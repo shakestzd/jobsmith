@@ -203,6 +203,30 @@ def _load_user_identity(
     return user
 
 
+def _extract_letter_body(letter: str | None) -> str:
+    """Extract the body-only portion of a cover letter for portal paste.
+
+    Strips the contact-info header (name + contact lines), the date line,
+    and the addressee block. The resulting text starts at the salutation
+    ('Dear ...,' / 'Hello,' etc.) and includes the closing.
+
+    Used by the Step 7 copy-paste partial. Falls back to the full letter
+    if structural markers can't be found.
+    """
+    if not letter:
+        return "_(no cover letter draft)_"
+
+    lines = letter.splitlines()
+    # Find the first salutation line. Common forms: 'Dear X,', 'Hello,'.
+    salutation_idx = next(
+        (i for i, line in enumerate(lines) if line.lstrip().startswith(("Dear ", "Hello,", "Hi "))),
+        None,
+    )
+    if salutation_idx is None:
+        return letter
+    return "\n".join(lines[salutation_idx:])
+
+
 def _extract_author_name(author: dict[str, Any]) -> str:
     """Build a display name from an author dict.
 
@@ -491,6 +515,12 @@ def assemble_application(
     (blocks_dir / "hm-dossier.md").write_text(_hm_dossier_md(hm_dict) + "\n")
     (blocks_dir / "cover-letter.md").write_text(
         (cover_letter or "_(no cover letter draft)_") + "\n"
+    )
+    # Body-only variant for portal paste — strips the contact-info header
+    # and the date line above the addressee block. Useful for portals with
+    # a single text field for the cover letter.
+    (blocks_dir / "cover-letter-body.md").write_text(
+        _extract_letter_body(cover_letter) + "\n"
     )
     (blocks_dir / "resume-preview.md").write_text(
         _resume_preview_md(

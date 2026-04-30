@@ -1,7 +1,7 @@
 # Cover Letter Draft {#sec-letter-draft}
 
-The cover letter as drafted by `apply-cover-letter-writer` and verified by `jobsmith fact-check`. Edit `cover-letter-draft.md` and re-run `jobsmith assemble {slug}` to refresh.
+The cover letter as drafted by `apply-cover-letter-writer` and verified by `jobsmith fact-check`. The code block below has a copy icon (top-right) — click to copy the full markdown source. Edit `cover-letter-draft.md` and re-run `jobsmith assemble {{< var slug >}}` to refresh.
 
-::: {.callout-note appearance="simple"}
+`````markdown
 {{< include /_blocks/cover-letter.md >}}
-:::
+`````

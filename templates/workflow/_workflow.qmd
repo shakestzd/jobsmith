@@ -11,6 +11,7 @@ format:
     callout-appearance: simple
     embed-resources: true
     page-layout: full
+    code-copy: true
 ---
 
 # {{< var company >}} — {{< var position >}}
