@@ -126,6 +126,106 @@ def _load_application_md(app_dir: Path, filename: str) -> str | None:
     return path.read_text()
 
 
+def _load_user_identity(
+    app_dir: Path,
+    master_author_yml: Path | None,
+    config_user: dict[str, str],
+) -> dict[str, str]:
+    """Resolve user identity by checking, in order:
+
+    1. <app>/documents/author.yml  — per-application author block
+    2. <master_author_yml>          — master author.yml (config.master.author_yml)
+    3. config.user                  — .apply-config.yaml user fields
+
+    Returns a dict with keys name, email, phone, location, github, linkedin.
+    Empty strings for any field not found.
+    """
+    sources: list[Path] = []
+    app_author = app_dir / "documents" / "author.yml"
+    if app_author.exists():
+        sources.append(app_author)
+    if master_author_yml and master_author_yml.exists():
+        sources.append(master_author_yml)
+
+    user: dict[str, str] = {
+        "name": config_user.get("name", "") or "",
+        "email": config_user.get("email", "") or "",
+        "phone": config_user.get("phone", "") or "",
+        "location": config_user.get("location", "") or "",
+        "github": config_user.get("github", "") or "",
+        "linkedin": config_user.get("linkedin", "") or "",
+    }
+
+    for src in sources:
+        try:
+            data = yaml.safe_load(src.read_text())
+        except (OSError, yaml.YAMLError):
+            continue
+        if not data:
+            continue
+
+        author = data.get("author") if isinstance(data, dict) else None
+        if isinstance(author, list) and author:
+            author = author[0]
+        if not isinstance(author, dict):
+            continue
+
+        # Name extraction — handle both flat (firstname/lastname) and
+        # nested (name.first/name.last) forms.
+        if not user["name"]:
+            user["name"] = _extract_author_name(author)
+
+        # Pull from contacts list (icon-tagged structure used by both
+        # shakestzd and the Pat Doe example).
+        for contact in author.get("contacts", []) or []:
+            icon = (contact.get("icon") or "").lower()
+            text = (contact.get("text") or "").strip()
+            url = (contact.get("url") or "").strip()
+            if not user["email"] and ("envelope" in icon or url.startswith("mailto:")):
+                user["email"] = text or url.removeprefix("mailto:")
+            elif not user["phone"] and ("phone" in icon or url.startswith("tel:")):
+                user["phone"] = text or url.removeprefix("tel:")
+            elif not user["location"] and "location" in icon:
+                user["location"] = text
+            elif not user["github"] and "github" in icon:
+                user["github"] = text or url.rsplit("/", 1)[-1]
+            elif not user["linkedin"] and "linkedin" in icon:
+                user["linkedin"] = text or url.rsplit("/", 1)[-1]
+
+        # Top-level email/phone fallback (Pat Doe-style schema).
+        if not user["email"] and isinstance(author.get("email"), str):
+            user["email"] = author["email"]
+        if not user["phone"] and isinstance(author.get("phone"), str):
+            user["phone"] = author["phone"]
+        if not user["location"] and isinstance(author.get("address"), str):
+            user["location"] = author["address"]
+
+    return user
+
+
+def _extract_author_name(author: dict[str, Any]) -> str:
+    """Build a display name from an author dict.
+
+    Handles both the shakestzd shape (firstname/lastname flat) and the
+    Pat Doe shape (nested name.first / name.middle / name.last).
+    """
+    if "firstname" in author or "lastname" in author:
+        first = (author.get("firstname") or "").strip()
+        last = (author.get("lastname") or "").strip()
+        return f"{first} {last}".strip()
+    name = author.get("name")
+    if isinstance(name, dict):
+        parts = [
+            (name.get("first") or "").strip(),
+            (name.get("middle") or "").strip(),
+            (name.get("last") or "").strip(),
+        ]
+        return " ".join(p for p in parts if p)
+    if isinstance(name, str):
+        return name.strip()
+    return ""
+
+
 # ---------- markdown renderers ----------
 # These pre-compute markdown for list/table shapes so partials can use
 # `{{< var foo_md >}}` without needing Lua filters or Python code blocks.
@@ -275,12 +375,16 @@ def assemble_application(
     cover_letter_pdf_path = app_dir / "documents" / "cover-letter.pdf"
     resume_qmd_path = app_dir / "documents" / "resume.qmd"
 
-    # Pull user identity from .apply-config.yaml (walks up from app_dir).
-    # Returns defaults (empty strings) if no config found, which is fine —
-    # the workflow QMD will render with empty author and the user can edit
-    # their config to fix it.
+    # Resolve user identity by checking, in order:
+    #   1. <app>/documents/author.yml   — per-application author block
+    #   2. master.author_yml            — from .apply-config.yaml
+    #   3. .apply-config.yaml user      — fallback config-level
+    #   4. empty defaults
+    # This means jobsmith works against existing repos that have an
+    # author.yml without requiring the user to maintain a separate
+    # .apply-config.yaml user section.
     config = load_config(search_from=app_dir)
-    user_identity = {
+    config_user_dict = {
         "name": config.user.name,
         "email": config.user.email,
         "phone": config.user.phone,
@@ -288,6 +392,13 @@ def assemble_application(
         "github": config.user.github,
         "linkedin": config.user.linkedin,
     }
+    repo_root = app_dir.parent.parent  # private/applications/<slug>/.. /..
+    master_author = (
+        config.master.author_yml
+        if config.master.author_yml.is_absolute()
+        else repo_root / config.master.author_yml
+    )
+    user_identity = _load_user_identity(app_dir, master_author, config_user_dict)
 
     must_haves_list = jd.get("must_haves", []) or []
     nice_to_haves_list = jd.get("nice_to_haves", []) or []
