@@ -127,12 +127,16 @@ Resume + cover letter already use the `awesomecv` Typst extension (shipped under
 
 ## How partials read state: pre-render assembly
 
-For partials to display content from `.apply-state/jd-parsed.json` etc., the JSON needs to be available to Quarto's `{{< var >}}` shortcode. We use a **pre-render assembly step** (rather than a Lua filter) for simplicity:
+For partials to display content from `.apply-state/jd-parsed.json` etc., the JSON needs to be available to Quarto's `{{< var >}}` shortcode. We use a **pre-render assembly step** (rather than a Lua filter) for simplicity.
+
+The CLI has two assembly modes:
 
 ```bash
-jobsmith assemble {slug}
-# Reads private/applications/{slug}/.apply-state/*.json
-# Writes private/applications/{slug}/_variables.yml with the relevant fields
+jobsmith assemble <slug>   # Per-application: reads private/applications/<slug>/.apply-state/*.json
+                           # and writes private/applications/<slug>/_variables.yml
+jobsmith assemble --all    # Site-wide: assembles every application under the configured
+                           # output.applications_dir. Used as the Quarto pre-render hook
+                           # so a single render pass refreshes all pages.
 ```
 
 After assembly, partials read the data via:
@@ -150,11 +154,18 @@ jd:
     - ...
 ```
 
-The Quarto preview/render pipeline runs `jobsmith assemble` automatically as a `pre-render` hook in `_quarto.yml`:
+The Quarto site (`templates/portfolio/_quarto.yml`) wires `jobsmith assemble --all` as a `pre-render` hook so `quarto preview` and `quarto render` automatically refresh every application's `_variables.yml` before composing the partials:
 
 ```yaml
 project:
-  pre-render: jobsmith assemble
+  type: website
+  pre-render: jobsmith assemble --all
+```
+
+For ad-hoc per-application work outside the site context (e.g., regenerating just one application's workflow QMD after a state edit), invoke the slug-aware form directly:
+
+```bash
+jobsmith assemble pwc-ai-engineer-data-scientist-ai-manager
 ```
 
 ### Why pre-render assembly over Lua filter
@@ -221,7 +232,7 @@ jobsmith review <slug>        # Open the per-application page in browser
 
 ## What this does NOT change
 
-- **`.apply-state/` stays exactly the same.** No schema changes.
+- **Existing `.apply-state/` contracts remain compatible.** No fields are renamed, removed, or restructured. New optional artifacts are added (`company-research.md`, `outreach-snippets.md`, per-application `_variables.yml`) but every specialist's existing output schema is preserved. Older applications missing the new artifacts render with empty sections rather than failing.
 - **Specialist contracts stay version 1** — `apply-company-research` is an additive specialist, not a breaking change.
 - **The Python package stays simple.** Three new modules (`assemble.py`, `company.py`, `site.py`); no architectural rewrite.
 - **The plugin layer is unchanged.** Agents still dispatch via Claude Code's Task tool; the only diff is they write more state and assemble it into Quarto-friendly form.
