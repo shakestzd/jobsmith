@@ -1,0 +1,793 @@
+# Specialist Contracts — Agentic /apply Workflow v2
+#
+# Plan: jobsmith agentic /apply pipeline
+# (Ported from shakestzd plan-b7b1d601 — depersonalized for reuse)
+#
+# This file is the FROZEN contract surface. Once approved, no specialist .md
+# may diverge from its declared input/output schema, tool allowlist, or model
+# assignment without updating this file first AND surfacing the change to
+# the user for review.
+#
+# Why freeze first: every downstream slice (2-8) attaches a quality gate to
+# one of these contracts. Drift here causes silent rework downstream.
+#
+# State convention: each /apply run has a directory
+# `applications/{slug}/.apply-state/` containing all intermediate
+# artifacts. The orchestrator writes a per-invocation `spec.json` for the
+# specialist it is about to call; the specialist reads spec.json + named
+# state files, performs work, writes its declared outputs, and returns by
+# writing `<specialist>-result.json` with status (ok | halt | revise) and
+# a one-line summary.
+#
+# Master YAML (assets/content/*.yml) is READ-ONLY for every specialist.
+# Master-first rule: factual corrections go into master and propagate; never
+# the reverse.
+
+version: 1
+frozen_at: null  # RESET: re-freeze when adopting jobsmith in your repo
+
+# ----------------------------------------------------------------------------
+# State directory layout (.apply-state/) — single source of truth between specialists
+# ----------------------------------------------------------------------------
+
+state_directory:
+  base: "applications/{slug}/.apply-state/"
+  files:
+    manifest.json:
+      written_by: [orchestrator, apply-jd-parser]
+      purpose: |
+        Slice/sub-task completion tracker. Records {slice_id, specialist,
+        status, started_at, finished_at, agent_id, retry_count} per
+        invocation. Also stores stable role metadata that downstream
+        specialists need (role_type, fit_score, tier).
+      shape:
+        run_id: "string (uuid4)"
+        slug: "string"
+        started_at: "ISO 8601"
+        role_type: "data-analyst | data-engineer | ai-engineer | finance | renewable-energy | general"
+        fit_score: "float 0.0-1.0"
+        tier: "fast | deep"
+        invocations: "list of {specialist, status, started_at, finished_at, retry_count}"
+
+    spec.json:
+      written_by: [orchestrator]
+      purpose: |
+        Per-invocation input contract handed to one specialist. Orchestrator
+        writes it immediately before dispatching the agent and overwrites it
+        on retry. Specialists MUST read spec.json first thing.
+      shape:
+        specialist: "string (must match a specialist name in this file)"
+        slug: "string"
+        retry_count: "int 0-2"
+        deadline_ms: "int (orchestrator's wall-clock budget for this call)"
+        inputs: "dict — keys mirror the specialist's declared inputs"
+
+    jd-parsed.json:        { written_by: [apply-jd-parser] }
+    fit-score.json:        { written_by: [apply-fit-scorer] }
+    bullet-selection.json: { written_by: [apply-bullet-selector] }
+    bullet-diff.md:        { written_by: [apply-bullet-selector, anchor-bullet-guard] }
+    bullet-decisions.json: { written_by: [apply-bullet-selector, apply-relevance-inquirer] }
+    questions.md:          { written_by: [apply-relevance-inquirer] }
+    gap-resolutions.md:    { written_by: [orchestrator] }   # records the user's answers verbatim
+    hm-snippet.md:         { written_by: [apply-hm-enricher] }
+    prose-draft.md:        { written_by: [apply-prose-writer] }
+    ai-tell-report.json:   { written_by: [apply-prose-qa, apply-resume-tell-fixer] }
+    render-log.json:       { written_by: [apply-resume-renderer] }
+    portfolio-check.json:  { written_by: [apply-portfolio-ats-checker] }
+    ats-report.md:         { written_by: [apply-portfolio-ats-checker] }
+    layout-report.md:      { written_by: [apply-visual-layout-reviewer] }
+    resume-preview.png:    { written_by: [apply-visual-layout-reviewer] }
+    db-log.json:           { written_by: [apply-db-logger] }
+
+# ----------------------------------------------------------------------------
+# Tier policy — fast vs deep
+# ----------------------------------------------------------------------------
+
+tier_policy:
+  threshold: 0.70
+  rule: |
+    Default tier comes from apply-fit-scorer's score:
+      - fit >= 0.70 → fast (Tier 1 only — slices 1-8)
+      - fit <  0.70 → deep (Tier 1 only for Phase 1; slice 9 ships in Phase 2)
+    The user's explicit `--deep` flag forces deep regardless of score.
+    The user's explicit `--fast` flag forces fast regardless of score.
+  rationale: |
+    Plan question q-tier-selection-threshold recommended fit-70. Phase 1
+    treats fast and deep identically because slice 9 (peer-benchmarker) is
+    deferred. The tier flag is still recorded in manifest.json so when
+    Phase 2 ships, the routing already exists.
+
+retry_policy:
+  max_per_specialist: 3
+  backoff: "no automatic backoff — orchestrator surfaces the error after retry 3"
+  on_halt: |
+    A specialist may set status=halt in its result.json to ask the
+    orchestrator to surface a blocker to the user. The orchestrator
+    pauses the pipeline, prints the halt reason + the relevant state
+    files, and waits for the user's decision.
+
+# ----------------------------------------------------------------------------
+# Pipeline graph — hybrid dispatch (q-orchestrator-architecture: hybrid)
+# ----------------------------------------------------------------------------
+
+pipeline:
+  description: |
+    apply-jd-parser runs first. After it completes, three specialists fan out
+    in parallel: apply-fit-scorer, apply-hm-enricher (opportunistic), apply-bullet-selector.
+    Once all three converge, apply-prose-writer drafts. apply-prose-qa loops with
+    apply-prose-writer up to 3 iterations. Then apply-resume-renderer, portfolio-ats-
+    checker, apply-visual-layout-reviewer (max 2 re-render iterations),
+    apply-cover-letter-writer (parallel branch — can start after fan-out
+    converges), apply-index-writer, apply-db-logger.
+
+    Relevance-inquiry hook: if apply-bullet-selector OR apply-prose-writer flags an
+    anchor-bullet drop or a JD requirement the master doesn't cover,
+    orchestrator pauses the affected branch, calls apply-relevance-inquirer to
+    accumulate questions, surfaces ALL questions in ONE batched prompt
+    to the user, records answers in gap-resolutions.md, then re-dispatches
+    the affected specialist with the new constraint. ONE inquiry cycle
+    per /apply, max.
+
+  stages:
+    - stage: 0_parse
+      specialists: [apply-jd-parser]
+    - stage: 1_fanout
+      specialists: [apply-fit-scorer, apply-hm-enricher, apply-bullet-selector]
+      parallel: true
+    - stage: 1_5_anchor_guard
+      specialists: [anchor-bullet-guard]
+      parallel: false
+      runs_after: [apply-bullet-selector]
+      kind: script  # Python, not a Claude agent
+    - stage: 1_6_inquiry
+      specialists: [apply-relevance-inquirer]
+      parallel: false
+      runs_when: "anchor-bullet-guard reports drops without logged reasons OR apply-fit-scorer flags GAP must-haves"
+    - stage: 2_prose
+      specialists: [apply-prose-writer]
+    - stage: 2_5_qa
+      specialists: [apply-prose-qa]
+      loop: "max 3 iterations with apply-prose-writer"
+    - stage: 3_render
+      specialists: [apply-resume-renderer]
+    - stage: 3_5_portfolio_ats
+      specialists: [apply-portfolio-ats-checker]
+    - stage: 3_6_layout
+      specialists: [apply-visual-layout-reviewer]
+      loop: "max 2 re-render iterations with apply-resume-renderer"
+    - stage: 4_cover_letter
+      specialists: [apply-cover-letter-writer]
+      parallel_with: [apply-resume-renderer, apply-portfolio-ats-checker, apply-visual-layout-reviewer]
+      runs_after: [apply-bullet-selector, apply-hm-enricher, apply-relevance-inquirer]
+    - stage: 5_finalize
+      specialists: [apply-index-writer, apply-db-logger]
+      sequential: true
+      runs_after: [apply-visual-layout-reviewer, apply-cover-letter-writer]
+
+# ============================================================================
+# SPECIALISTS
+# ============================================================================
+
+specialists:
+
+  # --------------------------------------------------------------------------
+  - name: apply-jd-parser
+    file: agents/apply-jd-parser.md
+    model: haiku
+    purpose: |
+      Convert a job URL or pasted JD text into structured fields the rest
+      of the pipeline can reason over. Mechanical extraction — not
+      analysis.
+    inputs:
+      from_orchestrator:
+        - jd_url: "string | null"
+        - jd_text: "string | null  (one of url/text required)"
+        - explicit_company: "string | null (the user can override slug derivation)"
+    outputs:
+      writes:
+        - .apply-state/jd-parsed.json:
+            company: "string"
+            position: "string"
+            location: "string | null"
+            location_type: "remote | hybrid | onsite | unknown"
+            salary_range: "string | null"
+            req_id: "string | null"
+            apply_url: "string"
+            named_hm: "string | null  (LinkedIn post author / JD signature only — no inference)"
+            role_type: "data-analyst | data-engineer | ai-engineer | finance | renewable-energy | general"
+            must_haves: "list[string]"
+            nice_to_haves: "list[string]"
+            top_keywords: "list[string]  (5-8)"
+            jd_text_clean: "string  (rendered text used downstream)"
+        - .apply-state/manifest.json:
+            updates: "{role_type, run_id, slug, slug_derived_from, started_at}"
+    tools_allowlist:
+      - WebFetch
+      - Read
+      - Write
+      - Bash       # for `date` only; no shell pipelines
+    failure_modes:
+      - condition: "WebFetch fails AND no jd_text provided"
+        action: "halt — surface 'Need JD text pasted directly'"
+      - condition: "Cannot determine role_type with confidence"
+        action: "halt — emit a 4-line classification table; ask the user"
+
+  # --------------------------------------------------------------------------
+  - name: apply-fit-scorer
+    file: agents/apply-fit-scorer.md
+    model: haiku
+    purpose: |
+      Conversational wrapper around the existing JSON-in/out apply-fit-scorer
+      at agents/fit-scorer.md. The original returns one JSON
+      object on stdout; this wrapper produces the same JSON but adds a
+      readable Markdown table summary the orchestrator can show to
+      the user during the analysis pause.
+    reuses:
+      core_agent: agents/fit-scorer.md
+      core_contract: "ReasoningResult JSON schema — unchanged"
+    inputs:
+      from_orchestrator:
+        - jd_parsed: "contents of .apply-state/jd-parsed.json"
+        - profile_path: "capacity/profile.yaml"
+        - master_paths: "[work.yml, skill.yml, education.yml, author.yml, publication.yml]"
+        - fast_path_scores: "morning-sourcing fast-path scores if available; null otherwise"
+    outputs:
+      writes:
+        - .apply-state/fit-score.json:
+            specialty: "tax_equity | ai_research | elixir_distributed | none"
+            score: "float 0.0-1.0  (NORMALIZED from 0-100 returned by core scorer)"
+            score_raw: "int 0-100  (passthrough for compatibility)"
+            rationale: "string"
+            matched_evidence: "list[string]"
+            concerns: "list[string]"
+            confidence: "high | medium | low"
+            must_have_table: "list[{requirement, level, evidence}]  STRONG|HAVE|PARTIAL|GAP|BLOCKER"
+            pitch: "string  (1-2 sentences why the user is compelling)"
+        - .apply-state/manifest.json:
+            updates: "{fit_score, tier (derived via tier_policy)}"
+    tools_allowlist:
+      - Read
+      - Write
+      - Bash       # for invoking the core apply-fit-scorer agent via `claude --print --agent apply-fit-scorer`
+    failure_modes:
+      - condition: "Core JSON scorer returns invalid JSON or out-of-range field"
+        action: "retry once; on second failure halt with raw stderr captured"
+
+  # --------------------------------------------------------------------------
+  - name: apply-bullet-selector
+    file: agents/apply-bullet-selector.md
+    model: sonnet
+    purpose: |
+      For each of the user's work positions in master work.yml, select and
+      reorder bullets to match the JD. ANCHOR BULLETS (≥$10M dollar
+      impact, ≥50% efficiency gain, ≥100K-asset portfolio scale) are
+      preserved unless an explicit reason is logged in
+      bullet-decisions.json. Selector NEVER fabricates — it only
+      selects, reorders, and writes JD-keyword-aware phrasing. Master is
+      read-only.
+    inputs:
+      from_orchestrator:
+        - jd_parsed: ".apply-state/jd-parsed.json"
+        - fit_score: ".apply-state/fit-score.json"
+        - master_work_yml: "assets/content/work.yml  (READ-ONLY)"
+        - master_skill_yml: "assets/content/skill.yml  (READ-ONLY)"
+        - gap_resolutions: ".apply-state/gap-resolutions.md  (may not exist on first call)"
+    outputs:
+      writes:
+        - .apply-state/bullet-selection.json:
+            positions: "list[{company, title, bullets: [{master_bullet_id, included: bool, rephrased: string|null, reason_if_dropped: string|null}]}]"
+            anchor_bullets_master: "list[bullet_id]  (computed by selector via _MONEY_RE / _PERCENT_RE)"
+            anchor_bullets_kept: "list[bullet_id]"
+            anchor_bullets_dropped: "list[{bullet_id, reason, JD_keyword_replacing_it}]"
+        - .apply-state/bullet-diff.md:
+            content: "side-by-side master vs tailored, anchor bullets highlighted"
+        - .apply-state/bullet-decisions.json:
+            updates: "{bullet_id: reason}  for every dropped anchor"
+        - applications/{slug}/documents/work.yml:
+            content: "tailored work.yml — selection + ordering + JD-keyword phrasing only"
+        - applications/{slug}/documents/skill.yml:
+            content: "reordered/renamed skill categories matching JD vocabulary"
+        - applications/{slug}/documents/education.yml:
+            content: "copied from master with optional emphasis tweak"
+        - applications/{slug}/documents/author.yml:
+            content: "copied from master with role-type-specific position tagline"
+    tools_allowlist:
+      - Read
+      - Write
+      - Bash       # for invoking anchor-bullet-guard.py
+      - Grep
+    failure_modes:
+      - condition: "Anchor-bullet drop with no logged reason"
+        action: "set result.status=halt with reason='ANCHOR_DROP_REQUIRES_INQUIRY' — orchestrator dispatches apply-relevance-inquirer"
+      - condition: "Cannot map JD must-have to any master bullet"
+        action: "set result.status=halt with reason='UNCOVERED_MUST_HAVE' + must_have text — orchestrator dispatches apply-relevance-inquirer"
+
+  # --------------------------------------------------------------------------
+  - name: anchor-bullet-guard
+    kind: python_script
+    file: scripts/anchor_bullet_guard.py
+    purpose: |
+      Mechanical guardrail. Imports _MONEY_RE and _PERCENT_RE from
+      scripts/fact_check_draft.py — DOES NOT REIMPLEMENT. Reads
+      master work.yml, identifies anchor bullets, cross-references
+      against bullet-selection.json. Outputs a diff and exit code.
+    reuses:
+      regexes_from: scripts/fact_check_draft.py
+      imports: ["_MONEY_RE", "_PERCENT_RE"]
+    invocation: |
+      uv run python scripts/anchor_bullet_guard.py \
+          --master assets/content/work.yml \
+          --selection applications/{slug}/.apply-state/bullet-selection.json \
+          --decisions applications/{slug}/.apply-state/bullet-decisions.json \
+          --diff-out applications/{slug}/.apply-state/bullet-diff.md
+    exit_codes:
+      0: "all anchors preserved or all drops have logged reasons"
+      1: "one or more anchors dropped without logged reason — caller must invoke apply-relevance-inquirer"
+      2: "internal error (master file not found, JSON malformed)"
+    anchor_thresholds:
+      money_min_usd: 10_000_000      # $10M
+      percent_min: 50.0              # 50%
+      asset_count_min: 100_000       # 100K
+    rationale: |
+      Thresholds chosen to match high-impact anchor bullets in master YAML
+      (e.g. $250M ITC unlock, $50M tax credits, 200K+ asset portfolio scale).
+      $1M figures paired with high percentages are caught by the percent regex.
+
+  # --------------------------------------------------------------------------
+  - name: apply-relevance-inquirer
+    file: agents/apply-relevance-inquirer.md
+    model: sonnet
+    purpose: |
+      The "ask, don't manufacture" specialist. Triggered when (a)
+      apply-bullet-selector flags an anchor drop without reason, (b)
+      apply-prose-writer flags a JD requirement the master doesn't cover, or
+      (c) apply-fit-scorer flags a must-have as GAP. NEVER rewrites or
+      invents. Only emits structured questions that the orchestrator
+      surfaces to the user in ONE batched prompt.
+    inputs:
+      from_orchestrator:
+        - trigger_reason: "ANCHOR_DROP | UNCOVERED_MUST_HAVE | GAP_MUST_HAVE"
+        - context_files: "list of state files relevant to the trigger"
+        - jd_parsed: ".apply-state/jd-parsed.json"
+        - master_work_yml: "assets/content/work.yml  (READ-ONLY)"
+    outputs:
+      writes:
+        - .apply-state/questions.md:
+            content: |
+              Markdown list of questions, each in this exact form:
+
+                ### Q{n}. {one-line summary}
+
+                JD asks for: {JD requirement verbatim}
+                Your master covers: {closest master bullet OR "no direct coverage"}
+                Anchor at risk (if any): {bullet text + metric}
+
+                Bridge? (free text — describe a real connection if any):
+                _Or acknowledge as gap?_ (y/n):
+        - .apply-state/bullet-decisions.json:
+            updates: "{bullet_id: 'pending-inquiry'} for the affected anchors"
+    tools_allowlist:
+      - Read
+      - Write
+    constraints:
+      - "MUST NOT propose bridges. Only ask. The user provides the bridge."
+      - "MUST batch all questions for one /apply run into a single questions.md."
+      - "MAX 5 questions per run. If more would be needed, surface a halt asking the user whether to skip the role."
+    failure_modes:
+      - condition: "More than 5 questions surface"
+        action: "halt — emit halt reason 'TOO_MANY_GAPS' and the count"
+
+  # --------------------------------------------------------------------------
+  - name: apply-prose-writer
+    file: agents/apply-prose-writer.md
+    model: opus
+    purpose: |
+      Write the Professional Summary (2-3 sentences) and rewrite
+      bullets that apply-bullet-selector marked as needing JD-keyword
+      phrasing. Voice: explorer not marketer, thesis not product,
+      specific not sweeping, no labels, generous credit.
+    inputs:
+      from_orchestrator:
+        - jd_parsed: ".apply-state/jd-parsed.json"
+        - fit_score: ".apply-state/fit-score.json"
+        - bullet_selection: ".apply-state/bullet-selection.json"
+        - gap_resolutions: ".apply-state/gap-resolutions.md  (if exists)"
+        - master_yamls: "[work, skill, education, author, publication]  (READ-ONLY)"
+        - voice_guide: "${VOICE_GUIDE_PATH}"
+    outputs:
+      writes:
+        - .apply-state/prose-draft.md:
+            content: |
+              # Professional Summary
+
+              {2-3 sentences}
+
+              # Tailored Bullets
+
+              ## {Position 1 — Title @ Company}
+              - {bullet 1}
+              - {bullet 2}
+              ...
+        - applications/{slug}/documents/work.yml:
+            updates: "tailored bullet text replaces the rephrased fields from bullet-selection.json"
+    tools_allowlist:
+      - Read
+      - Write
+      - Edit
+    failure_modes:
+      - condition: "JD requirement has no master coverage and no gap resolution"
+        action: "halt — reason='UNCOVERED_MUST_HAVE' — orchestrator dispatches apply-relevance-inquirer"
+      - condition: "Asked to write a metric or claim that doesn't appear in master"
+        action: "MUST NOT WRITE IT. Halt with reason='WOULD_FABRICATE' + the offending claim."
+
+  # --------------------------------------------------------------------------
+  - name: apply-prose-qa
+    file: agents/apply-prose-qa.md
+    model: sonnet
+    purpose: |
+      Decision agent that wraps apply-resume-tell-fixer. Runs the tell-fixer
+      against prose-draft.md and the Selected Projects section of
+      resume.qmd. Decides PASS / REVISE / HALT based on detected
+      patterns and iteration count. Blocking on hard patterns
+      (word list, em-dash density). Advisory on stylistic judgment
+      (sentence rhythm).
+    inputs:
+      from_orchestrator:
+        - prose_draft: ".apply-state/prose-draft.md"
+        - resume_qmd: "applications/{slug}/documents/resume.qmd  (if rendered)"
+        - iteration: "int 0-2  (current QA iteration)"
+    outputs:
+      writes:
+        - .apply-state/ai-tell-report.json:
+            iteration: "int"
+            decision: "pass | revise | halt"
+            blocking_findings: "list[{category, span, suggestion}]"
+            advisory_findings: "list[{category, span, note}]"
+            words_unchanged: "list[string]"
+            calibration_metrics: "{false_positive_estimate}"
+    tools_allowlist:
+      - Read
+      - Write
+      - Bash       # for invoking apply-resume-tell-fixer
+    pass_threshold:
+      blocking_findings: 0
+      max_iterations_before_halt: 3
+    failure_modes:
+      - condition: "iteration == 3 and blocking_findings still non-empty"
+        action: "set decision=halt; orchestrator surfaces unresolved patterns to the user"
+
+  # --------------------------------------------------------------------------
+  - name: apply-resume-tell-fixer
+    file: agents/apply-resume-tell-fixer.md
+    model: sonnet
+    purpose: |
+      Detect and propose fixes for AI tells in RESUME prose. NOT a
+      wrapper on tzd-labs:ai-tell-fixer (its word list is academic).
+      Calibrated against the 2026-04-23 Google + OpenAI failures.
+    detection_categories:
+      action_verb_tells:
+        - Architected
+        - Leveraged
+        - Orchestrated
+        - Spearheaded
+        - "Delivered end-to-end"
+        - "Shipped end-to-end"
+      em_dash_density:
+        rule: "more than 2 em-dashes per paragraph flagged"
+      parallel_sentence_rhythm:
+        rule: "3 consecutive bullets with identical verb-object-result pattern"
+        kind: advisory
+      label_closers:
+        examples:
+          - "MIT Technology & Policy engineer"
+        rule: "credential summary appended as a sentence-final label"
+      buzzword_bloat:
+        - enterprise
+        - proprietary
+        - comprehensive
+        - innovative
+        - passionate
+      marketer_voice:
+        - "perfect fit"
+        - "passionate about"
+        - "proven track record"
+    calibration_gate:
+      corpus: "5 approved resumes in applications/*/documents/resume.qmd"
+      max_false_positive_rate: 0.20
+      run_before_first_use: true
+    inputs:
+      from_orchestrator:
+        - target_file: "string  (path to file to scan)"
+        - mode: "scan | suggest"
+    outputs:
+      writes:
+        - .apply-state/ai-tell-report.json:
+            findings: "list[{category, span, suggestion}]"
+            file_scanned: "string"
+    tools_allowlist:
+      - Read
+      - Edit
+      - Grep
+      - Glob
+    structural_pattern_source: "tzd-labs ai-tell-fixer agent (STRUCTURE only — word list is REWRITTEN)"
+
+  # --------------------------------------------------------------------------
+  - name: apply-cover-letter-writer
+    file: agents/apply-cover-letter-writer.md
+    model: sonnet
+    purpose: |
+      Always draft a cover letter in Tier 1. Role-type-conditional
+      length. fact_check_draft.py is a BLOCKING gate before the file
+      is written. Reuses the existing cover-letter-drafter.md pattern.
+    inputs:
+      from_orchestrator:
+        - jd_parsed: ".apply-state/jd-parsed.json"
+        - fit_score: ".apply-state/fit-score.json"
+        - hm_snippet: ".apply-state/hm-snippet.md  (if exists; opportunistic)"
+        - exemplars: "list of 2-3 exemplar paths from index_exemplars.py / retrieve_exemplars.py"
+        - master_yamls: "[work, skill, education, author, publication]  (READ-ONLY)"
+        - gap_resolutions: ".apply-state/gap-resolutions.md  (if exists)"
+    outputs:
+      writes:
+        - applications/{slug}/cover-letter-draft.md:
+            content: "markdown cover letter, 120-150 words depending on role tone"
+    tools_allowlist:
+      - Read
+      - Write
+      - Bash       # for fact_check_draft.py
+    word_targets:
+      senior_strategic: 150
+      ai_engineer: 150
+      ic_portal: 120
+      skip_when: "JD or apply portal explicitly says no cover letter"
+    salutation_rule: |
+      If hm-snippet.md exists with a named HM → "Dear {first_name},"
+      Else → "Hello,"
+    blocking_gate: |
+      uv run python scripts/fact_check_draft.py \
+          --draft {cover-letter-draft.md} --verbose
+      Exit 0 → write file. Exit non-zero → ONE revision attempt; if
+      still failing, halt with FACT_CHECK_FAILED.
+    failure_modes:
+      - condition: "Fact check fails twice"
+        action: "halt — DO NOT save the draft. Surface failed claims to the user."
+
+  # --------------------------------------------------------------------------
+  - name: apply-hm-enricher
+    file: agents/apply-hm-enricher.md
+    model: sonnet
+    purpose: |
+      Opportunistic. Detects whether a JD has a named hiring manager
+      (LinkedIn post author, JD signature, explicit user arg). If
+      yes, produces a lightweight dossier. If no, writes a sentinel
+      file recording 'no HM detected' and exits 0 — does NOT fabricate.
+    inputs:
+      from_orchestrator:
+        - jd_parsed: ".apply-state/jd-parsed.json"
+        - explicit_hm: "string | null  (user can pass via --hm flag)"
+    outputs:
+      writes:
+        - .apply-state/hm-snippet.md:
+            content: |
+              # HM dossier (or sentinel)
+
+              detected: yes | no
+              name: {string|null}
+              source: linkedin_post | jd_signature | user_arg | none
+              one_specific_signal: {string  e.g. "co-author of TMP Consortium 2024 paper" — or null}
+              suggested_hook: {one sentence the apply-cover-letter-writer can adapt — or null}
+    tools_allowlist:
+      - Read
+      - Write
+      - WebFetch
+    constraints:
+      - "MUST NOT fabricate any HM detail. Real signal or sentinel only."
+      - "MUST NOT use Chrome MCP. WebFetch only."
+      - "Time budget: 30 seconds."
+
+  # --------------------------------------------------------------------------
+  - name: apply-resume-renderer
+    file: agents/apply-resume-renderer.md
+    model: haiku
+    purpose: |
+      Mechanical bash wrapper around `quarto render resume.qmd
+      --to awesomecv-typst`. Verifies symlink, runs render, captures
+      logs, verifies PDF was created and is exactly 1 page.
+    inputs:
+      from_orchestrator:
+        - slug: "string"
+        - retry_count: "int 0-2"
+    outputs:
+      writes:
+        - applications/{slug}/documents/resume.pdf  (via quarto)
+        - applications/{slug}/documents/resume.typ  (via quarto, keep-typ: true)
+        - .apply-state/render-log.json:
+            success: "bool"
+            page_count: "int"
+            stderr: "string  (truncated to 4KB)"
+            duration_ms: "int"
+    tools_allowlist:
+      - Bash
+      - Read
+    failure_modes:
+      - condition: "page_count != 1"
+        action: "halt — orchestrator passes to apply-visual-layout-reviewer for diagnosis OR back to apply-bullet-selector for trim"
+      - condition: "quarto render exits non-zero"
+        action: "retry once with `_extensions` symlink check first; on second failure halt"
+
+  # --------------------------------------------------------------------------
+  - name: apply-portfolio-ats-checker
+    file: agents/apply-portfolio-ats-checker.md
+    model: haiku
+    purpose: |
+      Two mechanical checks merged. (1) PORTFOLIO (advisory unless
+      role_type ∈ {ai-engineer, data-engineer, data-analyst}): verify
+      Selected Projects has ≥1 live URL + ≥1 GitHub link, ping each via
+      WebFetch for HTTP 200. (2) ATS PARSEABILITY (always blocking):
+      `pdftotext -layout resume.pdf resume.txt`, validate sections
+      extract in order, bullets are discrete lines, contact info in
+      body, no ligature artifacts, single-column structure.
+    inputs:
+      from_orchestrator:
+        - slug: "string"
+        - role_type: "from manifest.json"
+    outputs:
+      writes:
+        - .apply-state/portfolio-check.json:
+            mode: "blocking | advisory"
+            live_urls_checked: "list[{url, status}]"
+            github_links_found: "int"
+            decision: "pass | fail"
+        - .apply-state/ats-report.md:
+            sections_extracted_in_order: "bool"
+            bullets_discrete: "bool"
+            single_column: "bool"
+            ligature_artifacts: "list[string]"
+            contact_in_body: "bool"
+            decision: "pass | fail"
+            failure_details: "string  (only if decision=fail)"
+    tools_allowlist:
+      - Read
+      - Write
+      - Bash
+      - WebFetch
+    failure_modes:
+      - condition: "ATS check fails"
+        action: "halt — surface the specific structural issue"
+      - condition: "Portfolio check fails for ai-engineer/data-engineer/data-analyst role"
+        action: "halt — Selected Projects must include working live URL + GitHub link"
+
+  # --------------------------------------------------------------------------
+  - name: apply-visual-layout-reviewer
+    file: agents/apply-visual-layout-reviewer.md
+    model: sonnet
+    purpose: |
+      Final Tier 1 visual gate. Page-count check first (cheap mechanical
+      check via mdls — fail hard if ≠1). If pass, convert PDF to PNG
+      via pdftoppm (200 DPI) and dispatch a multimodal review for orphan
+      words, widow lines, section-header alignment, whitespace imbalance,
+      awkward hyphenation. Proposes word-level fixes with target file +
+      line + before/after. Never auto-applies meaning-changing edits.
+    inputs:
+      from_orchestrator:
+        - slug: "string"
+        - resume_pdf: "applications/{slug}/documents/resume.pdf"
+        - resume_qmd: "applications/{slug}/documents/resume.qmd"
+        - work_yml: "applications/{slug}/documents/work.yml"
+        - iteration: "int 0-1"
+    outputs:
+      writes:
+        - .apply-state/resume-preview.png:
+            content: "200 DPI single-page PNG via pdftoppm"
+        - .apply-state/layout-report.md:
+            content: "issues found + proposed fixes + applied/unapplied status"
+    tools_allowlist:
+      - Read
+      - Edit
+      - Bash       # for mdls + pdftoppm
+    iteration_policy:
+      max: 2
+      on_third_failure: "halt — surface PNG + unresolved issues to the user for manual fix"
+    constraints:
+      - "Fixes MUST preserve meaning. Word swaps for line-fit only."
+      - "MUST run page-count check BEFORE multimodal review (token cost guardrail)."
+
+  # --------------------------------------------------------------------------
+  - name: apply-index-writer
+    file: agents/apply-index-writer.md
+    model: haiku
+    purpose: |
+      Write `applications/{slug}/index.qmd` with frontmatter
+      (title, company, position, location, salary-range, job-url,
+      req-id, date-found, status, next-action) and sections (Job
+      Summary, Key Requirements two-column, Why This Role, Strategy,
+      Application Materials, Timeline). REORDERED: apply-index-writer runs
+      BEFORE apply-db-logger so apply-db-logger can read frontmatter as the truth.
+    inputs:
+      from_orchestrator:
+        - jd_parsed: ".apply-state/jd-parsed.json"
+        - fit_score: ".apply-state/fit-score.json"
+        - bullet_selection: ".apply-state/bullet-selection.json"
+        - layout_report: ".apply-state/layout-report.md"
+    outputs:
+      writes:
+        - applications/{slug}/index.qmd
+    tools_allowlist:
+      - Read
+      - Write
+
+  # --------------------------------------------------------------------------
+  - name: apply-db-logger
+    file: agents/apply-db-logger.md
+    model: haiku
+    purpose: |
+      Insert OR UPDATE the applications row keyed on (company, position).
+      Reads index.qmd frontmatter as the source of truth (NOT
+      jd-parsed.json directly — index.qmd may have the user's edits).
+      Refreshes last_synced_at. Logs application_documents and
+      interactions rows. Idempotent — re-running /apply on the same
+      JD must produce ONE applications row, not duplicates.
+    inputs:
+      from_orchestrator:
+        - slug: "string"
+        - index_qmd: "applications/{slug}/index.qmd"
+        - fit_score: ".apply-state/fit-score.json"
+    outputs:
+      writes:
+        - job_search.db (applications + application_documents + interactions)
+        - .apply-state/db-log.json:
+            action: "insert | update"
+            application_id: "int"
+            last_synced_at: "ISO 8601"
+    tools_allowlist:
+      - Read
+      - Write
+      - Bash       # for sqlite3
+    requires_migration: "001_add_last_synced_at.sql  (slice 8 prerequisite)"
+
+# ----------------------------------------------------------------------------
+# Voice / fabrication / master-first — global constraints inherited by ALL specialists
+# ----------------------------------------------------------------------------
+
+global_constraints:
+  master_first:
+    rule: |
+      assets/content/*.yml is the only source of truth for facts.
+      Application copies (applications/{slug}/documents/*.yml)
+      only differ in selection, ordering, and JD-keyword phrasing.
+      Never update master from an application. That path is a separate
+      future tool.
+  no_fabrication:
+    rule: |
+      Every dollar amount, percentage, year count, company name,
+      project name, or proper noun in any output MUST appear in master
+      YAML or an existing approved application. If a JD must-have has
+      no master coverage and no gap resolution recorded, halt and ask.
+      Reference: ${VOICE_GUIDE_PATH} (no_fabrication section).
+  writing_voice:
+    rule: |
+      Explorer not marketer. Thesis not product. Specific not sweeping.
+      No labels. Generous credit.
+      Reference: ${VOICE_GUIDE_PATH} (writing_voice section).
+  no_paid_services:
+    rule: |
+      No new paid services without explicit user approval. Local
+      tools only.
+  date_first:
+    rule: |
+      Orchestrator runs `date "+%Y-%m-%d %I:%M %p"` and writes the
+      result to manifest.json.started_at as the FIRST action. Every
+      specialist that needs the date reads from manifest.json — never
+      assumes.
+
+# ----------------------------------------------------------------------------
+# Done-when (slice-1 closure conditions)
+# ----------------------------------------------------------------------------
+
+slice_1_done_when:
+  - "specialist-contracts.yaml committed and frozen (user's approval recorded in `frozen_at`)."
+  - "All 13 specialist .md files exist and match their declared contracts."
+  - "apply-agent.md is ≤150 lines and dispatches per the pipeline graph above."
+  - "manifest.json tracks slice/sub-task completion with timestamps and agent IDs."
+  - "POC timing run on a real JD records wall-clock time. If fast path > 20 min: halt Phase 2."
+  - "Tier selection logic documented (this file): fit ≥0.70 → fast; else deep."

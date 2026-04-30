@@ -1,0 +1,61 @@
+# Resume data — fill in your own details
+# This file is loaded by the Quarto resume templates
+
+personal:
+  firstname: "FIRSTNAME"
+  lastname: "LASTNAME"
+  email: "you@example.com"
+  phone: "(+1) 000-000-0000"
+  github: "your-github"
+  linkedin: "your-linkedin"
+  address: "City, ST, USA"
+  positions:
+    - "Senior Data Analyst"
+    - "Data Engineer"
+
+summary:
+  default: |
+    Your professional summary goes here. 2-3 sentences focused on impact
+    and the value you deliver.
+
+experience:
+  - id: "role-1"
+    title: "Senior Data Analyst"
+    company: "Company Name"
+    location: "Remote"
+    date: "Jan 24 - Present"
+    bullets:
+      - id: "bullet-1"
+        text: "Description of impact with quantified results"
+        tags: ["python", "sql", "analytics"]
+      - id: "bullet-2"
+        text: "Second bullet point"
+        tags: ["automation", "etl"]
+
+education:
+  - degree: "M.S. in Your Field"
+    school: "University Name"
+    location: "City, ST"
+    date: "Sept 20 - Sept 22"
+
+  - degree: "B.S. in Your Field"
+    school: "University Name"
+    location: "City, ST"
+    date: "Aug 15 - May 20"
+    notes:
+      - "Honors or distinction"
+
+skills:
+  programming:
+    - Python
+    - SQL
+  data_tools:
+    - Excel (Advanced)
+    - Tableau
+    - Power BI
+  infrastructure:
+    - ETL Development
+    - Git/GitHub
+  cloud:
+    - Google Cloud
+    - AWS

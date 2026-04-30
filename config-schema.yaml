@@ -1,0 +1,181 @@
+# jobsmith configuration schema
+#
+# Users place a `.apply-config.yaml` in their application repo.
+# This file documents every supported field. Defaults are sensible —
+# only override what you need.
+#
+# All paths are relative to the user's application repo (where /apply
+# is invoked from), unless explicitly absolute.
+
+# ----------------------------------------------------------------------------
+# master — paths to the user's source-of-truth content YAMLs
+# ----------------------------------------------------------------------------
+master:
+  # Required. The user's master work history.
+  work_yml: assets/content/work.yml
+
+  # Required. Master skills.
+  skill_yml: assets/content/skill.yml
+
+  # Required. Master education.
+  education_yml: assets/content/education.yml
+
+  # Required. Author block (name, contact, links, role tagline).
+  author_yml: assets/content/author.yml
+
+  # Optional. Publications (academic papers, public talks).
+  publication_yml: assets/content/publication.yml
+
+  # Optional. Awards / recognitions.
+  award_yml: assets/content/award.yml
+
+# ----------------------------------------------------------------------------
+# output — where /apply writes per-application artifacts
+# ----------------------------------------------------------------------------
+output:
+  # Required. Directory where each application's slug subdirectory is created.
+  # Example: private/applications/pwc-ai-engineer/{documents/,index.qmd,...}
+  applications_dir: private/applications
+
+  # Optional. Path to the SQLite job-search tracking DB.
+  job_search_db: private/job_search.db
+
+# ----------------------------------------------------------------------------
+# user — author identity for cover letters and contact blocks
+# ----------------------------------------------------------------------------
+user:
+  # Required. Display name in cover letters and resume header.
+  name: "Pat Doe"
+
+  # Required. Email shown on resume + cover letter header.
+  email: "pat@example.com"
+
+  # Optional. Phone shown on resume header.
+  phone: ""
+
+  # Optional. City and state (or country).
+  location: ""
+
+  # Optional. GitHub username (will appear as github.com/{username}).
+  github: ""
+
+  # Optional. LinkedIn slug (linkedin.com/in/{slug}).
+  linkedin: ""
+
+# ----------------------------------------------------------------------------
+# voice — control over how the prose-writer + cover-letter-writer phrase things
+# ----------------------------------------------------------------------------
+voice:
+  # Optional. Path to a markdown file documenting the user's writing voice
+  # preferences (banned words, tone notes, examples). The prose-writer reads
+  # this for guidance before drafting Professional Summary and rephrased
+  # bullets.
+  voice_guide_path: null  # e.g., ~/.claude/memory/feedback_writing_voice.md
+
+  # Optional. Banned words/phrases the prose-writer must NOT use.
+  # These are checked by the apply-resume-tell-fixer specialist.
+  banned_action_verbs:
+    - Architected
+    - Leveraged
+    - Orchestrated
+    - Spearheaded
+    - "Delivered end-to-end"
+    - "Shipped end-to-end"
+
+  banned_buzzwords:
+    - enterprise
+    - proprietary
+    - comprehensive
+    - innovative
+    - passionate
+
+  banned_marketer_phrases:
+    - "perfect fit"
+    - "passionate about"
+    - "proven track record"
+
+  # Optional. Snippet text used by apply-cover-letter-writer to address an
+  # employment gap. If null, no employment-gap text is added to cover letters.
+  # If set, the literal text is inserted near the closing paragraph.
+  #
+  # Example:
+  #   employment_gap_snippet: |
+  #     I took a planned career break in 2025 to focus on family and
+  #     credentialing. That's now resolved and I'm fully available.
+  employment_gap_snippet: null
+
+# ----------------------------------------------------------------------------
+# anchor_thresholds — what counts as a "load-bearing" bullet
+# ----------------------------------------------------------------------------
+# Bullets containing any of these markers are preserved across applications
+# unless an explicit reason to drop is logged. The anchor-bullet-guard runs
+# after apply-bullet-selector to enforce this.
+anchor_thresholds:
+  money_min_usd: 10_000_000      # $10M
+  percent_min: 50.0              # 50%
+  asset_count_min: 100_000       # 100K assets / users / records / etc.
+
+# ----------------------------------------------------------------------------
+# cover_letter — letter-specific tuning
+# ----------------------------------------------------------------------------
+cover_letter:
+  # Required if you want cover letters generated. Set to "none" to skip.
+  framework: careerfair-io  # careerfair-io | minimal | none
+
+  # Word count targets per role-type. The cover-letter-writer chooses the
+  # closest match to the parsed jd.role_type.
+  word_targets:
+    senior_strategic: 150
+    ai_engineer: 150
+    data_engineer: 150
+    data_analyst: 130
+    ic_portal: 120
+    finance: 150
+    renewable_energy: 150
+    general: 130
+
+  # Salutation when no hiring manager is detected. The hm-enricher writes a
+  # sentinel file when it can't find a named HM; cover-letter-writer falls
+  # back to this.
+  default_salutation: "Hello,"
+
+# ----------------------------------------------------------------------------
+# resume — render-specific tuning
+# ----------------------------------------------------------------------------
+resume:
+  # Path to the Quarto resume template (relative to jobsmith plugin root,
+  # OR the user can override with their own template).
+  template: templates/resume/resume-template.typ
+
+  # Page-count enforcement. The renderer halts if the rendered PDF exceeds
+  # max_pages and the visual-layout-reviewer can't trim within iteration_limit
+  # iterations.
+  max_pages: 1
+  layout_iteration_limit: 2
+
+# ----------------------------------------------------------------------------
+# fit_scorer — fit thresholds and tier assignment
+# ----------------------------------------------------------------------------
+fit_scorer:
+  # When fit-score >= fast_threshold, run the fast pipeline path (Tier 1 only).
+  # When fit-score < fast_threshold, run the deep pipeline path.
+  # Phase 1 of jobsmith treats fast and deep identically — slice 9 of the
+  # original /apply spec is deferred.
+  fast_threshold: 0.70
+
+  # Optional. Path to user's profile YAML for fit-scorer's evidence comparison.
+  # Created via `jobsmith init` based on master YAML content + manual notes.
+  profile_yaml: private/capacity/profile.yaml
+
+# ----------------------------------------------------------------------------
+# portfolio — required signals for ai-engineer / data-engineer / data-analyst roles
+# ----------------------------------------------------------------------------
+portfolio:
+  # When the parsed role_type is one of these, the apply-portfolio-ats-checker
+  # treats the live-URL + GitHub-link checks as BLOCKING.
+  blocking_for_role_types:
+    - ai-engineer
+    - data-engineer
+    - data-analyst
+
+  # When NOT in the blocking list, the portfolio check is advisory only.

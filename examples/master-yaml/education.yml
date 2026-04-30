@@ -1,0 +1,20 @@
+# Sample master education for jobsmith
+#
+# Each entry has: title (institution), location, date, description (degree),
+# details (list of bullets — thesis, honors, scholarships, relevant coursework)
+
+- title: "Northeastern University"
+  location: "Boston, MA"
+  date: "Sept 2018 - May 2020"
+  description: "M.S. in Data Analytics Engineering"
+  details:
+    - "Thesis: Geospatial machine learning for renewable energy site selection across the US Southwest, integrating LANDFIRE, USGS, and weather station datasets"
+    - "Graduate Research Assistant — Climate & Energy Systems Lab"
+
+- title: "University of Michigan"
+  location: "Ann Arbor, MI"
+  date: "Sept 2014 - May 2018"
+  description: "B.S. in Industrial & Operations Engineering"
+  details:
+    - "Departmental Distinction; College of Engineering Dean's List 4 semesters"
+    - "Co-led the student chapter of the Renewable Energy Engineering Society"

@@ -1,0 +1,37 @@
+```{python}
+#| include: false
+import yaml
+from datetime import datetime
+
+# Load resume data for personal info
+with open('data/resume-data.yml', 'r') as f:
+    resume_data = yaml.safe_load(f)
+
+personal = resume_data['personal']
+current_date = datetime.now().strftime("%B %d, %Y")
+
+# Job-specific variables (to be set in the calling document)
+# company_name, position_title, hiring_manager, company_location
+```
+
+# `{python} personal['firstname']` `{python} personal['lastname']`
+**`{python} personal['positions'][0]`**
+
+📧 `{python} personal['email']` | 📱 `{python} personal['phone']` | 📍 `{python} personal['address']`
+🔗 [LinkedIn](https://linkedin.com/in/`{python} personal['linkedin']`) | 💻 [GitHub](https://github.com/`{python} personal['github']`)
+
+---
+
+`{python} current_date`
+
+```{python}
+#| output: asis
+print(f"**{hiring_manager}**")
+print(f"{company_name}")
+if 'company_location' in locals():
+    print(f"{company_location}")
+print()
+print(f"**RE: {position_title} Position**")
+```
+
+Dear `{python} hiring_manager.split()[0] if hiring_manager != "Hiring Manager" else "Hiring Manager"`,

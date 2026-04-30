@@ -1,0 +1,57 @@
+# Sample master skills for jobsmith
+#
+# Categories are flexible — name them per your story. The bullet-selector
+# reorders categories per JD, so the order here is your "default" order.
+#
+# Convention: include skill names with proficiency markers ("Advanced",
+# specific framework names) so the bullet-selector can match against JD
+# top_keywords accurately.
+
+- title: "Programming"
+  description: "Python (Advanced), SQL (Advanced), Bash, JavaScript"
+  details:
+    - "Python (Advanced)"
+    - "SQL (Advanced)"
+    - "Bash"
+    - "JavaScript"
+
+- title: "Data Engineering & Cloud"
+  description: "ETL Pipelines, Dagster, DLT Hub, DuckDB, Snowflake, PostgreSQL, AWS, GCP, Docker"
+  details:
+    - "ETL Pipelines"
+    - "Dagster"
+    - "DLT Hub"
+    - "DuckDB"
+    - "Snowflake"
+    - "PostgreSQL"
+    - "AWS"
+    - "GCP"
+    - "Docker"
+
+- title: "Modeling & Analytics"
+  description: "Statistical Modeling, GeoPandas, Forecasting, Optimization (OR-Tools), Pandas, NumPy"
+  details:
+    - "Statistical Modeling"
+    - "GeoPandas"
+    - "Forecasting"
+    - "Optimization"
+    - "OR-Tools (CP-SAT)"
+    - "Pandas"
+    - "NumPy"
+
+- title: "Visualization & BI"
+  description: "Tableau, Power BI, Power Query, Altair, Marimo"
+  details:
+    - "Tableau"
+    - "Power BI"
+    - "Power Query"
+    - "Altair"
+    - "Marimo"
+
+- title: "Domain"
+  description: "Climate-finance, Renewable Energy Tax Equity, Carbon Markets, Geospatial GIS"
+  details:
+    - "Climate-finance"
+    - "Renewable Energy Tax Equity"
+    - "Carbon Markets"
+    - "Geospatial / GIS"

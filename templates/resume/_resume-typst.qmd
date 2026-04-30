@@ -1,0 +1,109 @@
+```{python}
+#| include: false
+import yaml
+
+# Load resume data
+with open('data/resume-data.yml', 'r') as f:
+    resume_data = yaml.safe_load(f)
+
+personal = resume_data['personal']
+experience = resume_data['experience']
+education = resume_data['education']
+skills = resume_data['skills']
+```
+
+```{=typst}
+#import "@preview/awesomecv:0.1.0": *
+
+#show: resume.with(
+  author: (
+    firstname: "`{python} personal['firstname']`",
+    lastname: "`{python} personal['lastname']`",
+    email: "`{python} personal['email']`",
+    phone: "`{python} personal['phone']`",
+    github: "`{python} personal['github']`",
+    linkedin: "`{python} personal['linkedin']`",
+    address: "`{python} personal['address']`",
+    positions: `{python} tuple(personal['positions'])`,
+  ),
+  profile-picture: none,
+  date: datetime.today().display(),
+  language: "en",
+  colored-headers: true,
+  show-footer: false,
+  paper-size: "us-letter",
+)
+#line(length: 100%, stroke: 1pt + gray)
+
+`{python} resume_data['summary']['default']`
+
+= Experience
+
+```{python}
+#| output: asis
+for exp in experience:
+    # Create Typst resume entry
+    print(f"""
+#resume-entry(
+  title: "{exp['title']}",
+  location: "{exp['location']}",
+  date: "{exp['date']}",
+  description: "{exp['company']}",
+)
+
+#resume-item[""")
+
+    # Add bullet points
+    for bullet in exp['bullets']:
+        # Replace $ with \$ for Typst
+        text = bullet['text'].replace('$', '\\$')
+        print(f"  - *{text.split('**')[1] if '**' in text else text.split('*')[0]}*{text.split('**')[2] if '**' in text else text.split('*')[1] if '*' in text else text}")
+
+    print("]")
+```
+
+```{=typst}
+= Education
+
+```{python}
+#| output: asis
+for edu in education:
+    print(f"""
+#resume-entry(
+  title: "{edu['school']}",
+  location: "{edu['location']}",
+  date: "{edu['date']}",
+  description: "{edu['degree']}",
+)""")
+
+    if 'notes' in edu:
+        print("\n#resume-item[")
+        notes_str = " | ".join(edu['notes'])
+        print(f"  - {notes_str}")
+        print("]")
+```
+
+```{=typst}
+= Skills
+
+```{python}
+#| output: asis
+for category, skill_list in skills.items():
+    category_name = category.replace('_', ' ').title()
+
+    # Create skill items with emphasis on first few
+    skill_items = []
+    for i, skill in enumerate(skill_list):
+        if i < 3:  # Emphasize first 3 skills
+            skill_items.append(f'strong("{skill}")')
+        else:
+            skill_items.append(f'"{skill}"')
+
+    skills_tuple = f"({', '.join(skill_items)})"
+
+    print(f"""
+#resume-skill-item(
+  "{category_name}",
+  {skills_tuple},
+)""")
+```

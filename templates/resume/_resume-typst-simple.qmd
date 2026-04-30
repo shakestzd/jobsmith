@@ -1,0 +1,82 @@
+```{python}
+#| include: false
+import yaml
+
+# Load resume data
+with open('data/resume-data.yml', 'r') as f:
+    resume_data = yaml.safe_load(f)
+
+personal = resume_data['personal']
+experience = resume_data['experience']
+education = resume_data['education']
+skills = resume_data['skills']
+```
+
+#set text(font: "New Computer Modern", size: 11pt)
+#set page(margin: (top: 1.5cm, bottom: 1.5cm, left: 1.5cm, right: 1.5cm))
+
+#align(center)[
+  #text(size: 20pt, weight: "bold")[`{python} personal['firstname']` `{python} personal['lastname']`]
+
+  #text(size: 14pt)[`{python} personal['positions'][0]`]
+
+  #v(0.5em)
+
+  #text(size: 10pt)[
+    `{python} personal['email']` | `{python} personal['phone']` | `{python} personal['address']`
+
+    LinkedIn: linkedin.com/in/`{python} personal['linkedin']` | GitHub: github.com/`{python} personal['github']`
+  ]
+]
+
+#line(length: 100%, stroke: 1pt)
+
+#v(1em)
+
+*`{python} resume_data['summary']['default']`*
+
+#v(1em)
+
+= Experience
+
+```{python}
+#| output: asis
+for exp in experience:
+    print(f"""
+*{exp['title']}* | {exp['company']} | {exp['location']} | {exp['date']}
+""")
+
+    for bullet in exp['bullets']:
+        # Clean up bullet text for Typst
+        text = bullet['text'].replace('$', '\\$')
+        print(f"- {text}")
+
+    print()
+```
+
+= Education
+
+```{python}
+#| output: asis
+for edu in education:
+    print(f"""
+*{edu['degree']}* | {edu['school']} | {edu['location']} | {edu['date']}
+""")
+
+    if 'notes' in edu:
+        notes_str = " | ".join(edu['notes'])
+        print(f"- {notes_str}")
+
+    print()
+```
+
+= Skills
+
+```{python}
+#| output: asis
+for category, skill_list in skills.items():
+    category_name = category.replace('_', ' ').title()
+    skills_str = ', '.join(skill_list)
+    print(f"*{category_name}:* {skills_str}")
+    print()
+```

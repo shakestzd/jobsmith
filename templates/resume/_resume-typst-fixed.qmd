@@ -1,0 +1,96 @@
+```{python}
+#| include: false
+import yaml
+
+# Load resume data
+with open('data/resume-data.yml', 'r') as f:
+    resume_data = yaml.safe_load(f)
+
+personal = resume_data['personal']
+experience = resume_data['experience']
+education = resume_data['education']
+skills = resume_data['skills']
+```
+
+```{python}
+#| output: asis
+#| echo: false
+
+# Generate raw Typst content
+typst_content = f"""#set text(font: "New Computer Modern", size: 11pt)
+#set page(margin: (top: 1.5cm, bottom: 1.5cm, left: 1.5cm, right: 1.5cm))
+
+#align(center)[
+  #text(size: 20pt, weight: "bold")[{personal['firstname']} {personal['lastname']}]
+
+  #text(size: 14pt)[{personal['positions'][0]}]
+
+  #v(0.5em)
+
+  #text(size: 10pt)[
+    {personal['email']} | {personal['phone']} | {personal['address']}
+
+    LinkedIn: linkedin.com/in/{personal['linkedin']} | GitHub: github.com/{personal['github']}
+  ]
+]
+
+#line(length: 100%, stroke: 1pt)
+
+#v(1em)
+
+{resume_data['summary']['default']}
+
+#v(1em)
+
+= Experience
+"""
+
+# Add experience entries
+for exp in experience:
+    typst_content += f"""
+*{exp['title']}* | {exp['company']} | {exp['location']} | {exp['date']}
+
+"""
+
+    for bullet in exp['bullets']:
+        # Clean up bullet text for Typst - escape dollars
+        text = bullet['text'].replace('$', '\\$')
+        # Handle bold text markers properly
+        if '**' in text:
+            parts = text.split('**')
+            if len(parts) >= 3:
+                # Bold formatting: **text** becomes *text*
+                text = parts[0] + '*' + parts[1] + '*' + '**'.join(parts[2:])
+
+        typst_content += f"- {text}\n"
+
+    typst_content += "\n"
+
+typst_content += """
+= Education
+"""
+
+# Add education entries
+for edu in education:
+    typst_content += f"""
+*{edu['degree']}* | {edu['school']} | {edu['location']} | {edu['date']}
+"""
+
+    if 'notes' in edu:
+        notes_str = " | ".join(edu['notes'])
+        typst_content += f"- {notes_str}\n"
+
+    typst_content += "\n"
+
+typst_content += """
+= Skills
+"""
+
+# Add skills entries
+for category, skill_list in skills.items():
+    category_name = category.replace('_', ' ').title()
+    skills_str = ', '.join(skill_list)
+    typst_content += f"*{category_name}:* {skills_str}\n\n"
+
+print(typst_content)
+```

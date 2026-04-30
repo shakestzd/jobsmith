@@ -1,0 +1,81 @@
+```{python}
+#| include: false
+import yaml
+
+# Load resume data
+with open('data/resume-data.yml', 'r') as f:
+    resume_data = yaml.safe_load(f)
+
+personal = resume_data['personal']
+experience = resume_data['experience']
+education = resume_data['education']
+skills = resume_data['skills']
+```
+
+# `{python} personal['firstname']` `{python} personal['lastname']`
+## `{python} personal['positions'][0]`
+
+:::: {.columns}
+::: {.column width="50%"}
+**Contact Information**
+- 📧 `{python} personal['email']`
+- 📱 `{python} personal['phone']`
+- 📍 `{python} personal['address']`
+:::
+::: {.column width="50%"}
+**Professional Links**
+- 🔗 [LinkedIn](https://linkedin.com/in/`{python} personal['linkedin']`)
+- 💻 [GitHub](https://github.com/`{python} personal['github']`)
+:::
+::::
+
+---
+
+## Professional Summary
+
+`{python} resume_data['summary']['default']`
+
+---
+
+## Experience
+
+```{python}
+#| output: asis
+for exp in experience:
+    print(f"### {exp['title']}")
+    print(f"**{exp['company']}** | {exp['location']} | {exp['date']}")
+    print()
+
+    for bullet in exp['bullets']:
+        print(f"- {bullet['text']}")
+    print()
+```
+
+---
+
+## Education
+
+```{python}
+#| output: asis
+for edu in education:
+    print(f"### {edu['degree']}")
+    print(f"**{edu['school']}** | {edu['location']} | {edu['date']}")
+
+    if 'notes' in edu:
+        for note in edu['notes']:
+            print(f"- {note}")
+    print()
+```
+
+---
+
+## Technical Skills
+
+```{python}
+#| output: asis
+for category, skill_list in skills.items():
+    category_name = category.replace('_', ' ').title()
+    skills_str = ', '.join(skill_list)
+    print(f"**{category_name}:** {skills_str}")
+    print()
+```

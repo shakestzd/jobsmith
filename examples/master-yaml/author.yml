@@ -1,0 +1,50 @@
+# Sample master author block for jobsmith
+#
+# This appears at the top of every rendered resume.
+# Replace with your own name, contact info, links.
+#
+# The "tagline" is the role-summary line under the name (e.g.,
+# "Data Engineering & ML Systems | Renewable Energy Analytics").
+# The bullet-selector picks the right tagline per JD if you provide
+# multiple options under taglines:.
+
+author:
+  - name:
+      first: "Pat"
+      middle: ""
+      last: "Doe"
+    address: "Brooklyn, NY, USA"
+    email: "pat@example.com"
+    phone: "(+1) 555-0100"
+    homepage: "patdoe.dev"
+    photo: ""
+    photo-style: ""
+    photo-size: ""
+    position: "Data Engineering & ML Systems | Renewable Energy Analytics"
+    profession: ""
+    quote: ""
+    contacts:
+      - icon: fa solid envelope
+        text: pat@example.com
+        url: mailto:pat@example.com
+      - icon: fa solid phone
+        text: (+1) 555-0100
+        url: tel:+15555550100
+      - icon: fa solid location-dot
+        text: Brooklyn, NY
+        url: https://www.google.com/maps?q=Brooklyn,+NY
+      - icon: fa brands github
+        text: patdoe
+        url: https://github.com/patdoe
+      - icon: fa brands linkedin
+        text: patdoe
+        url: https://linkedin.com/in/patdoe
+
+# Optional: alternate taglines per role-type.
+# The bullet-selector picks the closest match to the parsed jd.role_type.
+taglines:
+  data-engineer: "Data Engineering & ML Systems | Renewable Energy Analytics"
+  ai-engineer: "AI Engineering & Production ML | Climate-Finance Infrastructure"
+  data-analyst: "Data Analytics & Financial Reporting | Renewable Energy"
+  finance: "Quantitative Finance | Renewable Energy Tax Equity"
+  general: "Data Engineering & ML Systems"

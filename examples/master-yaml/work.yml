@@ -1,0 +1,45 @@
+# Sample master work history for jobsmith
+#
+# This is a fictional "Pat Doe" profile — a senior data engineer with
+# climate-tech and fintech experience. Replace with your real history.
+#
+# CONVENTIONS
+# - Each position has: title, location, date, description, details
+# - "details" is a list of bullet strings — one bullet per element
+# - Anchor bullets contain a load-bearing metric: ≥$10M dollar amount,
+#   ≥50% percentage gain, or ≥100K asset/user/record count.
+#   The anchor-bullet-guard regex catches these automatically — you don't
+#   need to mark them by hand. Just write the bullet naturally.
+# - Anchors are preserved across applications unless an explicit reason
+#   to drop them is logged in the application's bullet-decisions.json.
+
+- title: "Senior Data Engineer"
+  location: "Helios Energy Corp"
+  date: "Aug 2024 - Present"
+  description: "Remote"
+  details:
+    - "Built a Python geospatial analytics platform that unlocked $250M in additional Investment Tax Credits across 200K+ solar assets in 29 states by intersecting federal Energy Community polygons with system coordinates"
+    - "Shipped data infrastructure for a 500K-asset renewable energy portfolio via 7 automated ETL pipelines (Python, DLT, DuckDB, Dagster) at 99.9% reliability"
+    - "Engineered helios_fde, an internal Python framework (DuckDB, DLT, Dagster, Pydantic) that consolidated 7 servicer pipelines into one declarative system, cutting new-datatape onboarding from weeks to hours"
+    - "Recovered $50M in incremental tax credits by translating IRS regulatory updates into automated business logic within 72 hours, in collaboration with Legal, Tax, and Government Relations"
+    - "Trained 2 treasury data analysts to independently handle business requests, reducing team response time from days to hours"
+
+- title: "Data Engineer"
+  location: "Helios Energy Corp"
+  date: "Nov 2022 - Jul 2024"
+  description: "Remote"
+  details:
+    - "Built a Google OR-Tools CP-SAT optimizer that allocated 788 MW of solar capacity ($4.25B Fair Market Value) across 10 active tax-equity partnership funds, under per-fund FICO, ITC, equipment, and safe-harbor constraints"
+    - "Developed a Python duration-forecasting layer (42.8-day MAE across 12K+ backtested systems) that fed timing constraints into the CP-SAT optimizer"
+    - "Cut accounts payable processing time by 75% by consolidating 4 separate Salesforce reports into a unified PostgreSQL view + Power Query/VBA automation"
+    - "Recovered $95M in dealer-related revenue through automated Python and Tableau pipelines: $91M in accounts receivables via integrated dashboards, $4M through credit-note reconciliation"
+    - "Generated $1M in interest revenue over 9 months by implementing automated SQL/Tableau pipelines that identified 3,000 non-compliant systems ($51M value), calculated tiered interest rates, and delivered weekly executive dashboards"
+
+- title: "Data Analyst"
+  location: "Atlas Climate Capital"
+  date: "Jun 2020 - Oct 2022"
+  description: "Remote"
+  details:
+    - "Modeled portfolio risk for a $1B+ renewable energy fund using Python, SQL, and Monte Carlo simulation across 50+ project finance scenarios"
+    - "Built quarterly investor reporting pipelines (Tableau + SQL) that reduced manual report assembly from 5 days to 4 hours"
+    - "Co-designed an internal data dictionary and PostgreSQL schema for portfolio asset tracking adopted across Finance, Operations, and Investor Relations"
