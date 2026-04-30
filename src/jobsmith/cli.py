@@ -21,6 +21,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
+from .assemble import assemble_all, assemble_application
 from .config import CONFIG_FILENAME, find_config, load_config
 from .factcheck import check_draft
 from .guard import check_anchors, render_diff_md
@@ -340,6 +341,59 @@ def doctor():
     console.print(table)
     if blocking:
         raise typer.Exit(code=1)
+
+
+@app.command()
+def assemble(
+    slug: str | None = typer.Argument(
+        None,
+        help="Application slug to assemble. Omit and pass --all to assemble every application.",
+    ),
+    all_apps: bool = typer.Option(
+        False,
+        "--all",
+        help="Assemble every application under output.applications_dir. Used as the Quarto pre-render hook.",
+    ),
+    applications_dir: Path | None = typer.Option(
+        None,
+        "--applications-dir",
+        help="Override output.applications_dir from .apply-config.yaml.",
+    ),
+):
+    """Read .apply-state/* and write _variables.yml for Quarto consumption.
+
+    Two modes:
+      jobsmith assemble <slug>   → assemble one application
+      jobsmith assemble --all    → assemble every application (site-wide pre-render hook)
+    """
+    config = load_config()
+    repo_root = repo_root_for()
+    apps_dir = applications_dir or resolve(config.output.applications_dir, repo_root)
+
+    if all_apps and slug:
+        console.print("[red]ERROR:[/red] pass either <slug> or --all, not both")
+        raise typer.Exit(code=1)
+    if not all_apps and not slug:
+        console.print("[red]ERROR:[/red] specify a slug or pass --all")
+        raise typer.Exit(code=1)
+
+    if all_apps:
+        try:
+            written = assemble_all(apps_dir)
+        except ValueError as e:
+            console.print(f"[red]ERROR:[/red] {e}")
+            raise typer.Exit(code=1) from e
+        console.print(f"[green]Assembled {len(written)} application(s):[/green]")
+        for path in written:
+            console.print(f"  WROTE {path}")
+        return
+
+    try:
+        written = assemble_application(slug, apps_dir)
+    except ValueError as e:
+        console.print(f"[red]ERROR:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    console.print(f"[green]Assembled[/green] {written}")
 
 
 @app.command(name="fact-check")

@@ -29,5 +29,13 @@
     "agents": "agents/",
     "commands": "commands/",
     "skills": "skills/"
+  },
+  "vendored": {
+    "skills/quarto-authoring": {
+      "upstream": "https://github.com/posit-dev/skills/tree/main/quarto",
+      "license": "MIT",
+      "license_file": "skills/quarto-authoring/UPSTREAM_LICENSE",
+      "purpose": "Quarto authoring guidance — used by jobsmith specialists when composing workflow QMDs, partials, and the portfolio site."
+    }
   }
 }

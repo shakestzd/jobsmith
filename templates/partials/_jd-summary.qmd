@@ -1,0 +1,19 @@
+# Step 1 — JD Analysis {#sec-jd-analysis}
+
+::: {.callout-note appearance="minimal"}
+**{{< var company >}}** — {{< var position >}}\
+{{< var location >}} ({{< var location_type >}}) · {{< var salary_range >}} · req `{{< var req_id >}}`\
+[Apply URL]({{< var apply_url >}})
+:::
+
+## Must-haves {#sec-must-haves}
+
+{{< var jd.must_haves_md >}}
+
+## Nice-to-haves {#sec-nice-to-haves}
+
+{{< var jd.nice_to_haves_md >}}
+
+## Top keywords
+
+{{< var jd.top_keywords_md >}}

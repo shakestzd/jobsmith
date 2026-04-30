@@ -1,0 +1,39 @@
+---
+title: "Cover Letter Workflow"
+author: "{{< var user.name >}}"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    toc-title: "Workflow steps"
+    callout-appearance: simple
+    embed-resources: true
+    page-layout: full
+---
+
+# {{< var company >}} — {{< var position >}}
+
+::: {.callout-warning appearance="minimal"}
+This is a **review surface** generated from `.apply-state/`. Edit the underlying state files (or the cover-letter draft) and re-run `jobsmith assemble {{< var slug >}}` to refresh. The final cover letter PDF is rendered separately by `apply-resume-renderer`.
+:::
+
+{{< include ../partials/_jd-summary.qmd >}}
+
+{{< include ../partials/_must-have-table.qmd >}}
+
+{{< include ../partials/_hm-status.qmd >}}
+
+{{< include ../partials/_letter-draft.qmd >}}
+
+---
+
+::: {.callout-tip appearance="minimal"}
+**Source artifacts** (in `private/applications/{{< var slug >}}/.apply-state/`):
+
+- `jd-parsed.json` → @sec-jd-analysis
+- `fit-score.json` → @sec-fit-table
+- `hm-snippet.md` → @sec-hm
+- `cover-letter-draft.md` (one level up) → @sec-letter-draft
+:::
