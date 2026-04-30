@@ -304,22 +304,24 @@ specialists:
 
   # --------------------------------------------------------------------------
   - name: anchor-bullet-guard
-    kind: python_script
-    file: scripts/anchor_bullet_guard.py
+    kind: cli_command
+    command: jobsmith anchor-check
     purpose: |
-      Mechanical guardrail. Imports _MONEY_RE and _PERCENT_RE from
-      scripts/fact_check_draft.py — DOES NOT REIMPLEMENT. Reads
-      master work.yml, identifies anchor bullets, cross-references
-      against bullet-selection.json. Outputs a diff and exit code.
+      Mechanical guardrail. The `jobsmith.anchors` package is the single
+      source of truth for the regex library and threshold constants.
+      `jobsmith.guard.check_anchors()` reads master work.yml, identifies
+      anchor bullets, cross-references against bullet-selection.json,
+      and returns a typed GuardResult. The CLI translates that to an
+      exit code and writes bullet-diff.md.
     reuses:
-      regexes_from: scripts/fact_check_draft.py
-      imports: ["_MONEY_RE", "_PERCENT_RE"]
+      regexes_from: src/jobsmith/anchors.py
+      imports: ["_MONEY_RE", "_PERCENT_RE", "_ASSET_COUNT_RE"]
     invocation: |
-      uv run python scripts/anchor_bullet_guard.py \
-          --master assets/content/work.yml \
+      jobsmith anchor-check \
           --selection applications/{slug}/.apply-state/bullet-selection.json \
           --decisions applications/{slug}/.apply-state/bullet-decisions.json \
           --diff-out applications/{slug}/.apply-state/bullet-diff.md
+      # CLI reads master.work_yml and anchor_thresholds.* from .apply-config.yaml
     exit_codes:
       0: "all anchors preserved or all drops have logged reasons"
       1: "one or more anchors dropped without logged reason — caller must invoke apply-relevance-inquirer"
@@ -517,7 +519,7 @@ specialists:
     model: sonnet
     purpose: |
       Always draft a cover letter in Tier 1. Role-type-conditional
-      length. fact_check_draft.py is a BLOCKING gate before the file
+      length. `jobsmith fact-check` is a BLOCKING gate before the file
       is written. Reuses the existing cover-letter-drafter.md pattern.
     inputs:
       from_orchestrator:
@@ -534,7 +536,7 @@ specialists:
     tools_allowlist:
       - Read
       - Write
-      - Bash       # for fact_check_draft.py
+      - Bash       # for `jobsmith fact-check`
     word_targets:
       senior_strategic: 150
       ai_engineer: 150
@@ -544,8 +546,7 @@ specialists:
       If hm-snippet.md exists with a named HM → "Dear {first_name},"
       Else → "Hello,"
     blocking_gate: |
-      uv run python scripts/fact_check_draft.py \
-          --draft {cover-letter-draft.md} --verbose
+      jobsmith fact-check {cover-letter-draft.md} --verbose
       Exit 0 → write file. Exit non-zero → ONE revision attempt; if
       still failing, halt with FACT_CHECK_FAILED.
     failure_modes:

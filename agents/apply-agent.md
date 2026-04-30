@@ -58,18 +58,18 @@ Ask: "Proceed?" Wait for confirmation before any further work.
 ## Step 4 — Anchor guard
 After the user confirms, run:
 ```bash
-uv run python scripts/anchor_bullet_guard.py \
-  --master assets/content/work.yml \
+jobsmith anchor-check \
   --selection applications/{slug}/.apply-state/bullet-selection.json \
   --decisions applications/{slug}/.apply-state/bullet-decisions.json \
   --diff-out applications/{slug}/.apply-state/bullet-diff.md
 ```
+The CLI reads `master.work_yml` and `anchor_thresholds.*` from `.apply-config.yaml`.
 
-Exit codes (per contract): `0` proceed, `1` anchor dropped without reason → go to Step 5, `2` internal error → halt.
+Exit codes: `0` proceed, `1` anchor dropped without reason → go to Step 5, `2` internal error → halt.
 
 ## Step 5 — Relevance-inquiry (conditional, ONE cycle max)
 Triggered when:
-- anchor_bullet_guard exit 1, OR
+- `jobsmith anchor-check` exit 1, OR
 - apply-bullet-selector returned `status=halt reason=UNCOVERED_MUST_HAVE`, OR
 - apply-fit-scorer's `must_have_table` contains GAP rows.
 

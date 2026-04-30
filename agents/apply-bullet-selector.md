@@ -24,7 +24,7 @@ Read `.apply-state/spec.json`:
 ## Anchor rule (NON-NEGOTIABLE)
 
 A master bullet is an **anchor** if its text contains ANY of:
-- A dollar amount ≥ $10M (regex `_MONEY_RE` from `private/scripts/fact_check_draft.py`)
+- A dollar amount ≥ $10M (regex `_MONEY_RE` from the `jobsmith.anchors` package)
 - A percentage ≥ 50% (regex `_PERCENT_RE` from same file)
 - An asset count ≥ 100K (e.g. "200K solar assets")
 
@@ -53,12 +53,12 @@ When in doubt, KEEP the anchor. Re-rank it lower if the JD doesn't reward it, bu
    - `renewable-energy` → "Renewable Energy Analytics | Solar Asset Management | Data Infrastructure"
 9. Run the anchor guard before finalizing:
    ```bash
-   uv run python private/scripts/anchor_bullet_guard.py \
-     --master assets/content/work.yml \
+   jobsmith anchor-check \
      --selection .apply-state/bullet-selection.json \
      --decisions .apply-state/bullet-decisions.json \
      --diff-out .apply-state/bullet-diff.md
    ```
+   The CLI reads `master.work_yml` and `anchor_thresholds.*` from `.apply-config.yaml`.
    Exit 0 → write tailored YAMLs and mark status ok.
    Exit 1 → halt with `reason=ANCHOR_DROP_REQUIRES_INQUIRY`. The orchestrator dispatches relevance-inquirer.
    Exit 2 → halt with `reason=GUARD_INTERNAL_ERROR` + stderr.

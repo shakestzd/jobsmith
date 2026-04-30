@@ -1,0 +1,81 @@
+[build-system]
+requires = ["hatchling>=1.20"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jobsmith"
+version = "0.1.0"
+description = "Tailored resume and cover-letter pipeline. Master-first, no fabrication, anchor-preserving. Ships as a Claude Code plugin and a standalone CLI."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Thandolwethu \"Shakes\" Dlamini", email = "shakestzd@gmail.com" },
+]
+keywords = [
+    "resume",
+    "cover-letter",
+    "job-application",
+    "quarto",
+    "typst",
+    "ats",
+    "claude-code",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business",
+    "Topic :: Text Processing :: Markup",
+]
+dependencies = [
+    "pydantic>=2.5",
+    "pyyaml>=6.0",
+    "typer>=0.12",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+tui = [
+    "textual>=0.60",
+]
+test = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+]
+dev = [
+    "jobsmith[test]",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+jobsmith = "jobsmith.cli:app"
+
+[project.urls]
+Homepage = "https://jobsmith.dev"
+Repository = "https://github.com/shakestzd/jobsmith"
+Issues = "https://github.com/shakestzd/jobsmith/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jobsmith"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --strict-markers"

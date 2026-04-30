@@ -22,7 +22,7 @@ Read `.apply-state/spec.json`:
 
 ## Prerequisite
 
-Migration `private/scripts/migrations/001_add_last_synced_at.sql` must have been applied. If column `last_synced_at` is missing, halt with `reason=MIGRATION_NOT_APPLIED` — orchestrator should run the migration before retrying.
+Migration `scripts/migrations/001_add_last_synced_at.sql` must have been applied (jobsmith ships migrations alongside the package). If column `last_synced_at` is missing, halt with `reason=MIGRATION_NOT_APPLIED` — orchestrator should run the migration before retrying.
 
 Verify:
 ```bash

@@ -1,51 +1,44 @@
-#!/usr/bin/env python3
 """Fact checker for drafted cover letters and narrative answers.
 
-Part of the /prepare-application slice 8 workflow. When a cover letter
-drafter or narrative drafter produces text containing hard claims
-(dollar amounts, percentages, company names, year counts, proper
-nouns), this module greps every claim against the master YAML files
-in assets/content/. Any claim that doesn't appear in ANY master file
-is flagged as unverified — the draft is rejected and the prepare
-orchestrator must regenerate it without the fabricated content.
+When a cover letter or narrative drafter produces text containing hard
+claims (dollar amounts, percentages, company names, year counts, count
+metrics, proper nouns), this module greps every claim against the master
+YAML files in `assets/content/`. Any claim that doesn't appear in ANY
+master file is flagged as unverified.
 
 **This is a safety gate, not an optimization.** Silent fabrication is
-the single worst failure mode for an automated application pipeline.
-The fact checker is deliberately aggressive — it prefers false
-positives (rejecting true claims) over false negatives (passing
-fabricated ones). Operators can always regenerate or manually verify.
+the worst failure mode for an automated application pipeline. The
+checker is deliberately aggressive — false positives (rejecting true
+claims) over false negatives (passing fabricated ones).
 
-Usage:
-    uv run python private/scripts/fact_check_draft.py \\
-        --draft private/applications/stripe/cover-letter-draft.md
-
-CLI exits 0 if all claims verified, 1 if any fail.
+The CLI surface is `jobsmith fact-check`. The Python API is
+`check_draft(draft_text, content_dir) -> FactCheckResult`.
 """
 
 from __future__ import annotations
 
-import argparse
-import logging
 import re
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONTENT_DIR = REPO_ROOT / "assets" / "content"
+from .anchors import _MONEY_RE, _PERCENT_RE
 
-logger = logging.getLogger("fact_check_draft")
+# ---------- types ----------
 
 
 @dataclass
 class Claim:
+    """One hard claim extracted from a draft."""
+
     text: str
-    kind: str  # "money" | "percent" | "year_count" | "proper_noun"
+    kind: str  # 'money' | 'percent' | 'year_count' | 'count' | 'proper_noun'
     offset: int
 
 
 @dataclass
 class VerificationResult:
+    """Outcome of verifying one claim against all master files."""
+
     claim: str
     kind: str
     verified: bool
@@ -54,21 +47,15 @@ class VerificationResult:
 
 @dataclass
 class FactCheckResult:
+    """Aggregate result over all claims in a draft."""
+
     passed: bool
     verified_claims: list[VerificationResult] = field(default_factory=list)
     failed_claims: list[str] = field(default_factory=list)
 
 
-# ---------- extractors ----------
-
-
-# $250M, $1B, $50.5K, $120,000, $120K, $132
-_MONEY_RE = re.compile(
-    r"\$\d+(?:[.,]\d+)*\s*[KMBk]?",
-)
-
-# 97.3%, 99.9%, 100%, 72%
-_PERCENT_RE = re.compile(r"\d+(?:\.\d+)?%")
+# ---------- factcheck-specific extractors ----------
+# (Money and percent come from jobsmith.anchors — single source of truth.)
 
 # "for 3.5 years", "over 7 years", "10+ years"
 _YEAR_COUNT_RE = re.compile(
@@ -76,20 +63,14 @@ _YEAR_COUNT_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Multi-word proper nouns: two+ capitalized words in a row
-# (minimum 4 chars each, to avoid two-letter false positives).
-# Also matches single word proper nouns of 6+ chars that are not
-# at sentence start (approximate via preceding non-period char).
-_MULTI_CAP_RE = re.compile(
-    r"\b[A-Z][a-zA-Z]{3,}(?:\s+[A-Z][a-zA-Z]{3,})+\b",
-)
+# Multi-word proper nouns: two+ capitalized words in a row, min 4 chars
+# each to avoid two-letter false positives.
+_MULTI_CAP_RE = re.compile(r"\b[A-Z][a-zA-Z]{3,}(?:\s+[A-Z][a-zA-Z]{3,})+\b")
 
-# Explicit company-style single words (CamelCase or starts with capital
-# and contains an internal capital — catches SunStrong, DagsterLabs, etc).
+# CamelCase company names — catches "SunStrong", "DagsterLabs", etc.
 _CAMEL_NAME_RE = re.compile(r"\b[A-Z][a-z]+[A-Z][a-zA-Z]+\b")
 
-# Countable metrics like "7 pipelines", "200K assets", "7 automated ETL pipelines".
-# Allow up to 3 words between the number and the unit (adjectives).
+# Countable metrics: "7 pipelines", "200K assets", "7 automated ETL pipelines".
 _COUNT_RE = re.compile(
     r"\b\d+[KMB]?\+?\s+(?:[\w\-]+\s+){0,3}"
     r"(?:pipelines?|assets?|systems?|states?|clients?|"
@@ -98,11 +79,8 @@ _COUNT_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Multi-word proper nouns with lowercase connectors allowed: "Technology
-# and Policy", "State of Massachusetts", "Bureau of Labor Statistics".
-# Requires 4+ char opening word so 3-char acronyms like MIT/SQL are left
-# for _ACRONYM_RE to handle separately (otherwise "MIT in Technology"
-# would greedy-match and obscure the real "Technology and Policy" phrase).
+# Multi-word names with lowercase connectors: "Technology and Policy",
+# "State of Massachusetts", "Bureau of Labor Statistics".
 _CONNECTED_CAP_RE = re.compile(
     r"\b[A-Z][a-zA-Z]{3,}"
     r"(?:\s+(?:and|of|the|in|for|at|on|to|de|la|le|du|van|von)\s+)"
@@ -111,13 +89,13 @@ _CONNECTED_CAP_RE = re.compile(
     r"\b"
 )
 
-# Short acronyms (2-5 all-caps chars). The stoplist below filters out
-# generic skills/cliches so only real claim-worthy acronyms (MIT, IBM,
-# IRS, etc.) make it through.
+# Short acronyms (2-5 all-caps chars). Stoplist filters out generic skill
+# acronyms so only claim-worthy ones (MIT, IBM, IRS) make it through.
 _ACRONYM_RE = re.compile(r"\b[A-Z]{2,5}\b")
 
-# Stoplist — words/acronyms that look like proper nouns but are generic
-# skills, cliches, or grammar and shouldn't be fact-checked.
+
+# ---------- stoplist ----------
+
 _PROPER_NOUN_STOPLIST = {
     # Grammar
     "The", "This", "That", "These", "Those", "Their", "There", "Then",
@@ -129,7 +107,7 @@ _PROPER_NOUN_STOPLIST = {
     "Sunday",
     "January", "February", "March", "April", "May", "June", "July",
     "August", "September", "October", "November", "December",
-    # Generic skill acronyms — common knowledge, not worth fact-checking
+    # Generic skill acronyms
     "SQL", "AI", "ML", "ETL", "ELT", "API", "CLI", "GUI", "SAAS",
     "PDF", "YAML", "JSON", "XML", "HTML", "CSS", "JS", "TS", "TSX",
     "RAG", "LLM", "LLMS", "NLP", "CV", "OCR", "SDK", "IDE",
@@ -140,12 +118,15 @@ _PROPER_NOUN_STOPLIST = {
 }
 
 
+# ---------- public API ----------
+
+
 def extract_hard_claims(text: str) -> list[Claim]:
     """Pull every hard claim out of a draft.
 
-    Order is deterministic — money → percent → years → counts →
-    proper nouns — so tests and logs are stable. Duplicates are
-    tolerated at extract time and dedup happens in check_draft.
+    Order is deterministic — money → percent → years → counts → proper nouns —
+    so tests and logs are stable. Duplicates are tolerated and dedup happens
+    in `check_draft`.
     """
     out: list[Claim] = []
     for m in _MONEY_RE.finditer(text):
@@ -155,19 +136,13 @@ def extract_hard_claims(text: str) -> list[Claim]:
     for m in _YEAR_COUNT_RE.finditer(text):
         out.append(Claim(text=m.group(0).strip(), kind="year_count", offset=m.start()))
     for m in _COUNT_RE.finditer(text):
-        # Extract just the leading number as the claim — e.g. "7 automated
-        # ETL pipelines" → claim="7 pipelines" (noise stripped). We keep
-        # the final unit word for uniqueness.
+        # Reduce "7 automated ETL pipelines" → "7 pipelines" for uniqueness.
         raw = m.group(0).strip()
         parts = raw.split()
-        if len(parts) >= 2:
-            claim_text = f"{parts[0]} {parts[-1]}"
-        else:
-            claim_text = raw
+        claim_text = f"{parts[0]} {parts[-1]}" if len(parts) >= 2 else raw
         out.append(Claim(text=claim_text, kind="count", offset=m.start()))
     for m in _CONNECTED_CAP_RE.finditer(text):
-        span = m.group(0).strip()
-        out.append(Claim(text=span, kind="proper_noun", offset=m.start()))
+        out.append(Claim(text=m.group(0).strip(), kind="proper_noun", offset=m.start()))
     for m in _MULTI_CAP_RE.finditer(text):
         span = m.group(0).strip()
         if span in _PROPER_NOUN_STOPLIST:
@@ -203,7 +178,7 @@ def _load_master_content(content_dir: Path) -> dict[str, str]:
 
 
 def _auto_detect_kind(claim: str) -> str:
-    """Infer the claim kind from its shape. Used when the caller doesn't pass one."""
+    """Infer the claim kind from its shape."""
     s = claim.strip()
     if s.startswith("$") or s.endswith(("K", "M", "B")):
         return "money"
@@ -220,7 +195,6 @@ def _claim_matches(claim: str, haystack: str, kind: str) -> bool:
         escaped = re.escape(claim)
         pattern = rf"(?:^|[\s'\"\[\(]){escaped}(?:[\s,.!?:;'\"\]\)]|$)"
         return bool(re.search(pattern, haystack))
-    # Proper nouns: case-insensitive substring
     return claim.lower() in haystack.lower()
 
 
@@ -231,10 +205,10 @@ def verify_claim(
 ) -> VerificationResult:
     """Check a single claim against every master YAML file.
 
-    Returns the first matching file (by sorted name), or a
-    not-verified result if none match. When `kind` is None, the
-    claim's shape is auto-detected — `$25`, `97%`, `3 years`, and
-    `SunStrong` all route to the right matcher.
+    Returns the first matching file (by sorted name), or a not-verified
+    result if none match. When `kind` is None, the claim's shape is
+    auto-detected — `$25`, `97%`, `3 years`, and `SunStrong` all route to
+    the right matcher.
     """
     effective_kind = kind or _auto_detect_kind(claim)
     master = _load_master_content(content_dir)
@@ -250,7 +224,7 @@ def check_draft(
     draft_text: str,
     content_dir: Path,
 ) -> FactCheckResult:
-    """Extract every hard claim from the draft and verify against the master files."""
+    """Extract every hard claim from the draft and verify against master files."""
     claims = extract_hard_claims(draft_text)
     verified: list[VerificationResult] = []
     failed: list[str] = []
@@ -271,56 +245,11 @@ def check_draft(
     )
 
 
-# ---------- CLI ----------
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--draft", type=Path, required=True, help="draft markdown file")
-    parser.add_argument(
-        "--master-content-dir",
-        type=Path,
-        default=DEFAULT_CONTENT_DIR,
-        help="directory containing master YAML files (default: assets/content/)",
-    )
-    parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args()
-
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(message)s",
-    )
-
-    if not args.draft.exists():
-        print(f"ERROR: draft file not found: {args.draft}", file=sys.stderr)
-        return 1
-
-    draft_text = args.draft.read_text()
-    result = check_draft(draft_text, args.master_content_dir)
-
-    if result.passed:
-        print(f"✓ fact check passed — {len(result.verified_claims)} claims verified")
-        if args.verbose:
-            for v in result.verified_claims:
-                print(f"  [{v.kind:12s}] {v.claim!r} → {v.source_file}")
-        return 0
-
-    print(
-        f"✗ fact check FAILED — {len(result.failed_claims)} unverified claim(s):",
-        file=sys.stderr,
-    )
-    for claim in result.failed_claims:
-        print(f"  ✗ {claim!r}", file=sys.stderr)
-    if args.verbose:
-        print(
-            f"\nVerified ({len([v for v in result.verified_claims if v.verified])}):",
-            file=sys.stderr,
-        )
-        for v in result.verified_claims:
-            if v.verified:
-                print(f"  ✓ [{v.kind}] {v.claim!r} → {v.source_file}", file=sys.stderr)
-    return 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+__all__ = [
+    "Claim",
+    "FactCheckResult",
+    "VerificationResult",
+    "check_draft",
+    "extract_hard_claims",
+    "verify_claim",
+]

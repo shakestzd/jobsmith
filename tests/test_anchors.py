@@ -1,0 +1,146 @@
+"""Tests for jobsmith.anchors — regex library and anchor extraction."""
+
+from __future__ import annotations
+
+import pytest
+
+from jobsmith.anchors import (
+    DEFAULT_ASSET_COUNT_THRESHOLD,
+    DEFAULT_MONEY_THRESHOLD_USD,
+    DEFAULT_PERCENT_THRESHOLD,
+    extract_anchors,
+    parse_asset_count,
+    parse_money_to_usd,
+    parse_percent,
+)
+
+
+# ---------- parse_money_to_usd ----------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("$250M", 250_000_000),
+        ("$1B", 1_000_000_000),
+        ("$50.5K", 50_500),
+        ("$120,000", 120_000),
+        ("$132", 132),
+        ("$4.25B", 4_250_000_000),
+    ],
+)
+def test_parse_money_to_usd_examples(raw: str, expected: float) -> None:
+    assert parse_money_to_usd(raw) == expected
+
+
+def test_parse_money_to_usd_invalid_returns_none() -> None:
+    assert parse_money_to_usd("not money") is None
+
+
+# ---------- parse_percent ----------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("75%", 75.0),
+        ("99.9%", 99.9),
+        ("100%", 100.0),
+        ("0.5%", 0.5),
+    ],
+)
+def test_parse_percent_examples(raw: str, expected: float) -> None:
+    assert parse_percent(raw) == expected
+
+
+def test_parse_percent_invalid_returns_none() -> None:
+    assert parse_percent("not a percent") is None
+
+
+# ---------- parse_asset_count ----------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("200K", 200_000),
+        ("1.5M", 1_500_000),
+        ("500K", 500_000),
+        ("3", 3),
+    ],
+)
+def test_parse_asset_count_examples(raw: str, expected: int) -> None:
+    assert parse_asset_count(raw) == expected
+
+
+# ---------- extract_anchors ----------
+
+
+def test_extract_anchors_money_above_threshold() -> None:
+    text = "Unlocked $250M in additional Investment Tax Credits"
+    anchors = extract_anchors(text)
+    assert len(anchors) == 1
+    assert anchors[0].kind == "money"
+    assert anchors[0].raw == "$250M"
+    assert anchors[0].value == 250_000_000
+
+
+def test_extract_anchors_money_below_threshold_excluded() -> None:
+    text = "Recovered $5K in dealer fees"  # below $10M default
+    anchors = extract_anchors(text)
+    assert anchors == []
+
+
+def test_extract_anchors_percent_above_threshold() -> None:
+    text = "Reduced accounts payable processing time by 75%"
+    anchors = extract_anchors(text)
+    assert len(anchors) == 1
+    assert anchors[0].kind == "percent"
+    assert anchors[0].value == 75.0
+
+
+def test_extract_anchors_percent_below_threshold_excluded() -> None:
+    text = "Achieved 12% cost reduction"  # below 50% default
+    anchors = extract_anchors(text)
+    assert anchors == []
+
+
+def test_extract_anchors_asset_count_above_threshold() -> None:
+    text = "Built data infrastructure for 500K solar assets"
+    anchors = extract_anchors(text)
+    assert len(anchors) == 1
+    assert anchors[0].kind == "asset_count"
+    assert anchors[0].value == 500_000.0
+
+
+def test_extract_anchors_money_count_distinguished() -> None:
+    """Asset-count regex must NOT match dollar-count phrases like $230K project."""
+    text = "Awarded $230K project funding"
+    anchors = extract_anchors(text)
+    # $230K is below money threshold AND should not match asset_count regex.
+    assert anchors == []
+
+
+def test_extract_anchors_multiple_in_one_bullet() -> None:
+    text = "Recovered $95M in dealer revenue: $91M via dashboards, $4M via reconciliation"
+    anchors = extract_anchors(text)
+    money_anchors = [a for a in anchors if a.kind == "money"]
+    # $95M and $91M are above $10M; $4M is below.
+    assert len(money_anchors) == 2
+    assert {a.raw for a in money_anchors} == {"$95M", "$91M"}
+
+
+def test_extract_anchors_custom_thresholds() -> None:
+    text = "Saved $5M in operating costs and improved efficiency by 25%"
+    anchors = extract_anchors(text, money_threshold=1_000_000, percent_threshold=20.0)
+    # With lower thresholds both should anchor.
+    kinds = {a.kind for a in anchors}
+    assert "money" in kinds
+    assert "percent" in kinds
+
+
+def test_default_thresholds() -> None:
+    """The default thresholds should match the published constants."""
+    assert DEFAULT_MONEY_THRESHOLD_USD == 10_000_000
+    assert DEFAULT_PERCENT_THRESHOLD == 50.0
+    assert DEFAULT_ASSET_COUNT_THRESHOLD == 100_000

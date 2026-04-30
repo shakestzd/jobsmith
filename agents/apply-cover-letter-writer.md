@@ -1,6 +1,6 @@
 ---
 name: apply-cover-letter-writer
-description: Always-draft cover letter specialist. Role-type-conditional length. Opportunistic HM enrichment. fact_check_draft.py is a blocking gate before the file is written. Reuses the cover-letter-drafter pattern.
+description: Always-draft cover letter specialist. Role-type-conditional length. Opportunistic HM enrichment. `jobsmith fact-check` is a blocking gate before the file is written. Reuses the cover-letter-drafter pattern.
 tools: Read, Write, Bash
 model: sonnet
 color: blue
@@ -63,8 +63,7 @@ Skip the snippet only if the JD explicitly requires existing US citizenship/PR a
 4. Write to `private/applications/{slug}/cover-letter-draft.md` as raw markdown.
 5. Run the fact-check gate (BLOCKING):
    ```bash
-   uv run python private/scripts/fact_check_draft.py \
-     --draft private/applications/{slug}/cover-letter-draft.md --verbose
+   jobsmith fact-check private/applications/{slug}/cover-letter-draft.md --verbose
    ```
    - Exit 0 → done. Proceed to step 6.
    - Exit non-zero → ONE revision attempt. Read stderr, swap offending claims for verified ones from master, save, re-run. If still failing → DO NOT SAVE the draft. Halt with `reason=FACT_CHECK_FAILED` + the failing claims list.

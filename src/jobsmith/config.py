@@ -1,0 +1,196 @@
+"""Pydantic models for `.apply-config.yaml`.
+
+Loads a user's jobsmith config from `<repo>/.apply-config.yaml`, validates
+it, and exposes typed accessors.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Literal
+
+import yaml
+from pydantic import BaseModel, Field, field_validator
+
+CONFIG_FILENAME = ".apply-config.yaml"
+
+
+class MasterPaths(BaseModel):
+    """Paths to the user's source-of-truth content YAMLs."""
+
+    work_yml: Path = Path("assets/content/work.yml")
+    skill_yml: Path = Path("assets/content/skill.yml")
+    education_yml: Path = Path("assets/content/education.yml")
+    author_yml: Path = Path("assets/content/author.yml")
+    publication_yml: Path | None = None
+    award_yml: Path | None = None
+
+
+class OutputPaths(BaseModel):
+    """Where /apply writes per-application artifacts."""
+
+    applications_dir: Path = Path("private/applications")
+    job_search_db: Path = Path("private/job_search.db")
+
+
+class UserIdentity(BaseModel):
+    """Author identity for cover letters and resume contact blocks."""
+
+    name: str = ""
+    email: str = ""
+    phone: str = ""
+    location: str = ""
+    github: str = ""
+    linkedin: str = ""
+
+
+class VoiceSettings(BaseModel):
+    """Controls for prose-writer + cover-letter-writer phrasing."""
+
+    voice_guide_path: Path | None = None
+    employment_gap_snippet: str | None = None
+    banned_action_verbs: list[str] = Field(
+        default_factory=lambda: [
+            "Architected",
+            "Leveraged",
+            "Orchestrated",
+            "Spearheaded",
+            "Delivered end-to-end",
+            "Shipped end-to-end",
+        ]
+    )
+    banned_buzzwords: list[str] = Field(
+        default_factory=lambda: [
+            "enterprise",
+            "proprietary",
+            "comprehensive",
+            "innovative",
+            "passionate",
+        ]
+    )
+    banned_marketer_phrases: list[str] = Field(
+        default_factory=lambda: [
+            "perfect fit",
+            "passionate about",
+            "proven track record",
+        ]
+    )
+
+
+class AnchorThresholds(BaseModel):
+    """What counts as a load-bearing bullet."""
+
+    money_min_usd: int = 10_000_000
+    percent_min: float = 50.0
+    asset_count_min: int = 100_000
+
+
+class CoverLetterSettings(BaseModel):
+    """Letter-specific tuning."""
+
+    framework: Literal["careerfair-io", "minimal", "none"] = "careerfair-io"
+    word_targets: dict[str, int] = Field(
+        default_factory=lambda: {
+            "senior_strategic": 150,
+            "ai_engineer": 150,
+            "data_engineer": 150,
+            "data_analyst": 130,
+            "ic_portal": 120,
+            "finance": 150,
+            "renewable_energy": 150,
+            "general": 130,
+        }
+    )
+    default_salutation: str = "Hello,"
+
+
+class ResumeSettings(BaseModel):
+    """Render-specific tuning."""
+
+    template: Path = Path("templates/resume/resume-template.typ")
+    max_pages: int = 1
+    layout_iteration_limit: int = 2
+
+
+class FitScorerSettings(BaseModel):
+    """Fit thresholds and tier assignment."""
+
+    fast_threshold: float = 0.70
+    profile_yaml: Path = Path("private/capacity/profile.yaml")
+
+
+class PortfolioSettings(BaseModel):
+    """Required signals for ai-engineer / data-engineer / data-analyst roles."""
+
+    blocking_for_role_types: list[str] = Field(
+        default_factory=lambda: ["ai-engineer", "data-engineer", "data-analyst"]
+    )
+
+
+class JobsmithConfig(BaseModel):
+    """Full jobsmith configuration loaded from `.apply-config.yaml`."""
+
+    master: MasterPaths = Field(default_factory=MasterPaths)
+    output: OutputPaths = Field(default_factory=OutputPaths)
+    user: UserIdentity = Field(default_factory=UserIdentity)
+    voice: VoiceSettings = Field(default_factory=VoiceSettings)
+    anchor_thresholds: AnchorThresholds = Field(default_factory=AnchorThresholds)
+    cover_letter: CoverLetterSettings = Field(default_factory=CoverLetterSettings)
+    resume: ResumeSettings = Field(default_factory=ResumeSettings)
+    fit_scorer: FitScorerSettings = Field(default_factory=FitScorerSettings)
+    portfolio: PortfolioSettings = Field(default_factory=PortfolioSettings)
+
+    @field_validator("anchor_thresholds")
+    @classmethod
+    def _percent_in_range(cls, v: AnchorThresholds) -> AnchorThresholds:
+        if not 0 <= v.percent_min <= 100:
+            raise ValueError(f"percent_min must be 0-100, got {v.percent_min}")
+        return v
+
+
+def load_config(path: Path | None = None, search_from: Path | None = None) -> JobsmithConfig:
+    """Load `.apply-config.yaml` from disk and validate it.
+
+    If `path` is given, load from that exact file.
+    Otherwise walk up from `search_from` (or cwd) looking for
+    `.apply-config.yaml`. Returns defaults if no config found.
+    """
+    if path is None:
+        path = find_config(search_from or Path.cwd())
+    if path is None or not path.exists():
+        return JobsmithConfig()
+    with path.open() as f:
+        data = yaml.safe_load(f) or {}
+    return JobsmithConfig.model_validate(data)
+
+
+def find_config(start: Path) -> Path | None:
+    """Walk up from `start` looking for `.apply-config.yaml`.
+
+    Returns the first match or None.
+    """
+    current = start.resolve()
+    while True:
+        candidate = current / CONFIG_FILENAME
+        if candidate.exists():
+            return candidate
+        if current.parent == current:
+            return None
+        current = current.parent
+
+
+__all__ = [
+    "AnchorThresholds",
+    "CONFIG_FILENAME",
+    "CoverLetterSettings",
+    "FitScorerSettings",
+    "JobsmithConfig",
+    "MasterPaths",
+    "OutputPaths",
+    "PortfolioSettings",
+    "ResumeSettings",
+    "UserIdentity",
+    "VoiceSettings",
+    "find_config",
+    "load_config",
+]

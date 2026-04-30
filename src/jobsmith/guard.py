@@ -1,15 +1,14 @@
 """Anchor-bullet preservation guardrail.
 
-Scans master work.yml for "anchor" bullets — those with high-impact metrics
-that must survive JD tailoring unless an explicit reason is logged. Reuses
-the money / percent regexes from fact_check_draft.py (no reimplementation).
+Reads master `work.yml`, identifies anchor bullets (those with ≥$10M /
+≥50% / ≥100K-asset metrics by default), cross-references them against
+a tailored `bullet-selection.json`, and reports any anchor dropped
+without a logged reason.
 
-Anchor thresholds (frozen in specialist-contracts.yaml):
-    - dollar amount >= $10M
-    - percentage >= 50%
-    - asset count >= 100K (solar assets, customers, accounts, etc.)
+The CLI surface is `jobsmith anchor-check`. The Python API is
+`check_anchors(master_path, selection_path, decisions_path) -> GuardResult`.
 
-Exit codes:
+Exit codes (when invoked via CLI):
     0  all anchors preserved, or all drops have logged reasons
     1  one or more anchors dropped without logged reason
     2  internal error (master missing, JSON malformed, etc.)
@@ -17,54 +16,32 @@ Exit codes:
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import re
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
-# Reuse the regex library from fact_check_draft.py — explicit import,
-# no reimplementation. If fact_check_draft.py moves, both fail together.
-sys.path.insert(0, str(Path(__file__).parent))
-from fact_check_draft import _MONEY_RE, _PERCENT_RE  # noqa: E402
-
-# Asset-count anchors: "200K solar assets", "500K customers", "70K systems".
-# Negative lookbehind for `$` rules out "$230K project" (that's money, not count).
-# Allow 1-3 connective words between the number and the unit noun so adjectival
-# qualifiers ("70K qualifying systems") still match. "projects" and "companies"
-# excluded — too prone to false matches with low counts.
-_ASSET_COUNT_RE = re.compile(
-    r"(?<!\$)\b(\d+(?:\.\d+)?)\s*([KMB])\+?\s+(?:[\w\-]+\s+){0,3}"
-    r"(?:assets?|systems?|customers?|accounts?|users?|clients?|"
-    r"properties|sites?|households?|homesteads?)\b",
-    re.IGNORECASE,
+from .anchors import (
+    DEFAULT_ASSET_COUNT_THRESHOLD,
+    DEFAULT_MONEY_THRESHOLD_USD,
+    DEFAULT_PERCENT_THRESHOLD,
+    Anchor,
+    _ASSET_COUNT_RE,
+    _MONEY_RE,
+    _PERCENT_RE,
 )
-
-# Anchor thresholds — must match specialist-contracts.yaml.
-MONEY_THRESHOLD_USD = 10_000_000
-PERCENT_THRESHOLD = 50.0
-ASSET_COUNT_THRESHOLD = 100_000
-
 
 # ---------- types ----------
 
 
 @dataclass
-class Anchor:
-    """One anchor metric within a bullet (a bullet may have several)."""
-
-    kind: str  # 'money' | 'percent' | 'asset_count'
-    raw: str   # the matched text, e.g. "$250M" or "75%"
-    value: float  # normalized — USD for money, percent points, raw count
-
-
-@dataclass
 class Bullet:
-    bullet_id: str            # stable 12-char hash of the bullet text
+    """A single bullet from master work.yml with its anchors annotated."""
+
+    bullet_id: str  # stable 12-char hash of the bullet text
     text: str
     company: str
     position_title: str
@@ -79,6 +56,8 @@ class Bullet:
 
 @dataclass
 class GuardResult:
+    """Outcome of cross-referencing anchors against a tailored selection."""
+
     exit_code: int
     anchor_bullets: list[Bullet]
     kept: list[Bullet]
@@ -86,7 +65,7 @@ class GuardResult:
     dropped_with_reason: list[tuple[Bullet, str]]
 
 
-# ---------- parsers ----------
+# ---------- internal helpers ----------
 
 
 def _bullet_id(text: str) -> str:
@@ -95,7 +74,7 @@ def _bullet_id(text: str) -> str:
 
 
 def _parse_money(raw: str) -> float | None:
-    """Convert '$250M' -> 250_000_000, '$1.5B' -> 1_500_000_000, '$95K' -> 95_000."""
+    """Convert '$250M' -> 250_000_000."""
     m = re.match(r"\$([\d.,]+)\s*([KMBk]?)", raw)
     if not m:
         return None
@@ -123,29 +102,42 @@ def _parse_asset_count(num: str, suffix: str) -> float | None:
     return n * multipliers.get(suffix.upper(), 1)
 
 
-def find_anchors_in_text(text: str) -> list[Anchor]:
+# ---------- public API ----------
+
+
+def find_anchors_in_text(
+    text: str,
+    money_threshold: float = DEFAULT_MONEY_THRESHOLD_USD,
+    percent_threshold: float = DEFAULT_PERCENT_THRESHOLD,
+    asset_count_threshold: float = DEFAULT_ASSET_COUNT_THRESHOLD,
+) -> list[Anchor]:
     """Detect every anchor metric in a single bullet's text."""
     anchors: list[Anchor] = []
 
     for m in _MONEY_RE.finditer(text):
         val = _parse_money(m.group(0))
-        if val is not None and val >= MONEY_THRESHOLD_USD:
+        if val is not None and val >= money_threshold:
             anchors.append(Anchor(kind="money", raw=m.group(0), value=val))
 
     for m in _PERCENT_RE.finditer(text):
         val = _parse_percent(m.group(0))
-        if val is not None and val >= PERCENT_THRESHOLD:
+        if val is not None and val >= percent_threshold:
             anchors.append(Anchor(kind="percent", raw=m.group(0), value=val))
 
     for m in _ASSET_COUNT_RE.finditer(text):
         val = _parse_asset_count(m.group(1), m.group(2))
-        if val is not None and val >= ASSET_COUNT_THRESHOLD:
+        if val is not None and val >= asset_count_threshold:
             anchors.append(Anchor(kind="asset_count", raw=m.group(0), value=val))
 
     return anchors
 
 
-def parse_master_bullets(master_path: Path) -> list[Bullet]:
+def parse_master_bullets(
+    master_path: Path,
+    money_threshold: float = DEFAULT_MONEY_THRESHOLD_USD,
+    percent_threshold: float = DEFAULT_PERCENT_THRESHOLD,
+    asset_count_threshold: float = DEFAULT_ASSET_COUNT_THRESHOLD,
+) -> list[Bullet]:
     """Read master work.yml and return all bullets with anchor annotations."""
     data = yaml.safe_load(master_path.read_text())
     if not isinstance(data, list):
@@ -156,7 +148,9 @@ def parse_master_bullets(master_path: Path) -> list[Bullet]:
         company = pos.get("location", "")
         title = pos.get("title", "")
         for bi, text in enumerate(pos.get("details", []) or []):
-            anchors = find_anchors_in_text(text)
+            anchors = find_anchors_in_text(
+                text, money_threshold, percent_threshold, asset_count_threshold
+            )
             out.append(
                 Bullet(
                     bullet_id=_bullet_id(text),
@@ -174,7 +168,7 @@ def parse_master_bullets(master_path: Path) -> list[Bullet]:
 def load_selection(selection_path: Path) -> dict[str, dict]:
     """Index bullet-selection.json by master_bullet_id.
 
-    Selection shape (per contract):
+    Selection shape (per specialist-contracts.yaml):
         {"positions": [{"company": ..., "title": ..., "bullets": [
             {"master_bullet_id": "...", "included": bool,
              "rephrased": str|null, "reason_if_dropped": str|null}, ...
@@ -193,24 +187,33 @@ def load_selection(selection_path: Path) -> dict[str, dict]:
 
 
 def load_decisions(decisions_path: Path) -> dict[str, str]:
+    """Read bullet-decisions.json — anchor-drop reasons keyed by bullet_id."""
     if not decisions_path.exists():
         return {}
     data = json.loads(decisions_path.read_text())
     return {k: v for k, v in data.items() if isinstance(v, str)}
 
 
-# ---------- core ----------
-
-
-def evaluate(
+def check_anchors(
     master_path: Path,
     selection_path: Path,
-    decisions_path: Path,
+    decisions_path: Path | None = None,
+    money_threshold: float = DEFAULT_MONEY_THRESHOLD_USD,
+    percent_threshold: float = DEFAULT_PERCENT_THRESHOLD,
+    asset_count_threshold: float = DEFAULT_ASSET_COUNT_THRESHOLD,
 ) -> GuardResult:
-    bullets = parse_master_bullets(master_path)
+    """Cross-reference anchor bullets in master against a tailored selection.
+
+    The CLI calls this and translates the GuardResult to an exit code.
+    Returns immediately if `selection_path` doesn't exist (interpreted as
+    "selector hasn't run yet" — all anchors are preserved by default).
+    """
+    bullets = parse_master_bullets(
+        master_path, money_threshold, percent_threshold, asset_count_threshold
+    )
     anchors = [b for b in bullets if b.is_anchor]
     selection = load_selection(selection_path)
-    decisions = load_decisions(decisions_path)
+    decisions = load_decisions(decisions_path) if decisions_path else {}
 
     kept: list[Bullet] = []
     dropped_with_reason: list[tuple[Bullet, str]] = []
@@ -219,9 +222,8 @@ def evaluate(
     for b in anchors:
         sel = selection.get(b.bullet_id)
         if sel is None:
-            # No selection entry yet — treat as missing if a selection file
-            # was provided. If no selection file, all anchors are "preserved
-            # by default" (selector hasn't run yet).
+            # No selection entry — if no selection file at all, the selector
+            # hasn't run yet, so treat all anchors as preserved.
             if not selection:
                 kept.append(b)
                 continue
@@ -236,10 +238,7 @@ def evaluate(
             kept.append(b)
             continue
 
-        reason = (
-            sel.get("reason_if_dropped")
-            or decisions.get(b.bullet_id, "")
-        ).strip()
+        reason = (sel.get("reason_if_dropped") or decisions.get(b.bullet_id, "")).strip()
         if reason and reason != "pending-inquiry":
             dropped_with_reason.append((b, reason))
         else:
@@ -253,9 +252,6 @@ def evaluate(
         dropped_without_reason=dropped_without_reason,
         dropped_with_reason=dropped_with_reason,
     )
-
-
-# ---------- diff renderer ----------
 
 
 def render_diff_md(result: GuardResult, master_path: Path) -> str:
@@ -308,40 +304,13 @@ def render_diff_md(result: GuardResult, master_path: Path) -> str:
     return "\n".join(lines)
 
 
-# ---------- cli ----------
-
-
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--master", type=Path, required=True)
-    ap.add_argument("--selection", type=Path, required=True)
-    ap.add_argument("--decisions", type=Path, required=True)
-    ap.add_argument("--diff-out", type=Path, required=True)
-    ap.add_argument("--quiet", action="store_true")
-    args = ap.parse_args(argv)
-
-    try:
-        result = evaluate(args.master, args.selection, args.decisions)
-    except FileNotFoundError as e:
-        print(f"anchor-guard: missing file {e.filename}", file=sys.stderr)
-        return 2
-    except (ValueError, yaml.YAMLError, json.JSONDecodeError) as e:
-        print(f"anchor-guard: parse error {e}", file=sys.stderr)
-        return 2
-
-    args.diff_out.parent.mkdir(parents=True, exist_ok=True)
-    args.diff_out.write_text(render_diff_md(result, args.master))
-
-    if not args.quiet:
-        print(
-            f"anchor-guard: {len(result.kept)} kept, "
-            f"{len(result.dropped_with_reason)} dropped-with-reason, "
-            f"{len(result.dropped_without_reason)} dropped-without-reason "
-            f"(exit {result.exit_code})"
-        )
-
-    return result.exit_code
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+__all__ = [
+    "Bullet",
+    "GuardResult",
+    "check_anchors",
+    "find_anchors_in_text",
+    "load_decisions",
+    "load_selection",
+    "parse_master_bullets",
+    "render_diff_md",
+]
