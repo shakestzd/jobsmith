@@ -71,48 +71,63 @@ Empirical motivation: a manual schneider←google light-edit took ~10 min vs. ~3
 
 ---
 
-## 0.3.0 — Cover-letter workflow process
+## 0.3.0 — Quarto content architecture: gather once, render many
 
-Generalize the careerfair.io 8-step `cover-letter-workflow.qmd` (built tonight as Google + Schneider Electric one-offs) into a reusable process.
+Establish a unified content-composition layer where every artifact (resume, cover letter, careerfair.io 8-step workflow review document, per-application portfolio page, LinkedIn outreach) is a **rendering** of `.apply-state/` rather than an independent gathering process. Uses Quarto's native DRY features (`{{< include >}}`, `{{< var >}}`, `_metadata.yml`, listings, profiles, themes) instead of bolt-on infrastructure.
 
-### Plan
+See [`docs/architecture.md`](docs/architecture.md) for the full design.
 
-- `templates/cover-letter/cover-letter-workflow-template.qmd` — Quarto template with 8 sections scaffolded:
-  1. JD analysis (responsibilities + qualifications tables)
-  2. Requirements-to-qualifications match (top 2 selection)
-  3. Why-do-you-want-to-work-here research (6 questions, 2 selected reasons)
-  4. 5-component letter draft (§1 who-I-am / §2 transition / §3 skill match / §4 why-here / §5 conclusion)
-  5. Pre-humanizer assembled letter
-  6. Humanizer pass (6.1 draft → 6.2 audit "what's still AI?" → 6.3 final)
-  7. Copy-paste output (body-only for portal paste; full letter for PDF/email)
-  8. LinkedIn outreach (connection-request + InMail + outreach plan)
-- `agents/apply-cover-letter-workflow.md` — new specialist that scaffolds the workflow QMD per application (vs. existing apply-cover-letter-writer which does a one-shot draft)
-- `commands/apply-cover-letter-workflow.md` — slash command `/apply-cover-letter-workflow {slug}`
-- `docs/cover-letter-workflow.md` — documentation: when to use the deep workflow vs. the one-shot drafter, how the humanizer pass works, what the careerfair.io 5-component template gives you
+### Specialists (small additive changes)
+
+- **NEW** — `apply-company-research`: produces `.apply-state/company-research.md` (mission, product, values, 2 selected reasons for §4, product-use evidence). Cached at `private/companies/{slug}.md` so two applications to the same company within N days don't re-research.
+- **EXTENDED** — `apply-hm-enricher`: also writes `.apply-state/outreach-snippets.md` (LinkedIn connection note + InMail draft when an HM is named).
+- **EXTENDED** — `apply-cover-letter-writer`: produces `cover-letter-draft.md` AND assembles `cover-letter-workflow.qmd` via `{{< include >}}` shortcodes. The workflow QMD doesn't re-gather any state — it composes partials.
+- **EXTENDED** — `apply-prose-qa`: humanizer pass extended to cover letter prose, not just resume.
+
+### Quarto templates (the "render many" surface)
+
+- **`templates/partials/`** (NEW) — reusable Quarto includes:
+  - `_jd-summary.qmd` reads `jd-parsed.json`
+  - `_must-have-table.qmd` reads `fit-score.json`
+  - `_bullet-diff.qmd` reads `bullet-selection.json` + `bullet-diff.md`
+  - `_company-research.qmd` reads `company-research.md`
+  - `_letter-draft.qmd` reads `cover-letter-draft.md`
+  - `_outreach.qmd` reads `outreach-snippets.md`
+  - `_humanizer-audit.qmd` reads `ai-tell-report.json`
+  - `_resume-preview.qmd` embeds the rendered resume PDF
+- **`templates/workflow/`** (NEW) — careerfair.io 8-step rendering that includes the partials in sequence
+- **`templates/portfolio/`** (NEW) — application portfolio site:
+  - `_quarto.yml` (website project + listings)
+  - `_metadata.yml` (cascading frontmatter)
+  - `_variables.yml` (user identity)
+  - `index.qmd` (listings page — sortable applications index)
+  - `_application-page.qmd` (per-application page partial composing partials/)
+  - `styles/jobsmith.scss` (theme)
+
+### Pre-render assembly (composition strategy)
+
+Partials read state via `{{< var >}}` shortcodes against a per-application `_variables.yml` written by `jobsmith assemble {slug}`. The `_quarto.yml` runs assembly as a `pre-render` hook so `quarto preview` automatically refreshes when state changes. Plain Python + plain Quarto — no Lua filters.
+
+### Why this scope
+
+Cover letter workflow + portfolio site share the same partials, theme, and variables — they're two layouts of the same content. Treating them as one milestone (instead of separate 0.3 + 0.4) avoids building each rendering as a one-off.
 
 ---
 
-## 0.4.0 — Quarto application portfolio site
+## 0.4.0 — Portfolio site CLI + publishing
 
-Each application becomes a page in a Quarto site rooted at the user's repo. The site is a browsable, reviewable surface for the entire application pipeline state.
-
-### Per-application page sections
-
-- Frontmatter: company, position, location, salary, JD URL, req ID, date found, status, fit score, similarity score (when 0.2 ships)
-- JD summary + key requirements two-column table (must-have / nice-to-have)
-- Fit score breakdown — must-have table with STRONG/HAVE/PARTIAL/GAP/BLOCKER
-- Bullet diff — anchor preservation summary
-- Cover letter workflow (the careerfair.io 8-step process inline as sub-page)
-- Embedded resume PDF preview
-- Embedded cover letter PDF preview
-- Application materials list (what was generated)
-- Timeline (decisions, edits, submission date)
+The infrastructure shipped in 0.3 makes the portfolio site renderable. 0.4 wraps it in a clean CLI surface and adds the publishing/serving story.
 
 ### CLI commands
 
-- `jobsmith site init` — scaffold the `_quarto.yml` and per-application page template in the user's repo
-- `jobsmith site serve` — run `quarto preview` for live editing
-- `jobsmith site render` — `quarto render` for static export (gitignored `_site/`)
+```bash
+jobsmith assemble <slug>   # Read .apply-state/*.json → write _variables.yml. Auto-run by site preview/render.
+jobsmith site init         # Scaffold templates/portfolio/ in user's repo + _quarto.yml
+jobsmith site serve        # quarto preview private/applications/
+jobsmith site render       # quarto render private/applications/
+jobsmith site list         # CLI table view (rich) — quick sortable list without browser
+jobsmith review <slug>     # Open the per-application page in browser
+```
 
 ### Privacy
 
