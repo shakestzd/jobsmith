@@ -3,5 +3,5 @@
 The cover letter as drafted by `apply-cover-letter-writer` and verified by `jobsmith fact-check`. Edit `cover-letter-draft.md` and re-run `jobsmith assemble {slug}` to refresh.
 
 ::: {.callout-note appearance="simple"}
-{{< include ../_blocks/cover-letter.md >}}
+{{< include /_blocks/cover-letter.md >}}
 :::

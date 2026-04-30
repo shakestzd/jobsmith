@@ -19,25 +19,25 @@ format:
 This is a **review surface** generated from `.apply-state/`. Edit the underlying state files (or the cover-letter draft) and re-run `jobsmith assemble {{< var slug >}}` to refresh.
 :::
 
-{{< include ../partials/_jd-summary.qmd >}}
+{{< include /_partials/_jd-summary.qmd >}}
 
-{{< include ../partials/_must-have-table.qmd >}}
+{{< include /_partials/_must-have-table.qmd >}}
 
-{{< include ../partials/_why-work-here.qmd >}}
+{{< include /_partials/_why-work-here.qmd >}}
 
-{{< include ../partials/_letter-draft.qmd >}}
+{{< include /_partials/_letter-draft.qmd >}}
 
-{{< include ../partials/_humanizer-audit.qmd >}}
+{{< include /_partials/_humanizer-audit.qmd >}}
 
-{{< include ../partials/_copy-paste.qmd >}}
+{{< include /_partials/_copy-paste.qmd >}}
 
-{{< include ../partials/_outreach.qmd >}}
+{{< include /_partials/_outreach.qmd >}}
 
 ---
 
 # Resume {#sec-resume}
 
-{{< include ../partials/_resume-preview.qmd >}}
+{{< include /_partials/_resume-preview.qmd >}}
 
 ---
 

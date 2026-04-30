@@ -8,12 +8,12 @@
 
 ## Must-haves {#sec-must-haves}
 
-{{< include ../_blocks/must-haves.md >}}
+{{< include /_blocks/must-haves.md >}}
 
 ## Nice-to-haves {#sec-nice-to-haves}
 
-{{< include ../_blocks/nice-to-haves.md >}}
+{{< include /_blocks/nice-to-haves.md >}}
 
 ## Top keywords
 
-{{< include ../_blocks/top-keywords.md >}}
+{{< include /_blocks/top-keywords.md >}}

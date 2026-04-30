@@ -15,4 +15,4 @@ Run `jobsmith assemble {{< var slug >}}` after the specialist writes its output 
 
 ## Hiring manager dossier
 
-{{< include ../_blocks/hm-dossier.md >}}
+{{< include /_blocks/hm-dossier.md >}}

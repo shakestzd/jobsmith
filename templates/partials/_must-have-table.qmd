@@ -5,15 +5,15 @@
 **Pitch:** {{< var fit.pitch >}}
 :::
 
-{{< include ../_blocks/must-have-table.md >}}
+{{< include /_blocks/must-have-table.md >}}
 
 ## Matched evidence
 
-{{< include ../_blocks/matched-evidence.md >}}
+{{< include /_blocks/matched-evidence.md >}}
 
 ## Concerns
 
-{{< include ../_blocks/concerns.md >}}
+{{< include /_blocks/concerns.md >}}
 
 ::: {.callout-note appearance="minimal"}
 **Rationale:** {{< var fit.rationale >}}
