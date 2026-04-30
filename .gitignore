@@ -1,0 +1,44 @@
+# macOS
+.DS_Store
+._*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.uv-cache/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node (in case templates/tools end up needing it)
+node_modules/
+package-lock.json
+
+# Build artifacts
+*.pdf
+*.typ
+_freeze/
+.quarto/
+
+# Per-user state (should NEVER be committed to the framework)
+.apply-state/
+applications/
+private/
+*.local.yml
+*.local.yaml
+config.yaml
+
+# Logs and traces
+*.log
+.htmlgraph/
+
+# OS / editor
+*.bak
+*.tmp

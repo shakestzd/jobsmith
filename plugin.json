@@ -1,0 +1,33 @@
+{
+  "name": "jobsmith",
+  "version": "0.1.0-alpha",
+  "description": "Tailored resume and cover-letter pipeline for Claude Code. Master-first, no fabrication, anchor-preserving. Renders 1-page Quarto+Typst PDFs from a structured YAML profile.",
+  "author": {
+    "name": "Thandolwethu \"Shakes\" Dlamini",
+    "url": "https://jobsmith.dev"
+  },
+  "license": "MIT",
+  "homepage": "https://jobsmith.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shakestzd/jobsmith"
+  },
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "resume",
+    "cover-letter",
+    "job-application",
+    "quarto",
+    "typst",
+    "ats"
+  ],
+  "engines": {
+    "claude-code": ">=1.0.0"
+  },
+  "components": {
+    "agents": "agents/",
+    "commands": "commands/",
+    "skills": "skills/"
+  }
+}
