@@ -1,0 +1,9 @@
+# Humanizer Audit {#sec-humanizer}
+
+::: {.callout-warning appearance="minimal"}
+**Awaiting extended `apply-prose-qa`** (planned for 0.3).
+
+Today's `apply-prose-qa` runs the AI-tell scrubber against resume prose only. The 0.3 extension runs the same scrubber against `cover-letter-draft.md` and writes `.apply-state/ai-tell-report.json` with three iterations: 6.1 first-pass scrub → 6.2 audit ("what's still AI?") → 6.3 final humanized version.
+
+Run `jobsmith assemble {{< var slug >}}` after the specialist writes its output to populate this section.
+:::

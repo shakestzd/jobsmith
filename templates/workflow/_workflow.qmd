@@ -7,7 +7,7 @@ format:
     toc: true
     toc-depth: 3
     toc-location: left
-    toc-title: "Workflow steps"
+    toc-title: "Workflow"
     callout-appearance: simple
     embed-resources: true
     page-layout: full
@@ -16,24 +16,42 @@ format:
 # {{< var company >}} — {{< var position >}}
 
 ::: {.callout-warning appearance="minimal"}
-This is a **review surface** generated from `.apply-state/`. Edit the underlying state files (or the cover-letter draft) and re-run `jobsmith assemble {{< var slug >}}` to refresh. The final cover letter PDF is rendered separately by `apply-resume-renderer`.
+This is a **review surface** generated from `.apply-state/`. Edit the underlying state files (or the cover-letter draft) and re-run `jobsmith assemble {{< var slug >}}` to refresh.
 :::
 
 {{< include ../partials/_jd-summary.qmd >}}
 
 {{< include ../partials/_must-have-table.qmd >}}
 
-{{< include ../partials/_hm-status.qmd >}}
+{{< include ../partials/_why-work-here.qmd >}}
 
 {{< include ../partials/_letter-draft.qmd >}}
+
+{{< include ../partials/_humanizer-audit.qmd >}}
+
+{{< include ../partials/_copy-paste.qmd >}}
+
+{{< include ../partials/_outreach.qmd >}}
+
+---
+
+# Resume {#sec-resume}
+
+{{< include ../partials/_resume-preview.qmd >}}
 
 ---
 
 ::: {.callout-tip appearance="minimal"}
-**Source artifacts** (in `private/applications/{{< var slug >}}/.apply-state/`):
+**Source artifacts** (in `private/applications/{{< var slug >}}/`):
 
-- `jd-parsed.json` → @sec-jd-analysis
-- `fit-score.json` → @sec-fit-table
-- `hm-snippet.md` → @sec-hm
-- `cover-letter-draft.md` (one level up) → @sec-letter-draft
+| Section | Source | Specialist |
+|---|---|---|
+| @sec-jd-analysis | `.apply-state/jd-parsed.json` | `apply-jd-parser` |
+| @sec-fit-table | `.apply-state/fit-score.json` | `apply-fit-scorer` |
+| @sec-why-here | `.apply-state/company-research.md` | `apply-company-research` (0.3) |
+| @sec-letter-draft | `cover-letter-draft.md` | `apply-cover-letter-writer` |
+| @sec-humanizer | `.apply-state/ai-tell-report.json` | `apply-prose-qa` (0.3 ext) |
+| @sec-copy-paste | `cover-letter-draft.md` | (derived) |
+| @sec-outreach | `.apply-state/outreach-snippets.md` + `.apply-state/hm-snippet.md` | `apply-hm-enricher` (0.3 ext) |
+| @sec-resume | `documents/resume.pdf` + `documents/resume.qmd` | `apply-resume-renderer` |
 :::

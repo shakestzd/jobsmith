@@ -1,0 +1,16 @@
+::: {.callout-note appearance="simple"}
+**File:** [`{{< var artifacts.resume_pdf >}}`]({{< var artifacts.resume_pdf >}})\
+**Source:** [`{{< var artifacts.resume_qmd >}}`]({{< var artifacts.resume_qmd >}})
+:::
+
+```{=html}
+<embed src="documents/resume.pdf" type="application/pdf" width="100%" height="800" />
+```
+
+::: {.callout-tip appearance="minimal"}
+The PDF embed above shows the rendered resume. To regenerate after a master YAML edit:
+
+```bash
+cd documents && quarto render resume.qmd
+```
+:::

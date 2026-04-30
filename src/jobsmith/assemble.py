@@ -182,6 +182,11 @@ def assemble_application(slug: str, applications_dir: Path) -> Path:
     outreach = _load_text_artifact(state_dir, "outreach-snippets.md")
     bullet_diff = _load_text_artifact(state_dir, "bullet-diff.md")
 
+    # Resolve artifact paths (relative to the application dir for portability)
+    resume_pdf_path = app_dir / "documents" / "resume.pdf"
+    cover_letter_pdf_path = app_dir / "documents" / "cover-letter.pdf"
+    resume_qmd_path = app_dir / "documents" / "resume.qmd"
+
     must_haves_list = jd.get("must_haves", []) or []
     nice_to_haves_list = jd.get("nice_to_haves", []) or []
     top_keywords_list = jd.get("top_keywords", []) or []
@@ -242,10 +247,36 @@ def assemble_application(slug: str, applications_dir: Path) -> Path:
         "company_research": company_research,
         "outreach": outreach,
         "bullet_diff": bullet_diff,
+        "artifacts": {
+            "resume_pdf": "documents/resume.pdf" if resume_pdf_path.exists() else None,
+            "resume_qmd": "documents/resume.qmd" if resume_qmd_path.exists() else None,
+            "cover_letter_pdf": (
+                "documents/cover-letter.pdf" if cover_letter_pdf_path.exists() else None
+            ),
+            "cover_letter_md": (
+                "cover-letter-draft.md" if cover_letter is not None else None
+            ),
+        },
     }
 
     out_path = app_dir / "_variables.yml"
     out_path.write_text(yaml.safe_dump(variables, sort_keys=False, allow_unicode=True))
+
+    # Markdown block-level content (lists, tables) MUST be written to separate
+    # files because Quarto's {{< var >}} shortcode inlines values as text and
+    # smushes block structure. Partials pull these in via {{< include >}}, which
+    # preserves markdown blocks.
+    blocks_dir = app_dir / "_blocks"
+    blocks_dir.mkdir(exist_ok=True)
+    (blocks_dir / "must-haves.md").write_text(_bullet_list(must_haves_list) + "\n")
+    (blocks_dir / "nice-to-haves.md").write_text(_bullet_list(nice_to_haves_list) + "\n")
+    (blocks_dir / "top-keywords.md").write_text(_keyword_inline(top_keywords_list) + "\n")
+    (blocks_dir / "must-have-table.md").write_text(_must_have_table(must_have_table) + "\n")
+    (blocks_dir / "matched-evidence.md").write_text(_bullet_list(matched_evidence_list) + "\n")
+    (blocks_dir / "concerns.md").write_text(_bullet_list(concerns_list) + "\n")
+    (blocks_dir / "hm-dossier.md").write_text(_hm_dossier_md(hm_dict) + "\n")
+    (blocks_dir / "cover-letter.md").write_text((cover_letter or "_(no cover letter draft)_") + "\n")
+
     return out_path
 
 

@@ -1,19 +1,19 @@
-# Step 2 — Requirements ↔ Qualifications Match {#sec-fit-table}
+# Requirements ↔ Qualifications Match {#sec-fit-table}
 
 ::: {.callout-tip appearance="minimal"}
 **Fit score:** {{< var fit.score_raw >}}/100 · **Confidence:** {{< var fit.confidence >}}\
 **Pitch:** {{< var fit.pitch >}}
 :::
 
-{{< var fit.must_have_table_md >}}
+{{< include ../_blocks/must-have-table.md >}}
 
 ## Matched evidence
 
-{{< var fit.matched_evidence_md >}}
+{{< include ../_blocks/matched-evidence.md >}}
 
 ## Concerns
 
-{{< var fit.concerns_md >}}
+{{< include ../_blocks/concerns.md >}}
 
 ::: {.callout-note appearance="minimal"}
 **Rationale:** {{< var fit.rationale >}}

@@ -1,0 +1,18 @@
+# LinkedIn Outreach {#sec-outreach}
+
+::: {.callout-warning appearance="minimal"}
+**Awaiting extended `apply-hm-enricher`** (planned for 0.3).
+
+When a hiring manager is named (LinkedIn post author, JD signature, or explicit `--hm` flag), the extended `apply-hm-enricher` writes `.apply-state/outreach-snippets.md` with two artifacts:
+
+- A LinkedIn connection-request note (≤300 characters)
+- A post-connection InMail message (~180 words) referencing specific HM signals
+
+When no HM is named, this section recommends portal-only application and suggests the public-engagement fallback (e.g., a LinkedIn post about a relevant project).
+
+Run `jobsmith assemble {{< var slug >}}` after the specialist writes its output to populate this section.
+:::
+
+## Hiring manager dossier
+
+{{< include ../_blocks/hm-dossier.md >}}

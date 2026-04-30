@@ -1,0 +1,11 @@
+# Copy-Paste Output {#sec-copy-paste}
+
+For application portals that have a single text field for the cover letter (no PDF upload), copy the body below. The full letter (with header + addressee block) lives in [`{{< var artifacts.cover_letter_md >}}`]({{< var artifacts.cover_letter_md >}}).
+
+::: {.callout-tip appearance="simple"}
+The text below is rendered from `cover-letter-draft.md` exactly as the fact-checker validated it. Re-run `jobsmith assemble {{< var slug >}}` after editing the draft.
+:::
+
+```text
+{{< include ../_blocks/cover-letter.md >}}
+```

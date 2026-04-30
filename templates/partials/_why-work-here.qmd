@@ -1,0 +1,13 @@
+# Why Work Here {#sec-why-here}
+
+```{=html}
+<div class="awaiting-specialist"></div>
+```
+
+::: {.callout-warning appearance="minimal"}
+**Awaiting `apply-company-research` specialist** (planned for 0.3).
+
+The careerfair.io Step 3 research — mission, product, values, two selected reasons (one values-driven + one topical), product-use evidence — lives in `.apply-state/company-research.md` once `apply-company-research` produces it. Cached at `private/companies/{company-slug}.md` so applications to the same company within N days reuse the research.
+
+Run `jobsmith assemble {{< var slug >}}` after the specialist writes its output to populate this section.
+:::

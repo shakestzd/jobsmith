@@ -1,7 +1,7 @@
-# Step 4–5 — Cover Letter Draft {#sec-letter-draft}
+# Cover Letter Draft {#sec-letter-draft}
 
-The cover letter as drafted by `apply-cover-letter-writer` and verified by `jobsmith fact-check`. Edit the underlying file (`cover-letter-draft.md`) and re-run `jobsmith assemble {slug}` to refresh.
+The cover letter as drafted by `apply-cover-letter-writer` and verified by `jobsmith fact-check`. Edit `cover-letter-draft.md` and re-run `jobsmith assemble {slug}` to refresh.
 
 ::: {.callout-note appearance="simple"}
-{{< var cover_letter_draft >}}
+{{< include ../_blocks/cover-letter.md >}}
 :::

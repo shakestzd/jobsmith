@@ -1,4 +1,4 @@
-# Step 1 — JD Analysis {#sec-jd-analysis}
+# JD Analysis {#sec-jd-analysis}
 
 ::: {.callout-note appearance="minimal"}
 **{{< var company >}}** — {{< var position >}}\
@@ -8,12 +8,12 @@
 
 ## Must-haves {#sec-must-haves}
 
-{{< var jd.must_haves_md >}}
+{{< include ../_blocks/must-haves.md >}}
 
 ## Nice-to-haves {#sec-nice-to-haves}
 
-{{< var jd.nice_to_haves_md >}}
+{{< include ../_blocks/nice-to-haves.md >}}
 
 ## Top keywords
 
-{{< var jd.top_keywords_md >}}
+{{< include ../_blocks/top-keywords.md >}}
