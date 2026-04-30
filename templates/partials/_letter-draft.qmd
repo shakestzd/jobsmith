@@ -1,7 +1,5 @@
-# Cover Letter Draft {#sec-letter-draft}
+# Cover Letter (PDF) {#sec-letter-pdf}
 
-The cover letter as drafted by `apply-cover-letter-writer` and verified by `jobsmith fact-check`. The code block below has a copy icon (top-right) — click to copy the full markdown source. Edit `cover-letter-draft.md` and re-run `jobsmith assemble {{< var slug >}}` to refresh.
+For portals that accept a document upload (preferred when available — preserves typography and formatting).
 
-`````markdown
-{{< include /_blocks/cover-letter.md >}}
-`````
+{{< include /_blocks/cover-letter-pdf.md >}}

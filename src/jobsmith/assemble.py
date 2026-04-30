@@ -305,35 +305,72 @@ def _hm_dossier_md(hm: dict[str, Any]) -> str:
     return "\n\n".join(lines)
 
 
+def _pdf_preview_md(
+    pdf_relpath: str | None,
+    source_relpath: str | None,
+    not_rendered_message: str,
+) -> str:
+    """Render a generic PDF preview block — link + embed when present, fallback when not.
+
+    Used for both the resume PDF and the cover letter PDF.
+    """
+    if not (pdf_relpath or source_relpath):
+        return (
+            "::: {.callout-warning appearance=\"minimal\"}\n"
+            f"{not_rendered_message}\n"
+            ":::\n"
+        )
+    lines = ["::: {.callout-note appearance=\"simple\"}"]
+    if pdf_relpath:
+        lines.append(f"**File:** [`{pdf_relpath}`]({pdf_relpath})\\")
+    if source_relpath:
+        lines.append(f"**Source:** [`{source_relpath}`]({source_relpath})")
+    lines.append(":::")
+    if pdf_relpath:
+        lines.append("")
+        lines.append("```{=html}")
+        lines.append(
+            f'<embed src="{pdf_relpath}" type="application/pdf" '
+            'width="100%" height="800" />'
+        )
+        lines.append("```")
+    return "\n".join(lines) + "\n"
+
+
 def _resume_preview_md(
     resume_pdf_exists: bool,
     resume_qmd_exists: bool,
 ) -> str:
     """Render the resume preview block — conditional on file existence."""
-    if not (resume_pdf_exists or resume_qmd_exists):
-        return (
-            "::: {.callout-warning appearance=\"minimal\"}\n"
+    return _pdf_preview_md(
+        pdf_relpath="documents/resume.pdf" if resume_pdf_exists else None,
+        source_relpath="documents/resume.qmd" if resume_qmd_exists else None,
+        not_rendered_message=(
             "**Resume not yet rendered.** Run `apply-resume-renderer` "
             "(or `quarto render documents/resume.qmd`) to produce "
             "`documents/resume.pdf`, then re-run "
-            "`jobsmith assemble {slug}` to populate this section.\n"
-            ":::\n"
-        )
-    lines = ["::: {.callout-note appearance=\"simple\"}"]
-    if resume_pdf_exists:
-        lines.append("**File:** [`documents/resume.pdf`](documents/resume.pdf)\\")
-    if resume_qmd_exists:
-        lines.append("**Source:** [`documents/resume.qmd`](documents/resume.qmd)")
-    lines.append(":::")
-    if resume_pdf_exists:
-        lines.append("")
-        lines.append("```{=html}")
-        lines.append(
-            '<embed src="documents/resume.pdf" type="application/pdf" '
-            'width="100%" height="800" />'
-        )
-        lines.append("```")
-    return "\n".join(lines) + "\n"
+            "`jobsmith assemble {slug}` to populate this section."
+        ),
+    )
+
+
+def _cover_letter_pdf_md(
+    pdf_relpath: str | None,
+    qmd_relpath: str | None,
+) -> str:
+    """Render the cover letter PDF preview block — for upload-type portals."""
+    return _pdf_preview_md(
+        pdf_relpath=pdf_relpath,
+        source_relpath=qmd_relpath,
+        not_rendered_message=(
+            "**Cover letter PDF not yet rendered.** Run "
+            "`quarto render cover-letter.qmd` (or the equivalent for your "
+            "template path) to produce a PDF, then re-run "
+            "`jobsmith assemble {slug}` to populate this section. "
+            "The plaintext copy-paste version above remains usable for "
+            "single-text-field portals while the PDF is pending."
+        ),
+    )
 
 
 def _quarto_project_yml(slug: str) -> str:
@@ -394,10 +431,23 @@ def assemble_application(
     outreach = _load_text_artifact(state_dir, "outreach-snippets.md")
     bullet_diff = _load_text_artifact(state_dir, "bullet-diff.md")
 
-    # Resolve artifact paths (relative to the application dir for portability)
+    # Resolve artifact paths (relative to the application dir for portability).
+    # Cover letter PDF can live at the app root or under documents/ depending
+    # on which template the user picked.
     resume_pdf_path = app_dir / "documents" / "resume.pdf"
-    cover_letter_pdf_path = app_dir / "documents" / "cover-letter.pdf"
     resume_qmd_path = app_dir / "documents" / "resume.qmd"
+    cover_letter_pdf_root = app_dir / "cover-letter.pdf"
+    cover_letter_pdf_documents = app_dir / "documents" / "cover-letter.pdf"
+    cover_letter_qmd_root = app_dir / "cover-letter.qmd"
+    if cover_letter_pdf_root.exists():
+        cover_letter_pdf_path = cover_letter_pdf_root
+        cover_letter_pdf_relpath = "cover-letter.pdf"
+    elif cover_letter_pdf_documents.exists():
+        cover_letter_pdf_path = cover_letter_pdf_documents
+        cover_letter_pdf_relpath = "documents/cover-letter.pdf"
+    else:
+        cover_letter_pdf_path = None
+        cover_letter_pdf_relpath = None
 
     # Resolve user identity by checking, in order:
     #   1. <app>/documents/author.yml   — per-application author block
@@ -488,8 +538,9 @@ def assemble_application(
         "artifacts": {
             "resume_pdf": "documents/resume.pdf" if resume_pdf_path.exists() else None,
             "resume_qmd": "documents/resume.qmd" if resume_qmd_path.exists() else None,
-            "cover_letter_pdf": (
-                "documents/cover-letter.pdf" if cover_letter_pdf_path.exists() else None
+            "cover_letter_pdf": cover_letter_pdf_relpath,
+            "cover_letter_qmd": (
+                "cover-letter.qmd" if cover_letter_qmd_root.exists() else None
             ),
             "cover_letter_md": (
                 "cover-letter-draft.md" if cover_letter is not None else None
@@ -526,6 +577,14 @@ def assemble_application(
         _resume_preview_md(
             resume_pdf_path.exists(),
             resume_qmd_path.exists(),
+        )
+    )
+    (blocks_dir / "cover-letter-pdf.md").write_text(
+        _cover_letter_pdf_md(
+            pdf_relpath=cover_letter_pdf_relpath,
+            qmd_relpath=(
+                "cover-letter.qmd" if cover_letter_qmd_root.exists() else None
+            ),
         )
     )
 

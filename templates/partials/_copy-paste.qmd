@@ -1,11 +1,11 @@
 # Copy-Paste Output {#sec-copy-paste}
 
-For portals with a single text field (no PDF upload), copy the body below — it's the same content as @sec-letter-draft, with the contact-info header and date stripped so it can paste straight into a single-field form.
+For portals with a single text field (no PDF upload), copy the body below — it's the same content as the rendered cover letter PDF in @sec-letter-pdf, with the contact-info header and date stripped so it can paste straight into a single-field form.
 
 ::: {.callout-tip appearance="simple"}
-The plaintext code block has Quarto's copy icon (top-right). Re-run `jobsmith assemble {{< var slug >}}` after editing `cover-letter-draft.md` to refresh.
+The code block has Quarto's copy icon (top-right). Re-run `jobsmith assemble {{< var slug >}}` after editing `cover-letter-draft.md` to refresh.
 :::
 
-```text
+`````markdown
 {{< include /_blocks/cover-letter-body.md >}}
-```
+`````
