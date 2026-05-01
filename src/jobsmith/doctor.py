@@ -103,6 +103,84 @@ def check_anthropic_api_key() -> CheckResult:
     return check_claude_auth()
 
 
+def check_benchmarks(config_path: Optional[Path] = None, cwd: Optional[Path] = None) -> CheckResult:
+    """Check that benchmark files are resolvable.
+
+    - No config / no benchmarks section: WARN (skip — not a hard failure).
+    - ``required=False`` and some files missing: PASS with fallback message.
+    - ``required=True`` and some files missing: FAIL with remediation.
+    - All five user files set and on disk: PASS with count message.
+    """
+    from .config import find_config, load_config
+    from .benchmarks import count_user_benchmarks
+
+    directory = cwd or Path.cwd()
+    cp = config_path or find_config(directory)
+
+    if cp is None or not cp.exists():
+        return CheckResult(
+            name="benchmarks",
+            ok=True,
+            message="no config found — using generic Pat Doe fallback (0 of 5 user benchmarks set)",
+        )
+
+    try:
+        config = load_config(cp)
+    except Exception as exc:
+        return CheckResult(
+            name="benchmarks",
+            ok=False,
+            message=f"failed to load config for benchmark check: {exc}",
+            remediation="run `jobsmith validate` to diagnose the config error",
+        )
+
+    repo_root = cp.parent
+    bm = config.benchmarks
+    fields = ["resume_pdf", "resume_qmd", "cover_letter_md", "cover_letter_pdf", "workflow_html"]
+
+    set_count = count_user_benchmarks(config)
+    total = len(fields)
+
+    # Determine which user-set files are actually missing on disk.
+    missing_user: list[str] = []
+    for f in fields:
+        user_val = getattr(bm, f)
+        if user_val is not None:
+            resolved = user_val if user_val.is_absolute() else (repo_root / user_val).resolve()
+            if not resolved.exists():
+                missing_user.append(f)
+
+    if set_count == total and not missing_user:
+        return CheckResult(
+            name="benchmarks",
+            ok=True,
+            message=f"5/5 user benchmarks resolved",
+        )
+
+    unset_count = total - set_count
+    if bm.required and (unset_count > 0 or missing_user):
+        problems = []
+        if unset_count:
+            problems.append(f"{unset_count} field(s) not configured")
+        if missing_user:
+            problems.append(f"{len(missing_user)} file(s) missing on disk: {', '.join(missing_user)}")
+        return CheckResult(
+            name="benchmarks",
+            ok=False,
+            message=f"benchmarks.required=true but {'; '.join(problems)}",
+            remediation=(
+                "populate private/benchmarks/ with your reference files, "
+                "or set required: false"
+            ),
+        )
+
+    return CheckResult(
+        name="benchmarks",
+        ok=True,
+        message=f"using generic Pat Doe fallback ({set_count} of {total} user benchmarks set)",
+    )
+
+
 def check_apply_config(cwd: Optional[Path] = None) -> CheckResult:
     """Verify ``.apply-config.yaml`` is reachable from the working directory.
 
@@ -250,13 +328,19 @@ def check_plugin_dir_resolves() -> CheckResult:
 
 def run_all_checks(cwd: Optional[Path] = None) -> list[CheckResult]:
     """Run every preflight check and return results in a stable order."""
+    from .config import find_config
+
+    directory = cwd or Path.cwd()
+    config_path = find_config(directory)
+
     return [
         check_python_version(),
         check_claude_binary(),
         check_claude_auth(),
+        check_plugin_dir_resolves(),
         check_apply_config(cwd),
         check_master_yaml(cwd),
-        check_plugin_dir_resolves(),
+        check_benchmarks(config_path=config_path, cwd=cwd),
     ]
 
 
@@ -283,6 +367,7 @@ def preflight(cwd: Optional[Path] = None) -> bool:
 __all__ = [
     "CheckResult",
     "check_anthropic_api_key",  # deprecated alias
+    "check_benchmarks",
     "check_claude_auth",
     "check_apply_config",
     "check_claude_binary",

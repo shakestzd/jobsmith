@@ -9,6 +9,7 @@ import yaml
 
 from jobsmith.config import (
     AnchorThresholds,
+    BenchmarkConfig,
     JobsmithConfig,
     find_config,
     load_config,
@@ -79,3 +80,65 @@ def test_user_identity_optional() -> None:
     config = JobsmithConfig()
     assert config.user.name == ""
     assert config.user.email == ""
+
+
+# ---------------------------------------------------------------------------
+# BenchmarkConfig tests
+# ---------------------------------------------------------------------------
+
+def test_benchmark_config_default_is_empty_not_required() -> None:
+    config = JobsmithConfig()
+    assert config.benchmarks.required is False
+    assert config.benchmarks.resume_pdf is None
+    assert config.benchmarks.resume_qmd is None
+    assert config.benchmarks.cover_letter_md is None
+    assert config.benchmarks.cover_letter_pdf is None
+    assert config.benchmarks.workflow_html is None
+
+
+def test_benchmark_config_round_trip(tmp_path: Path) -> None:
+    """Config with benchmarks: section parses correctly."""
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        "benchmarks:\n"
+        "  resume_qmd: private/benchmarks/resume.qmd\n"
+        "  cover_letter_md: private/benchmarks/cover-letter.md\n"
+        "  required: true\n"
+    )
+    config = load_config(config_file)
+    assert config.benchmarks.resume_qmd == Path("private/benchmarks/resume.qmd")
+    assert config.benchmarks.cover_letter_md == Path("private/benchmarks/cover-letter.md")
+    assert config.benchmarks.required is True
+    # Unset fields remain None
+    assert config.benchmarks.resume_pdf is None
+    assert config.benchmarks.workflow_html is None
+
+
+def test_benchmark_config_required_true_missing_path_still_valid_config() -> None:
+    """required=true with missing file path is still a valid Pydantic model.
+
+    The validation happens at doctor/use time, not at parse time.
+    """
+    config = JobsmithConfig.model_validate(
+        {
+            "benchmarks": {
+                "resume_qmd": "/nonexistent/path/resume.qmd",
+                "required": True,
+            }
+        }
+    )
+    assert config.benchmarks.required is True
+    assert config.benchmarks.resume_qmd == Path("/nonexistent/path/resume.qmd")
+
+
+def test_benchmark_config_all_fields_optional() -> None:
+    """Every benchmark path field can be set or left None independently."""
+    bm = BenchmarkConfig(
+        resume_pdf=Path("a.pdf"),
+        cover_letter_pdf=Path("cl.pdf"),
+    )
+    assert bm.resume_pdf == Path("a.pdf")
+    assert bm.cover_letter_pdf == Path("cl.pdf")
+    assert bm.resume_qmd is None
+    assert bm.cover_letter_md is None
+    assert bm.workflow_html is None

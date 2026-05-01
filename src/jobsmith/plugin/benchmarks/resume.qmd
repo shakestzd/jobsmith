@@ -1,0 +1,131 @@
+---
+title: "Pat Doe — Resume"
+format:
+  typst:
+    template: ../../templates/resume/_resume-typst-fixed.qmd
+    output-file: resume.pdf
+---
+
+```{python}
+#| include: false
+# Generic Pat Doe resume — used as a style reference when no user benchmark
+# is configured. This file ships with the jobsmith plugin; it contains
+# entirely fictional data and must never be copied into a real application.
+
+personal = {
+    "name": "Pat Doe",
+    "email": "pat.doe@example.com",
+    "phone": "(555) 012-3456",
+    "location": "Austin, TX",
+    "linkedin": "patdoe",
+    "github": "patdoe",
+    "tagline": "Data Engineer · Pipelines · Cloud · Analytics",
+}
+
+experience = [
+    {
+        "title": "Senior Data Engineer",
+        "company": "Acme Corp",
+        "location": "Austin, TX",
+        "date": "2022 – present",
+        "bullets": [
+            "Redesigned ingestion layer for 120 upstream feeds, cutting end-to-end latency from 6 h to 45 min across 80 M daily events.",
+            "Migrated 14 TB of raw Parquet tables to Delta Lake on Databricks, reducing storage cost by $230 K/yr and enabling time-travel audits.",
+            "Led team of 3 engineers to standardise dbt model governance; cut P1 data-quality incidents from 11/quarter to 2/quarter.",
+            "Implemented CI pipeline with dbt test + Great Expectations gates; blocked 7 schema-breaking changes before they reached production.",
+        ],
+    },
+    {
+        "title": "Data Engineer",
+        "company": "Riverview Analytics",
+        "location": "Remote",
+        "date": "2019 – 2022",
+        "bullets": [
+            "Built real-time Kafka → Snowflake pipeline processing 2.4 M events/hour for a retail analytics product serving 55 enterprise clients.",
+            "Automated 60 manual ETL jobs with Airflow DAGs, freeing 12 h/week of analyst time and eliminating 3 recurring SLA breaches.",
+            "Partnered with Data Science to productionise 4 ML feature stores; reduced feature-serving latency from 800 ms to 120 ms.",
+        ],
+    },
+    {
+        "title": "Junior Data Analyst",
+        "company": "Greenfield Financial",
+        "location": "Chicago, IL",
+        "date": "2017 – 2019",
+        "bullets": [
+            "Authored SQL dashboards in Looker tracking $1.2 B AUM across 9 fund families; adopted by all 4 portfolio-management teams.",
+            "Standardised monthly reporting templates, saving 15 h/month across the analytics team and improving stakeholder confidence.",
+        ],
+    },
+]
+
+education = [
+    {
+        "degree": "B.S. Computer Science",
+        "school": "State University",
+        "location": "Chicago, IL",
+        "date": "2017",
+        "notes": ["GPA 3.7", "Dean's List 2015–2017"],
+    }
+]
+
+skills = {
+    "Languages": ["Python", "SQL", "Bash"],
+    "Platforms": ["Databricks", "Snowflake", "BigQuery", "AWS S3 / Glue"],
+    "Orchestration": ["Apache Airflow", "dbt", "Prefect"],
+    "Streaming": ["Apache Kafka", "Kinesis"],
+    "Tooling": ["Git", "Docker", "Terraform", "Great Expectations"],
+}
+```
+
+```{python}
+#| output: asis
+#| echo: false
+
+lines = []
+
+# Header
+lines.append(f"#set text(font: \"New Computer Modern\", size: 10.5pt)")
+lines.append(f"#set page(margin: (top: 1.4cm, bottom: 1.4cm, left: 1.5cm, right: 1.5cm))")
+lines.append("")
+lines.append("#align(center)[")
+lines.append(f"  #text(size: 18pt, weight: \"bold\")[{personal['name']}]")
+lines.append(f"  #v(0.25em)")
+lines.append(f"  #text(size: 11pt)[{personal['tagline']}]")
+lines.append(f"  #v(0.3em)")
+lines.append(f"  #text(size: 9.5pt)[")
+lines.append(f"    {personal['email']} | {personal['phone']} | {personal['location']} |")
+lines.append(f"    linkedin.com/in/{personal['linkedin']} | github.com/{personal['github']}")
+lines.append(f"  ]")
+lines.append("]")
+lines.append("")
+lines.append("#line(length: 100%, stroke: 0.5pt)")
+lines.append("")
+
+# Experience
+lines.append("= Experience")
+lines.append("")
+for exp in experience:
+    lines.append(f"*{exp['title']}* | {exp['company']}, {exp['location']} | _{exp['date']}_")
+    lines.append("")
+    for bullet in exp["bullets"]:
+        lines.append(f"- {bullet}")
+    lines.append("")
+
+# Education
+lines.append("= Education")
+lines.append("")
+for edu in education:
+    notes = " | ".join(edu.get("notes", []))
+    note_str = f" | {notes}" if notes else ""
+    lines.append(f"*{edu['degree']}* | {edu['school']}, {edu['location']} | _{edu['date']}_{note_str}")
+    lines.append("")
+
+# Skills
+lines.append("= Skills")
+lines.append("")
+for category, items in skills.items():
+    lines.append(f"*{category}:* {', '.join(items)}")
+    lines.append("")
+
+print("\n".join(lines))
+```

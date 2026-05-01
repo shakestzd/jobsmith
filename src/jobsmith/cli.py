@@ -129,6 +129,44 @@ GITIGNORE_ADDITIONS = dedent(
     private/applications/*/documents/*.pdf
     private/applications/*/documents/*.typ
     private/job_search.db
+    private/benchmarks/
+    """
+)
+
+BENCHMARKS_README = dedent(
+    """\
+    # private/benchmarks/ — personal style references
+
+    Place your best previous application files here so jobsmith can use them
+    as quality benchmarks.  Symlinks work well (e.g., link to the best version
+    of your resume from a previous application cycle).
+
+    ## Files to add
+
+    | File                | Purpose                                      |
+    |---------------------|----------------------------------------------|
+    | resume.qmd          | Quarto source of your favourite resume       |
+    | resume.pdf          | Rendered PDF of the same                     |
+    | cover-letter.md     | Markdown source of your best cover letter    |
+    | cover-letter.pdf    | PDF render of the cover letter (optional)    |
+    | workflow.html       | Rendered workflow review page (optional)     |
+
+    ## Wire up in .apply-config.yaml
+
+    ```yaml
+    benchmarks:
+      resume_qmd:       private/benchmarks/resume.qmd
+      resume_pdf:       private/benchmarks/resume.pdf
+      cover_letter_md:  private/benchmarks/cover-letter.md
+      required: false   # set true once you have all five files in place
+    ```
+
+    ## Notes
+
+    - Benchmarks are **style references only** — their content is never copied
+      into a new application.
+    - This directory is gitignored so your personal data stays private.
+    - Run `jobsmith doctor` to verify all paths resolve correctly.
     """
 )
 
@@ -183,13 +221,29 @@ def init(
     (target / "private" / "applications").mkdir(parents=True, exist_ok=True)
     console.print(f"  ENSURED {target / 'private' / 'applications'}")
 
+    # Benchmarks scaffold
+    console.print("\n[bold]Benchmark scaffold:[/bold]")
+    _write_file(
+        target / "private" / "benchmarks" / "README.md",
+        BENCHMARKS_README,
+        force,
+    )
+
     # .gitignore additions
     console.print("\n[bold].gitignore:[/bold]")
     gitignore = target / ".gitignore"
     if gitignore.exists():
         existing = gitignore.read_text()
+        new_lines: list[str] = []
         if "jobsmith" not in existing:
-            gitignore.write_text(existing.rstrip() + "\n" + GITIGNORE_ADDITIONS)
+            new_lines.append(GITIGNORE_ADDITIONS)
+        else:
+            # jobsmith block already present — ensure individual rules are there
+            for rule in ("private/benchmarks/",):
+                if rule not in existing:
+                    new_lines.append(f"\n{rule}\n")
+        if new_lines:
+            gitignore.write_text(existing.rstrip() + "\n" + "".join(new_lines))
             console.print(f"  APPENDED to {gitignore}")
         else:
             console.print(f"  ALREADY HAS jobsmith section ({gitignore})")
@@ -301,10 +355,17 @@ def apply(
         "-f",
         help="Restart the pipeline from phase 1 even if prior artifacts exist.",
     ),
+    verbose: int = typer.Option(
+        0,
+        "-v",
+        "--verbose",
+        count=True,
+        help="Verbosity: -v shows filtered tool calls; -vv shows all tool calls.",
+    ),
 ) -> None:
     """Run the three-phase apply pipeline against a JD URL."""
     from .apply import run_apply
-    raise typer.Exit(run_apply(url, skip_confirm=yes, force=force))
+    raise typer.Exit(run_apply(url, skip_confirm=yes, force=force, verbosity=verbose))
 
 
 @app.command()

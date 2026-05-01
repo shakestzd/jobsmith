@@ -16,6 +16,7 @@ from typer.testing import CliRunner
 from jobsmith.doctor import (
     CheckResult,
     check_anthropic_api_key,
+    check_benchmarks,
     check_claude_auth,
     check_apply_config,
     check_claude_binary,
@@ -263,9 +264,9 @@ def test_check_plugin_dir_resolves_fail_no_plugin_json(monkeypatch: pytest.Monke
 # run_all_checks
 # ---------------------------------------------------------------------------
 
-def test_run_all_checks_returns_six_results() -> None:
+def test_run_all_checks_returns_seven_results() -> None:
     results = run_all_checks()
-    assert len(results) == 6
+    assert len(results) == 7
     assert all(isinstance(r, CheckResult) for r in results)
 
 
@@ -277,11 +278,64 @@ def test_run_all_checks_stable_order() -> None:
         "python_version",
         "claude_binary",
         "claude_auth",
+        "plugin_dir",
         "apply_config",
         "master_yaml",
-        "plugin_dir",
+        "benchmarks",
     ]
     assert names == expected_names
+
+
+# ---------------------------------------------------------------------------
+# check_benchmarks
+# ---------------------------------------------------------------------------
+
+def _scaffold_config_with_benchmarks(root: Path, benchmarks_block: str = "") -> Path:
+    cfg = root / ".apply-config.yaml"
+    content = "master:\n  work_yml: assets/content/work.yml\n"
+    if benchmarks_block:
+        content += f"\nbenchmarks:\n{benchmarks_block}\n"
+    cfg.write_text(content)
+    return cfg
+
+
+def test_check_benchmarks_no_config_pass_fallback(tmp_path: Path) -> None:
+    result = check_benchmarks(cwd=tmp_path)
+    assert result.ok is True
+    assert result.name == "benchmarks"
+    assert "Pat Doe" in result.message
+
+
+def test_check_benchmarks_required_missing_is_fail(tmp_path: Path) -> None:
+    _scaffold_config_with_benchmarks(tmp_path, "  required: true\n")
+    result = check_benchmarks(cwd=tmp_path)
+    assert result.ok is False
+    assert result.remediation is not None
+
+
+def test_check_benchmarks_not_required_missing_is_pass(tmp_path: Path) -> None:
+    _scaffold_config_with_benchmarks(tmp_path, "  required: false\n")
+    result = check_benchmarks(cwd=tmp_path)
+    assert result.ok is True
+
+
+def test_check_benchmarks_all_set_present_is_pass(tmp_path: Path) -> None:
+    bm_dir = tmp_path / "private" / "benchmarks"
+    bm_dir.mkdir(parents=True)
+    for fname in ("resume.qmd", "resume.pdf", "cover-letter.md", "cover-letter.pdf", "workflow.html"):
+        (bm_dir / fname).write_text(f"# {fname}\n")
+
+    _scaffold_config_with_benchmarks(
+        tmp_path,
+        "  resume_qmd: private/benchmarks/resume.qmd\n"
+        "  resume_pdf: private/benchmarks/resume.pdf\n"
+        "  cover_letter_md: private/benchmarks/cover-letter.md\n"
+        "  cover_letter_pdf: private/benchmarks/cover-letter.pdf\n"
+        "  workflow_html: private/benchmarks/workflow.html\n",
+    )
+    result = check_benchmarks(cwd=tmp_path)
+    assert result.ok is True
+    assert "5/5" in result.message
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +346,7 @@ def test_preflight_returns_true_when_all_pass(monkeypatch: pytest.MonkeyPatch, t
     """Mock every check to pass and confirm preflight returns True."""
     passing = [
         CheckResult(name=f"check_{i}", ok=True, message="ok")
-        for i in range(6)
+        for i in range(7)
     ]
     monkeypatch.setattr("jobsmith.doctor.run_all_checks", lambda cwd=None: passing)
 
@@ -302,7 +356,7 @@ def test_preflight_returns_true_when_all_pass(monkeypatch: pytest.MonkeyPatch, t
 
     assert result is True
     output = captured.getvalue()
-    assert output.count("[PASS]") == 6
+    assert output.count("[PASS]") == 7
     assert "[FAIL]" not in output
 
 

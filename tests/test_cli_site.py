@@ -247,3 +247,56 @@ def test_site_render_default_is_private(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert captured["mode"] == "private"
     assert "private" in result.output
+
+
+# ---------- jobsmith init — benchmarks scaffold ----------
+
+
+def _run_init(tmp_path: Path, extra_args: list[str] | None = None) -> object:
+    """Run `jobsmith init <tmp_path>` with example copy patched out."""
+    import jobsmith.cli as cli_module
+    from unittest.mock import patch
+
+    # Patch EXAMPLES_DIR so init doesn't try to copy real master YAML examples
+    with patch.object(cli_module, "EXAMPLES_DIR", tmp_path / "_fake_examples"):
+        # create fake examples so init doesn't error on missing dir
+        fake_examples = tmp_path / "_fake_examples"
+        fake_examples.mkdir(parents=True, exist_ok=True)
+        return runner.invoke(app, ["init", str(tmp_path)] + (extra_args or []))
+
+
+def test_init_creates_benchmarks_readme(tmp_path: Path) -> None:
+    result = _run_init(tmp_path)
+    assert result.exit_code == 0, result.output
+    readme = tmp_path / "private" / "benchmarks" / "README.md"
+    assert readme.is_file(), f"README not found at {readme}"
+    content = readme.read_text()
+    assert "benchmarks" in content.lower()
+
+
+def test_init_adds_benchmarks_to_gitignore(tmp_path: Path) -> None:
+    result = _run_init(tmp_path)
+    assert result.exit_code == 0, result.output
+    gitignore = (tmp_path / ".gitignore").read_text()
+    assert "private/benchmarks/" in gitignore
+
+
+def test_init_does_not_duplicate_gitignore_rules(tmp_path: Path) -> None:
+    """Running init twice should not duplicate .gitignore entries."""
+    _run_init(tmp_path)
+    _run_init(tmp_path)
+    gitignore = (tmp_path / ".gitignore").read_text()
+    assert gitignore.count("private/benchmarks/") == 1
+
+
+def test_init_preserves_existing_gitignore_content(tmp_path: Path) -> None:
+    existing_gitignore = tmp_path / ".gitignore"
+    existing_gitignore.write_text("node_modules/\n.env\n")
+
+    result = _run_init(tmp_path)
+    assert result.exit_code == 0, result.output
+
+    content = existing_gitignore.read_text()
+    assert "node_modules/" in content
+    assert ".env" in content
+    assert "private/benchmarks/" in content
