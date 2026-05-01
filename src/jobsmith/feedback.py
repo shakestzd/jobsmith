@@ -199,13 +199,13 @@ def record(
     records: list[dict] = []
 
     # --- prose-draft diff ---
-    # Canonical agent baseline lives in .apply-state/prose-draft.md (per the
-    # apply pipeline contract — written by apply-prose-writer). The user is
-    # expected to copy it to the application root and edit there, so we diff
-    # <app_dir>/prose-draft.md against the .apply-state baseline. If either
-    # file is missing or they're identical, no records are produced.
-    prose_agent = state_dir / "prose-draft.md"
-    prose_user = app_dir / "prose-draft.md"
+    # Agent baseline is the immutable snapshot written by `apply` at the end
+    # of phase 2 (see :func:`jobsmith.apply._snapshot_phase_drafts`). The
+    # live ``.apply-state/prose-draft.md`` is the user-editable copy —
+    # specialists never overwrite the .agent.md snapshot. If either file is
+    # missing the pipeline never reached the snapshot step and we skip.
+    prose_agent = state_dir / "prose-draft.agent.md"
+    prose_user = state_dir / "prose-draft.md"
     if prose_agent.exists() and prose_user.exists():
         edits = _diff_bullets(prose_agent.read_text(), prose_user.read_text())
         for before, after in edits:
@@ -215,12 +215,10 @@ def record(
             records.append(r)
 
     # --- cover-letter diff ---
-    # Cover letter is written to <app_dir>/cover-letter-draft.md by
-    # apply-cover-letter-writer (per apply-cover-letter-writer.md), and the
-    # humanizer pass leaves a snapshot in .apply-state/cover-letter-draft.md.
-    # The user edits the app-root file in place; we diff against the
-    # state-dir snapshot.
-    cl_agent = state_dir / "cover-letter-draft.md"
+    # Agent baseline is the snapshot written at end of phase 3. The user
+    # edits ``<app_dir>/cover-letter-draft.md`` in place (where
+    # apply-cover-letter-writer wrote it).
+    cl_agent = state_dir / "cover-letter-draft.agent.md"
     cl_user = app_dir / "cover-letter-draft.md"
     if cl_agent.exists() and cl_user.exists():
         edits = _diff_paragraphs(cl_agent.read_text(), cl_user.read_text())

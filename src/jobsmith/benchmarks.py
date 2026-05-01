@@ -36,8 +36,13 @@ def resolve_benchmark_or_fallback(
     field: str,
     config: JobsmithConfig,
     repo_root: Path,
-) -> Path:
+) -> Path | None:
     """Return the path to a benchmark file, falling back to Pat Doe if unset.
+
+    Returns ``None`` (rather than a non-existent path) when the user has not
+    configured the field AND the bundled Pat Doe fallback does not ship the
+    corresponding file. The plugin currently only bundles ``resume.qmd`` and
+    ``cover-letter.md``; PDFs and HTML have no generic stand-in.
 
     Parameters
     ----------
@@ -52,14 +57,15 @@ def resolve_benchmark_or_fallback(
 
     Returns
     -------
-    Path
-        Resolved absolute path to the benchmark file.
+    Path | None
+        Resolved absolute path to the benchmark file, or ``None`` when no
+        path can be supplied (user unset + fallback file not shipped).
 
     Raises
     ------
     BenchmarkRequiredError
         When ``config.benchmarks.required`` is ``True`` and the user has not
-        set the requested field.
+        set the requested field (regardless of fallback availability).
     ValueError
         When *field* is not a recognised benchmark field name.
     """
@@ -85,8 +91,14 @@ def resolve_benchmark_or_fallback(
             "your reference files, or set required: false."
         )
 
-    # Fall back to the Pat Doe file shipped with the plugin.
+    # Fall back to the Pat Doe file shipped with the plugin — but only when
+    # the file actually exists. Returning a non-existent path here would
+    # silently hand the visual-layout-reviewer / cover-letter writers a
+    # missing file. Callers must treat ``None`` as "no benchmark available
+    # for this field" and skip the spec.json key entirely.
     fallback = _plugin_benchmarks_dir() / _FALLBACK_FILES[field]
+    if not fallback.exists():
+        return None
     return fallback
 
 

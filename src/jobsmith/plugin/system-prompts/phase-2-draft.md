@@ -44,9 +44,32 @@ Do NOT invoke: apply-jd-parser, apply-fit-scorer, apply-hm-enricher, apply-bulle
 
 ### Step 6 — Prose loop (max 3 iterations)
 
+Before dispatching, read `manifest.json` once to recover `role_type`. The Paths
+block carries any benchmark + feedback paths injected by the wrapper —
+specifically `benchmark.resume_qmd` and `feedback.dir` (both optional;
+absent keys mean "not configured", not "unset string").
+
+Each prose-writer dispatch must write a per-invocation
+`<applications-dir>/<slug>/.apply-state/spec.json` with:
+
+```json
+{
+  "specialist": "apply-prose-writer",
+  "slug": "<slug>",
+  "retry_count": <iteration - 1>,
+  "inputs": {
+    "iteration": <iteration>,
+    "previous_ai_tell_report": "ai-tell-report.json"  // omit on iteration 1
+    "benchmark_resume_qmd": "<Paths block: benchmark.resume_qmd, omit if absent>",
+    "feedback_dir": "<Paths block: feedback.dir, omit if absent>",
+    "role_type": "<manifest.json: role_type>"
+  }
+}
+```
+
 Loop (iteration = 1, 2, 3):
 
-1. Dispatch `apply-prose-writer` — writes `prose-draft.md` and updates `documents/work.yml` with rephrased bullets. Pass current `iteration` count and, from iteration 2 onward, the previous `ai-tell-report.json` as input for revision guidance.
+1. Write the `spec.json` shown above, then dispatch `apply-prose-writer` — writes `prose-draft.md` and updates `documents/work.yml` with rephrased bullets. Pass current `iteration` count and, from iteration 2 onward, the previous `ai-tell-report.json` as input for revision guidance.
 2. Dispatch `apply-prose-qa` with `iteration` count and `prose-draft.md` as input.
 3. Read `ai-tell-report.json`:
    - If `decision=pass` → exit loop. Proceed to the artifacts-written check and emit the phase-complete marker.

@@ -44,13 +44,36 @@ Do NOT invoke: apply-jd-parser, apply-fit-scorer, apply-hm-enricher, apply-bulle
 
 ## Step-by-step instructions
 
+### Spec.json wiring (applies to every dispatch in this phase)
+
+Before each Task-tool dispatch, write a per-invocation `spec.json` to
+`<applications-dir>/<slug>/.apply-state/spec.json` carrying the inputs the
+specialist needs. Read `manifest.json` once for `role_type`. Pull benchmark
++ feedback paths from the Paths block. Both groups are optional — when a
+key is absent from the Paths block (no benchmark configured / no feedback
+yet), omit it from `inputs` rather than passing an empty string.
+
+Per-specialist `inputs` to include:
+
+- `apply-cover-letter-writer`: `benchmark_cover_letter_md` (Paths:
+  `benchmark.cover_letter_md`), `feedback_dir` (Paths: `feedback.dir`),
+  `role_type` (manifest), plus the other inputs declared in
+  `specialist-contracts.yaml` for this specialist (jd_parsed, hm_snippet,
+  user_identity, etc.).
+- `apply-visual-layout-reviewer`: `benchmark_resume_pdf` (Paths:
+  `benchmark.resume_pdf`), plus declared inputs (resume.pdf path,
+  iteration count).
+- `apply-prose-qa`, `apply-resume-renderer`, `apply-portfolio-ats-checker`,
+  `apply-index-writer`, `apply-db-logger`: declared inputs only — these
+  specialists do not consume benchmarks or feedback.
+
 ### Step 7 — Render + portfolio/ATS + layout (sequential)
 
 1. Dispatch `apply-resume-renderer`. Read `render-log.json`. If `page_count != 1` or render failed, retry once; on second failure halt.
 
 2. Dispatch `apply-portfolio-ats-checker`. If either check fails, halt with the specific structural issue.
 
-3. Dispatch `apply-visual-layout-reviewer`. If it proposes fixes, apply them, re-run `apply-resume-renderer`, re-run reviewer. Max 2 re-render iterations. On third failure: halt and surface PNG + issues.
+3. Dispatch `apply-visual-layout-reviewer` (write spec.json with `benchmark_resume_pdf` from the Paths block first). If it proposes fixes, apply them, re-run `apply-resume-renderer`, re-run reviewer. Max 2 re-render iterations. On third failure: halt and surface PNG + issues.
 
 Update `manifest.json.invocations` with start/finish/agent_id for each dispatch.
 
@@ -58,7 +81,7 @@ Update `manifest.json.invocations` with start/finish/agent_id for each dispatch.
 
 Step 8 can begin in parallel with Step 7 once Step 5 (handled between phases) has converged.
 
-Dispatch `apply-cover-letter-writer`. Skip only if `jd-parsed.json` says portal explicitly forbids cover letters. The fact-check gate is the writer's responsibility (blocking).
+Write `spec.json` for `apply-cover-letter-writer` with `benchmark_cover_letter_md`, `feedback_dir`, and `role_type` populated from the Paths block + manifest (omit absent keys), then dispatch. Skip only if `jd-parsed.json` says portal explicitly forbids cover letters. The fact-check gate is the writer's responsibility (blocking).
 
 ### Step 9 — Index + DB
 

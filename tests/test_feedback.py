@@ -67,12 +67,13 @@ def test_diff_prose_bullets_detects_significant_edit(tmp_path: Path) -> None:
     state_dir = app_dir / ".apply-state"
     state_dir.mkdir(parents=True)
 
-    # Agent-written baseline lives in .apply-state/; user edits at app root.
+    # Agent baseline is the immutable .agent.md snapshot; live prose-draft.md
+    # is the user-editable copy (both in .apply-state/).
     original = "- Built scalable data pipelines\n- Led a team of 3 engineers\n"
     edited = "- Built highly scalable data pipelines handling 10TB daily\n- Led a team of 3 engineers\n"
 
-    (state_dir / "prose-draft.md").write_text(original)
-    (app_dir / "prose-draft.md").write_text(edited)
+    (state_dir / "prose-draft.agent.md").write_text(original)
+    (state_dir / "prose-draft.md").write_text(edited)
 
     records = feedback_record(slug, app_dir=app_dir, feedback_dir=feedback_dir)
     assert len(records) == 1
@@ -102,8 +103,8 @@ def test_diff_skips_whitespace_only(tmp_path: Path) -> None:
     original = "- Built scalable data pipelines\n"
     edited = "- Built scalable data pipelines  \n"  # trailing spaces only
 
-    (state_dir / "prose-draft.md").write_text(original)
-    (app_dir / "prose-draft.md").write_text(edited)
+    (state_dir / "prose-draft.agent.md").write_text(original)
+    (state_dir / "prose-draft.md").write_text(edited)
 
     records = feedback_record(slug, app_dir=app_dir, feedback_dir=feedback_dir)
     assert records == []
@@ -127,8 +128,8 @@ def test_record_writes_json_to_feedback_dir(tmp_path: Path) -> None:
     original = "- Owned the billing microservice reducing latency by 20%\n"
     edited = "- Owned the billing microservice reducing P99 latency by 40% across all regions\n"
 
-    (state_dir / "prose-draft.md").write_text(original)
-    (app_dir / "prose-draft.md").write_text(edited)
+    (state_dir / "prose-draft.agent.md").write_text(original)
+    (state_dir / "prose-draft.md").write_text(edited)
 
     records = feedback_record(slug, app_dir=app_dir, feedback_dir=feedback_dir)
     assert len(records) == 1
@@ -266,8 +267,8 @@ def test_cli_feedback_record_invokes_module(tmp_path: Path) -> None:
 
     original = "- Original bullet text here\n"
     edited = "- Modified bullet text here with extra detail\n"
-    (state_dir / "prose-draft.md").write_text(original)
-    (app_dir / "prose-draft.md").write_text(edited)
+    (state_dir / "prose-draft.agent.md").write_text(original)
+    (state_dir / "prose-draft.md").write_text(edited)
 
     # The CLI should accept a slug and call feedback.record()
     # We mock the working directory via the app's CWD so paths resolve correctly.
@@ -299,8 +300,8 @@ def test_record_populates_role_type_context_from_manifest(tmp_path: Path) -> Non
 
     original = "- Built scalable data pipelines\n"
     edited = "- Built highly scalable data pipelines handling 10TB daily\n"
-    (state_dir / "prose-draft.md").write_text(original)
-    (app_dir / "prose-draft.md").write_text(edited)
+    (state_dir / "prose-draft.agent.md").write_text(original)
+    (state_dir / "prose-draft.md").write_text(edited)
 
     records = feedback_record(slug, app_dir=app_dir, feedback_dir=feedback_dir)
     assert len(records) == 1
@@ -327,8 +328,8 @@ def test_significance_detects_substitution_with_similar_length(tmp_path: Path) -
     edited = "- investigated user attrition over 12 cohorts\n"
     assert abs(len(original) - len(edited)) <= 2  # length-only delta would skip
 
-    (state_dir / "prose-draft.md").write_text(original)
-    (app_dir / "prose-draft.md").write_text(edited)
+    (state_dir / "prose-draft.agent.md").write_text(original)
+    (state_dir / "prose-draft.md").write_text(edited)
 
     records = feedback_record(slug, app_dir=app_dir, feedback_dir=feedback_dir)
     assert len(records) == 1
