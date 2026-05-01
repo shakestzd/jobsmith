@@ -72,9 +72,12 @@ packages = ["src/jobsmith"]
 # <repo>/templates/. Resolved at runtime via _find_package_root() in
 # jobsmith.assemble — checkout layout returns <repo>/, wheel layout returns
 # <site-packages>/jobsmith/.
+#
+# The plugin subtree (agents/, commands/, plugin.json) lives under
+# src/jobsmith/plugin/ and is included automatically by the Hatchling
+# `packages = ["src/jobsmith"]` rule — no explicit force-include needed.
 [tool.hatch.build.targets.wheel.force-include]
 "templates" = "jobsmith/templates"
-"agents" = "jobsmith/agents"
 
 [tool.ruff]
 line-length = 100
