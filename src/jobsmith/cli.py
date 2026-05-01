@@ -292,6 +292,16 @@ def doctor() -> None:
 
 
 @app.command()
+def apply(
+    url: str = typer.Argument(..., help="Job description URL"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip phase-gate confirmations"),
+) -> None:
+    """Run the three-phase apply pipeline against a JD URL."""
+    from .apply import run_apply
+    raise typer.Exit(run_apply(url, skip_confirm=yes))
+
+
+@app.command()
 def assemble(
     slug: str | None = typer.Argument(
         None,
