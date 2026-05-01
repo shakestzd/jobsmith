@@ -220,6 +220,101 @@ def _load_application_md(app_dir: Path, filename: str) -> str | None:
     return path.read_text()
 
 
+def _load_ai_tell_report(state_dir: Path) -> dict[str, Any] | None:
+    """Load .apply-state/ai-tell-report.json, returning None if missing or malformed.
+
+    Degrades gracefully — callers must not raise on None; use the fallback
+    callout block instead.
+    """
+    import logging
+
+    path = state_dir / "ai-tell-report.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        logging.getLogger(__name__).warning(
+            "ai-tell-report.json could not be loaded (%s): %s", path, exc
+        )
+        return None
+
+
+_HUMANIZER_AUDIT_FALLBACK = (
+    '::: {.callout-warning appearance="minimal"}\n'
+    "**Awaiting specialist** — `apply-prose-qa` has not yet written "
+    "`ai-tell-report.json`. Run the specialist (or `jobsmith assemble {slug}`) "
+    "after it completes to populate the humanizer audit section.\n"
+    ":::\n"
+)
+
+
+def _render_humanizer_audit_block(report: dict[str, Any] | None) -> str:
+    """Format the 6.2 audit + 6.3 final diff from an ai-tell-report into markdown.
+
+    Iterations are sorted by id (6.1 -> 6.2 -> 6.3) regardless of JSON order.
+    Returns a fallback awaiting-specialist callout when report is None or
+    contains no 6.2/6.3 entries.
+    """
+    if report is None:
+        return _HUMANIZER_AUDIT_FALLBACK
+
+    iterations: list[dict[str, Any]] = sorted(
+        report.get("iterations") or [],
+        key=lambda it: it.get("id", ""),
+    )
+
+    sections: list[str] = []
+    for it in iterations:
+        it_id = it.get("id", "")
+        label = it.get("label", "")
+
+        if it_id == "6.2":
+            header = f"### {it_id} Audit --- {label}"
+            remaining = it.get("remaining_tells") or []
+            verdict = it.get("verdict", "")
+            lines = [header, ""]
+            if remaining:
+                lines.append(f"**Verdict:** {verdict}")
+                lines.append("")
+                lines.append("| Phrase | Rationale | Severity |")
+                lines.append("|---|---|---|")
+                for tell in remaining:
+                    phrase = (tell.get("phrase") or "").replace("|", r"\|")
+                    rationale = (tell.get("rationale") or "").replace("|", r"\|")
+                    severity = (tell.get("severity") or "").replace("|", r"\|")
+                    lines.append(f"| `{phrase}` | {rationale} | {severity} |")
+            else:
+                lines.append(f"**Verdict:** {verdict or 'clean'} --- no remaining tells.")
+            sections.append("\n".join(lines))
+
+        elif it_id == "6.3":
+            header = f"### {it_id} Final --- {label}"
+            applied = it.get("applied_fixes") or []
+            final_diff = (it.get("final_diff") or "").strip()
+            lines = [header, ""]
+            if applied:
+                lines.append("**Applied fixes:**")
+                lines.append("")
+                for fix in applied:
+                    phrase = fix.get("phrase") or ""
+                    replaced = fix.get("replaced_with") or ""
+                    lines.append(f"- `{phrase}` -> `{replaced}`")
+                lines.append("")
+            if final_diff:
+                lines.append("**Diff:**")
+                lines.append("")
+                lines.append("```diff")
+                lines.append(final_diff)
+                lines.append("```")
+            sections.append("\n".join(lines))
+
+    if not sections:
+        return _HUMANIZER_AUDIT_FALLBACK
+
+    return "\n\n".join(sections) + "\n"
+
+
 def _load_user_identity(
     app_dir: Path,
     master_author_yml: Path | None,
@@ -556,6 +651,7 @@ def assemble_application(
     company_research = _load_text_artifact(state_dir, "company-research.md")
     outreach = _load_text_artifact(state_dir, "outreach-snippets.md")
     bullet_diff = _load_text_artifact(state_dir, "bullet-diff.md")
+    ai_tell_report = _load_ai_tell_report(state_dir)
 
     # Resolve artifact paths (relative to the application dir for portability).
     # Cover letter PDF can live at the app root or under documents/ depending
@@ -716,6 +812,9 @@ def assemble_application(
     (blocks_dir / "outreach-snippets.md").write_text(
         _outreach_snippets_block(outreach)
     )
+    (blocks_dir / "humanizer-audit.md").write_text(
+        _render_humanizer_audit_block(ai_tell_report)
+    )
 
     # Make the application directory a self-contained Quarto project so
     # project-root-absolute include paths (`/_blocks/foo.md`,
@@ -792,7 +891,9 @@ def assemble_all(applications_dir: Path) -> list[Path]:
 __all__ = [
     "assemble_all",
     "assemble_application",
+    "_load_ai_tell_report",
     "_outreach_snippets_block",
+    "_render_humanizer_audit_block",
     "_resolve_theme",
     "_slugify_company",
 ]

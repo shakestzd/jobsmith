@@ -439,6 +439,8 @@ specialists:
         - prose_draft: ".apply-state/prose-draft.md"
         - resume_qmd: "applications/{slug}/documents/resume.qmd  (if rendered)"
         - iteration: "int 0-2  (current QA iteration)"
+      reads:
+        - .apply-state/cover-letter-draft.md  # (cover-letter humanizer pass — Step 6)
     outputs:
       writes:
         - .apply-state/ai-tell-report.json:
@@ -448,6 +450,13 @@ specialists:
             advisory_findings: "list[{category, span, note}]"
             words_unchanged: "list[string]"
             calibration_metrics: "{false_positive_estimate}"
+            iterations: |
+              list[{id, label, ...}]  cover-letter humanizer pass — entries
+              with id 6.1 (first-pass scrub), 6.2 (audit), 6.3 (final
+              humanized). See agents/apply-prose-qa.md "Cover-letter
+              humanizer pass (Step 6)" for the full schema.
+        - applications/{slug}/cover-letter-draft.md:
+            description: "Rewritten in place across the 6.1 → 6.3 iterations."
     tools_allowlist:
       - Read
       - Write
