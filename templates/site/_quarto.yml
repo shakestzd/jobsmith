@@ -7,6 +7,14 @@
 # gitignored. The --public flag (added by feat-9377b64d) re-renders to
 # _site-public/ with sensitive variables (salary, fit_score, hm_*, etc.)
 # stripped. See docs/architecture.md "Privacy model".
+#
+# Render scope: ONLY the listings page is rendered by this project. Each
+# application directory is its own self-contained Quarto project with its
+# own _quarto.yml — those projects are rendered independently (`quarto
+# render private/applications/<slug>`) so their project-root-absolute
+# include paths (`/_partials/...`, `/_blocks/...`) resolve correctly. The
+# listings page reads frontmatter from each per-app index.qmd via Quarto
+# listings without re-rendering them.
 
 project:
   type: website
@@ -14,7 +22,6 @@ project:
   output-dir: _site
   render:
     - "index.qmd"
-    - "private/applications/*/index.qmd"
 
 website:
   title: "Job applications"

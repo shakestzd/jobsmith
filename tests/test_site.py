@@ -106,39 +106,88 @@ def test_sensitive_keys_constant_documented() -> None:
 # ---------- render_site output dir resolution ----------
 
 
-def test_render_site_resolves_private_output_dir(tmp_path: Path) -> None:
-    """Private mode should resolve to <root>/_site/."""
+def _site_root(tmp_path: Path) -> Path:
+    """Scaffold a minimal Quarto site project at *tmp_path* so render_site
+    passes its existence check without running quarto."""
+    (tmp_path / "_quarto.yml").write_text("project:\n  type: website\n")
+    return tmp_path
+
+
+def test_render_site_missing_quarto_yml_raises(tmp_path: Path) -> None:
+    """render_site requires _quarto.yml at root — direct user to site init."""
     from jobsmith.site import render_site
 
-    try:
-        result = render_site(tmp_path, mode="private")
-    except NotImplementedError:
-        # quarto not available — but the function should have resolved the path
-        # before raising; catch and inspect via the exception message
-        pytest.skip("quarto not on PATH — output-dir resolution not verifiable without quarto")
-    assert result == tmp_path / "_site"
+    with pytest.raises(FileNotFoundError, match="_quarto.yml"):
+        render_site(tmp_path, mode="private")
 
 
-def test_render_site_resolves_public_output_dir(tmp_path: Path) -> None:
-    """Public mode should resolve to <root>/_site-public/."""
-    from jobsmith.site import render_site
+def test_render_site_resolves_private_output_dir(tmp_path: Path, monkeypatch) -> None:
+    """Private mode resolves to <root>/_site/. Stub quarto to avoid invoking it."""
+    from jobsmith import site as site_mod
 
-    try:
-        result = render_site(tmp_path, mode="public")
-    except NotImplementedError:
-        pytest.skip("quarto not on PATH — output-dir resolution not verifiable without quarto")
-    assert result == tmp_path / "_site-public"
+    root = _site_root(tmp_path)
+
+    monkeypatch.setattr(site_mod.shutil, "which", lambda name: "/fake/quarto")
+
+    captured: dict = {}
+
+    class _StubResult:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, capture_output=True, text=True):
+        captured["cmd"] = cmd
+        return _StubResult()
+
+    import subprocess as subprocess_mod
+
+    monkeypatch.setattr(subprocess_mod, "run", fake_run)
+
+    result = site_mod.render_site(root, mode="private")
+    assert result == root / "_site"
+    assert "--output-dir" in captured["cmd"]
+    assert str(root / "_site") in captured["cmd"]
 
 
-def test_render_site_respects_explicit_output_dir(tmp_path: Path) -> None:
+def test_render_site_resolves_public_output_dir(tmp_path: Path, monkeypatch) -> None:
+    """Public mode resolves to <root>/_site-public/."""
+    from jobsmith import site as site_mod
+
+    root = _site_root(tmp_path)
+    monkeypatch.setattr(site_mod.shutil, "which", lambda name: "/fake/quarto")
+
+    class _StubResult:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    import subprocess as subprocess_mod
+
+    monkeypatch.setattr(subprocess_mod, "run", lambda *a, **kw: _StubResult())
+
+    result = site_mod.render_site(root, mode="public")
+    assert result == root / "_site-public"
+
+
+def test_render_site_respects_explicit_output_dir(tmp_path: Path, monkeypatch) -> None:
     """When output_dir is provided explicitly, it overrides the default resolution."""
-    from jobsmith.site import render_site
+    from jobsmith import site as site_mod
+
+    root = _site_root(tmp_path)
+    monkeypatch.setattr(site_mod.shutil, "which", lambda name: "/fake/quarto")
+
+    class _StubResult:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    import subprocess as subprocess_mod
+
+    monkeypatch.setattr(subprocess_mod, "run", lambda *a, **kw: _StubResult())
 
     custom = tmp_path / "my-output"
-    try:
-        result = render_site(tmp_path, mode="private", output_dir=custom)
-    except NotImplementedError:
-        pytest.skip("quarto not on PATH")
+    result = site_mod.render_site(root, mode="private", output_dir=custom)
     assert result == custom
 
 
@@ -147,6 +196,35 @@ def test_render_site_unknown_mode_raises() -> None:
 
     with pytest.raises(ValueError, match="mode"):
         render_site(Path("/tmp"), mode="typo")
+
+
+def test_render_site_quarto_missing_raises_runtimeerror(tmp_path: Path, monkeypatch) -> None:
+    from jobsmith import site as site_mod
+
+    root = _site_root(tmp_path)
+    monkeypatch.setattr(site_mod.shutil, "which", lambda name: None)
+
+    with pytest.raises(RuntimeError, match="quarto"):
+        site_mod.render_site(root, mode="private")
+
+
+def test_render_site_quarto_failure_raises_runtimeerror(tmp_path: Path, monkeypatch) -> None:
+    from jobsmith import site as site_mod
+
+    root = _site_root(tmp_path)
+    monkeypatch.setattr(site_mod.shutil, "which", lambda name: "/fake/quarto")
+
+    class _StubResult:
+        returncode = 7
+        stdout = "stdout text"
+        stderr = "boom"
+
+    import subprocess as subprocess_mod
+
+    monkeypatch.setattr(subprocess_mod, "run", lambda *a, **kw: _StubResult())
+
+    with pytest.raises(RuntimeError, match="exited 7"):
+        site_mod.render_site(root, mode="private")
 
 
 # ---------- init_site ----------
@@ -276,3 +354,313 @@ def test_discover_applications_returns_empty_when_no_applications_dir(tmp_path: 
     """Repo exists but private/applications/ has not been created yet."""
     found = discover_applications(tmp_path)
     assert found == []
+
+
+# ---------- nested sanitization (fix-roborev-906) ----------
+
+from jobsmith.site import (  # noqa: E402
+    SENSITIVE_BLOCK_FILES,
+    SENSITIVE_VARIABLE_PATHS,
+    sanitize_blocks_dir,
+)
+
+NESTED_SAMPLE: dict = {
+    "company": "Acme Corp",
+    "position": "Engineer",
+    "slug": "acme-engineer",
+    "salary_range": "$120k–$150k",
+    "fit": {
+        "score": 0.78,
+        "rationale": "Strong on Python, weak on Spark",
+        "must_have_table": [{"requirement": "Python", "level": "STRONG"}],
+        "matched_evidence": ["profile.python"],
+        "concerns": ["no Spark"],
+        "pitch": "good fit",
+    },
+    "hm": {
+        "detected": True,
+        "name": "Pat Director",
+        "source": "linkedin_post",
+        "one_specific_signal": "Authored 2024 paper on X",
+        "suggested_hook": "Reference paper directly",
+    },
+    "hm_md": "## HM dossier\n- Pat Director\n",
+    "outreach": "## Connection note\nHi Pat...",
+    "humanizer_audit": {"ai_tell_score": 0.12},
+    "cover_letter_draft": "Dear Hiring Team,\nReal letter.",
+    "bullets": {
+        "positions": [{"company": "Prior Co"}],
+        "anchor_bullets_master": ["bullet a"],
+        "anchor_bullets_kept": ["bullet a"],
+        "anchor_bullets_dropped": ["bullet b — internal context"],
+    },
+}
+
+
+def test_sanitize_strips_nested_fit_in_public_mode() -> None:
+    out = sanitize_variables(NESTED_SAMPLE, mode="public")
+    # fit.* must be empty (every nested sensitive subkey gone)
+    assert out["fit"] == {}
+    # Originals untouched
+    assert NESTED_SAMPLE["fit"]["score"] == 0.78
+
+
+def test_sanitize_strips_nested_hm_in_public_mode() -> None:
+    out = sanitize_variables(NESTED_SAMPLE, mode="public")
+    assert out["hm"] == {}
+    assert "hm_md" not in out
+
+
+def test_sanitize_strips_outreach_humanizer_cover_letter_draft() -> None:
+    out = sanitize_variables(NESTED_SAMPLE, mode="public")
+    assert "outreach" not in out
+    assert "humanizer_audit" not in out
+    assert "cover_letter_draft" not in out
+
+
+def test_sanitize_strips_dropped_bullets_but_keeps_kept_bullets() -> None:
+    """Anchor bullets that were dropped reveal internal selection logic;
+    kept bullets are public (they appear in the final résumé)."""
+    out = sanitize_variables(NESTED_SAMPLE, mode="public")
+    bullets = out["bullets"]
+    assert "anchor_bullets_dropped" not in bullets
+    assert bullets["anchor_bullets_kept"] == ["bullet a"]
+    assert bullets["positions"] == [{"company": "Prior Co"}]
+
+
+def test_sanitize_keeps_safe_keys_in_public_mode() -> None:
+    out = sanitize_variables(NESTED_SAMPLE, mode="public")
+    assert out["company"] == "Acme Corp"
+    assert out["position"] == "Engineer"
+    assert out["slug"] == "acme-engineer"
+
+
+def test_sanitize_strips_legacy_top_level_salary() -> None:
+    out = sanitize_variables(NESTED_SAMPLE, mode="public")
+    assert "salary_range" not in out
+
+
+def test_sanitize_private_mode_returns_deep_copy() -> None:
+    out = sanitize_variables(NESTED_SAMPLE, mode="private")
+    out["fit"]["score"] = 0.0  # mutate the copy
+    assert NESTED_SAMPLE["fit"]["score"] == 0.78  # original intact
+
+
+def test_sanitize_handles_missing_nested_subkeys() -> None:
+    minimal = {"company": "X", "fit": {"score": 0.5}}  # no hm, no outreach
+    out = sanitize_variables(minimal, mode="public")
+    assert out["company"] == "X"
+    assert out["fit"] == {}
+
+
+def test_sensitive_variable_paths_documented() -> None:
+    # Sanity: every required category is represented somewhere in the
+    # paths tuple. This guards against silent regressions where a future
+    # refactor drops fit.* or hm.*.
+    flat_heads = {p[0] for p in SENSITIVE_VARIABLE_PATHS}
+    assert "fit" in flat_heads
+    assert "hm" in flat_heads
+    assert "outreach" in flat_heads
+    assert "humanizer_audit" in flat_heads
+    assert "salary_range" in flat_heads
+    assert "cover_letter_draft" in flat_heads
+
+
+# ---------- sanitize_blocks_dir ----------
+
+
+def test_sanitize_blocks_dir_replaces_sensitive_files(tmp_path: Path) -> None:
+    blocks = tmp_path / "_blocks"
+    blocks.mkdir()
+    # Sensitive files
+    (blocks / "must-have-table.md").write_text("| evidence column |\n")
+    (blocks / "hm-dossier.md").write_text("## HM dossier\nPat Director\n")
+    (blocks / "outreach-snippets.md").write_text("LinkedIn note\n")
+    # Public-safe files
+    (blocks / "must-haves.md").write_text("- Python\n")
+    (blocks / "nice-to-haves.md").write_text("- Terraform\n")
+
+    rewritten = sanitize_blocks_dir(blocks, mode="public")
+
+    rewritten_names = {p.name for p in rewritten}
+    assert "must-have-table.md" in rewritten_names
+    assert "hm-dossier.md" in rewritten_names
+    assert "outreach-snippets.md" in rewritten_names
+    # Safe files untouched
+    assert (blocks / "must-haves.md").read_text() == "- Python\n"
+    assert (blocks / "nice-to-haves.md").read_text() == "- Terraform\n"
+    # Rewritten content is the redaction notice
+    assert "omitted in the public variant" in (blocks / "hm-dossier.md").read_text()
+
+
+def test_sanitize_blocks_dir_private_mode_is_noop(tmp_path: Path) -> None:
+    blocks = tmp_path / "_blocks"
+    blocks.mkdir()
+    (blocks / "hm-dossier.md").write_text("private content\n")
+
+    rewritten = sanitize_blocks_dir(blocks, mode="private")
+    assert rewritten == []
+    assert (blocks / "hm-dossier.md").read_text() == "private content\n"
+
+
+def test_sanitize_blocks_dir_handles_missing_directory(tmp_path: Path) -> None:
+    """No-op when the blocks directory doesn't exist (e.g. unassembled app)."""
+    rewritten = sanitize_blocks_dir(tmp_path / "nope", mode="public")
+    assert rewritten == []
+
+
+def test_sensitive_block_files_covers_known_artifacts() -> None:
+    # Sanity: the block-file allowlist must include every artifact that a
+    # specialist writes containing private analysis.
+    required = {
+        "must-have-table.md",
+        "hm-dossier.md",
+        "outreach-snippets.md",
+        "humanizer-audit.md",
+        "cover-letter.md",
+    }
+    assert required <= SENSITIVE_BLOCK_FILES
+
+
+# ---------- public-mode snapshot/sanitize/restore (fix-roborev-906) ----------
+
+import yaml as _yaml  # noqa: E402
+
+
+def _make_assembled_app(root: Path, slug: str) -> Path:
+    """Lay out an app with _variables.yml + sensitive _blocks/*.md files,
+    skipping the full assemble pipeline."""
+    app = root / "private" / "applications" / slug
+    blocks = app / "_blocks"
+    blocks.mkdir(parents=True)
+    (app / "_variables.yml").write_text(
+        _yaml.safe_dump(
+            {
+                "company": "Acme Corp",
+                "position": "Engineer",
+                "slug": slug,
+                "salary_range": "$120k–$150k",
+                "fit": {"score": 0.78, "rationale": "strong"},
+                "hm": {"detected": True, "name": "Pat Director"},
+            },
+            sort_keys=False,
+        )
+    )
+    (blocks / "must-haves.md").write_text("- Python\n")
+    (blocks / "hm-dossier.md").write_text("## HM dossier\nPat Director\n")
+    (blocks / "outreach-snippets.md").write_text("LinkedIn note\n")
+    return app
+
+
+def test_render_site_public_sanitizes_then_restores_variables(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Public render writes sanitized _variables.yml during the quarto call,
+    then restores the originals on completion."""
+    from jobsmith import site as site_mod
+
+    root = _site_root(tmp_path)
+    app = _make_assembled_app(root, "acme-engineer")
+    original_vars = (app / "_variables.yml").read_text()
+    original_hm_dossier = (app / "_blocks" / "hm-dossier.md").read_text()
+
+    captured_during_run: dict = {}
+
+    def fake_run(cmd, capture_output=True, text=True):
+        # While quarto would be running, the on-disk files should be sanitized.
+        captured_during_run["vars"] = (app / "_variables.yml").read_text()
+        captured_during_run["hm_dossier"] = (
+            app / "_blocks" / "hm-dossier.md"
+        ).read_text()
+
+        class _R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return _R()
+
+    import subprocess as subprocess_mod
+
+    monkeypatch.setattr(site_mod.shutil, "which", lambda name: "/fake/quarto")
+    monkeypatch.setattr(subprocess_mod, "run", fake_run)
+
+    site_mod.render_site(root, mode="public")
+
+    # During the quarto run, sensitive content was stripped/redacted
+    sanitized_vars = _yaml.safe_load(captured_during_run["vars"])
+    assert sanitized_vars["fit"] == {}  # nested fit emptied
+    assert "hm" not in sanitized_vars or sanitized_vars["hm"] == {}
+    assert "salary_range" not in sanitized_vars
+    assert "omitted in the public variant" in captured_during_run["hm_dossier"]
+
+    # After completion, originals restored
+    assert (app / "_variables.yml").read_text() == original_vars
+    assert (app / "_blocks" / "hm-dossier.md").read_text() == original_hm_dossier
+
+
+def test_render_site_public_restores_variables_even_on_quarto_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """If quarto exits non-zero, the snapshot restore still runs — never
+    leave private state stripped on disk."""
+    from jobsmith import site as site_mod
+
+    root = _site_root(tmp_path)
+    app = _make_assembled_app(root, "acme-engineer")
+    original_vars = (app / "_variables.yml").read_text()
+    original_hm_dossier = (app / "_blocks" / "hm-dossier.md").read_text()
+
+    class _R:
+        returncode = 1
+        stdout = ""
+        stderr = "boom"
+
+    import subprocess as subprocess_mod
+
+    monkeypatch.setattr(site_mod.shutil, "which", lambda name: "/fake/quarto")
+    monkeypatch.setattr(subprocess_mod, "run", lambda *a, **kw: _R())
+
+    with pytest.raises(RuntimeError):
+        site_mod.render_site(root, mode="public")
+
+    assert (app / "_variables.yml").read_text() == original_vars
+    assert (app / "_blocks" / "hm-dossier.md").read_text() == original_hm_dossier
+
+
+def test_render_site_private_does_not_mutate_or_restore(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Private mode must not touch _variables.yml or _blocks/*.md at all."""
+    from jobsmith import site as site_mod
+
+    root = _site_root(tmp_path)
+    app = _make_assembled_app(root, "acme-engineer")
+    original_vars = (app / "_variables.yml").read_text()
+    original_hm_dossier = (app / "_blocks" / "hm-dossier.md").read_text()
+
+    captured: dict = {}
+
+    def fake_run(cmd, capture_output=True, text=True):
+        captured["vars"] = (app / "_variables.yml").read_text()
+
+        class _R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return _R()
+
+    import subprocess as subprocess_mod
+
+    monkeypatch.setattr(site_mod.shutil, "which", lambda name: "/fake/quarto")
+    monkeypatch.setattr(subprocess_mod, "run", fake_run)
+
+    site_mod.render_site(root, mode="private")
+
+    # During the quarto call, _variables.yml is still the original (private mode
+    # never sanitizes). Note: assemble_all may have run if private/applications/
+    # exists with .apply-state — _make_assembled_app does NOT create .apply-state,
+    # so assemble_all skips this dir, leaving _variables.yml untouched.
+    assert captured["vars"] == original_vars
+    assert (app / "_blocks" / "hm-dossier.md").read_text() == original_hm_dossier

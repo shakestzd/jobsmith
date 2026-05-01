@@ -195,12 +195,21 @@ def test_site_review_opens_rendered_html_when_present(tmp_path: Path, monkeypatc
 
 def test_site_render_without_quarto_exits_2(tmp_path: Path, monkeypatch) -> None:
     """When quarto is not on PATH, render exits 2 with a clear error message."""
-    monkeypatch.setattr("shutil.which", lambda name: None)
+    # Scaffold a minimal _quarto.yml so render_site gets past the existence check
+    (tmp_path / "_quarto.yml").write_text("project:\n  type: website\n")
+    monkeypatch.setattr("jobsmith.site.shutil.which", lambda name: None)
 
     result = runner.invoke(app, ["site", "render", str(tmp_path)])
 
     assert result.exit_code == 2
     assert "quarto" in result.output.lower()
+
+
+def test_site_render_missing_quarto_yml_exits_2(tmp_path: Path) -> None:
+    """When _quarto.yml is missing, render exits 2 and points the user at site init."""
+    result = runner.invoke(app, ["site", "render", str(tmp_path)])
+    assert result.exit_code == 2
+    assert "_quarto.yml" in result.output
 
 
 def test_site_render_public_flag_parsed(tmp_path: Path, monkeypatch) -> None:

@@ -67,6 +67,15 @@ Issues = "https://github.com/shakestzd/jobsmith/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["src/jobsmith"]
 
+# Force-include the templates tree inside the installed package so wheel
+# installs ship the same templates/ layout that checkout installs see at
+# <repo>/templates/. Resolved at runtime via _find_package_root() in
+# jobsmith.assemble — checkout layout returns <repo>/, wheel layout returns
+# <site-packages>/jobsmith/.
+[tool.hatch.build.targets.wheel.force-include]
+"templates" = "jobsmith/templates"
+"agents" = "jobsmith/agents"
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

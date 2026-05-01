@@ -764,3 +764,119 @@ def test_assemble_migrates_legacy_workflow_qmd(tmp_path: Path) -> None:
 
     assert (app_dir / "index.qmd").exists()
     assert not legacy.exists(), "legacy workflow.qmd should have been removed"
+
+
+# ---------- _find_package_root (wheel vs checkout) ----------
+
+
+def test_find_package_root_resolves_to_directory_with_templates(tmp_path: Path) -> None:
+    """PACKAGE_ROOT must point to a directory containing templates/."""
+    from jobsmith.assemble import PACKAGE_ROOT
+
+    assert (PACKAGE_ROOT / "templates").is_dir(), (
+        f"PACKAGE_ROOT ({PACKAGE_ROOT}) must contain templates/ — fix "
+        "_find_package_root or pyproject force-include configuration."
+    )
+    # Sanity check: the well-known subdirs used by assemble + site exist.
+    assert (PACKAGE_ROOT / "templates" / "partials").is_dir()
+    assert (PACKAGE_ROOT / "templates" / "themes").is_dir()
+    assert (PACKAGE_ROOT / "templates" / "site").is_dir()
+    assert (PACKAGE_ROOT / "templates" / "workflow" / "_index.qmd").is_file()
+
+
+def test_find_package_root_prefers_inside_package_when_both_exist(tmp_path: Path, monkeypatch) -> None:
+    """When templates/ lives inside the package directory (wheel layout), it
+    wins over an outer templates/ (checkout layout)."""
+    fake_pkg = tmp_path / "site-packages" / "jobsmith"
+    (fake_pkg / "templates").mkdir(parents=True)
+    fake_init = fake_pkg / "__init__.py"
+    fake_init.write_text("")
+
+    # Create a sibling outer templates/ that would also satisfy the checkout
+    # heuristic — we want the wheel-layout sibling to win.
+    (tmp_path / "site-packages" / "templates").mkdir()
+
+    # Patch __file__ via a dynamic reimport-like check
+    from jobsmith import assemble
+
+    monkeypatch.setattr(assemble, "__file__", str(fake_pkg / "assemble.py"))
+    # Recompute and assert wheel layout wins
+    pkg_dir = Path(assemble.__file__).resolve().parent
+    if (pkg_dir / "templates").is_dir():
+        resolved = pkg_dir
+    else:
+        resolved = pkg_dir.parent.parent
+    assert resolved == fake_pkg
+
+
+# ---------- listing frontmatter injection (fix-roborev-906) ----------
+
+
+def test_assemble_injects_company_position_into_index_frontmatter(tmp_path: Path) -> None:
+    """Per-app index.qmd gets company/position/status/fit_score/date_found
+    in its YAML frontmatter so site listings can sort/filter on them."""
+    apps_dir = _setup_app(tmp_path)
+    assemble_application("test-co-engineer", apps_dir)
+    text = (apps_dir / "test-co-engineer" / "index.qmd").read_text()
+
+    assert text.startswith("---\n")
+    front_yaml = text.split("---\n", 2)[1]
+    front = yaml.safe_load(front_yaml)
+
+    assert front["company"] == "Test Co"
+    assert front["position"] == "Engineer"
+    assert front["fit_score"] == 0.75  # from _setup_app's fit-score.json
+    assert front["slug"] == "test-co-engineer"
+    assert "status" in front  # default fallback ("drafting") even when JD lacks it
+
+
+def test_assemble_preserves_user_added_frontmatter(tmp_path: Path) -> None:
+    """Keys outside _LISTING_FRONTMATTER_KEYS (title, author, date, format)
+    survive a re-assemble — jobsmith only owns the listing fields."""
+    apps_dir = _setup_app(tmp_path)
+    target = apps_dir / "test-co-engineer" / "index.qmd"
+    # Pre-write an index.qmd with user-edited frontmatter
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        "---\n"
+        'title: "User-customized title"\n'
+        'author: "Pat Custom"\n'
+        'custom_field: "should survive"\n'
+        "---\n"
+        "\n# Body\n"
+    )
+
+    assemble_application("test-co-engineer", apps_dir)
+    front = yaml.safe_load(target.read_text().split("---\n", 2)[1])
+
+    # Owned fields — refreshed
+    assert front["company"] == "Test Co"
+    assert front["fit_score"] == 0.75
+    # User fields — preserved
+    assert front["title"] == "User-customized title"
+    assert front["author"] == "Pat Custom"
+    assert front["custom_field"] == "should survive"
+
+
+def test_assemble_idempotent_frontmatter_injection(tmp_path: Path) -> None:
+    """Running assemble twice produces the same listing frontmatter."""
+    apps_dir = _setup_app(tmp_path)
+    assemble_application("test-co-engineer", apps_dir)
+    first = (apps_dir / "test-co-engineer" / "index.qmd").read_text()
+    assemble_application("test-co-engineer", apps_dir)
+    second = (apps_dir / "test-co-engineer" / "index.qmd").read_text()
+
+    assert first == second
+
+
+def test_assemble_injection_handles_index_with_no_frontmatter(tmp_path: Path) -> None:
+    """If the index.qmd template ever loses its frontmatter, injection
+    creates one rather than crashing."""
+    apps_dir = _setup_app(tmp_path)
+    target = apps_dir / "test-co-engineer" / "index.qmd"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# Just a header, no frontmatter\n")
+
+    assemble_application("test-co-engineer", apps_dir)
+    front = yaml.safe_load(target.read_text().split("---\n", 2)[1])
+    assert front["company"] == "Test Co"

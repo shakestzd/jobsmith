@@ -46,11 +46,29 @@ from typing import Any
 import yaml
 
 from .config import load_config
+from .paths import repo_root_for
 
-# Default location of the bundled partials + workflow templates within jobsmith.
-# Resolved as <package_root>/templates/... assuming the package is installed
-# from a checkout (uv pip install -e .) or vendored as a Claude Code plugin.
-PACKAGE_ROOT = Path(__file__).resolve().parent.parent.parent
+# Resolve the directory containing the bundled `templates/` tree. Two layouts
+# need to work:
+#   1. Checkout / editable install (`uv pip install -e .`):
+#      <repo>/src/jobsmith/__init__.py + <repo>/templates/...
+#      → walk up two levels from this file.
+#   2. Wheel install (pyproject force-include moves templates/ into the
+#      installed package): <site-packages>/jobsmith/__init__.py +
+#      <site-packages>/jobsmith/templates/...
+#      → templates/ sits next to this file.
+
+
+def _find_package_root() -> Path:
+    """Locate the directory that contains the templates/ tree."""
+    pkg_dir = Path(__file__).resolve().parent  # .../jobsmith/
+    if (pkg_dir / "templates").is_dir():
+        return pkg_dir  # wheel install — templates lives inside the package
+    # Editable / checkout install — templates is sibling of src/.
+    return pkg_dir.parent.parent
+
+
+PACKAGE_ROOT = _find_package_root()
 DEFAULT_PARTIALS_SRC = PACKAGE_ROOT / "templates" / "partials"
 DEFAULT_INDEX_SRC = PACKAGE_ROOT / "templates" / "workflow" / "_index.qmd"
 # Backwards-compat alias for callers still using `workflow_src=`. Removed in
@@ -629,6 +647,73 @@ def _quarto_project_yml(slug: str) -> str:
     )
 
 
+# Keys jobsmith owns inside the per-app index.qmd frontmatter. Rewritten on
+# every assemble; user-added keys (anything not in this set) are preserved.
+_LISTING_FRONTMATTER_KEYS: frozenset[str] = frozenset(
+    {"company", "position", "status", "fit_score", "date_found", "slug"}
+)
+
+
+def _inject_listing_frontmatter(
+    index_qmd: Path,
+    *,
+    company: Any,
+    position: Any,
+    status: Any,
+    fit_score: Any,
+    date_found: Any,
+    slug: str,
+) -> None:
+    """Merge listing metadata into the YAML frontmatter of *index_qmd*.
+
+    The site listings page and `jobsmith site list` read these fields per
+    app; without them the listing is empty. Existing frontmatter keys NOT
+    in ``_LISTING_FRONTMATTER_KEYS`` (title, author, date, format, etc.) are
+    preserved verbatim — only the listing-owned keys are overwritten.
+
+    Idempotent: re-running on an already-injected file just refreshes the
+    six owned fields.
+    """
+    text = index_qmd.read_text()
+
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 4)
+        if end == -1:
+            # Malformed frontmatter — bail rather than corrupt the file.
+            return
+        front_yaml = text[4:end]
+        body = text[end + 5 :]
+        try:
+            front: dict[str, Any] = yaml.safe_load(front_yaml) or {}
+        except yaml.YAMLError:
+            return
+        if not isinstance(front, dict):
+            return
+    else:
+        front = {}
+        body = text
+
+    # Owned fields — overwrite. Skip None so empty listings stay tidy.
+    owned: dict[str, Any] = {
+        "company": company,
+        "position": position,
+        "status": status,
+        "fit_score": fit_score,
+        "date_found": date_found,
+        "slug": slug,
+    }
+    for key, value in owned.items():
+        if value is None:
+            front.pop(key, None)
+        else:
+            front[key] = value
+
+    rebuilt = "---\n" + yaml.safe_dump(
+        front, sort_keys=False, allow_unicode=True
+    ) + "---\n" + body
+    index_qmd.write_text(rebuilt)
+
+
 # ---------- public API ----------
 
 
@@ -708,7 +793,11 @@ def assemble_application(
         "github": config.user.github,
         "linkedin": config.user.linkedin,
     }
-    repo_root = app_dir.parent.parent  # private/applications/<slug>/.. /..
+    # Resolve repo root via the .apply-config.yaml location, NOT structural
+    # parent walking — the layout is private/applications/<slug>, so
+    # app_dir.parent.parent lands at <repo>/private and skips the actual
+    # author.yml at the repo root.
+    repo_root = repo_root_for(app_dir)
     master_author = (
         config.master.author_yml
         if config.master.author_yml.is_absolute()
@@ -877,6 +966,19 @@ def assemble_application(
         target_index = app_dir / "index.qmd"
         if not target_index.exists():
             target_index.write_text(workflow_src.read_text())
+        # Inject listing-relevant metadata into the frontmatter so the site
+        # listings page (and `jobsmith site list`) can sort/filter by company,
+        # position, status, fit_score, and date_found without re-running
+        # assembly. Idempotent: re-running just refreshes these fields.
+        _inject_listing_frontmatter(
+            target_index,
+            company=jd.get("company"),
+            position=jd.get("position"),
+            status=jd.get("status") or fit.get("status") or "drafting",
+            fit_score=fit.get("score"),
+            date_found=jd.get("date_found"),
+            slug=slug,
+        )
         # One-time migration: rename any legacy workflow.qmd that pre-dates
         # this convention. Idempotent: no-op once the rename has happened.
         legacy = app_dir / "workflow.qmd"

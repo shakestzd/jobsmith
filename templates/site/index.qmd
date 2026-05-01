@@ -6,7 +6,6 @@ listing:
     - private/applications/*/index.qmd
   type: table
   fields:
-    - title
     - company
     - position
     - status
@@ -16,14 +15,14 @@ listing:
     - "fit_score desc"
     - "date_found desc"
   sort-ui:
-    - title
     - company
+    - position
     - status
     - fit_score
     - date_found
   filter-ui:
-    - title
     - company
+    - position
     - status
   date-format: "YYYY-MM-DD"
   feed: false
@@ -34,8 +33,9 @@ listing:
 
 ::: {.callout-note appearance="minimal"}
 This page aggregates every application directory under `private/applications/`
-that has been assembled by jobsmith. Sortable / filterable; click any row to
-open the per-application review surface.
+that has been assembled by jobsmith. Sortable / filterable; each row links to
+the per-app `index.html` (rendered separately — each app is its own Quarto
+project so its include paths resolve).
 
 Privacy: this site renders to `_site/` and should stay local — application
 pages contain salary ranges, fit scores, and hiring-manager intelligence.

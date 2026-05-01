@@ -640,10 +640,7 @@ def site_render_cmd(
     mode = "public" if public else "private"
     try:
         out = render_site(root.resolve(), mode=mode)
-    except NotImplementedError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=2) from exc
-    except ValueError as exc:
+    except (RuntimeError, FileNotFoundError, ValueError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=2) from exc
     label = "[red bold]PUBLIC[/red bold]" if public else "[green]private[/green]"
