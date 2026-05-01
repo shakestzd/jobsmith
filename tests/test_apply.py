@@ -744,6 +744,76 @@ def test_build_paths_benchmark_fallback_when_not_configured(tmp_path: Path) -> N
     assert paths["benchmark.resume_pdf"] == str(pat_doe_dir / "resume.pdf")
 
 
+# ---------------------------------------------------------------------------
+# 13. _build_paths injects feedback_dir + role_type into phase paths dict
+# ---------------------------------------------------------------------------
+
+
+def test_build_paths_injects_feedback_dir_when_present(tmp_path: Path) -> None:
+    """_build_paths includes inputs.feedback_dir when private/feedback/ exists."""
+    import yaml
+
+    from jobsmith.apply import _build_paths
+
+    # Create the feedback directory so the helper can detect it
+    feedback_dir = tmp_path / "private" / "feedback"
+    feedback_dir.mkdir(parents=True)
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+
+    plugin_fake = tmp_path / "plugin"
+    plugin_fake.mkdir()
+
+    paths = _build_paths("test-slug", tmp_path, plugin_fake)
+
+    assert "inputs.feedback_dir" in paths, "inputs.feedback_dir must be present when feedback/ exists"
+    assert paths["inputs.feedback_dir"] == str(feedback_dir.resolve())
+
+
+def test_build_paths_feedback_dir_null_when_missing(tmp_path: Path) -> None:
+    """_build_paths sets inputs.feedback_dir to 'null' when private/feedback/ is absent."""
+    import yaml
+
+    from jobsmith.apply import _build_paths
+
+    # Do NOT create the feedback directory
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+
+    plugin_fake = tmp_path / "plugin"
+    plugin_fake.mkdir()
+
+    paths = _build_paths("test-slug", tmp_path, plugin_fake)
+
+    assert "inputs.feedback_dir" in paths, "inputs.feedback_dir key must always be present"
+    assert paths["inputs.feedback_dir"] == "null"
+
+
 def test_renderer_text_event_non_empty() -> None:
     """Non-empty text events are rendered as dim italic at verbosity >= 1."""
     con, buf = _make_test_console()

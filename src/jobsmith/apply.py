@@ -246,6 +246,12 @@ def _build_paths(slug: str, cwd: Path, plugin_directory: Path) -> dict[str, str]
         ):
             result[key] = str(resolve_benchmark_or_fallback(field, config, repo_root))
 
+        # Feedback dir — soft style lessons for prose-writer + cover-letter-writer.
+        # Emitted as "null" string when the directory doesn't exist so agents
+        # can check the value without the path block being absent.
+        feedback_dir = repo_root / "private" / "feedback"
+        result["inputs.feedback_dir"] = str(feedback_dir.resolve()) if feedback_dir.exists() else "null"
+
     return result
 
 

@@ -407,6 +407,12 @@ specialists:
             Resolved by orchestrator via resolve_benchmark_or_fallback("resume_qmd").
             SEMANTICS: voice/rhythm/structure exemplar; NEVER source of fact.
             Agent MUST NOT copy claims, metrics, proper nouns, or dollar amounts from it.
+        - feedback_dir: |
+            Path | null — absolute path to private/feedback/ directory containing
+            JSON feedback records. Null when directory does not exist (new users).
+            SEMANTICS: soft style hints only (voice/word-choice). Agent reads
+            individual record files via Read tool. Never pre-loaded by orchestrator.
+        - role_type: "string — from manifest.json; used to filter feedback records by role"
     outputs:
       writes:
         - .apply-state/prose-draft.md:
@@ -554,6 +560,12 @@ specialists:
             Resolved by orchestrator via resolve_benchmark_or_fallback("cover_letter_md").
             SEMANTICS: voice/rhythm/5-component-structure exemplar; NEVER source of fact.
             Agent MUST NOT copy claims, metrics, proper nouns, or dollar amounts from it.
+        - feedback_dir: |
+            Path | null — absolute path to private/feedback/ directory containing
+            JSON feedback records. Null when directory does not exist (new users).
+            SEMANTICS: soft style hints only (voice/word-choice). Agent reads
+            individual record files via Read tool. Never pre-loaded by orchestrator.
+        - role_type: "string — from manifest.json; used to filter feedback records by role"
     outputs:
       writes:
         - applications/{slug}/cover-letter-draft.md:

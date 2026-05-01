@@ -47,6 +47,24 @@ of this rule is equivalent to fabrication and triggers an immediate halt.
 
 <!-- ─── END BENCHMARK STYLE REFERENCE ─── -->
 
+## Prior feedback lessons (soft style guidance)
+
+If `inputs.feedback_dir` is set and the directory has `*.json` files, read up to the 10 most recent records (sorted by filename — they are timestamp-suffixed). Filter:
+1. Prefer records with `kind: prose-bullet` AND `context.role_type == inputs.role_type`
+2. If <3 matches, top up with most-recent `kind: prose-bullet` regardless of role_type
+3. Drop any record with empty `lesson` field — they're placeholders the user hasn't filled in
+
+Treat each `lesson` as a voice/word-choice hint. Examples of valid lesson application:
+- Lesson "Don't lead bullets with the verb 'Built'" → avoid "Built X" openings
+- Lesson "Prefer 'investigated' over 'analyzed'" → swap word choice
+
+FORBIDDEN:
+- A lesson can NEVER introduce a metric, dollar amount, percentage, or proper noun absent from master YAML
+- A lesson can NEVER override a JD requirement
+- If lessons conflict with the bullet-selector's chosen claims, the claims win — log the conflict in `prose-result.json` under `lessons_skipped: [...]`
+
+If `feedback_dir` is null/missing or no records match, proceed without lessons. This is the v0.5 default for new users.
+
 ## Voice rules (read the voice_guide; this is the short version)
 
 - **Explorer not marketer.** "I'm investigating how X enables Y" not "I'm passionate about driving Y."
