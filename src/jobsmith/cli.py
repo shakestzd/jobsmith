@@ -7,6 +7,11 @@ Exposes:
     jobsmith doctor        — diagnose common setup issues
     jobsmith fact-check    — verify draft claims against master YAMLs
     jobsmith anchor-check  — verify anchor bullets are preserved
+    jobsmith site init     — scaffold the listings website project
+    jobsmith site list     — print every assembled application in a Rich table
+    jobsmith site render   — quarto render the site (private or --public)
+    jobsmith site serve    — quarto preview the site (live reload)
+    jobsmith site review   — open one application's index.html in the browser
     jobsmith --version
 """
 
@@ -22,6 +27,7 @@ from rich.table import Table
 
 from . import __version__
 from .assemble import assemble_all, assemble_application
+from .site import discover_applications, init_site, render_site
 from .config import CONFIG_FILENAME, find_config, load_config
 from .factcheck import check_draft
 from .guard import check_anchors, render_diff_md
@@ -508,6 +514,248 @@ def anchor_check_cmd(
         )
 
     raise typer.Exit(code=result.exit_code)
+
+
+# ---------- site subcommand group ----------
+
+
+site_app = typer.Typer(
+    name="site",
+    help="Aggregator website over private/applications/. Init, render, serve, list, review.",
+    no_args_is_help=True,
+)
+app.add_typer(site_app)
+
+
+@site_app.command("init")
+def site_init_cmd(
+    root: Path = typer.Argument(
+        Path("."),
+        help="Root of the user's repo. The website project is scaffolded here.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing _quarto.yml / index.qmd / styles/jobsmith.scss.",
+    ),
+) -> None:
+    """Scaffold the listings website project (`_quarto.yml`, `index.qmd`,
+    `styles/jobsmith.scss`, `.gitignore`) into *root*. By default existing
+    files are preserved; pass `--force` to overwrite."""
+    written = init_site(root.resolve(), overwrite=force)
+    if not written:
+        console.print(
+            "[yellow]No files written[/yellow] — every site template already "
+            "exists. Pass --force to refresh from the bundled templates."
+        )
+        return
+    console.print(
+        f"[green]Scaffolded {len(written)} file(s):[/green]"
+    )
+    for path in written:
+        console.print(f"  WROTE {path}")
+    console.print(
+        "\nNext: run [cyan]jobsmith assemble --all[/cyan] to populate per-app "
+        "index.qmd files, then [cyan]jobsmith site serve[/cyan] to preview."
+    )
+
+
+@site_app.command("list")
+def site_list_cmd(
+    root: Path = typer.Argument(
+        Path("."), help="Root of the user's repo (must contain private/applications/)."
+    ),
+) -> None:
+    """Print every assembled application as a Rich table.
+
+    Reads each app's index.qmd frontmatter (company, position, status,
+    fit_score, date_found) and surfaces them sorted by fit_score desc.
+    Apps without an index.qmd or .apply-state/ are skipped silently —
+    same convention as `assemble_all` / Quarto listings.
+    """
+    apps = discover_applications(root.resolve())
+    if not apps:
+        console.print(
+            "[yellow]No assembled applications found[/yellow] under "
+            f"{(root / 'private' / 'applications').resolve()}.\n"
+            "Run [cyan]jobsmith assemble <slug>[/cyan] (or "
+            "[cyan]jobsmith assemble --all[/cyan]) first."
+        )
+        raise typer.Exit(code=0)
+
+    table = Table(title="Assembled applications", show_lines=False)
+    table.add_column("Slug", style="cyan", no_wrap=True)
+    table.add_column("Company")
+    table.add_column("Position")
+    table.add_column("Status")
+    table.add_column("Fit", justify="right")
+    table.add_column("Found")
+
+    rows = []
+    for app_dir in apps:
+        meta = _read_index_frontmatter(app_dir / "index.qmd")
+        rows.append(
+            (
+                app_dir.name,
+                meta.get("company") or "—",
+                meta.get("position") or "—",
+                meta.get("status") or "—",
+                meta.get("fit_score"),
+                meta.get("date_found") or "—",
+            )
+        )
+
+    # Sort: highest fit_score first, then by date_found desc.
+    def _sort_key(row: tuple) -> tuple:
+        fit = row[4]
+        return (-(fit if isinstance(fit, (int, float)) else -1), str(row[5]))
+
+    rows.sort(key=_sort_key)
+    for slug, company, position, status, fit, date_found in rows:
+        fit_display = f"{fit:.2f}" if isinstance(fit, (int, float)) else "—"
+        table.add_row(slug, str(company), str(position), str(status), fit_display, str(date_found))
+
+    console.print(table)
+
+
+@site_app.command("render")
+def site_render_cmd(
+    root: Path = typer.Argument(
+        Path("."), help="Root of the website project (contains _quarto.yml)."
+    ),
+    public: bool = typer.Option(
+        False,
+        "--public",
+        help="Render the sanitized public variant to _site-public/ (strips "
+        "salary, fit_score, hm_*, etc. — see docs/architecture.md "
+        "Privacy model). Default is private (everything → _site/).",
+    ),
+) -> None:
+    """Run `quarto render` on the website project.
+
+    Privacy model: default mode renders to `_site/` (gitignored). The
+    `--public` flag re-renders to `_site-public/` after applying
+    `jobsmith.site.sanitize_variables` so sensitive keys are stripped.
+    """
+    mode = "public" if public else "private"
+    try:
+        out = render_site(root.resolve(), mode=mode)
+    except NotImplementedError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    label = "[red bold]PUBLIC[/red bold]" if public else "[green]private[/green]"
+    console.print(f"Rendered ({label}) to: [cyan]{out}[/cyan]")
+
+
+@site_app.command("serve")
+def site_serve_cmd(
+    root: Path = typer.Argument(
+        Path("."), help="Root of the website project (contains _quarto.yml)."
+    ),
+) -> None:
+    """Run `quarto preview` for live-reload development.
+
+    Always serves the private variant — the public sanitization step only
+    runs at render-time, not preview-time. If you need to QA the public
+    variant before sharing, run `jobsmith site render --public` and open
+    `_site-public/index.html` directly.
+    """
+    quarto = shutil.which("quarto")
+    if quarto is None:
+        console.print(
+            "[red]quarto is not on PATH.[/red] "
+            "Install Quarto (https://quarto.org/docs/get-started/) and re-run."
+        )
+        raise typer.Exit(code=2)
+
+    import subprocess
+
+    console.print(f"[cyan]quarto preview[/cyan] at {root.resolve()}")
+    result = subprocess.run([quarto, "preview", str(root.resolve())])
+    raise typer.Exit(code=result.returncode)
+
+
+@site_app.command("review")
+def site_review_cmd(
+    slug: str = typer.Argument(..., help="Application slug (directory name)."),
+    root: Path = typer.Option(
+        Path("."), "--root", help="Root of the user's repo."
+    ),
+) -> None:
+    """Open the rendered review surface for one application in the default browser.
+
+    Resolves to `<root>/_site/private/applications/<slug>/index.html` if the
+    site has been rendered; otherwise falls back to opening
+    `<root>/private/applications/<slug>/index.qmd` so the user can render manually.
+    """
+    import webbrowser
+
+    site_html = (
+        root.resolve()
+        / "_site"
+        / "private"
+        / "applications"
+        / slug
+        / "index.html"
+    )
+    raw_qmd = (
+        root.resolve()
+        / "private"
+        / "applications"
+        / slug
+        / "index.qmd"
+    )
+
+    if site_html.is_file():
+        target = site_html
+    elif raw_qmd.is_file():
+        console.print(
+            f"[yellow]No rendered HTML found for {slug}.[/yellow] "
+            "Opening the source QMD instead — run "
+            "[cyan]jobsmith site render[/cyan] first to get rendered output."
+        )
+        target = raw_qmd
+    else:
+        console.print(
+            f"[red]Application {slug!r} not found[/red] under "
+            f"{(root / 'private' / 'applications').resolve()}."
+        )
+        raise typer.Exit(code=2)
+
+    webbrowser.open(target.as_uri())
+    console.print(f"Opened: [cyan]{target}[/cyan]")
+
+
+def _read_index_frontmatter(path: Path) -> dict:
+    """Extract the YAML frontmatter from a Quarto index.qmd as a dict.
+
+    Returns an empty dict if the file has no frontmatter, parsing fails, or
+    the file does not exist. Used by `jobsmith site list` to surface
+    company / position / status / fit_score per row without re-running the
+    full assemble pipeline.
+    """
+    if not path.is_file():
+        return {}
+
+    text = path.read_text()
+    if not text.startswith("---"):
+        return {}
+
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return {}
+
+    import yaml
+
+    try:
+        meta = yaml.safe_load(parts[1])
+    except yaml.YAMLError:
+        return {}
+
+    return meta if isinstance(meta, dict) else {}
 
 
 # ---------- helpers ----------
