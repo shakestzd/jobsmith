@@ -290,6 +290,88 @@ def test_phase_failed_marker_without_reason(monkeypatch):
     assert failed[0].error is None
 
 
+def test_phase_complete_marker_two_brackets(monkeypatch):
+    """Marker with exactly 2 closing brackets (`<<PHASE_COMPLETE: gather>>`) must match."""
+    payload = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {"type": "text", "text": "Work done. <<PHASE_COMPLETE: gather>>"}
+            ]
+        },
+    }
+    _mock_popen_with_lines(monkeypatch, [json.dumps(payload) + "\n"])
+
+    events = list(run_phase(PHASE, SESSION_ID, PROMPT, PLUGIN_DIR, SYSTEM_PROMPT))
+
+    complete = [e for e in events if e.type == "phase_complete"]
+    assert len(complete) == 1
+    assert complete[0].name == "gather"
+
+
+def test_phase_complete_marker_three_brackets(monkeypatch):
+    """Marker with exactly 3 closing brackets (regression check)."""
+    payload = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {"type": "text", "text": "Work done. <<PHASE_COMPLETE: gather>>>"}
+            ]
+        },
+    }
+    _mock_popen_with_lines(monkeypatch, [json.dumps(payload) + "\n"])
+
+    events = list(run_phase(PHASE, SESSION_ID, PROMPT, PLUGIN_DIR, SYSTEM_PROMPT))
+
+    complete = [e for e in events if e.type == "phase_complete"]
+    assert len(complete) == 1
+    assert complete[0].name == "gather"
+
+
+def test_phase_failed_marker_two_brackets(monkeypatch):
+    """`<<PHASE_FAILED: draft : reason>>` (2 brackets) must match."""
+    payload = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Halting. <<PHASE_FAILED: draft : test-reason>>",
+                }
+            ]
+        },
+    }
+    _mock_popen_with_lines(monkeypatch, [json.dumps(payload) + "\n"])
+    events = list(run_phase(PHASE, SESSION_ID, PROMPT, PLUGIN_DIR, SYSTEM_PROMPT))
+
+    failed = [e for e in events if e.type == "phase_failed"]
+    assert len(failed) == 1
+    assert failed[0].name == "draft"
+    assert failed[0].error == "test-reason"
+
+
+def test_phase_complete_marker_one_bracket_no_match(monkeypatch):
+    """Marker with only 1 closing bracket (`<<PHASE_COMPLETE: gather>`) must NOT match."""
+    payload = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {"type": "text", "text": "Work done. <<PHASE_COMPLETE: gather>"}
+            ]
+        },
+    }
+    _mock_popen_with_lines(monkeypatch, [json.dumps(payload) + "\n"])
+
+    events = list(run_phase(PHASE, SESSION_ID, PROMPT, PLUGIN_DIR, SYSTEM_PROMPT))
+
+    # Should be parsed as regular text, not phase_complete
+    complete = [e for e in events if e.type == "phase_complete"]
+    assert len(complete) == 0
+    text = [e for e in events if e.type == "text"]
+    assert len(text) == 1
+    assert "<<PHASE_COMPLETE: gather>" in text[0].text
+
+
 def test_subprocess_reaped_before_stderr_read(monkeypatch):
     """Regression: caller breaking early on phase_complete must NOT cause a hang
     because the finally block reads stderr before reaping the subprocess.
