@@ -1,0 +1,28 @@
+// =============================================================================
+// jobsmith theme — Apple
+// Brand: Apple silver #A1A1A6, blue #007AFF, near-black #1D1D1F
+// =============================================================================
+
+$jobsmith-primary:      #1D1D1F;   // Apple near-black
+$jobsmith-primary-bg:   #F5F5F7;   // Apple system gray bg
+$jobsmith-accent-color: #007AFF;   // Apple blue (system)
+$jobsmith-accent-bg:    #E5F0FF;   // pale blue tint
+
+// --- Heading accent border ---
+h1, h2 {
+  border-left: 4px solid $jobsmith-primary;
+  padding-left: 0.5rem;
+}
+
+// --- Blockquote styling ---
+blockquote {
+  border-left: 3px solid $jobsmith-accent-color;
+  background-color: $jobsmith-accent-bg;
+  padding: 0.5rem 1rem;
+  margin-left: 0;
+}
+
+// --- Callout tip border ---
+.callout-tip {
+  border-left-color: $jobsmith-primary !important;
+}

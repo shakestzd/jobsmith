@@ -1,0 +1,28 @@
+// =============================================================================
+// jobsmith theme — Stripe
+// Brand: Stripe purple #635BFF, indigo #0A2540
+// =============================================================================
+
+$jobsmith-primary:      #635BFF;   // Stripe purple
+$jobsmith-primary-bg:   #EFEDFF;   // pale purple tint
+$jobsmith-accent-color: #0A2540;   // Stripe indigo
+$jobsmith-accent-bg:    #F6F9FC;   // near-white indigo tint
+
+// --- Heading accent border ---
+h1, h2 {
+  border-left: 4px solid $jobsmith-primary;
+  padding-left: 0.5rem;
+}
+
+// --- Blockquote styling ---
+blockquote {
+  border-left: 3px solid $jobsmith-accent-color;
+  background-color: $jobsmith-accent-bg;
+  padding: 0.5rem 1rem;
+  margin-left: 0;
+}
+
+// --- Callout tip border ---
+.callout-tip {
+  border-left-color: $jobsmith-primary !important;
+}

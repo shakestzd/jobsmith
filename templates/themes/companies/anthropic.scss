@@ -1,0 +1,28 @@
+// =============================================================================
+// jobsmith theme — Anthropic
+// Brand: Anthropic clay #CC785C, ink #181818, paper #F5F0EB
+// =============================================================================
+
+$jobsmith-primary:      #CC785C;   // Anthropic clay
+$jobsmith-primary-bg:   #F5E8E1;   // pale clay tint
+$jobsmith-accent-color: #181818;   // Anthropic ink
+$jobsmith-accent-bg:    #F5F0EB;   // Anthropic paper
+
+// --- Heading accent border ---
+h1, h2 {
+  border-left: 4px solid $jobsmith-primary;
+  padding-left: 0.5rem;
+}
+
+// --- Blockquote styling ---
+blockquote {
+  border-left: 3px solid $jobsmith-accent-color;
+  background-color: $jobsmith-accent-bg;
+  padding: 0.5rem 1rem;
+  margin-left: 0;
+}
+
+// --- Callout tip border ---
+.callout-tip {
+  border-left-color: $jobsmith-primary !important;
+}
