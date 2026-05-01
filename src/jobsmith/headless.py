@@ -52,8 +52,8 @@ from pathlib import Path
 JOBSMITH_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "jobsmith.headless")
 
 # Regex that signals the end of a phase inside a text block.
-_PHASE_COMPLETE_RE = re.compile(r"<<PHASE_COMPLETE:\s*(\w+)\s*>>>")
-_PHASE_FAILED_RE = re.compile(r"<<PHASE_FAILED:\s*(\w+)\s*(?::\s*([^>]+?)\s*)?>>>")
+_PHASE_COMPLETE_RE = re.compile(r"<<PHASE_COMPLETE:\s*(\w+)\s*>>+")
+_PHASE_FAILED_RE = re.compile(r"<<PHASE_FAILED:\s*(\w+)\s*(?::\s*([^>]+?)\s*)?>>+")
 
 # Marker text fragment scanned for tool results.
 _TOOL_RESULT_TYPE = "tool_result"
