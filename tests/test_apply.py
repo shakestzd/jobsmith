@@ -819,9 +819,12 @@ def test_reconcile_canonical_slug_renames_when_different(tmp_path: Path) -> None
         json.dumps({"company": "Clay", "position": "GTM Data Analyst"})
     )
 
-    canonical_slug = _reconcile_canonical_slug("url-slug", tmp_path, _past_started_at())
+    canonical_slug, reconciled = _reconcile_canonical_slug(
+        "url-slug", tmp_path, _past_started_at()
+    )
 
     assert canonical_slug == "clay-gtm-data-analyst"
+    assert reconciled is True, "successful reconcile must signal True"
     # Canonical dir must exist with the artifact
     canonical_state = tmp_path / "private" / "applications" / "clay-gtm-data-analyst" / ".apply-state"
     assert canonical_state.exists()
@@ -842,11 +845,12 @@ def test_reconcile_canonical_slug_noop_when_already_canonical(tmp_path: Path) ->
         json.dumps({"company": "Acme", "position": "ML Engineer"})
     )
 
-    canonical_slug = _reconcile_canonical_slug(
+    canonical_slug, reconciled = _reconcile_canonical_slug(
         "acme-ml-engineer", tmp_path, _past_started_at()
     )
 
     assert canonical_slug == "acme-ml-engineer"
+    assert reconciled is True
     # Dir must still exist
     assert (apply_state / "jd-parsed.json").exists()
 
@@ -867,25 +871,32 @@ def test_reconcile_canonical_slug_falls_back_to_alt_dir(tmp_path: Path) -> None:
         json.dumps({"company": "Clay", "position": "GTM Data Analyst"})
     )
 
-    canonical_slug = _reconcile_canonical_slug("jobs", tmp_path, _past_started_at())
+    canonical_slug, reconciled = _reconcile_canonical_slug(
+        "jobs", tmp_path, _past_started_at()
+    )
 
     assert canonical_slug == "clay-gtm-data-analyst"
+    assert reconciled is True
     # The canonical dir must still be intact (no rename needed — already correct name)
     assert (canonical_state / "jd-parsed.json").exists()
 
 
 def test_reconcile_canonical_slug_missing_jd_parsed_returns_active(tmp_path: Path) -> None:
-    """With no jd-parsed.json anywhere, returns active_slug unchanged."""
+    """With no jd-parsed.json anywhere, returns active_slug unchanged + reconciled=False."""
     from jobsmith.apply import _reconcile_canonical_slug
 
     _scaffold_apply_config_for_reconcile(tmp_path, slug="url-slug")
     # No jd-parsed.json written anywhere
 
-    canonical_slug = _reconcile_canonical_slug(
+    canonical_slug, reconciled = _reconcile_canonical_slug(
         "url-slug", tmp_path, _past_started_at()
     )
 
     assert canonical_slug == "url-slug"
+    assert reconciled is False, (
+        "missing jd-parsed must signal reconciled=False so the URL index "
+        "is not corrupted with a non-canonical slug"
+    )
 
 
 def test_reconcile_canonical_slug_skips_stale_fallback_candidates(
@@ -915,12 +926,13 @@ def test_reconcile_canonical_slug_skips_stale_fallback_candidates(
     os.utime(stale_jd, (one_hour_ago, one_hour_ago))
 
     # started_at = "now-ish"; anything older than ~1s must be filtered out.
-    canonical_slug = _reconcile_canonical_slug(
+    canonical_slug, reconciled = _reconcile_canonical_slug(
         "url-slug", tmp_path, time.time()
     )
 
     # Helper must NOT pick up the stale unrelated job.
     assert canonical_slug == "url-slug"
+    assert reconciled is False
     # Stale dir must still exist untouched.
     assert stale_state.exists()
 
@@ -949,12 +961,16 @@ def test_reconcile_canonical_slug_halts_on_existing_canonical_collision(
         json.dumps({"company": "Clay", "position": "Old Role"})
     )
 
-    canonical_slug = _reconcile_canonical_slug(
+    canonical_slug, reconciled = _reconcile_canonical_slug(
         "url-slug", tmp_path, _past_started_at()
     )
 
     # Must refuse to merge — return active_slug, leave both dirs intact.
     assert canonical_slug == "url-slug"
+    assert reconciled is False, (
+        "collision must signal reconciled=False so the URL index is not "
+        "overwritten with the URL-slug (non-canonical) value"
+    )
     assert (apply_state / "jd-parsed.json").exists(), "active dir must be untouched"
     assert (canonical_state / "jd-parsed.json").exists(), "stale canonical dir must be untouched"
     # The active dir must NOT have been moved INSIDE the canonical dir
@@ -981,11 +997,12 @@ def test_reconcile_canonical_slug_replaces_empty_canonical_dir(tmp_path: Path) -
     )
     canonical_dir.mkdir(parents=True, exist_ok=True)
 
-    canonical_slug = _reconcile_canonical_slug(
+    canonical_slug, reconciled = _reconcile_canonical_slug(
         "url-slug", tmp_path, _past_started_at()
     )
 
     assert canonical_slug == "clay-gtm-data-analyst"
+    assert reconciled is True
     # The rename succeeded — content lives directly under canonical dir.
     assert (canonical_dir / ".apply-state" / "jd-parsed.json").exists()
     # No nested url-slug subdir.
@@ -1957,4 +1974,256 @@ def test_malformed_manifest_treated_as_incomplete(
     assert rc == 0
     assert call_count[0] == 3, (
         f"malformed manifest must be treated as incomplete; expected 3 phases, got {call_count[0]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 17. roborev 910 fixes — --force uses canonical slug, index not corrupted
+# ---------------------------------------------------------------------------
+
+
+def test_force_uses_canonical_slug_from_url_index(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """--force on a URL already in the index targets the canonical dir, not URL-slug.
+
+    This prevents the corruption pattern where --force creates a duplicate
+    URL-slug dir, then post-phase-1 reconcile refuses to merge (canonical
+    dir already exists, non-empty), leaving two stale directories.
+    """
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    canonical = "acme-ml-engineer"
+    url = "https://example.com/jobs/totally-different-url-slug"
+    apps_dir = tmp_path / "private" / "applications"
+    apps_dir.mkdir(parents=True, exist_ok=True)
+    # URL is already in the index from a prior successful run.
+    (apps_dir / ".url-index.json").write_text(
+        f'{{"{url}": "{canonical}"}}'
+    )
+    # And the canonical dir has content from that prior run.
+    apply_state = apps_dir / canonical / ".apply-state"
+    apply_state.mkdir(parents=True, exist_ok=True)
+    (apply_state / "jd-parsed.json").write_text(
+        '{"company": "Acme", "position": "ML Engineer"}'
+    )
+
+    seen_slugs_in_paths: list[str] = []
+    phase_sequence = ["gather", "draft", "render"]
+    call_count = [0]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        # The Paths block in the prompt should reference apply_state_dir for the
+        # canonical slug, not the URL-derived slug.
+        if canonical in prompt:
+            seen_slugs_in_paths.append(canonical)
+        idx = call_count[0]
+        call_count[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply(url, cwd=tmp_path, skip_confirm=True, force=True)
+
+    assert rc == 0
+    # Phase 1 must have started under the canonical slug, not URL-slug.
+    assert seen_slugs_in_paths, (
+        "--force should consult URL index and run phase 1 under canonical slug"
+    )
+
+    # The URL index still points at the canonical slug — not corrupted to URL-slug.
+    import json
+
+    index = json.loads(
+        (tmp_path / "private" / "applications" / ".url-index.json").read_text()
+    )
+    assert index.get(url) == canonical, (
+        f"URL index must remain pointing at canonical {canonical!r}; got: {index!r}"
+    )
+
+    # No stale URL-slug dir was ever created.
+    url_slug_dir = (
+        tmp_path / "private" / "applications" / derive_slug(url)
+    )
+    assert not url_slug_dir.exists(), (
+        f"--force must not create a URL-slug duplicate directory at {url_slug_dir}"
+    )
+
+
+def test_url_mapping_not_recorded_when_reconcile_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """If reconcile cannot derive canonical (e.g. missing jd-parsed.json), the URL
+    index must NOT be overwritten with the fallback (URL-derived) slug."""
+    import yaml
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+    content = tmp_path / "assets" / "content"
+    content.mkdir(parents=True, exist_ok=True)
+    for name in ("work.yml", "skill.yml", "education.yml", "author.yml"):
+        (content / name).write_text("# placeholder\n")
+
+    plugin_fake = _scaffold_plugin(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    # Pre-existing index — must NOT be touched after a reconcile failure.
+    canonical = "real-canonical-slug"
+    url = "https://example.com/jobs/x"
+    apps_dir = tmp_path / "private" / "applications"
+    apps_dir.mkdir(parents=True, exist_ok=True)
+    (apps_dir / ".url-index.json").write_text(
+        f'{{"{url}": "{canonical}"}}'
+    )
+    # Ensure canonical app dir has content but NO jd-parsed.json (forces
+    # reconcile to fail with reconciled=False).
+    (apps_dir / canonical).mkdir(parents=True, exist_ok=True)
+
+    phase_sequence = ["gather", "draft", "render"]
+    call_count = [0]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        idx = call_count[0]
+        call_count[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: True)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply(url, cwd=tmp_path, skip_confirm=True)
+    assert rc == 0
+
+    import json
+
+    index = json.loads((apps_dir / ".url-index.json").read_text())
+    assert index.get(url) == canonical, (
+        f"URL index must remain pointing at the original canonical {canonical!r}; "
+        f"got: {index!r}"
+    )
+
+
+def test_step_45_runs_when_gather_skipped_but_decisions_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Manifest shows phase 1 done but bullet-decisions.json is missing
+    (prior run failed at the wrapper-side anchor guard).  When draft is
+    about to run, step 4/5 must execute even though gather was skipped.
+    """
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    canonical = "acme-ml-engineer"
+    apply_state = (
+        tmp_path / "private" / "applications" / canonical / ".apply-state"
+    )
+    _write_manifest(apply_state, completed_specialists=_PHASE_1_SPECIALISTS)
+    # bullet-decisions.json deliberately missing.
+    (tmp_path / "private" / "applications" / ".url-index.json").write_text(
+        '{"https://example.com/jobs/x": "acme-ml-engineer"}'
+    )
+
+    step45_calls: list[str] = []
+
+    def fake_step45(slug, cwd):
+        step45_calls.append(slug)
+        # Simulate success and produce the artifact.
+        decisions = (
+            cwd / "private" / "applications" / slug / ".apply-state" / "bullet-decisions.json"
+        )
+        decisions.parent.mkdir(parents=True, exist_ok=True)
+        decisions.write_text("{}")
+        return 0
+
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", fake_step45)
+
+    seen_phases: list[str] = []
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        seen_phases.append(phase)
+        idx = len(seen_phases) - 1
+        return iter(_make_phase_events(["draft", "render"][idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply(
+        "https://example.com/jobs/x",
+        cwd=tmp_path,
+        skip_confirm=True,
+    )
+    assert rc == 0
+    assert seen_phases == ["draft", "render"], (
+        f"phase 1 must stay skipped; got {seen_phases!r}"
+    )
+    assert step45_calls == [canonical], (
+        f"step 4/5 must run before draft when bullet-decisions.json is missing, "
+        f"got: {step45_calls!r}"
+    )
+
+
+def test_step_45_skipped_when_gather_skipped_and_decisions_present(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """If bullet-decisions.json already exists, step 4/5 is NOT re-run."""
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    canonical = "acme-ml-engineer"
+    apply_state = (
+        tmp_path / "private" / "applications" / canonical / ".apply-state"
+    )
+    _write_manifest(apply_state, completed_specialists=_PHASE_1_SPECIALISTS)
+    # bullet-decisions.json already present from a prior successful step 4/5.
+    (apply_state / "bullet-decisions.json").write_text("{}")
+    (tmp_path / "private" / "applications" / ".url-index.json").write_text(
+        '{"https://example.com/jobs/x": "acme-ml-engineer"}'
+    )
+
+    step45_calls: list[str] = []
+
+    def fake_step45(slug, cwd):
+        step45_calls.append(slug)
+        return 0
+
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", fake_step45)
+
+    seen_phases: list[str] = []
+    phase_sequence = ["draft", "render"]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        seen_phases.append(phase)
+        idx = len(seen_phases) - 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply(
+        "https://example.com/jobs/x",
+        cwd=tmp_path,
+        skip_confirm=True,
+    )
+    assert rc == 0
+    assert step45_calls == [], (
+        f"step 4/5 must be skipped when bullet-decisions.json exists; got: {step45_calls!r}"
     )

@@ -366,18 +366,19 @@ def _render_event(event: headless.Event) -> str | None:
 
 def _reconcile_canonical_slug(
     active_slug: str, cwd: Path, started_at: float
-) -> str:
-    """Return the canonical slug after an optional directory rename.
+) -> tuple[str, bool]:
+    """Return ``(slug, reconciled)`` after an optional directory rename.
 
     After phase 1 (gather), the specialist ``apply-jd-parser`` derives a
     canonical slug of the form ``{company-slug}-{position-slug}`` and writes
     artifacts under *that* directory.  The wrapper may have pre-created a
     different directory from the raw URL.  This helper reconciles the two.
 
-    The session id is intentionally NOT returned: Claude Code stores its
-    session JSONL file under the deterministic id derived from the original
-    ``active_slug``.  Switching the id mid-run would orphan that file and
-    break ``--resume`` for phases 2/3.  Callers keep the original session id.
+    The second return value, ``reconciled``, signals whether the slug was
+    successfully derived from a ``jd-parsed.json`` (i.e. the helper produced
+    a true canonical slug, not a fallback).  Callers MUST gate persistence
+    of the URL → slug mapping on this flag — recording a non-canonical slug
+    would corrupt future resume lookups.
 
     Strategy
     --------
@@ -389,12 +390,13 @@ def _reconcile_canonical_slug(
     3. Compute canonical = ``_slugify_part(company) + "-" + _slugify_part(position)``.
     4. If the *owning* directory's name differs from canonical, rename it.
        If the canonical directory already exists and is non-empty, halt with
-       a controlled error and return ``active_slug`` unchanged — the user
-       must resolve the collision manually.
-    5. Return ``canonical``.
+       a controlled error and return ``(active_slug, False)`` — the user
+       must resolve the collision manually, and the index must NOT be
+       updated to point at the active (non-canonical) slug.
+    5. Return ``(canonical, True)``.
 
-    When no qualifying ``jd-parsed.json`` is found, returns ``active_slug``
-    unchanged and logs a warning — the caller decides whether to abort.
+    When no qualifying ``jd-parsed.json`` is found, returns
+    ``(active_slug, False)`` and logs a warning.
     """
     config_path = find_config(cwd)
     if config_path is None:
@@ -402,7 +404,7 @@ def _reconcile_canonical_slug(
             "reconcile: cannot locate .apply-config.yaml — skipping slug reconciliation.",
             err=True,
         )
-        return active_slug
+        return active_slug, False
 
     config = load_config(config_path)
     repo_root = config_path.parent
@@ -427,7 +429,7 @@ def _reconcile_canonical_slug(
                 "reconcile: no jd-parsed.json produced in this run — cannot derive canonical slug.",
                 err=True,
             )
-            return active_slug
+            return active_slug, False
         jd_path = max(candidates, key=lambda p: p.stat().st_mtime)
         owning_dir = jd_path.parent.parent  # strip "/.apply-state/jd-parsed.json"
 
@@ -441,14 +443,14 @@ def _reconcile_canonical_slug(
             f"reconcile: failed to parse jd-parsed.json ({exc}) — skipping.",
             err=True,
         )
-        return active_slug
+        return active_slug, False
 
     if not company or not position:
         click.echo(
             "reconcile: jd-parsed.json missing company or position — skipping.",
             err=True,
         )
-        return active_slug
+        return active_slug, False
 
     canonical = f"{_slugify_part(company)}-{_slugify_part(position)}"
 
@@ -472,7 +474,7 @@ def _reconcile_canonical_slug(
                     "Resolve manually (rename or remove the stale directory) and re-run.",
                     err=True,
                 )
-                return active_slug
+                return active_slug, False
             else:
                 canonical_dir.rmdir()
                 shutil.move(str(owning_dir), str(canonical_dir))
@@ -487,7 +489,7 @@ def _reconcile_canonical_slug(
                 err=True,
             )
 
-    return canonical
+    return canonical, True
 
 
 # ---------------------------------------------------------------------------
@@ -815,8 +817,19 @@ def run_apply(
     plugin_directory = get_plugin_dir()
 
     if force:
-        slug = derive_slug(url)
-        from_index = False
+        # --force restarts the pipeline but must still target the existing
+        # canonical directory if we know about it; otherwise phase 1 writes
+        # under the URL slug and the post-phase-1 reconcile would refuse to
+        # merge into the non-empty canonical dir, leaving us in a broken
+        # state that corrupts the URL index. Consult the persisted index
+        # first; fall back to URL-derived slug only when the URL is unknown.
+        index = _load_url_index(resolved_cwd)
+        if url in index:
+            slug = index[url]
+            from_index = True
+        else:
+            slug = derive_slug(url)
+            from_index = False
         rdr.print_force_banner()
     else:
         slug, from_index = _resolve_starting_slug(url, resolved_cwd)
@@ -853,6 +866,19 @@ def run_apply(
     total_phases = len(_PHASES)
 
     for phase_name, phase_num in _PHASES:
+        # Step 3pre: just-in-time wrapper-owned prerequisites that must run
+        # regardless of whether the prior phase ran or was skipped.  Step 4/5
+        # produces ``bullet-decisions.json`` (a wrapper artifact, not a
+        # specialist artifact); a prior run can mark all gather specialists
+        # as ``ok`` but stop at the anchor guard, so we re-run step 4/5
+        # before draft any time it is missing.
+        if phase_name == "draft" and not phase_done["draft"]:
+            state_dir = _apply_state_dir(slug, resolved_cwd)
+            if state_dir is not None and not (state_dir / "bullet-decisions.json").exists():
+                rc = _run_step45_orchestration(slug, resolved_cwd)
+                if rc != 0:
+                    return rc
+
         # Skip phases already marked complete in manifest.json.
         if phase_done[phase_name]:
             rdr.print_phase_skipped(phase_num, phase_name)
@@ -921,23 +947,25 @@ def run_apply(
             )
             return 2
 
-        # Step 3g: between-phase orchestration. After gather (phase 1) we
-        # reconcile the canonical slug (phase 1 may have written artifacts
-        # under a different directory than the URL-derived slug), record the
-        # URL → canonical mapping, recompute session_id (Option A: phase 2/3
-        # run under a fresh session keyed on the canonical slug — phase
-        # prompts read .apply-state/* directly so conversation continuity is
-        # not required), then run the anchor guard / relevance inquiry to
-        # produce the bullet-decisions.json that phase 2 needs.
+        # Step 3g: between-phase orchestration. After gather we reconcile the
+        # canonical slug (phase 1 may have written artifacts under a different
+        # directory than the URL-derived slug), and recompute session_id
+        # (Option A: phase 2/3 run under a fresh session keyed on the
+        # canonical slug — phase prompts read .apply-state/* directly so
+        # conversation continuity is not required).  The URL → slug mapping
+        # is persisted only when reconciliation actually produced a canonical
+        # slug; otherwise we'd corrupt the index by recording a fallback
+        # (URL-derived) slug as if it were canonical.  Step 4/5 runs before
+        # phase 2 (in Step 3pre above) regardless of how gather got "done".
         if phase_name == "gather":
-            new_slug = _reconcile_canonical_slug(slug, resolved_cwd, started_at)
+            new_slug, reconciled = _reconcile_canonical_slug(
+                slug, resolved_cwd, started_at
+            )
             if new_slug != slug:
                 slug = new_slug
                 session_id = headless.deterministic_session_id(slug)
-            _record_url_mapping(url, slug, resolved_cwd)
-            rc = _run_step45_orchestration(slug, resolved_cwd)
-            if rc != 0:
-                return rc
+            if reconciled:
+                _record_url_mapping(url, slug, resolved_cwd)
             # Render per-phase summary panel before the confirm gate
             state_dir = _apply_state_dir(slug, resolved_cwd)
             if state_dir is not None:
