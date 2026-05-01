@@ -186,8 +186,17 @@ def _write_record(
     safe_ts = ts.replace(":", "-").replace("+", "p")
     # Timestamp leads so lexicographic sort = chronological sort. ISO 8601
     # is constant-width up to the offset, which makes "sort by filename" a
-    # safe primitive for the readback specialists.
+    # safe primitive for the readback specialists. Append a -NN counter on
+    # collision so back-to-back records (multiple edits in one record()
+    # call landing in the same microsecond) don't overwrite each other.
+    # We avoid Path.with_suffix here because safe_ts contains dots in the
+    # microsecond field — with_suffix would replace the ".microseconds"
+    # token and mangle the filename.
     path = feedback_dir / f"{safe_ts}__{slug}.json"
+    counter = 1
+    while path.exists():
+        path = feedback_dir / f"{safe_ts}__{slug}-{counter:02d}.json"
+        counter += 1
     path.write_text(json.dumps(record, indent=2))
     return record
 

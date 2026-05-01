@@ -42,6 +42,10 @@ def _write_feedback_record(
     feedback_dir.mkdir(parents=True, exist_ok=True)
     safe_ts = ts.replace(":", "-").replace("+", "p")
     path = feedback_dir / f"{safe_ts}__{slug}.json"
+    counter = 1
+    while path.exists():
+        path = feedback_dir / f"{safe_ts}__{slug}-{counter:02d}.json"
+        counter += 1
     path.write_text(json.dumps(record))
 
     if age_days is not None:
@@ -425,3 +429,26 @@ def test_diff_aligns_around_inserted_bullet(tmp_path: Path) -> None:
     r = records[0]
     assert r["before"] == ""
     assert "Investigated" in r["after"]
+
+
+# ---------------------------------------------------------------------------
+# test_record_filenames_are_unique_when_timestamps_collide
+# ---------------------------------------------------------------------------
+
+
+def test_record_filenames_are_unique_when_timestamps_collide(tmp_path: Path) -> None:
+    """Two records written at the same timestamp must not overwrite each other."""
+    feedback_dir = tmp_path / "private" / "feedback"
+
+    # Force the same timestamp on three records — exercise the collision counter.
+    ts = "2026-05-01T19:30:00.000000+00:00"
+    paths = [
+        _write_feedback_record(feedback_dir, "acme", "prose-bullet", "x", "y", timestamp=ts),
+        _write_feedback_record(feedback_dir, "acme", "prose-bullet", "p", "q", timestamp=ts),
+        _write_feedback_record(feedback_dir, "acme", "prose-bullet", "u", "v", timestamp=ts),
+    ]
+
+    # All three must be distinct paths and all three must exist on disk.
+    assert len({str(p) for p in paths}) == 3
+    for p in paths:
+        assert p.exists(), f"{p} was overwritten by a later same-timestamp write"

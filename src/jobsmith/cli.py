@@ -813,7 +813,16 @@ def feedback_record(slug: str = typer.Argument(...)) -> None:
     from .feedback import record as _record
 
     repo_root = repo_root_for()
-    app_dir = repo_root / "private" / "applications" / slug
+    # Honour `output.applications_dir` from .apply-config.yaml — repos with a
+    # custom layout (e.g. archive/applications/) would otherwise be invisible
+    # to feedback record. Fall back to the default when no config exists.
+    config_path = find_config(repo_root)
+    if config_path is not None:
+        cfg = load_config(config_path)
+        apps_dir = resolve(cfg.output.applications_dir, config_path.parent)
+    else:
+        apps_dir = repo_root / "private" / "applications"
+    app_dir = apps_dir / slug
     feedback_dir = repo_root / "private" / "feedback"
 
     if not app_dir.exists():

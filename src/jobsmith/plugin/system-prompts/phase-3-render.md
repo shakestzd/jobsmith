@@ -84,7 +84,9 @@ Per-specialist `inputs` to include:
 
 ### Step 7 — Render + portfolio/ATS + layout (sequential)
 
-1. Dispatch `apply-resume-renderer`. Read `render-log.json`. If `page_count != 1` or render failed, retry once; on second failure halt.
+1. Dispatch `apply-resume-renderer`. Read `render-log.json`.
+   - If render *failed* (Quarto error, missing template, etc.): retry once; on second failure halt.
+   - If render *succeeded*, defer the page-count verdict to `apply-visual-layout-reviewer` (Step 7.3 below). When `benchmark.resume_pdf` is in the Paths block, the user's benchmark dictates the page-count target (some benchmarks are 2-page); when no benchmark is configured, the reviewer applies the default 1-page heuristic. Do **not** halt here on `page_count != 1`.
 
 2. Dispatch `apply-portfolio-ats-checker`. If either check fails, halt with the specific structural issue.
 
