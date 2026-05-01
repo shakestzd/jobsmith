@@ -1,0 +1,28 @@
+// =============================================================================
+// jobsmith theme — Netflix
+// Brand: Netflix Red #E50914, near-black #141414
+// =============================================================================
+
+$jobsmith-primary:      #E50914;   // Netflix red
+$jobsmith-primary-bg:   #FDEAEB;   // pale red tint
+$jobsmith-accent-color: #B4070F;   // darker red for borders
+$jobsmith-accent-bg:    #FEF3F3;   // near-white red tint
+
+// --- Heading accent border ---
+h1, h2 {
+  border-left: 4px solid $jobsmith-primary;
+  padding-left: 0.5rem;
+}
+
+// --- Blockquote styling ---
+blockquote {
+  border-left: 3px solid $jobsmith-accent-color;
+  background-color: $jobsmith-accent-bg;
+  padding: 0.5rem 1rem;
+  margin-left: 0;
+}
+
+// --- Callout tip border ---
+.callout-tip {
+  border-left-color: $jobsmith-primary !important;
+}

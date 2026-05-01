@@ -1,0 +1,28 @@
+// =============================================================================
+// jobsmith theme — PwC
+// Brand: PwC Orange #DC6B2F, dark grey #21201F
+// =============================================================================
+
+$jobsmith-primary:      #DC6B2F;   // PwC orange
+$jobsmith-primary-bg:   #FCF0E9;   // pale orange tint
+$jobsmith-accent-color: #B3561E;   // darker orange for borders
+$jobsmith-accent-bg:    #FEF6F0;   // near-white orange tint
+
+// --- Heading accent border ---
+h1, h2 {
+  border-left: 4px solid $jobsmith-primary;
+  padding-left: 0.5rem;
+}
+
+// --- Blockquote styling ---
+blockquote {
+  border-left: 3px solid $jobsmith-accent-color;
+  background-color: $jobsmith-accent-bg;
+  padding: 0.5rem 1rem;
+  margin-left: 0;
+}
+
+// --- Callout tip border ---
+.callout-tip {
+  border-left-color: $jobsmith-primary !important;
+}

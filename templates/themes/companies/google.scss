@@ -1,0 +1,28 @@
+// =============================================================================
+// jobsmith theme — Google
+// Brand: Google Blue #4285F4, Red #EA4335, Yellow #FBBC04, Green #34A853
+// =============================================================================
+
+$jobsmith-primary:      #4285F4;   // Google blue
+$jobsmith-primary-bg:   #E8F0FE;   // pale blue tint
+$jobsmith-accent-color: #EA4335;   // Google red
+$jobsmith-accent-bg:    #FEF0EE;   // pale red tint
+
+// --- Heading accent border ---
+h1, h2 {
+  border-left: 4px solid $jobsmith-primary;
+  padding-left: 0.5rem;
+}
+
+// --- Blockquote styling ---
+blockquote {
+  border-left: 3px solid $jobsmith-accent-color;
+  background-color: $jobsmith-accent-bg;
+  padding: 0.5rem 1rem;
+  margin-left: 0;
+}
+
+// --- Callout tip border ---
+.callout-tip {
+  border-left-color: $jobsmith-primary !important;
+}

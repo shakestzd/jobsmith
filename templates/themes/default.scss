@@ -1,0 +1,37 @@
+// =============================================================================
+// jobsmith default theme — neutral palette
+// =============================================================================
+//
+// SCSS CONTRACT — every curated company theme must define these variables:
+//
+//   $jobsmith-primary       — primary brand color (headings, accents)
+//   $jobsmith-primary-bg    — light tint of primary (callout backgrounds)
+//   $jobsmith-accent-color  — secondary accent color (borders, highlights)
+//   $jobsmith-accent-bg     — light tint of accent (blockquote backgrounds)
+//
+// =============================================================================
+
+// --- Variable definitions (neutral slate palette) ---
+$jobsmith-primary:      #2C3E50;   // slate blue-grey
+$jobsmith-primary-bg:   #EAF0F5;   // pale blue-grey tint
+$jobsmith-accent-color: #5D7A8A;   // muted steel
+$jobsmith-accent-bg:    #F0F4F6;   // near-white steel tint
+
+// --- Heading accent border ---
+h1, h2 {
+  border-left: 4px solid $jobsmith-primary;
+  padding-left: 0.5rem;
+}
+
+// --- Blockquote styling ---
+blockquote {
+  border-left: 3px solid $jobsmith-accent-color;
+  background-color: $jobsmith-accent-bg;
+  padding: 0.5rem 1rem;
+  margin-left: 0;
+}
+
+// --- Callout tip border ---
+.callout-tip {
+  border-left-color: $jobsmith-primary !important;
+}

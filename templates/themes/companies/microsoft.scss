@@ -1,0 +1,28 @@
+// =============================================================================
+// jobsmith theme — Microsoft
+// Brand: Microsoft Blue #0078D4, dark grey #323130
+// =============================================================================
+
+$jobsmith-primary:      #0078D4;   // Microsoft blue (Fluent design)
+$jobsmith-primary-bg:   #E3F2FD;   // pale blue tint
+$jobsmith-accent-color: #005A9E;   // darker blue for borders
+$jobsmith-accent-bg:    #EFF6FF;   // near-white blue tint
+
+// --- Heading accent border ---
+h1, h2 {
+  border-left: 4px solid $jobsmith-primary;
+  padding-left: 0.5rem;
+}
+
+// --- Blockquote styling ---
+blockquote {
+  border-left: 3px solid $jobsmith-accent-color;
+  background-color: $jobsmith-accent-bg;
+  padding: 0.5rem 1rem;
+  margin-left: 0;
+}
+
+// --- Callout tip border ---
+.callout-tip {
+  border-left-color: $jobsmith-primary !important;
+}

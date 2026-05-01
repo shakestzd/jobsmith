@@ -14,6 +14,8 @@ from jobsmith.assemble import (
     _keyword_inline,
     _must_have_table,
     _outreach_snippets_block,
+    _resolve_theme,
+    _slugify_company,
     assemble_all,
     assemble_application,
 )
