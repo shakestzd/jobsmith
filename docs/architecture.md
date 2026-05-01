@@ -245,6 +245,14 @@ The Python caller streams `claude -p` output and stops reading once it sees the 
 
 ---
 
+## Benchmark and feedback design
+
+The per-user quality benchmarks (`benchmarks:` in `.apply-config.yaml`) and the
+`jobsmith feedback` subcommand that captures user edits as structured lessons are
+documented in detail in [render-benchmark.md](render-benchmark.md).
+
+---
+
 ## CLI surface (0.4)
 
 ```bash
