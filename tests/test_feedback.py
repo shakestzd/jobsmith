@@ -64,15 +64,15 @@ def test_diff_prose_bullets_detects_significant_edit(tmp_path: Path) -> None:
     slug = "test-acme"
     app_dir = tmp_path / "private" / "applications" / slug
     feedback_dir = tmp_path / "private" / "feedback"
-    doc_dir = app_dir / "documents"
-    doc_dir.mkdir(parents=True)
+    state_dir = app_dir / ".apply-state"
+    state_dir.mkdir(parents=True)
 
-    # Agent-written version
+    # Agent-written baseline lives in .apply-state/; user edits at app root.
     original = "- Built scalable data pipelines\n- Led a team of 3 engineers\n"
     edited = "- Built highly scalable data pipelines handling 10TB daily\n- Led a team of 3 engineers\n"
 
-    (doc_dir / "prose-draft.md").write_text(edited)
-    (doc_dir / "prose-draft-agent.md").write_text(original)
+    (state_dir / "prose-draft.md").write_text(original)
+    (app_dir / "prose-draft.md").write_text(edited)
 
     records = feedback_record(slug, app_dir=app_dir, feedback_dir=feedback_dir)
     assert len(records) == 1
@@ -96,14 +96,14 @@ def test_diff_skips_whitespace_only(tmp_path: Path) -> None:
     slug = "test-whitespace"
     app_dir = tmp_path / "private" / "applications" / slug
     feedback_dir = tmp_path / "private" / "feedback"
-    doc_dir = app_dir / "documents"
-    doc_dir.mkdir(parents=True)
+    state_dir = app_dir / ".apply-state"
+    state_dir.mkdir(parents=True)
 
     original = "- Built scalable data pipelines\n"
     edited = "- Built scalable data pipelines  \n"  # trailing spaces only
 
-    (doc_dir / "prose-draft.md").write_text(edited)
-    (doc_dir / "prose-draft-agent.md").write_text(original)
+    (state_dir / "prose-draft.md").write_text(original)
+    (app_dir / "prose-draft.md").write_text(edited)
 
     records = feedback_record(slug, app_dir=app_dir, feedback_dir=feedback_dir)
     assert records == []
@@ -121,14 +121,14 @@ def test_record_writes_json_to_feedback_dir(tmp_path: Path) -> None:
     slug = "test-corp-swe"
     app_dir = tmp_path / "private" / "applications" / slug
     feedback_dir = tmp_path / "private" / "feedback"
-    doc_dir = app_dir / "documents"
-    doc_dir.mkdir(parents=True)
+    state_dir = app_dir / ".apply-state"
+    state_dir.mkdir(parents=True)
 
     original = "- Owned the billing microservice reducing latency by 20%\n"
     edited = "- Owned the billing microservice reducing P99 latency by 40% across all regions\n"
 
-    (doc_dir / "prose-draft.md").write_text(edited)
-    (doc_dir / "prose-draft-agent.md").write_text(original)
+    (state_dir / "prose-draft.md").write_text(original)
+    (app_dir / "prose-draft.md").write_text(edited)
 
     records = feedback_record(slug, app_dir=app_dir, feedback_dir=feedback_dir)
     assert len(records) == 1
@@ -261,13 +261,13 @@ def test_cli_feedback_record_invokes_module(tmp_path: Path) -> None:
 
     slug = "test-cli-slug"
     app_dir = tmp_path / "private" / "applications" / slug
-    doc_dir = app_dir / "documents"
-    doc_dir.mkdir(parents=True)
+    state_dir = app_dir / ".apply-state"
+    state_dir.mkdir(parents=True)
 
     original = "- Original bullet text here\n"
     edited = "- Modified bullet text here with extra detail\n"
-    (doc_dir / "prose-draft.md").write_text(edited)
-    (doc_dir / "prose-draft-agent.md").write_text(original)
+    (state_dir / "prose-draft.md").write_text(original)
+    (app_dir / "prose-draft.md").write_text(edited)
 
     # The CLI should accept a slug and call feedback.record()
     # We mock the working directory via the app's CWD so paths resolve correctly.
@@ -276,3 +276,60 @@ def test_cli_feedback_record_invokes_module(tmp_path: Path) -> None:
     # (may exit non-zero if no app dir found, but should NOT be ImportError)
     assert "ImportError" not in (result.output or "")
     assert result.exit_code in (0, 1, 2)
+
+
+# ---------------------------------------------------------------------------
+# test_record_populates_role_type_context_from_manifest
+# ---------------------------------------------------------------------------
+
+
+def test_record_populates_role_type_context_from_manifest(tmp_path: Path) -> None:
+    """record() must read role_type from manifest.json so wave-3 read-back can filter."""
+    from jobsmith.feedback import record as feedback_record
+
+    slug = "test-role-type"
+    app_dir = tmp_path / "private" / "applications" / slug
+    feedback_dir = tmp_path / "private" / "feedback"
+    state_dir = app_dir / ".apply-state"
+    state_dir.mkdir(parents=True)
+
+    (state_dir / "manifest.json").write_text(
+        json.dumps({"slug": slug, "role_type": "data-engineer"})
+    )
+
+    original = "- Built scalable data pipelines\n"
+    edited = "- Built highly scalable data pipelines handling 10TB daily\n"
+    (state_dir / "prose-draft.md").write_text(original)
+    (app_dir / "prose-draft.md").write_text(edited)
+
+    records = feedback_record(slug, app_dir=app_dir, feedback_dir=feedback_dir)
+    assert len(records) == 1
+    assert records[0]["context"] == {"role_type": "data-engineer"}
+
+
+# ---------------------------------------------------------------------------
+# test_significance_detects_substitution_with_similar_length
+# ---------------------------------------------------------------------------
+
+
+def test_significance_detects_substitution_with_similar_length(tmp_path: Path) -> None:
+    """A substitution with similar length but >5 changed chars must be recorded."""
+    from jobsmith.feedback import record as feedback_record
+
+    slug = "test-substitution"
+    app_dir = tmp_path / "private" / "applications" / slug
+    feedback_dir = tmp_path / "private" / "feedback"
+    state_dir = app_dir / ".apply-state"
+    state_dir.mkdir(parents=True)
+
+    # Same length (40 chars), but the verb + object swap is a substantive edit.
+    original = "- analyzed customer churn across 12 cohorts\n"
+    edited = "- investigated user attrition over 12 cohorts\n"
+    assert abs(len(original) - len(edited)) <= 2  # length-only delta would skip
+
+    (state_dir / "prose-draft.md").write_text(original)
+    (app_dir / "prose-draft.md").write_text(edited)
+
+    records = feedback_record(slug, app_dir=app_dir, feedback_dir=feedback_dir)
+    assert len(records) == 1
+    assert "investigated" in records[0]["after"]

@@ -15,11 +15,15 @@ from __future__ import annotations
 import json
 import time
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import yaml
 
-# Minimum character delta to count as a "significant" edit.
+# Minimum changed-character count to count as a "significant" edit.
+# Counted via SequenceMatcher opcodes so substitutions of similar length
+# (e.g. swapping a 12-char phrase for a different 12-char phrase) still
+# register, not just length deltas.
 _SIGNIFICANT_THRESHOLD = 5
 
 # Default subdirectory names.
@@ -42,12 +46,39 @@ def _repo_root() -> Path:
 
 
 def _is_significant(before: str, after: str) -> bool:
-    """Return True when the edit is larger than the threshold and not whitespace-only."""
-    delta = abs(len(after) - len(before))
-    if delta < _SIGNIFICANT_THRESHOLD:
+    """Return True when the edit changes more than the threshold of characters
+    (substitutions count, not just length delta) and is not whitespace-only.
+    """
+    if before.strip() == after.strip():
         return False
-    # Reject pure-whitespace diffs.
-    return before.strip() != after.strip()
+    matcher = SequenceMatcher(a=before, b=after, autojunk=False)
+    changed = sum(
+        max(i2 - i1, j2 - j1)
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes()
+        if tag != "equal"
+    )
+    return changed >= _SIGNIFICANT_THRESHOLD
+
+
+def _load_role_type(state_dir: Path) -> str | None:
+    """Read role_type from manifest.json (preferred) or jd-parsed.json.
+
+    The wave-3 read-back filter in apply-prose-writer + apply-cover-letter-writer
+    matches `context.role_type == inputs.role_type`, so role-typed records must
+    carry it. Returns None when neither file exists or role_type is absent.
+    """
+    for filename in ("manifest.json", "jd-parsed.json"):
+        path = state_dir / filename
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        role_type = data.get("role_type")
+        if isinstance(role_type, str) and role_type:
+            return role_type
+    return None
 
 
 def _diff_bullets(agent_text: str, user_text: str) -> list[tuple[str, str]]:
@@ -162,25 +193,41 @@ def record(
     if feedback_dir is None:
         feedback_dir = repo_root / _DEFAULT_FEEDBACK_SUBDIR
 
-    doc_dir = app_dir / "documents"
+    state_dir = app_dir / ".apply-state"
+    role_type = _load_role_type(state_dir)
+    context = {"role_type": role_type} if role_type else None
     records: list[dict] = []
 
     # --- prose-draft diff ---
-    prose_user = doc_dir / "prose-draft.md"
-    prose_agent = doc_dir / "prose-draft-agent.md"
-    if prose_user.exists() and prose_agent.exists():
+    # Canonical agent baseline lives in .apply-state/prose-draft.md (per the
+    # apply pipeline contract — written by apply-prose-writer). The user is
+    # expected to copy it to the application root and edit there, so we diff
+    # <app_dir>/prose-draft.md against the .apply-state baseline. If either
+    # file is missing or they're identical, no records are produced.
+    prose_agent = state_dir / "prose-draft.md"
+    prose_user = app_dir / "prose-draft.md"
+    if prose_agent.exists() and prose_user.exists():
         edits = _diff_bullets(prose_agent.read_text(), prose_user.read_text())
         for before, after in edits:
-            r = _write_record(feedback_dir, slug, "prose-bullet", before, after)
+            r = _write_record(
+                feedback_dir, slug, "prose-bullet", before, after, context=context
+            )
             records.append(r)
 
     # --- cover-letter diff ---
-    cl_user = doc_dir / "cover-letter-final.md"
-    cl_agent = doc_dir / "cover-letter-agent.md"
-    if cl_user.exists() and cl_agent.exists():
+    # Cover letter is written to <app_dir>/cover-letter-draft.md by
+    # apply-cover-letter-writer (per apply-cover-letter-writer.md), and the
+    # humanizer pass leaves a snapshot in .apply-state/cover-letter-draft.md.
+    # The user edits the app-root file in place; we diff against the
+    # state-dir snapshot.
+    cl_agent = state_dir / "cover-letter-draft.md"
+    cl_user = app_dir / "cover-letter-draft.md"
+    if cl_agent.exists() and cl_user.exists():
         edits = _diff_paragraphs(cl_agent.read_text(), cl_user.read_text())
         for before, after in edits:
-            r = _write_record(feedback_dir, slug, "cover-letter-paragraph", before, after)
+            r = _write_record(
+                feedback_dir, slug, "cover-letter-paragraph", before, after, context=context
+            )
             records.append(r)
 
     return records

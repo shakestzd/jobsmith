@@ -22,7 +22,7 @@ import click
 
 from . import headless
 from . import plugin_dir as get_plugin_dir
-from .benchmarks import BenchmarkRequiredError, resolve_benchmark_or_fallback
+from .benchmarks import resolve_benchmark_or_fallback
 from .config import CONFIG_FILENAME, find_config, load_config
 from .guard import check_anchors
 from .paths import resolve
