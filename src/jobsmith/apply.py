@@ -5,7 +5,8 @@ Public API
 - :func:`derive_slug` — sanitize a JD URL into a filesystem-safe slug
 - :func:`ensure_bootstrap` — auto-bootstrap `.apply-config.yaml` if missing
 - :func:`build_phase_prompt` — construct the user prompt for each phase
-- :func:`run_apply` — orchestrate all three phases with confirm gates
+- :func:`run_apply` — orchestrate all three phases with confirm gates and
+  per-phase resume from completed work (via ``manifest.json`` + URL index)
 """
 
 from __future__ import annotations
@@ -509,6 +510,166 @@ def _apply_state_dir(slug: str, cwd: Path) -> Path | None:
 
 
 # ---------------------------------------------------------------------------
+# URL → canonical slug index + per-phase resume helpers
+# ---------------------------------------------------------------------------
+
+URL_INDEX_FILENAME = ".url-index.json"
+
+# Specialists whose successful invocation marks each phase as complete.
+# A specialist is considered "done" when manifest.json.invocations contains an
+# entry with that ``specialist`` name and ``status`` == "ok".
+_PHASE_REQUIRED_SPECIALISTS: dict[str, tuple[str, ...]] = {
+    "gather": (
+        "apply-jd-parser",
+        "apply-fit-scorer",
+        "apply-hm-enricher",
+        "apply-bullet-selector",
+        "apply-company-research",
+    ),
+    "draft": (
+        "apply-prose-writer",
+        "apply-prose-qa",
+    ),
+    "render": (
+        "apply-resume-renderer",
+        "apply-cover-letter-writer",
+        "apply-index-writer",
+    ),
+}
+
+
+def _applications_dir(cwd: Path) -> Path | None:
+    """Resolve the absolute ``applications/`` directory, or None if config absent."""
+    config_path = find_config(cwd)
+    if config_path is None:
+        return None
+    config = load_config(config_path)
+    repo_root = config_path.parent
+    return resolve(config.output.applications_dir, repo_root)
+
+
+def _url_index_path(cwd: Path) -> Path | None:
+    """Return the absolute path of ``applications/.url-index.json``."""
+    apps_dir = _applications_dir(cwd)
+    if apps_dir is None:
+        return None
+    return apps_dir / URL_INDEX_FILENAME
+
+
+def _load_url_index(cwd: Path) -> dict[str, str]:
+    """Read the URL → canonical-slug index. Returns ``{}`` on missing/malformed."""
+    idx_path = _url_index_path(cwd)
+    if idx_path is None or not idx_path.exists():
+        return {}
+    try:
+        data = json.loads(idx_path.read_text())
+        if isinstance(data, dict):
+            return {str(k): str(v) for k, v in data.items()}
+    except (json.JSONDecodeError, OSError):
+        pass
+    return {}
+
+
+def _save_url_index(cwd: Path, index: dict[str, str]) -> None:
+    """Atomically write the URL → canonical-slug index."""
+    idx_path = _url_index_path(cwd)
+    if idx_path is None:
+        return
+    idx_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = idx_path.with_suffix(idx_path.suffix + ".tmp")
+    tmp.write_text(json.dumps(index, indent=2, sort_keys=True) + "\n")
+    tmp.replace(idx_path)
+
+
+def _scan_for_url_match(url: str, cwd: Path) -> str | None:
+    """Scan ``applications/*/.apply-state/jd-parsed.json`` for one matching *url*.
+
+    Checks ``jd_url``, ``url``, and ``apply_url`` fields in that order.  Returns
+    the slug of the matching directory, or None if no candidate matches.
+    """
+    apps_dir = _applications_dir(cwd)
+    if apps_dir is None or not apps_dir.exists():
+        return None
+    for jd_path in apps_dir.glob("*/.apply-state/jd-parsed.json"):
+        try:
+            data = json.loads(jd_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        for key in ("jd_url", "url", "apply_url"):
+            if data.get(key) == url:
+                return jd_path.parent.parent.name
+    return None
+
+
+def _resolve_starting_slug(url: str, cwd: Path) -> tuple[str, bool]:
+    """Resolve which slug to start the run under.
+
+    Returns ``(slug, from_index)`` where ``from_index`` is True iff the slug
+    came from the persisted URL index or a one-time migration scan.  Falls
+    back to the URL-derived slug when neither lookup succeeds.
+    """
+    index = _load_url_index(cwd)
+    if url in index:
+        return index[url], True
+    # One-time migration: if the URL isn't in the index, scan jd-parsed.json
+    # files under applications/* for a matching jd_url/url/apply_url field.
+    scanned = _scan_for_url_match(url, cwd)
+    if scanned:
+        index[url] = scanned
+        _save_url_index(cwd, index)
+        return scanned, True
+    return derive_slug(url), False
+
+
+def _record_url_mapping(url: str, canonical_slug: str, cwd: Path) -> None:
+    """Persist URL → canonical slug into the index, creating it if absent."""
+    index = _load_url_index(cwd)
+    if index.get(url) == canonical_slug:
+        return
+    index[url] = canonical_slug
+    _save_url_index(cwd, index)
+
+
+def _load_manifest(app_dir: Path) -> dict | None:
+    """Read ``app_dir/.apply-state/manifest.json``. Returns None on missing/malformed."""
+    manifest_path = app_dir / ".apply-state" / "manifest.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        data = json.loads(manifest_path.read_text())
+        if isinstance(data, dict):
+            return data
+    except (json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
+def _phase_completed(manifest: dict | None, phase_name: str) -> bool:
+    """Return True iff every required specialist for *phase_name* is done.
+
+    "Done" means the manifest's ``invocations`` list contains at least one
+    entry per required specialist with ``status == "ok"``.  Missing manifest
+    or malformed invocations always return False — callers re-run the phase.
+    """
+    if not manifest:
+        return False
+    required = _PHASE_REQUIRED_SPECIALISTS.get(phase_name, ())
+    if not required:
+        return False
+    invocations = manifest.get("invocations")
+    if not isinstance(invocations, list):
+        return False
+    completed_specialists = {
+        inv.get("specialist")
+        for inv in invocations
+        if isinstance(inv, dict) and inv.get("status") == "ok"
+    }
+    return all(spec in completed_specialists for spec in required)
+
+
+# ---------------------------------------------------------------------------
 # Steps 4-5: between-phase anchor guard + relevance inquiry
 # ---------------------------------------------------------------------------
 
@@ -607,6 +768,7 @@ def run_apply(
     *,
     cwd: Path | None = None,
     skip_confirm: bool = False,
+    force: bool = False,
     renderer: ApplyRenderer | None = None,
 ) -> int:
     """Run the three-phase apply pipeline.
@@ -619,6 +781,10 @@ def run_apply(
         Working directory (defaults to current directory).
     skip_confirm:
         When True, phase-gate confirmations are bypassed (--yes flag).
+    force:
+        When True, ignore ``.url-index.json`` and any prior ``manifest.json``;
+        start fresh from phase 1 even if a canonical directory already
+        contains completed work.  Maps to the ``--force`` CLI flag.
     renderer:
         Optional :class:`~jobsmith.render.ApplyRenderer` instance.  When None,
         one is constructed automatically (TTY-aware, using *skip_confirm* for
@@ -639,22 +805,63 @@ def run_apply(
         rdr.print_error(f"Bootstrap failed: {exc}")
         return 1
 
-    # Step 2: derive slug and session. Capture started_at so the post-gather
-    # reconciliation can scope its fallback to artifacts produced in this run.
+    # Step 2: resolve starting slug. With --force, bypass the URL index and
+    # use the URL-derived slug (a fresh run). Otherwise look up the URL in
+    # the persisted index, falling back to a one-time migration scan, and
+    # finally to the URL-derived slug.
     import time
 
     started_at = time.time()
-    slug = derive_slug(url)
-    session_id = headless.deterministic_session_id(slug)
     plugin_directory = get_plugin_dir()
 
+    if force:
+        slug = derive_slug(url)
+        from_index = False
+        rdr.print_force_banner()
+    else:
+        slug, from_index = _resolve_starting_slug(url, resolved_cwd)
+
+    session_id = headless.deterministic_session_id(slug)
+
     rdr.print_info(f"jobsmith apply: slug={slug!r}  session={session_id}")
+
+    # Step 3: phase-completion gating. Read manifest at the resolved app dir
+    # (when not --force) and decide which phases to skip. Manifest absence,
+    # malformed JSON, or missing invocations all fall through to "rerun".
+    apps_dir = _applications_dir(resolved_cwd)
+    app_dir = apps_dir / slug if apps_dir is not None else None
+    manifest = None if force or app_dir is None else _load_manifest(app_dir)
+
+    phase_done: dict[str, bool] = {
+        name: _phase_completed(manifest, name) for name, _ in _PHASES
+    }
+
+    # All phases done → print summary and exit cleanly unless --force.
+    if all(phase_done.values()) and app_dir is not None:
+        rdr.print_already_complete(app_dir)
+        return 0
+
+    # Resume banner above the first phase that will actually run, when
+    # phases earlier than that one are being skipped.
+    first_to_run = next(name for name, _ in _PHASES if not phase_done[name])
+    if first_to_run != "gather":
+        first_phase_num = next(
+            num for name, num in _PHASES if name == first_to_run
+        )
+        rdr.print_resume_banner(slug, first_phase_num, first_to_run)
 
     total_phases = len(_PHASES)
 
     for phase_name, phase_num in _PHASES:
-        # Step 3a: determine resume flag
-        resume = (phase_name != "gather") and headless.session_exists(session_id, cwd=resolved_cwd)
+        # Skip phases already marked complete in manifest.json.
+        if phase_done[phase_name]:
+            rdr.print_phase_skipped(phase_num, phase_name)
+            continue
+
+        # Step 3a: determine resume flag (Claude session continuity).
+        resume = (phase_name != "gather") and headless.session_exists(
+            session_id, cwd=resolved_cwd
+        )
 
         # Step 3b: resolve system prompt path
         system_prompt = plugin_directory / "system-prompts" / f"phase-{phase_num}-{phase_name}.md"
@@ -716,13 +923,18 @@ def run_apply(
 
         # Step 3g: between-phase orchestration. After gather (phase 1) we
         # reconcile the canonical slug (phase 1 may have written artifacts
-        # under a different directory than the URL-derived slug), then run the
-        # anchor guard + relevance inquiry to produce the bullet-decisions.json
-        # that phase 2 (draft) requires as input.
+        # under a different directory than the URL-derived slug), record the
+        # URL → canonical mapping, recompute session_id (Option A: phase 2/3
+        # run under a fresh session keyed on the canonical slug — phase
+        # prompts read .apply-state/* directly so conversation continuity is
+        # not required), then run the anchor guard / relevance inquiry to
+        # produce the bullet-decisions.json that phase 2 needs.
         if phase_name == "gather":
-            # Reconcile slug only — keep the original session_id so phase 2/3
-            # can resume the Claude session created during gather.
-            slug = _reconcile_canonical_slug(slug, resolved_cwd, started_at)
+            new_slug = _reconcile_canonical_slug(slug, resolved_cwd, started_at)
+            if new_slug != slug:
+                slug = new_slug
+                session_id = headless.deterministic_session_id(slug)
+            _record_url_mapping(url, slug, resolved_cwd)
             rc = _run_step45_orchestration(slug, resolved_cwd)
             if rc != 0:
                 return rc
@@ -731,7 +943,8 @@ def run_apply(
             if state_dir is not None:
                 rdr.render_phase_summary("gather", state_dir)
 
-        # Step 3h: confirm gate (not after the last phase)
+        # Step 3h: confirm gate (not after the last phase, and not after a
+        # phase that was skipped — only fresh-run phases prompt).
         if not skip_confirm and phase_name != "render":
             rdr.pause_before_confirm()
             if not click.confirm(f"Phase {phase_num} ({phase_name}) complete. Proceed to next phase?"):

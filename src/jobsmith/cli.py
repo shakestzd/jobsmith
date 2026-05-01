@@ -295,10 +295,16 @@ def doctor() -> None:
 def apply(
     url: str = typer.Argument(..., help="Job description URL"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip phase-gate confirmations"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Restart the pipeline from phase 1 even if prior artifacts exist.",
+    ),
 ) -> None:
     """Run the three-phase apply pipeline against a JD URL."""
     from .apply import run_apply
-    raise typer.Exit(run_apply(url, skip_confirm=yes))
+    raise typer.Exit(run_apply(url, skip_confirm=yes, force=force))
 
 
 @app.command()

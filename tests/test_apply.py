@@ -303,9 +303,10 @@ def test_cli_apply_yes_flag(tmp_path: Path, monkeypatch) -> None:
 
     captured: dict = {}
 
-    def fake_run_apply(url, *, cwd=None, skip_confirm=False):
+    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False):
         captured["url"] = url
         captured["skip_confirm"] = skip_confirm
+        captured["force"] = force
         return 0
 
     # Patch at the apply module level AND in cli namespace (lazy import resolves to apply module)
@@ -321,7 +322,27 @@ def test_cli_apply_yes_flag(tmp_path: Path, monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert captured.get("skip_confirm") is True
+    assert captured.get("force") is False
     assert captured.get("url") == "https://example.com/jobs/swe"
+
+
+def test_cli_apply_force_flag(tmp_path: Path, monkeypatch) -> None:
+    """`jobsmith apply --force <url>` threads force=True into run_apply."""
+    runner = CliRunner()
+    captured: dict = {}
+
+    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False):
+        captured["force"] = force
+        return 0
+
+    import jobsmith.apply as apply_mod
+
+    monkeypatch.setattr(apply_mod, "run_apply", fake_run_apply)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(app, ["apply", "--force", "https://example.com/jobs/swe"])
+
+    assert result.exit_code == 0
+    assert captured.get("force") is True
 
 
 def test_cli_apply_without_yes_default_confirm_false(tmp_path: Path, monkeypatch) -> None:
@@ -330,7 +351,7 @@ def test_cli_apply_without_yes_default_confirm_false(tmp_path: Path, monkeypatch
 
     captured: dict = {}
 
-    def fake_run_apply(url, *, cwd=None, skip_confirm=False):
+    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False):
         captured["skip_confirm"] = skip_confirm
         return 0
 
@@ -1045,20 +1066,28 @@ def test_run_apply_threads_canonical_slug_into_phase_2(tmp_path: Path, monkeypat
         f"draft prompt must not contain url slug {url_slug!r}; got: {draft_prompt!r}"
     )
 
-    # Session id must remain the ORIGINAL (URL-slug-derived) one across all
-    # three phases — Claude's session JSONL file is keyed on this id, and
-    # switching it would break --resume for phases 2/3.
-    expected_session_id = deterministic_session_id(url_slug)
-    for phase, sid, _ in captured:
-        assert sid == expected_session_id, (
-            f"session_id for phase {phase!r} should remain {expected_session_id!r}, got {sid!r}"
-        )
+    # Option A: phase 1 runs under the URL-slug-derived session id, but
+    # phase 2/3 must run under the CANONICAL-slug-derived session id (a
+    # fresh claude -p session — phase prompts read .apply-state/* directly
+    # so phase-1 conversation continuity is unnecessary).
+    url_session = deterministic_session_id(url_slug)
+    canonical_session = deterministic_session_id("clay-gtm-data-analyst")
+    sessions_by_phase = {phase: sid for phase, sid, _ in captured}
+    assert sessions_by_phase["gather"] == url_session, (
+        f"gather should use URL-slug session {url_session!r}, got {sessions_by_phase['gather']!r}"
+    )
+    assert sessions_by_phase["draft"] == canonical_session, (
+        f"draft should use canonical-slug session {canonical_session!r}, got {sessions_by_phase['draft']!r}"
+    )
+    assert sessions_by_phase["render"] == canonical_session, (
+        f"render should use canonical-slug session {canonical_session!r}, got {sessions_by_phase['render']!r}"
+    )
 
 
-def test_run_apply_session_id_unchanged_after_reconcile(
+def test_run_apply_session_id_switches_to_canonical_after_reconcile(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """After slug reconciliation, session_id must remain the URL-slug-derived id."""
+    """Option A: post-reconcile, phase 2/3 run under the canonical session id."""
     import json
 
     import yaml
@@ -1087,7 +1116,8 @@ def test_run_apply_session_id_unchanged_after_reconcile(
 
     url = "https://example.com/jobs/x"
     url_slug = derive_slug(url)
-    original_session_id = deterministic_session_id(url_slug)
+    url_session_id = deterministic_session_id(url_slug)
+    canonical_session_id = deterministic_session_id("acme-ml-engineer")
 
     apply_state = (
         tmp_path / "private" / "applications" / url_slug / ".apply-state"
@@ -1097,12 +1127,12 @@ def test_run_apply_session_id_unchanged_after_reconcile(
         json.dumps({"company": "Acme", "position": "ML Engineer"})
     )
 
-    seen_sessions: list[str] = []
+    seen_sessions: list[tuple[str, str]] = []  # [(phase, session_id), ...]
     call_count = [0]
     phase_sequence = ["gather", "draft", "render"]
 
     def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
-        seen_sessions.append(session_id)
+        seen_sessions.append((phase, session_id))
         idx = call_count[0]
         call_count[0] += 1
         return iter(_make_phase_events(phase_sequence[idx]))
@@ -1114,9 +1144,18 @@ def test_run_apply_session_id_unchanged_after_reconcile(
 
     rc = run_apply(url, cwd=tmp_path, skip_confirm=True)
     assert rc == 0
-    assert all(s == original_session_id for s in seen_sessions), (
-        f"all phases must share the URL-derived session_id {original_session_id!r}; got {seen_sessions!r}"
+
+    sessions_by_phase = dict(seen_sessions)
+    assert sessions_by_phase["gather"] == url_session_id, (
+        f"gather should use URL session {url_session_id!r}; got {sessions_by_phase['gather']!r}"
     )
+    assert sessions_by_phase["draft"] == canonical_session_id, (
+        f"draft should switch to canonical session {canonical_session_id!r}; got {sessions_by_phase['draft']!r}"
+    )
+    assert sessions_by_phase["render"] == canonical_session_id, (
+        f"render should switch to canonical session {canonical_session_id!r}; got {sessions_by_phase['render']!r}"
+    )
+
     # Sanity: slug DID get reconciled to canonical (the URL's path slug 'x' is not canonical)
     canonical_dir = tmp_path / "private" / "applications" / "acme-ml-engineer"
     assert canonical_dir.exists()
@@ -1490,3 +1529,432 @@ def test_build_phase_prompt_includes_uv_run_python_rule() -> None:
         "phase-1-gather.md must contain filesystem-search prohibition"
     )
     # No assertion on output content — just must not raise
+
+
+# ---------------------------------------------------------------------------
+# 16. Resume from completed phases (URL index, manifest gating, --force)
+# ---------------------------------------------------------------------------
+
+
+def _scaffold_resume_project(tmp_path: Path) -> Path:
+    """Scaffold a minimal project with apply-config + a fake plugin dir.
+
+    Returns the absolute path of the fake plugin directory so callers can
+    monkeypatch ``jobsmith.apply.get_plugin_dir`` to point at it.
+    """
+    import yaml
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+    content = tmp_path / "assets" / "content"
+    content.mkdir(parents=True, exist_ok=True)
+    for name in ("work.yml", "skill.yml", "education.yml", "author.yml"):
+        (content / name).write_text("# placeholder\n")
+
+    return _scaffold_plugin(tmp_path)
+
+
+def _write_manifest(
+    apply_state: Path,
+    *,
+    completed_specialists: list[str],
+) -> None:
+    """Write a minimal manifest.json with the listed specialists marked status=ok."""
+    import json
+
+    apply_state.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "run_id": "00000000-0000-0000-0000-000000000000",
+        "slug": "acme-ml-engineer",
+        "started_at": "2026-01-01T00:00:00Z",
+        "role_type": "ai-engineer",
+        "tier": "fast",
+        "invocations": [
+            {"specialist": s, "status": "ok"} for s in completed_specialists
+        ],
+    }
+    (apply_state / "manifest.json").write_text(json.dumps(manifest))
+
+
+_PHASE_1_SPECIALISTS = [
+    "apply-jd-parser",
+    "apply-fit-scorer",
+    "apply-hm-enricher",
+    "apply-bullet-selector",
+    "apply-company-research",
+]
+_PHASE_2_SPECIALISTS = [
+    "apply-prose-writer",
+    "apply-prose-qa",
+]
+_PHASE_3_SPECIALISTS = [
+    "apply-resume-renderer",
+    "apply-cover-letter-writer",
+    "apply-index-writer",
+]
+
+
+def test_resume_from_phase_2_when_phase_1_complete(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Manifest with phase 1 done → only draft/render run; banner mentions resume."""
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    canonical = "acme-ml-engineer"
+    apply_state = (
+        tmp_path / "private" / "applications" / canonical / ".apply-state"
+    )
+    _write_manifest(apply_state, completed_specialists=_PHASE_1_SPECIALISTS)
+    # URL index pre-populated so wrapper resolves to canonical immediately
+    (tmp_path / "private" / "applications" / ".url-index.json").write_text(
+        '{"https://example.com/jobs/x": "acme-ml-engineer"}'
+    )
+
+    seen_phases: list[str] = []
+    phase_sequence = ["draft", "render"]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        seen_phases.append(phase)
+        idx = len(seen_phases) - 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    buf = io.StringIO()
+    rdr = ApplyRenderer(yes=True, console=Console(file=buf, force_terminal=False, no_color=True, width=120))
+
+    rc = run_apply(
+        "https://example.com/jobs/x",
+        cwd=tmp_path,
+        skip_confirm=True,
+        renderer=rdr,
+    )
+
+    assert rc == 0
+    assert seen_phases == ["draft", "render"], (
+        f"phase 1 must be skipped; got phases={seen_phases!r}"
+    )
+    output = buf.getvalue()
+    assert "Resuming" in output, f"resume banner missing from output: {output!r}"
+    assert "phase 2" in output.lower() or "draft" in output.lower()
+
+
+def test_resume_from_phase_3_when_phase_2_complete(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Manifest with phase 1+2 done → only render runs."""
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    canonical = "acme-ml-engineer"
+    apply_state = (
+        tmp_path / "private" / "applications" / canonical / ".apply-state"
+    )
+    _write_manifest(
+        apply_state,
+        completed_specialists=_PHASE_1_SPECIALISTS + _PHASE_2_SPECIALISTS,
+    )
+    (tmp_path / "private" / "applications" / ".url-index.json").write_text(
+        '{"https://example.com/jobs/x": "acme-ml-engineer"}'
+    )
+
+    seen_phases: list[str] = []
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        seen_phases.append(phase)
+        return iter(_make_phase_events("render"))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply(
+        "https://example.com/jobs/x",
+        cwd=tmp_path,
+        skip_confirm=True,
+    )
+    assert rc == 0
+    assert seen_phases == ["render"], (
+        f"only render must run; got phases={seen_phases!r}"
+    )
+
+
+def test_already_complete_exits_clean(tmp_path: Path, monkeypatch) -> None:
+    """All phases done → no run_phase calls; exit 0; output mentions --force."""
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    canonical = "acme-ml-engineer"
+    apply_state = (
+        tmp_path / "private" / "applications" / canonical / ".apply-state"
+    )
+    _write_manifest(
+        apply_state,
+        completed_specialists=(
+            _PHASE_1_SPECIALISTS + _PHASE_2_SPECIALISTS + _PHASE_3_SPECIALISTS
+        ),
+    )
+    (tmp_path / "private" / "applications" / ".url-index.json").write_text(
+        '{"https://example.com/jobs/x": "acme-ml-engineer"}'
+    )
+
+    call_count = [0]
+
+    def fake_run_phase(*a, **kw):
+        call_count[0] += 1
+        return iter([])
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+
+    buf = io.StringIO()
+    rdr = ApplyRenderer(yes=True, console=Console(file=buf, force_terminal=False, no_color=True, width=120))
+
+    rc = run_apply(
+        "https://example.com/jobs/x",
+        cwd=tmp_path,
+        skip_confirm=True,
+        renderer=rdr,
+    )
+
+    assert rc == 0
+    assert call_count[0] == 0, "no phase should run when manifest shows all complete"
+    output = buf.getvalue()
+    assert "--force" in output, f"output must mention --force; got: {output!r}"
+
+
+def test_force_flag_ignores_existing_state(tmp_path: Path, monkeypatch) -> None:
+    """With --force (force=True), all three phases run despite a complete manifest."""
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    canonical = "acme-ml-engineer"
+    apply_state = (
+        tmp_path / "private" / "applications" / canonical / ".apply-state"
+    )
+    _write_manifest(
+        apply_state,
+        completed_specialists=(
+            _PHASE_1_SPECIALISTS + _PHASE_2_SPECIALISTS + _PHASE_3_SPECIALISTS
+        ),
+    )
+    (tmp_path / "private" / "applications" / ".url-index.json").write_text(
+        '{"https://example.com/jobs/x": "acme-ml-engineer"}'
+    )
+    # Ensure jd-parsed.json exists in url-derived slug dir for reconcile to find
+    url = "https://example.com/jobs/x"
+    url_slug = derive_slug(url)
+    url_state = (
+        tmp_path / "private" / "applications" / url_slug / ".apply-state"
+    )
+    url_state.mkdir(parents=True, exist_ok=True)
+    (url_state / "jd-parsed.json").write_text(
+        '{"company": "Acme", "position": "ML Engineer"}'
+    )
+
+    seen_phases: list[str] = []
+    phase_sequence = ["gather", "draft", "render"]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        seen_phases.append(phase)
+        idx = len(seen_phases) - 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply(url, cwd=tmp_path, skip_confirm=True, force=True)
+
+    assert rc == 0
+    assert seen_phases == ["gather", "draft", "render"], (
+        f"--force must run all phases; got {seen_phases!r}"
+    )
+
+
+def test_url_index_populated_after_first_run(tmp_path: Path, monkeypatch) -> None:
+    """Fresh state → after a successful run, .url-index.json contains URL → canonical."""
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    url = "https://example.com/jobs/ml-eng-id"
+    url_slug = derive_slug(url)
+    # Pre-populate jd-parsed.json under the URL-slug dir so reconcile works.
+    url_state = (
+        tmp_path / "private" / "applications" / url_slug / ".apply-state"
+    )
+    url_state.mkdir(parents=True, exist_ok=True)
+    (url_state / "jd-parsed.json").write_text(
+        '{"company": "Acme", "position": "ML Engineer"}'
+    )
+
+    phase_sequence = ["gather", "draft", "render"]
+    call_count = [0]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        idx = call_count[0]
+        call_count[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: True)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply(url, cwd=tmp_path, skip_confirm=True)
+    assert rc == 0
+
+    import json
+
+    index_path = tmp_path / "private" / "applications" / ".url-index.json"
+    assert index_path.exists(), ".url-index.json must be written after first run"
+    data = json.loads(index_path.read_text())
+    assert data.get(url) == "acme-ml-engineer", (
+        f"index must map URL to canonical slug; got: {data!r}"
+    )
+
+
+def test_url_index_lookup_short_circuits_url_slug_derivation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Pre-populated index → wrapper uses canonical slug from index, not URL slug."""
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    canonical = "acme-ml-engineer"
+    # Pre-populate index AND apply-state so phase 1 is skipped (manifest done).
+    apply_state = (
+        tmp_path / "private" / "applications" / canonical / ".apply-state"
+    )
+    _write_manifest(
+        apply_state,
+        completed_specialists=(
+            _PHASE_1_SPECIALISTS + _PHASE_2_SPECIALISTS + _PHASE_3_SPECIALISTS
+        ),
+    )
+    url = "https://example.com/jobs/totally-different-url-slug"
+    (tmp_path / "private" / "applications" / ".url-index.json").write_text(
+        f'{{"{url}": "{canonical}"}}'
+    )
+
+    captured_paths: list[str] = []
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        captured_paths.append(prompt)
+        return iter(_make_phase_events(phase))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+
+    rc = run_apply(url, cwd=tmp_path, skip_confirm=True)
+
+    # All phases done from manifest → exit cleanly without invoking any phase
+    assert rc == 0
+    assert captured_paths == [], (
+        f"no phase should run when manifest shows all complete; got: {captured_paths!r}"
+    )
+
+
+def test_one_time_migration_when_index_missing_but_dir_matches(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """No URL index, but jd-parsed.json under canonical dir matches input URL → resume."""
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    canonical = "clay-gtm-data-analyst"
+    url = "https://jobs.ashbyhq.com/clay/some-id"
+    apply_state = (
+        tmp_path / "private" / "applications" / canonical / ".apply-state"
+    )
+    apply_state.mkdir(parents=True, exist_ok=True)
+    # jd-parsed.json carries the URL via jd_url field — migration must find it.
+    (apply_state / "jd-parsed.json").write_text(
+        f'{{"company": "Clay", "position": "GTM Data Analyst", "jd_url": "{url}"}}'
+    )
+    _write_manifest(apply_state, completed_specialists=_PHASE_1_SPECIALISTS)
+
+    seen_phases: list[str] = []
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        seen_phases.append(phase)
+        idx = len(seen_phases) - 1
+        return iter(_make_phase_events(["draft", "render"][idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply(url, cwd=tmp_path, skip_confirm=True)
+    assert rc == 0
+    assert seen_phases == ["draft", "render"], (
+        f"migration must let phase 1 be skipped; got {seen_phases!r}"
+    )
+
+    # Migration also persists the discovered mapping into the index.
+    import json
+
+    index_path = tmp_path / "private" / "applications" / ".url-index.json"
+    assert index_path.exists(), "migration must populate the URL index"
+    data = json.loads(index_path.read_text())
+    assert data.get(url) == canonical
+
+
+def test_malformed_manifest_treated_as_incomplete(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Malformed manifest.json → phase 1 reruns; no crash."""
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    url = "https://example.com/jobs/x"
+    url_slug = derive_slug(url)
+    apply_state = (
+        tmp_path / "private" / "applications" / url_slug / ".apply-state"
+    )
+    apply_state.mkdir(parents=True, exist_ok=True)
+    # Garbage JSON
+    (apply_state / "manifest.json").write_text("{not valid json")
+    # jd-parsed.json so the post-phase-1 reconcile has something to read.
+    (apply_state / "jd-parsed.json").write_text(
+        '{"company": "Acme", "position": "ML Engineer"}'
+    )
+
+    phase_sequence = ["gather", "draft", "render"]
+    call_count = [0]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        idx = call_count[0]
+        call_count[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: True)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply(url, cwd=tmp_path, skip_confirm=True)
+
+    assert rc == 0
+    assert call_count[0] == 3, (
+        f"malformed manifest must be treated as incomplete; expected 3 phases, got {call_count[0]}"
+    )

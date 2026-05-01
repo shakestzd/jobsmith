@@ -431,3 +431,46 @@ class ApplyRenderer:
     def print_info(self, message: str) -> None:
         """Print an informational message."""
         self.console.print(f"[dim]{message}[/dim]")
+
+    # ------------------------------------------------------------------
+    # Resume UX
+    # ------------------------------------------------------------------
+
+    def print_phase_skipped(self, phase_num: int, phase_name: str) -> None:
+        """Render a green-checkmark panel for a phase skipped via manifest resume."""
+        self.console.print(
+            Panel(
+                f"[bold]✓ Phase {phase_num} ({phase_name}) — already complete, skipping[/bold]",
+                style="green",
+                expand=False,
+            )
+        )
+
+    def print_resume_banner(
+        self, slug: str, phase_num: int, phase_name: str
+    ) -> None:
+        """Print a single-line banner above the first phase that will run."""
+        self.console.print(
+            f"[dim]Resuming application {slug!r} from phase {phase_num} ({phase_name})[/dim]"
+        )
+
+    def print_already_complete(self, app_dir: Path) -> None:
+        """Render the all-phases-done panel; tells user to pass --force to redo."""
+        self.console.print(
+            Panel(
+                f"[bold]Application already complete at {app_dir}.[/bold]\n"
+                "Re-run with [bold]--force[/bold] to start over.",
+                style="green",
+                expand=False,
+            )
+        )
+
+    def print_force_banner(self) -> None:
+        """Yellow panel announcing that --force is bypassing prior state."""
+        self.console.print(
+            Panel(
+                "[bold]--force: ignoring prior state[/bold]",
+                style="yellow",
+                expand=False,
+            )
+        )

@@ -89,7 +89,9 @@ For any URL that does not match the patterns above, fetch the HTML page directly
 
 ## Output
 
-Write `.apply-state/jd-parsed.json` matching the contract schema exactly. Fields: `company, position, location, location_type, salary_range, req_id, apply_url, named_hm, role_type, must_haves, nice_to_haves, top_keywords, jd_text_clean`.
+Write `.apply-state/jd-parsed.json` matching the contract schema exactly. Fields: `company, position, location, location_type, salary_range, req_id, apply_url, named_hm, role_type, must_haves, nice_to_haves, top_keywords, jd_text_clean, jd_url`.
+
+`jd_url` is the original input URL (from `inputs.jd_url`). Preserve it verbatim — the Python wrapper uses it on subsequent runs to short-circuit slug derivation and resume from completed phases.
 
 Append to `.apply-state/manifest.json` (read first, merge):
 ```json
