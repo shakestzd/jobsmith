@@ -191,7 +191,72 @@ def _run_init(target: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def build_phase_prompt(phase: str, slug: str, url: str) -> str:
+def _build_paths(slug: str, cwd: Path, plugin_directory: Path) -> dict[str, str]:
+    """Build the paths dict injected into each phase prompt.
+
+    Called once per phase so that ``apply_state_dir`` always uses the
+    current (possibly post-reconcile) slug.
+
+    Returns a flat string→string mapping of absolute paths.  Optional
+    master YAMLs (``publication_yml``) are omitted when not configured.
+    When ``.apply-config.yaml`` cannot be found the dict contains only the
+    plugin-side paths (agent still gets them).
+    """
+    config_path = find_config(cwd)
+
+    result: dict[str, str] = {
+        "plugin_dir": str(plugin_directory.resolve()),
+        "agent_dir": str((plugin_directory / "agents").resolve()),
+        "specialist_contracts": str(
+            (plugin_directory / "agents" / "apply" / "specialist-contracts.yaml").resolve()
+        ),
+    }
+
+    if config_path is not None:
+        result["config"] = str(config_path.resolve())
+        config = load_config(config_path)
+        repo_root = config_path.parent
+
+        # Master YAMLs — include only those that are configured (non-None)
+        result["master.work_yml"] = str(resolve(config.master.work_yml, repo_root))
+        result["master.skill_yml"] = str(resolve(config.master.skill_yml, repo_root))
+        result["master.education_yml"] = str(resolve(config.master.education_yml, repo_root))
+        result["master.author_yml"] = str(resolve(config.master.author_yml, repo_root))
+        if config.master.publication_yml is not None:
+            result["master.publication_yml"] = str(
+                resolve(config.master.publication_yml, repo_root)
+            )
+        if config.master.award_yml is not None:
+            result["master.award_yml"] = str(resolve(config.master.award_yml, repo_root))
+
+        # apply_state_dir — absolute path for the current slug
+        apps_dir = resolve(config.output.applications_dir, repo_root)
+        result["apply_state_dir"] = str(apps_dir / slug / ".apply-state")
+
+    return result
+
+
+def _format_paths_block(paths: dict[str, str]) -> str:
+    """Format a deterministic Paths block for injection into a phase prompt.
+
+    Keys are sorted alphabetically so the block is stable across runs.
+    Returns an empty string when *paths* is empty (omit block from prompt).
+    """
+    if not paths:
+        return ""
+    lines = ["Paths (use these absolute paths verbatim — do NOT search for them):"]
+    for key in sorted(paths.keys()):
+        lines.append(f"  {key}: {paths[key]}")
+    return "\n".join(lines)
+
+
+def build_phase_prompt(
+    phase: str,
+    slug: str,
+    url: str,
+    *,
+    paths: dict[str, str] | None = None,
+) -> str:
     """Return the user prompt text for a given phase.
 
     The system prompt (loaded via ``--system-prompt-file``) carries the full
@@ -205,30 +270,44 @@ def build_phase_prompt(phase: str, slug: str, url: str) -> str:
         Application slug derived from the URL.
     url:
         Original JD URL.
+    paths:
+        Optional flat string→string mapping of absolute paths to inject.
+        When provided (and non-empty) a "Paths" block is appended to the
+        prompt so the agent does not need to search the filesystem.
+        Defaults to ``{}`` — omits the block (useful for unit tests that
+        do not need path injection).
 
     Returns
     -------
     str
-        Short user prompt text.
+        User prompt text, optionally with an injected Paths block.
 
     Raises
     ------
     ValueError
         If *phase* is not one of the three recognised phases.
     """
+    effective_paths: dict[str, str] = paths if paths is not None else {}
+    paths_block = _format_paths_block(effective_paths)
+
+    def _with_paths(text: str) -> str:
+        if paths_block:
+            return f"{text}\n\n{paths_block}"
+        return text
+
     if phase == "gather":
-        return (
+        return _with_paths(
             f"Process this JD: {url}. Application slug: {slug}. "
             "Begin Phase 1 (gather): jd-parse, fit, HM enrichment, company research, "
             "bullet selection. Pause at the analysis gate as instructed."
         )
     if phase == "draft":
-        return (
+        return _with_paths(
             f"Resume Phase 2 (draft) for slug {slug}. "
             "Read .apply-state/ artifacts. Run prose-writer + prose-qa loop until pass."
         )
     if phase == "render":
-        return (
+        return _with_paths(
             f"Resume Phase 3 (render) for slug {slug}. "
             "Render resume PDF, ATS check, visual layout, cover letter, index page, "
             "then jobsmith assemble."
@@ -539,14 +618,18 @@ def run_apply(
             rdr.print_error(f"ERROR: system prompt not found: {system_prompt}")
             return 1
 
-        # Step 3c: build prompt text
-        prompt_text = build_phase_prompt(phase_name, slug, url)
+        # Step 3c: build paths dict for this phase (uses current slug — after reconcile
+        # for draft/render, slug may have changed from the URL-derived value).
+        phase_paths = _build_paths(slug, resolved_cwd, plugin_directory)
 
-        # Step 3d: render phase header and start spinner
+        # Step 3d: build prompt text
+        prompt_text = build_phase_prompt(phase_name, slug, url, paths=phase_paths)
+
+        # Step 3e: render phase header and start spinner
         rdr.print_header(phase_num, total_phases, phase_name)
         rdr.start_phase(phase_name)
 
-        # Step 3e: stream events
+        # Step 3f: stream events
         phase_succeeded = False
         try:
             for event in headless.run_phase(
@@ -587,7 +670,7 @@ def run_apply(
             )
             return 2
 
-        # Step 3f: between-phase orchestration. After gather (phase 1) we
+        # Step 3g: between-phase orchestration. After gather (phase 1) we
         # reconcile the canonical slug (phase 1 may have written artifacts
         # under a different directory than the URL-derived slug), then run the
         # anchor guard + relevance inquiry to produce the bullet-decisions.json
@@ -602,7 +685,7 @@ def run_apply(
             if state_dir is not None:
                 rdr.render_phase_summary("gather", state_dir)
 
-        # Step 3g: confirm gate (not after the last phase)
+        # Step 3h: confirm gate (not after the last phase)
         if not skip_confirm and phase_name != "render":
             rdr.pause_before_confirm()
             if not click.confirm(f"Phase {phase_num} ({phase_name}) complete. Proceed to next phase?"):

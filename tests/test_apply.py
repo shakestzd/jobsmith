@@ -1155,4 +1155,152 @@ def test_renderer_phase_summary_tolerates_missing(tmp_path: Path) -> None:
 
     # Should not raise; empty dir → no artifacts
     rdr.render_phase_summary("gather", apply_state_dir)
+
+
+# ---------------------------------------------------------------------------
+# 15. Path injection into phase prompts
+# ---------------------------------------------------------------------------
+
+
+_SAMPLE_PATHS = {
+    "plugin_dir": "/abs/plugin",
+    "config": "/abs/.apply-config.yaml",
+    "specialist_contracts": "/abs/plugin/agents/apply/specialist-contracts.yaml",
+    "agent_dir": "/abs/plugin/agents",
+    "master.work_yml": "/abs/assets/content/work.yml",
+    "master.skill_yml": "/abs/assets/content/skill.yml",
+    "master.education_yml": "/abs/assets/content/education.yml",
+    "master.author_yml": "/abs/assets/content/author.yml",
+    "apply_state_dir": "/abs/private/applications/acme-mle/.apply-state",
+}
+
+
+def test_build_phase_prompt_includes_paths_block_when_provided() -> None:
+    """When paths dict provided, prompt includes a Paths block with all keys+values."""
+    prompt = build_phase_prompt(
+        "gather", "acme-mle", "https://e.com/jobs/x", paths=_SAMPLE_PATHS
+    )
+    # Header appears exactly once
+    assert prompt.count("Paths") == 1
+
+    # Every key appears
+    for key in _SAMPLE_PATHS:
+        assert key in prompt, f"key {key!r} missing from prompt"
+
+    # Every value appears verbatim
+    for value in _SAMPLE_PATHS.values():
+        assert value in prompt, f"value {value!r} missing from prompt"
+
+
+def test_build_phase_prompt_omits_paths_when_empty() -> None:
+    """Default paths={} (or absent kwarg) omits the Paths header from the prompt."""
+    prompt_default = build_phase_prompt("gather", "acme-mle", "https://e.com/jobs/x")
+    assert "Paths" not in prompt_default
+
+    prompt_empty = build_phase_prompt(
+        "gather", "acme-mle", "https://e.com/jobs/x", paths={}
+    )
+    assert "Paths" not in prompt_empty
+
+
+def test_build_phase_prompt_paths_for_draft_and_render() -> None:
+    """The same Paths block appears regardless of phase (gather / draft / render)."""
+    for phase in ("gather", "draft", "render"):
+        prompt = build_phase_prompt(
+            phase, "acme-mle", "https://e.com/jobs/x", paths=_SAMPLE_PATHS
+        )
+        for key in _SAMPLE_PATHS:
+            assert key in prompt, f"phase={phase}: key {key!r} missing"
+        for value in _SAMPLE_PATHS.values():
+            assert value in prompt, f"phase={phase}: value {value!r} missing"
+
+
+def test_run_apply_threads_paths_to_each_phase(tmp_path: Path, monkeypatch) -> None:
+    """run_apply injects absolute paths (config, plugin_dir, specialist_contracts,
+    apply_state_dir) into every phase prompt."""
+    import yaml
+
+    # Scaffold a minimal but real config so _build_paths can resolve everything
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {
+                    "applications_dir": "private/applications",
+                },
+            }
+        )
+    )
+    content = tmp_path / "assets" / "content"
+    content.mkdir(parents=True, exist_ok=True)
+    for name in ("work.yml", "skill.yml", "education.yml", "author.yml"):
+        (content / name).write_text("# placeholder\n")
+
+    plugin_fake = _scaffold_plugin(tmp_path)
+    # Add specialist-contracts.yaml under agents/apply/
+    agents_apply = plugin_fake / "agents" / "apply"
+    agents_apply.mkdir(parents=True, exist_ok=True)
+    (agents_apply / "specialist-contracts.yaml").write_text("frozen_at: 2025-01-01\n")
+
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    url = "https://example.com/jobs/ml-engineer"
+
+    captured_prompts: list[tuple[str, str]] = []
+    call_count = [0]
+    phase_sequence = ["gather", "draft", "render"]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        captured_prompts.append((phase, prompt))
+        idx = call_count[0]
+        call_count[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: True)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply(url, cwd=tmp_path, skip_confirm=True)
+    assert rc == 0, f"run_apply returned {rc}"
+
+    expected_config = str(config_file.resolve())
+    expected_plugin = str(plugin_fake.resolve())
+    expected_contracts = str((plugin_fake / "agents" / "apply" / "specialist-contracts.yaml").resolve())
+
+    for phase, prompt in captured_prompts:
+        assert expected_config in prompt, (
+            f"phase={phase}: config path missing from prompt"
+        )
+        assert expected_plugin in prompt, (
+            f"phase={phase}: plugin_dir missing from prompt"
+        )
+        assert expected_contracts in prompt, (
+            f"phase={phase}: specialist_contracts missing from prompt"
+        )
+        # apply_state_dir: for draft/render uses canonical slug (may match or differ)
+        assert ".apply-state" in prompt, (
+            f"phase={phase}: .apply-state dir missing from prompt"
+        )
+
+
+def test_build_phase_prompt_includes_uv_run_python_rule() -> None:
+    """phase-1-gather.md contains 'uv run python' rule and filesystem-search prohibition."""
+    import jobsmith
+
+    gather_md = jobsmith.plugin_dir() / "system-prompts" / "phase-1-gather.md"
+    content = gather_md.read_text()
+
+    assert "uv run python" in content, (
+        "phase-1-gather.md must contain 'uv run python' rule"
+    )
+    assert "Do NOT search the filesystem" in content or "do not search" in content.lower(), (
+        "phase-1-gather.md must contain filesystem-search prohibition"
+    )
     # No assertion on output content — just must not raise
