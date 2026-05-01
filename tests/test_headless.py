@@ -98,6 +98,7 @@ def test_command_construction_no_resume(monkeypatch):
     assert SESSION_ID in args
     assert "--output-format" in args
     assert "stream-json" in args
+    assert "--verbose" in args
     assert "--allowedTools" in args
     assert "Agent Bash WebFetch Read Edit Write" in args
     assert "--max-turns" in args
