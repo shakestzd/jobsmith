@@ -26,6 +26,8 @@ Read `.apply-state/spec.json`:
 - `inputs.master_yamls` (READ-ONLY)
 - `inputs.gap_resolutions` (if exists)
 - `inputs.benchmark_cover_letter_md` = path to benchmark cover letter .md file, or null
+- `inputs.feedback_dir` = absolute path to `private/feedback/` directory, or null
+- `inputs.role_type` = string (e.g. `data-analyst`, `ai-engineer`) from manifest.json
 
 ## Benchmark style reference
 
@@ -50,6 +52,24 @@ The benchmark teaches *how to write*; master YAML is *what to write*. Violation
 of this rule is equivalent to fabrication and triggers an immediate halt.
 
 <!-- ─── END BENCHMARK STYLE REFERENCE ─── -->
+
+## Prior feedback lessons (soft style guidance)
+
+If `inputs.feedback_dir` is set and the directory has `*.json` files, read up to the 10 most recent records (sorted by filename — they are timestamp-suffixed). Filter:
+1. Prefer records with `kind: cover-letter-paragraph` AND `context.role_type == inputs.role_type`
+2. If <3 matches, top up with most-recent `kind: cover-letter-paragraph` regardless of role_type
+3. Drop any record with empty `lesson` field — they're placeholders the user hasn't filled in
+
+Treat each `lesson` as a voice/word-choice hint. Examples of valid lesson application:
+- Lesson "Don't open with 'I am excited'" → avoid excitement-opener patterns
+- Lesson "Prefer shorter closing paragraphs" → trim the close to 2 sentences
+
+FORBIDDEN:
+- A lesson can NEVER introduce a metric, dollar amount, percentage, or proper noun absent from master YAML
+- A lesson can NEVER override a JD requirement
+- If lessons conflict with the draft's chosen claims, the claims win — log the conflict in `cover-letter-writer-result.json` under `lessons_skipped: [...]`
+
+If `feedback_dir` is null/missing or no records match, proceed without lessons. This is the v0.5 default for new users.
 
 ## Length targets
 
