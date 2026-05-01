@@ -70,6 +70,7 @@ state_directory:
     questions.md:          { written_by: [apply-relevance-inquirer] }
     gap-resolutions.md:    { written_by: [orchestrator] }   # records the user's answers verbatim
     hm-snippet.md:         { written_by: [apply-hm-enricher] }
+    outreach-snippets.md:  { written_by: [apply-hm-enricher] }
     prose-draft.md:        { written_by: [apply-prose-writer] }
     ai-tell-report.json:   { written_by: [apply-prose-qa, apply-resume-tell-fixer] }
     render-log.json:       { written_by: [apply-resume-renderer] }
@@ -577,6 +578,21 @@ specialists:
               source: linkedin_post | jd_signature | user_arg | none
               one_specific_signal: {string  e.g. "co-author of TMP Consortium 2024 paper" — or null}
               suggested_hook: {one sentence the apply-cover-letter-writer can adapt — or null}
+        - .apply-state/outreach-snippets.md:
+            content: |
+              When HM detected:
+
+                ## Connection Request Note (≤300 chars)
+
+                {≤300 character LinkedIn connection-request note referencing one specific HM signal}
+
+                ## InMail Message (~180 words)
+
+                {~180 word post-connection InMail referencing the same signal, naming the role, ending with a clear ask}
+
+              When no HM detected:
+
+                no HM detected — portal-only application
     tools_allowlist:
       - Read
       - Write
@@ -585,6 +601,8 @@ specialists:
       - "MUST NOT fabricate any HM detail. Real signal or sentinel only."
       - "MUST NOT use Chrome MCP. WebFetch only."
       - "Time budget: 30 seconds."
+      - "Connection Request Note MUST be ≤300 characters (LinkedIn hard limit)."
+      - "Both messages reference the SAME one specific HM signal."
 
   # --------------------------------------------------------------------------
   - name: apply-resume-renderer

@@ -38,6 +38,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +53,98 @@ from .config import load_config
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_PARTIALS_SRC = PACKAGE_ROOT / "templates" / "partials"
 DEFAULT_WORKFLOW_SRC = PACKAGE_ROOT / "templates" / "workflow" / "_workflow.qmd"
+
+
+# ---------- theme helpers ----------
+
+
+def _slugify_company(company: str) -> str:
+    """Convert a company name to a filesystem-safe slug.
+
+    Rules:
+      - Lowercase
+      - Spaces and underscores → hyphens
+      - Strip any character not in [a-z0-9-]
+      - Collapse multiple consecutive hyphens to one
+      - Strip leading/trailing hyphens
+
+    Examples:
+      "Schneider Electric" → "schneider-electric"
+      "PwC"               → "pwc"
+      "Microsoft Corp."   → "microsoft-corp"
+    """
+    slug = company.lower()
+    slug = re.sub(r"[ _]+", "-", slug)
+    slug = re.sub(r"[^a-z0-9-]", "", slug)
+    slug = re.sub(r"-{2,}", "-", slug)
+    return slug.strip("-")
+
+
+def _resolve_theme(
+    slug: str,
+    company: str | None,
+    app_dir: Path,
+    package_root: Path,
+) -> Path:
+    """Walk the theme resolution chain and return the winning SCSS path.
+
+    Priority (high → low):
+      1. <app_dir>/theme.scss   — user's per-app override (already present)
+      2. <package_root>/templates/themes/companies/<slug>.scss — curated
+      3. <package_root>/templates/themes/default.scss          — fallback
+
+    The ``slug`` parameter is the pre-computed company slug (already slugified).
+    If ``company`` is provided and ``slug`` does not match any curated file,
+    the function also tries slugifying ``company`` directly (robustness).
+    """
+    # 1. User override — if theme.scss is already a real file, leave it alone.
+    app_theme = app_dir / "theme.scss"
+    if app_theme.exists() and not app_theme.is_symlink():
+        return app_theme
+    if app_theme.is_symlink() and app_theme.resolve().exists():
+        return app_theme
+
+    themes_root = package_root / "templates" / "themes"
+    companies_dir = themes_root / "companies"
+
+    # 2. Curated company SCSS — try the given slug first, then re-slugify company.
+    candidates = [slug]
+    if company:
+        derived = _slugify_company(company)
+        if derived != slug:
+            candidates.append(derived)
+    for candidate in candidates:
+        curated = companies_dir / f"{candidate}.scss"
+        if curated.exists():
+            return curated
+
+    # 3. Default fallback.
+    return themes_root / "default.scss"
+
+
+def _install_theme(resolved: Path, app_dir: Path) -> None:
+    """Symlink (or copy) the resolved SCSS into <app_dir>/theme.scss.
+
+    If the destination already exists and is the correct target, it is left
+    untouched. A stale symlink or a copy from a previous run is replaced.
+    """
+    dest = app_dir / "theme.scss"
+
+    # Already a real file (user override) — never overwrite.
+    if dest.exists() and not dest.is_symlink():
+        return
+
+    # Remove stale symlink if target has changed.
+    if dest.is_symlink():
+        if dest.resolve() == resolved.resolve():
+            return  # already correct
+        dest.unlink()
+
+    try:
+        os.symlink(resolved, dest)
+    except OSError:
+        # Fallback on platforms where symlinks are unavailable (e.g. Windows).
+        shutil.copy2(resolved, dest)
 
 
 # ---------- per-source loaders ----------
@@ -288,6 +382,29 @@ def _must_have_table(rows: list[dict[str, Any]]) -> str:
         evidence = (row.get("evidence") or "").replace("|", "\\|").replace("\n", " ")
         lines.append(f"| {req} | {level_label} | {evidence} |")
     return "\n".join(lines)
+
+
+def _outreach_snippets_block(content: str | None) -> str:
+    """Return the outreach-snippets block content or a fallback callout.
+
+    When content is provided (the specialist has written outreach-snippets.md),
+    return it verbatim — the specialist owns character-count constraints.
+
+    When content is None (specialist hasn't run yet or no HM was detected on a
+    portal-only application), return a standard "awaiting specialist" callout
+    that the _outreach.qmd partial renders gracefully.
+    """
+    if content is not None:
+        return content
+    return (
+        "::: {.callout-warning appearance=\"minimal\"}\n"
+        "**Awaiting specialist** — `apply-hm-enricher` has not yet written "
+        "`outreach-snippets.md`. Run the specialist (or `jobsmith assemble {slug}`) "
+        "after it completes to populate this section.\n\n"
+        "When no hiring manager is named, this section will contain: "
+        "_no HM detected — portal-only application_.\n"
+        ":::\n"
+    )
 
 
 def _hm_dossier_md(hm: dict[str, Any]) -> str:
@@ -587,6 +704,9 @@ def assemble_application(
             ),
         )
     )
+    (blocks_dir / "outreach-snippets.md").write_text(
+        _outreach_snippets_block(outreach)
+    )
 
     # Make the application directory a self-contained Quarto project so
     # project-root-absolute include paths (`/_blocks/foo.md`,
@@ -648,4 +768,4 @@ def assemble_all(applications_dir: Path) -> list[Path]:
     return written
 
 
-__all__ = ["assemble_all", "assemble_application"]
+__all__ = ["assemble_all", "assemble_application", "_outreach_snippets_block"]
