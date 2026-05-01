@@ -53,6 +53,7 @@ JOBSMITH_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "jobsmith.headless")
 
 # Regex that signals the end of a phase inside a text block.
 _PHASE_COMPLETE_RE = re.compile(r"<<PHASE_COMPLETE:\s*(\w+)\s*>>>")
+_PHASE_FAILED_RE = re.compile(r"<<PHASE_FAILED:\s*(\w+)\s*(?::\s*([^>]+?)\s*)?>>>")
 
 # Marker text fragment scanned for tool results.
 _TOOL_RESULT_TYPE = "tool_result"
@@ -347,31 +348,42 @@ def run_phase(
                 emitted += 1
                 yield event
 
-                # Check for phase-complete marker in text events.
+                # Check for phase-boundary markers in text events. Both markers
+                # signal that the phase is over; the caller distinguishes
+                # success vs failure on the synthetic event type.
                 if event.type == "text" and event.text:
-                    m = _PHASE_COMPLETE_RE.search(event.text)
-                    if m:
-                        yield Event(type="phase_complete", name=m.group(1), raw={})
-                        # Signal subprocess to stop and clean up.
-                        with contextlib.suppress(Exception):
-                            proc.stdout.close()  # type: ignore[union-attr]
-                        try:
-                            proc.wait(timeout=2)
-                        except subprocess.TimeoutExpired:
-                            proc.terminate()
+                    failed = _PHASE_FAILED_RE.search(event.text)
+                    if failed:
+                        yield Event(
+                            type="phase_failed",
+                            name=failed.group(1),
+                            raw={},
+                            error=(failed.group(2) or None),
+                        )
+                        return
+                    completed = _PHASE_COMPLETE_RE.search(event.text)
+                    if completed:
+                        yield Event(type="phase_complete", name=completed.group(1), raw={})
                         return
     finally:
-        # Ensure the process is reaped even if the caller breaks early.
+        # Reap the subprocess BEFORE reading stderr — otherwise proc.stderr.read()
+        # can block indefinitely if the caller broke out of the loop and claude
+        # has not yet exited (the subprocess keeps stderr open until it dies).
         with contextlib.suppress(Exception):
             proc.stdout.close()  # type: ignore[union-attr]
+        if proc.poll() is None:
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
         stderr_output = ""
         with contextlib.suppress(Exception):
             stderr_output = proc.stderr.read()  # type: ignore[union-attr]
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.terminate()
-            proc.wait()
 
     rc = proc.returncode
     if rc != 0 and emitted == 0:

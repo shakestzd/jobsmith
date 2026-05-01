@@ -246,6 +246,88 @@ def test_phase_complete_marker(monkeypatch):
     assert all("extra" not in (e.text or "") for e in text_events)
 
 
+def test_phase_failed_marker_with_reason(monkeypatch):
+    """`<<PHASE_FAILED: draft: prose-qa-max-iterations>>>` yields a phase_failed event
+    carrying the reason on Event.error."""
+    payload = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Halting. <<PHASE_FAILED: draft: prose-qa-max-iterations>>>",
+                }
+            ]
+        },
+    }
+    _mock_popen_with_lines(monkeypatch, [json.dumps(payload) + "\n"])
+    events = list(run_phase(PHASE, SESSION_ID, PROMPT, PLUGIN_DIR, SYSTEM_PROMPT))
+
+    failed = [e for e in events if e.type == "phase_failed"]
+    assert len(failed) == 1
+    assert failed[0].name == "draft"
+    assert failed[0].error == "prose-qa-max-iterations"
+    # Subsequent events not emitted (terminal marker)
+    assert events[-1].type == "phase_failed"
+
+
+def test_phase_failed_marker_without_reason(monkeypatch):
+    """`<<PHASE_FAILED: draft>>>` (no reason) yields a phase_failed event with error=None."""
+    payload = {
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "<<PHASE_FAILED: draft>>>"}]},
+    }
+    _mock_popen_with_lines(monkeypatch, [json.dumps(payload) + "\n"])
+    events = list(run_phase(PHASE, SESSION_ID, PROMPT, PLUGIN_DIR, SYSTEM_PROMPT))
+
+    failed = [e for e in events if e.type == "phase_failed"]
+    assert len(failed) == 1
+    assert failed[0].name == "draft"
+    assert failed[0].error is None
+
+
+def test_subprocess_reaped_before_stderr_read(monkeypatch):
+    """Regression: caller breaking early on phase_complete must NOT cause a hang
+    because the finally block reads stderr before reaping the subprocess.
+
+    Verifies that proc.wait (or terminate/kill) is invoked before proc.stderr.read
+    in the cleanup path.
+    """
+    from unittest.mock import MagicMock, call
+
+    call_log: list[str] = []
+
+    mock_proc = MagicMock()
+    stdout_mock = MagicMock()
+    payload = {
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "<<PHASE_COMPLETE: gather>>>"}]},
+    }
+    stdout_mock.__iter__ = MagicMock(return_value=iter([json.dumps(payload) + "\n"]))
+    stdout_mock.close = MagicMock(side_effect=lambda: call_log.append("stdout.close"))
+    mock_proc.stdout = stdout_mock
+
+    # Simulate "still running" so the finally branch must wait/terminate.
+    mock_proc.poll = MagicMock(side_effect=lambda: call_log.append("poll") or None)
+    mock_proc.wait = MagicMock(side_effect=lambda timeout=None: call_log.append(f"wait(timeout={timeout})") or 0)
+    mock_proc.terminate = MagicMock(side_effect=lambda: call_log.append("terminate"))
+
+    stderr_mock = MagicMock()
+    stderr_mock.read = MagicMock(side_effect=lambda: call_log.append("stderr.read") or "")
+    mock_proc.stderr = stderr_mock
+    mock_proc.returncode = 0
+
+    monkeypatch.setattr("jobsmith.headless.subprocess.Popen", MagicMock(return_value=mock_proc))
+
+    list(run_phase(PHASE, SESSION_ID, PROMPT, PLUGIN_DIR, SYSTEM_PROMPT))
+
+    # Critical ordering: poll/wait/terminate must precede stderr.read.
+    assert "stderr.read" in call_log
+    stderr_idx = call_log.index("stderr.read")
+    reap_calls = [c for c in call_log[:stderr_idx] if c.startswith(("wait(", "terminate"))]
+    assert reap_calls, f"subprocess was not reaped before stderr.read; log={call_log}"
+
+
 # ---------------------------------------------------------------------------
 # 7. Malformed JSON — error event then continue
 # ---------------------------------------------------------------------------
