@@ -20,6 +20,30 @@ Read `.apply-state/spec.json`:
 - `inputs.resume_pdf`: path to PDF
 - `inputs.resume_qmd`, `inputs.work_yml`: source files
 - `inputs.iteration`: int 0-1
+- `inputs.benchmark_resume_pdf`: path to benchmark PDF, or null
+
+## Benchmark layout reference
+
+<!-- ─── LAYOUT REFERENCE — READ CAREFULLY ─── -->
+
+If `inputs.benchmark_resume_pdf` is provided (non-null), use that file to set
+**layout targets** for the multimodal review in Step 3:
+
+- **Page count** — use the benchmark's page count as the target page count (normally 1).
+  If the benchmark is 1 page, a 1-page candidate is correct; if 2 pages, allow 2.
+  This replaces the internal one-page heuristic when a benchmark is supplied.
+- **Density** — measure the benchmark's text-to-whitespace ratio visually (margin widths,
+  section spacing, bullet density per page). Use this as the density target.
+  A candidate that is noticeably sparser or denser than the benchmark should have
+  that gap flagged in `layout-report.md`.
+
+When `inputs.benchmark_resume_pdf` is null (not provided), fall back to the default:
+one-page target, standard density heuristics.
+
+**This reference governs layout geometry only — page count and density.**
+Do NOT read the benchmark for content, claims, or any textual material.
+
+<!-- ─── END BENCHMARK LAYOUT REFERENCE ─── -->
 
 ## Steps
 
