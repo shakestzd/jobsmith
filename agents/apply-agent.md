@@ -31,10 +31,11 @@ After it writes `jd-parsed.json`:
 - Initialize `manifest.json` with `{run_id, slug, started_at, role_type, invocations: []}`.
 
 ## Step 2 — Fan-out (parallel)
-In ONE message dispatch three specialists in parallel:
+In ONE message dispatch four specialists in parallel:
 - `apply-fit-scorer` (writes `fit-score.json`)
 - `apply-hm-enricher` (writes `hm-snippet.md` — sentinel if no HM detected)
 - `apply-bullet-selector` (writes `bullet-selection.json`, `bullet-diff.md`, tailored YAMLs in `documents/`)
+- `apply-company-research` (writes `company-research.md` — uses `private/companies/<slug>.md` cache; writes a callout-warning sentinel if WebFetch fails)
 
 Each gets its own `spec.json`. Update `manifest.json.invocations` with start/finish/agent_id for each.
 

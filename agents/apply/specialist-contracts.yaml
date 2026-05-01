@@ -71,6 +71,10 @@ state_directory:
     gap-resolutions.md:    { written_by: [orchestrator] }   # records the user's answers verbatim
     hm-snippet.md:         { written_by: [apply-hm-enricher] }
     outreach-snippets.md:  { written_by: [apply-hm-enricher] }
+    company-research.md:   { written_by: [apply-company-research] }
+    apply-company-research-result.json:
+      written_by: [apply-company-research]
+      purpose: "{status, summary, cached_from?, fetched_urls, slug}"
     prose-draft.md:        { written_by: [apply-prose-writer] }
     ai-tell-report.json:   { written_by: [apply-prose-qa, apply-resume-tell-fixer] }
     render-log.json:       { written_by: [apply-resume-renderer] }
@@ -133,7 +137,7 @@ pipeline:
     - stage: 0_parse
       specialists: [apply-jd-parser]
     - stage: 1_fanout
-      specialists: [apply-fit-scorer, apply-hm-enricher, apply-bullet-selector]
+      specialists: [apply-fit-scorer, apply-hm-enricher, apply-bullet-selector, apply-company-research]
       parallel: true
     - stage: 1_5_anchor_guard
       specialists: [anchor-bullet-guard]
@@ -612,6 +616,58 @@ specialists:
       - "Time budget: 30 seconds."
       - "Connection Request Note MUST be ≤300 characters (LinkedIn hard limit)."
       - "Both messages reference the SAME one specific HM signal."
+
+  # --------------------------------------------------------------------------
+  - name: apply-company-research
+    file: agents/apply-company-research.md
+    model: sonnet
+    stage: 1_fanout
+    purpose: |
+      Fetches company context from public web sources (homepage + about/values)
+      and synthesizes a structured research file used in §4 of the cover letter
+      ("Why I want to work here"). Caches per company under
+      `private/companies/<slug>.md` so a second application within 30 days
+      reuses the research without WebFetch.
+    inputs:
+      from_orchestrator:
+        - jd_parsed: ".apply-state/jd-parsed.json"  # extracts .company, .position, .apply_url
+        - cache_root: "private/companies/  (default)"
+      reads:
+        - "private/companies/<slug>.md  (cache hit when mtime within 30 days)"
+    outputs:
+      writes:
+        - .apply-state/company-research.md:
+            description: |
+              Markdown with sections: Mission, Problem They Solve, Product,
+              What's Unique, Values, Selected Reasons for §4 (values-driven +
+              topical), Product-use Evidence. On WebFetch failure, contains
+              only a callout-warning "research unavailable" sentinel.
+        - private/companies/<slug>.md:
+            description: "Verbatim copy of the .apply-state version on a fresh fetch."
+        - .apply-state/apply-company-research-result.json:
+            status: "ok | halt"
+            summary: "string (one line)"
+            cached_from: "string (path) — present when cache hit"
+            fetched_urls: "list[string]"
+            slug: "string"
+    tools_allowlist:
+      - Read
+      - Write
+      - WebFetch
+    pass_threshold:
+      max_pages_fetched: 2  # homepage + about
+      cache_window_days: 30
+    failure_modes:
+      - condition: "WebFetch unavailable, 404, or page returns no usable text"
+        action: "write callout-warning sentinel; status=halt"
+      - condition: "jd_parsed.company empty or missing"
+        action: "skip fetch; write sentinel; status=halt"
+    hard_rules:
+      - "Two pages max (homepage + about). Don't crawl."
+      - "Quote the company's published language for Mission and Values."
+      - "Two §4 reasons must be specific (values-driven + topical), not generic enthusiasm."
+      - "Never fabricate values or product details. If absent, say so."
+      - "Always write both .apply-state/ and private/companies/ copies on a fresh fetch."
 
   # --------------------------------------------------------------------------
   - name: apply-resume-renderer

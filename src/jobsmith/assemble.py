@@ -315,6 +315,22 @@ def _render_humanizer_audit_block(report: dict[str, Any] | None) -> str:
     return "\n\n".join(sections) + "\n"
 
 
+_COMPANY_RESEARCH_FALLBACK = (
+    '::: {.callout-warning appearance="minimal"}\n'
+    "**Awaiting specialist** — `apply-company-research` has not yet written "
+    "`company-research.md`. Run the specialist (or `jobsmith assemble {slug}`) "
+    "after it completes to populate the §4 \"Why work here\" section.\n"
+    ":::\n"
+)
+
+
+def _company_research_block(content: str | None) -> str:
+    """Return the company-research markdown verbatim or a fallback callout."""
+    if content is None or not content.strip():
+        return _COMPANY_RESEARCH_FALLBACK
+    return content if content.endswith("\n") else content + "\n"
+
+
 def _load_user_identity(
     app_dir: Path,
     master_author_yml: Path | None,
@@ -815,6 +831,9 @@ def assemble_application(
     (blocks_dir / "humanizer-audit.md").write_text(
         _render_humanizer_audit_block(ai_tell_report)
     )
+    (blocks_dir / "company-research.md").write_text(
+        _company_research_block(company_research)
+    )
 
     # Make the application directory a self-contained Quarto project so
     # project-root-absolute include paths (`/_blocks/foo.md`,
@@ -891,6 +910,7 @@ def assemble_all(applications_dir: Path) -> list[Path]:
 __all__ = [
     "assemble_all",
     "assemble_application",
+    "_company_research_block",
     "_load_ai_tell_report",
     "_outreach_snippets_block",
     "_render_humanizer_audit_block",

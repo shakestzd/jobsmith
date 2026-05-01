@@ -632,3 +632,110 @@ def test_ai_tell_report_iteration_ordering(tmp_path: Path) -> None:
     assert pos_62 != -1, "6.2 section not found"
     assert pos_63 != -1, "6.3 section not found"
     assert pos_62 < pos_63, "6.2 must appear before 6.3 in the rendered block"
+
+
+# ---------- company-research block ----------
+
+_SAMPLE_COMPANY_RESEARCH = """\
+# Company Research — Acme Corp
+
+## Mission
+Democratize access to renewable energy infrastructure for industrial customers.
+
+## Problem They Solve
+Industrial facilities pay 30-40% more for energy than residential due to opaque
+spot-market pricing. Acme normalizes this with real-time hedging.
+
+## Product
+SaaS platform + energy desk that manages PPAs, RECs, and spot purchases for
+Fortune-500 manufacturing.
+
+## What's Unique
+Only operator that combines algorithmic trading with human energy traders
+on-call 24/7.
+
+## Values
+- Transparency first
+- Operator mindset
+- Continuous improvement
+
+## Selected Reasons for §4 (Why I Want to Work Here)
+### Values-driven reason
+Acme's transparency-first culture aligns with how I write software: every
+metric surfaced, every decision logged.
+
+### Topical reason
+The REC portfolio management tooling is directly adjacent to the tax-equity
+work I did at Invenergy — real domain overlap, not surface-level interest.
+
+## Product-use Evidence
+I evaluated Acme's public API docs for a side project in 2024; the
+design choices there influenced how I structured the telemetry layer at
+Mercuria.
+"""
+
+_PARTIAL_COMPANY_RESEARCH = """\
+# Company Research — Partial Co
+
+## Mission
+Build better tools for data teams.
+
+## Values
+- Speed over perfection
+- User-first design
+"""
+
+
+def _setup_app_with_research(
+    tmp_path: Path,
+    slug: str = "test-co-engineer",
+    research_content: str | None = _SAMPLE_COMPANY_RESEARCH,
+) -> Path:
+    """Create a minimal application directory; optionally include company-research.md."""
+    apps_dir = _setup_app(tmp_path, slug)
+    state_dir = apps_dir / slug / ".apply-state"
+    if research_content is not None:
+        (state_dir / "company-research.md").write_text(research_content)
+    return apps_dir
+
+
+def test_company_research_block_when_present(tmp_path: Path) -> None:
+    """When company-research.md exists in .apply-state, it is written verbatim to _blocks/company-research.md."""
+    apps_dir = _setup_app_with_research(
+        tmp_path, research_content=_SAMPLE_COMPANY_RESEARCH
+    )
+    assemble_application("test-co-engineer", apps_dir)
+
+    block_file = apps_dir / "test-co-engineer" / "_blocks" / "company-research.md"
+    assert block_file.exists(), "_blocks/company-research.md was not written"
+    content = block_file.read_text()
+    assert "Mission" in content
+    assert "Values" in content
+    assert "Selected Reasons" in content
+    assert "Acme Corp" in content
+
+
+def test_company_research_block_fallback_when_missing(tmp_path: Path) -> None:
+    """When company-research.md is absent, _blocks/company-research.md contains an 'awaiting specialist' callout."""
+    apps_dir = _setup_app(tmp_path)
+    assemble_application("test-co-engineer", apps_dir)
+
+    block_file = apps_dir / "test-co-engineer" / "_blocks" / "company-research.md"
+    assert block_file.exists(), "_blocks/company-research.md fallback was not written"
+    content = block_file.read_text()
+    assert "callout-warning" in content or "awaiting" in content.lower()
+    assert "company-research" in content or "specialist" in content.lower()
+
+
+def test_company_research_block_handles_partial_content(tmp_path: Path) -> None:
+    """A research file with only some sections renders without error."""
+    apps_dir = _setup_app_with_research(
+        tmp_path, research_content=_PARTIAL_COMPANY_RESEARCH
+    )
+    assemble_application("test-co-engineer", apps_dir)
+
+    block_file = apps_dir / "test-co-engineer" / "_blocks" / "company-research.md"
+    assert block_file.exists()
+    content = block_file.read_text()
+    assert "Mission" in content
+    assert "Values" in content
