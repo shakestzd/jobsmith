@@ -30,8 +30,8 @@ Every application produces structured state in `private/applications/{slug}/.app
   │ Renderings  │                 │  Renderings  │
   │  (Quarto)   │                 │   (Typst)    │
   ├─────────────┤                 ├──────────────┤
-  │ workflow.qmd│                 │  resume.pdf  │
-  │ index.qmd   │                 │  cover.pdf   │
+  │ index.qmd   │                 │  resume.pdf  │
+  │ (per app)   │                 │  cover.pdf   │
   │ site/       │                 └──────────────┘
   └─────────────┘
 ```
@@ -55,7 +55,7 @@ Stage 1.5: anchor-bullet-guard
 Stage 1.6: apply-relevance-inquirer (conditional)
 Stage 2:   apply-prose-writer ↔ apply-prose-qa (loop)
 Stage 3:   apply-resume-renderer → apply-portfolio-ats-checker → apply-visual-layout-reviewer
-Stage 4:   apply-cover-letter-writer — produces draft.md AND assembles workflow.qmd
+Stage 4:   apply-cover-letter-writer — produces draft.md AND assembles the per-app index.qmd
            apply-hm-enricher (extended in 0.3) — also produces outreach-snippets.md
 Stage 5:   apply-index-writer — produces per-application portfolio page
            apply-db-logger
@@ -199,7 +199,7 @@ jobsmith/
 │   │   ├── _humanizer-audit.qmd         # AI-tell findings from ai-tell-report.json
 │   │   └── _resume-preview.qmd          # Embeds the rendered resume PDF
 │   ├── workflow/                        # NEW — careerfair.io 8-step rendering
-│   │   ├── _workflow.qmd                # Composes the 8 partials in sequence
+│   │   ├── _index.qmd                   # Composes the 8 partials in sequence (copied to per-app index.qmd)
 │   │   └── _quarto.yml                  # Workflow render profile
 │   ├── portfolio/                       # NEW — application portfolio site
 │   │   ├── _quarto.yml                  # Website project + listings config

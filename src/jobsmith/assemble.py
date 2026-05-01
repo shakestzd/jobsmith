@@ -10,7 +10,7 @@ this module makes each application directory a **self-contained Quarto project**
     ├── _variables.yml          ← scalars (company, position, score, etc.)
     ├── _blocks/                ← block-level markdown (lists, tables, fallbacks)
     ├── _partials/              ← symlink to jobsmith templates/partials/
-    ├── workflow.qmd            ← copied from templates/workflow/_workflow.qmd
+    ├── index.qmd               ← copied from templates/workflow/_index.qmd
     ├── .apply-state/           ← unchanged — source of truth for specialists
     ├── documents/              ← resume.pdf + cover-letter.pdf live here
     └── cover-letter-draft.md
@@ -52,7 +52,11 @@ from .config import load_config
 # from a checkout (uv pip install -e .) or vendored as a Claude Code plugin.
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_PARTIALS_SRC = PACKAGE_ROOT / "templates" / "partials"
-DEFAULT_WORKFLOW_SRC = PACKAGE_ROOT / "templates" / "workflow" / "_workflow.qmd"
+DEFAULT_INDEX_SRC = PACKAGE_ROOT / "templates" / "workflow" / "_index.qmd"
+# Backwards-compat alias for callers still using `workflow_src=`. Removed in
+# a future release — the per-app file is now `index.qmd` to match Quarto's
+# website-page convention.
+DEFAULT_WORKFLOW_SRC = DEFAULT_INDEX_SRC
 
 
 # ---------- theme helpers ----------
@@ -642,7 +646,7 @@ def assemble_application(
       <app>/_blocks/*.md         (block-level markdown for {{< include >}})
       <app>/_quarto.yml          (makes it a project; partials resolve correctly)
       <app>/_partials            (symlink to jobsmith templates/partials)
-      <app>/workflow.qmd         (copy of templates/workflow/_workflow.qmd)
+      <app>/index.qmd            (copy of templates/workflow/_index.qmd)
       <app>/theme.scss           (symlink/copy of resolved per-company theme)
 
     Returns the path of _variables.yml. Raises ValueError if the
@@ -864,12 +868,20 @@ def assemble_application(
             import shutil
             shutil.copytree(partials_src, partials_link)
 
-    # Copy the workflow QMD into the application root so the user can edit
-    # the per-application review surface without modifying the template.
+    # Copy the per-app index QMD into the application root so the user can
+    # edit the review surface without modifying the template. The file is
+    # named index.qmd to match Quarto's website-page convention; the site-level
+    # listings page (templates/site/index.qmd) reads from each app's index.qmd
+    # via Quarto listings.
     if workflow_src.is_file():
-        target_workflow = app_dir / "workflow.qmd"
-        if not target_workflow.exists():
-            target_workflow.write_text(workflow_src.read_text())
+        target_index = app_dir / "index.qmd"
+        if not target_index.exists():
+            target_index.write_text(workflow_src.read_text())
+        # One-time migration: rename any legacy workflow.qmd that pre-dates
+        # this convention. Idempotent: no-op once the rename has happened.
+        legacy = app_dir / "workflow.qmd"
+        if legacy.exists() and legacy.resolve() != target_index.resolve():
+            legacy.unlink()
 
     # Resolve and install the per-company theme SCSS.
     # The company name comes from jd-parsed.json; fall back to the slug.

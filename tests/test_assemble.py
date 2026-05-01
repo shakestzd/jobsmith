@@ -739,3 +739,28 @@ def test_company_research_block_handles_partial_content(tmp_path: Path) -> None:
     content = block_file.read_text()
     assert "Mission" in content
     assert "Values" in content
+
+
+# ---------- workflow.qmd → index.qmd migration ----------
+
+
+def test_assemble_writes_index_qmd_not_workflow_qmd(tmp_path: Path) -> None:
+    """assemble_application writes <app>/index.qmd (Quarto website convention)."""
+    apps_dir = _setup_app(tmp_path)
+    assemble_application("test-co-engineer", apps_dir)
+    app_dir = apps_dir / "test-co-engineer"
+    assert (app_dir / "index.qmd").exists(), "index.qmd was not written"
+    assert not (app_dir / "workflow.qmd").exists(), "legacy workflow.qmd should not exist on a fresh assemble"
+
+
+def test_assemble_migrates_legacy_workflow_qmd(tmp_path: Path) -> None:
+    """If a legacy workflow.qmd exists, assemble removes it and writes index.qmd."""
+    apps_dir = _setup_app(tmp_path)
+    app_dir = apps_dir / "test-co-engineer"
+    legacy = app_dir / "workflow.qmd"
+    legacy.write_text("# legacy review surface\n")
+
+    assemble_application("test-co-engineer", apps_dir)
+
+    assert (app_dir / "index.qmd").exists()
+    assert not legacy.exists(), "legacy workflow.qmd should have been removed"

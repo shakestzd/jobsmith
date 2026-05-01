@@ -81,7 +81,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the full design.
 
 - **NEW** — `apply-company-research`: produces `.apply-state/company-research.md` (mission, product, values, 2 selected reasons for §4, product-use evidence). Cached at `private/companies/{slug}.md` so two applications to the same company within N days don't re-research.
 - **EXTENDED** — `apply-hm-enricher`: also writes `.apply-state/outreach-snippets.md` (LinkedIn connection note + InMail draft when an HM is named).
-- **EXTENDED** — `apply-cover-letter-writer`: produces `cover-letter-draft.md` AND assembles `cover-letter-workflow.qmd` via `{{< include >}}` shortcodes. The workflow QMD doesn't re-gather any state — it composes partials.
+- **EXTENDED** — `apply-cover-letter-writer`: produces `cover-letter-draft.md` AND assembles the per-app `index.qmd` via `{{< include >}}` shortcodes. The index QMD doesn't re-gather any state — it composes partials. (Renamed from `workflow.qmd` to match Quarto's website-page convention; the site listings page reads each app's `index.qmd`.)
 - **EXTENDED** — `apply-prose-qa`: humanizer pass extended to cover letter prose, not just resume.
 
 ### Quarto templates (the "render many" surface)
