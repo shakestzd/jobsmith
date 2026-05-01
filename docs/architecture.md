@@ -217,6 +217,32 @@ jobsmith/
 
 ---
 
+## Phase boundaries (0.4)
+
+The 0.4 headless apply pipeline splits `agents/apply-agent.md` into three discrete `claude -p` invocations. Each phase is driven by a dedicated system prompt and signals completion by emitting a marker line that the Python caller (`headless.py`) reads to detect the boundary.
+
+| Phase | Steps owned | Pause gate | System prompt |
+|---|---|---|---|
+| **gather** | 0-3 (JD parse, fan-out, tier decision, analysis pause) | After Step 3 analysis output | `src/jobsmith/plugin/system-prompts/phase-1-gather.md` |
+| **draft** | 6 (prose-writer + prose-qa loop, max 3 iterations) | After `decision=pass` from prose-qa | `src/jobsmith/plugin/system-prompts/phase-2-draft.md` |
+| **render** | 7-9 (resume render, ATS, layout, cover letter, index + assemble) | After `index.qmd` written and `jobsmith assemble` succeeds | `src/jobsmith/plugin/system-prompts/phase-3-render.md` |
+
+Steps 4-5 (anchor guard, relevance inquiry) run between phases 1 and 2, orchestrated by `headless.py` using the CLI directly.
+
+### Phase-complete marker
+
+Each phase prompt ends by emitting the marker on its own line:
+
+```
+<<PHASE_COMPLETE: gather>>>
+<<PHASE_COMPLETE: draft>>>
+<<PHASE_COMPLETE: render>>>
+```
+
+The Python caller streams `claude -p` output and stops reading once it sees the marker. The marker is only emitted on success; on halt the phase exits without it, which the caller treats as a pipeline error requiring user intervention.
+
+---
+
 ## CLI surface (0.4)
 
 ```bash
