@@ -204,6 +204,7 @@ specialists:
             nice_to_haves: "list[string]"
             top_keywords: "list[string]  (5-8)"
             jd_text_clean: "string  (rendered text used downstream)"
+            jd_url: "string | null  (input JD URL, preserved verbatim for resume / migration matching)"
         - .apply-state/manifest.json:
             updates: "{role_type, run_id, slug, slug_derived_from, started_at}"
     tools_allowlist:
