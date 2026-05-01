@@ -60,7 +60,7 @@ def check_claude_auth() -> CheckResult:
     """
     try:
         proc = subprocess.run(
-            ["claude", "auth", "status", "--output-format", "json"],
+            ["claude", "auth", "status"],
             capture_output=True,
             text=True,
             timeout=5,
