@@ -67,6 +67,8 @@ The diff vs. 0.1: **one new specialist (`apply-company-research`)** and **two sp
 
 ## Quarto features that make rendering DRY
 
+The renderer agents reference the bundled `jobsmith-quarto` skill (`src/jobsmith/plugin/skills/jobsmith-quarto/`) for Quarto authoring patterns specific to jobsmith's three surfaces.
+
 Quarto ships native features that map directly to the "render many" requirement:
 
 ### `{{< include _partial.qmd >}}` — content reuse
