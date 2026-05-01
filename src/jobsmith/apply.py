@@ -11,7 +11,9 @@ Public API
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+import shutil
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -38,6 +40,18 @@ _PHASES = [
 # ---------------------------------------------------------------------------
 # Slug derivation
 # ---------------------------------------------------------------------------
+
+
+def _slugify_part(s: str) -> str:
+    """Convert an arbitrary string into a lowercase hyphenated slug component.
+
+    Lowercases, replaces non-alphanumeric runs with a single hyphen, and
+    strips leading/trailing hyphens.  Used by both :func:`derive_slug` and
+    :func:`_reconcile_canonical_slug` so slug-cleaning logic stays DRY.
+    """
+    s = s.lower()
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    return s.strip("-")
 
 
 def derive_slug(url: str) -> str:
@@ -72,13 +86,7 @@ def derive_slug(url: str) -> str:
             # Replace non-ASCII with hyphens
             raw = raw.encode("ascii", errors="replace").decode("ascii")
 
-        slug = raw.lower()
-        # Replace any non-alphanumeric character with a hyphen
-        slug = re.sub(r"[^a-z0-9]+", "-", slug)
-        # Collapse consecutive hyphens
-        slug = re.sub(r"-{2,}", "-", slug)
-        # Strip leading/trailing hyphens
-        slug = slug.strip("-")
+        slug = _slugify_part(raw)
     else:
         slug = ""
 
@@ -269,6 +277,97 @@ def _render_event(event: headless.Event) -> str | None:
 
     # Skip text events (too verbose) and other pass-through types
     return None
+
+
+# ---------------------------------------------------------------------------
+# Slug reconciliation — canonical slug from jd-parsed.json
+# ---------------------------------------------------------------------------
+
+
+def _reconcile_canonical_slug(active_slug: str, cwd: Path) -> tuple[str, str]:
+    """Return ``(canonical_slug, session_id)`` after an optional directory rename.
+
+    After phase 1 (gather), the specialist ``apply-jd-parser`` derives a
+    canonical slug of the form ``{company-slug}-{position-slug}`` and writes
+    artifacts under *that* directory.  The wrapper may have pre-created a
+    different directory from the raw URL.  This helper reconciles the two.
+
+    Strategy
+    --------
+    1. Try ``applications/{active_slug}/.apply-state/jd-parsed.json``.
+    2. Fallback: glob ``applications/*/.apply-state/jd-parsed.json`` and pick
+       the file with the latest mtime (phase 1 may have written under a
+       different directory).
+    3. Compute canonical = ``_slugify_part(company) + "-" + _slugify_part(position)``.
+    4. If the *owning* directory's name differs from canonical, rename it via
+       ``shutil.move``.
+    5. Return ``(canonical, deterministic_session_id(canonical))``.
+
+    When no ``jd-parsed.json`` is found anywhere, returns
+    ``(active_slug, deterministic_session_id(active_slug))`` unchanged and
+    logs a warning — the caller decides whether to abort.
+    """
+    config_path = find_config(cwd)
+    if config_path is None:
+        click.echo(
+            "reconcile: cannot locate .apply-config.yaml — skipping slug reconciliation.",
+            err=True,
+        )
+        return active_slug, headless.deterministic_session_id(active_slug)
+
+    config = load_config(config_path)
+    repo_root = config_path.parent
+    apps_dir = resolve(config.output.applications_dir, repo_root)
+
+    # 1. Primary: check the active slug's apply-state
+    primary = apps_dir / active_slug / ".apply-state" / "jd-parsed.json"
+    if primary.exists():
+        jd_path = primary
+        owning_dir = apps_dir / active_slug
+    else:
+        # 2. Fallback: find the most recently modified jd-parsed.json under any slug
+        candidates = list(apps_dir.glob("*/.apply-state/jd-parsed.json"))
+        if not candidates:
+            click.echo(
+                "reconcile: jd-parsed.json not found — cannot derive canonical slug.",
+                err=True,
+            )
+            return active_slug, headless.deterministic_session_id(active_slug)
+        jd_path = max(candidates, key=lambda p: p.stat().st_mtime)
+        owning_dir = jd_path.parent.parent  # strip "/.apply-state/jd-parsed.json"
+
+    # 3. Derive canonical slug from company + position fields
+    try:
+        jd_data = json.loads(jd_path.read_text())
+        company = jd_data.get("company", "")
+        position = jd_data.get("position", "")
+    except Exception as exc:
+        click.echo(
+            f"reconcile: failed to parse jd-parsed.json ({exc}) — skipping.",
+            err=True,
+        )
+        return active_slug, headless.deterministic_session_id(active_slug)
+
+    if not company or not position:
+        click.echo(
+            "reconcile: jd-parsed.json missing company or position — skipping.",
+            err=True,
+        )
+        return active_slug, headless.deterministic_session_id(active_slug)
+
+    canonical = f"{_slugify_part(company)}-{_slugify_part(position)}"
+
+    # 4. Rename owning dir if it doesn't already have the canonical name
+    if owning_dir.name != canonical:
+        canonical_dir = apps_dir / canonical
+        shutil.move(str(owning_dir), str(canonical_dir))
+        click.echo(
+            f"reconcile: renamed {owning_dir.name!r} → {canonical!r}",
+            err=True,
+        )
+
+    # 5. Return canonical slug + recomputed session id
+    return canonical, headless.deterministic_session_id(canonical)
 
 
 # ---------------------------------------------------------------------------
@@ -470,9 +569,12 @@ def run_apply(
             return 2
 
         # Step 3f: between-phase orchestration. After gather (phase 1) we
-        # run the anchor guard + relevance inquiry to produce the
-        # bullet-decisions.json that phase 2 (draft) requires as input.
+        # reconcile the canonical slug (phase 1 may have written artifacts
+        # under a different directory than the URL-derived slug), then run the
+        # anchor guard + relevance inquiry to produce the bullet-decisions.json
+        # that phase 2 (draft) requires as input.
         if phase_name == "gather":
+            slug, session_id = _reconcile_canonical_slug(slug, resolved_cwd)
             rc = _run_step45_orchestration(slug, resolved_cwd)
             if rc != 0:
                 return rc

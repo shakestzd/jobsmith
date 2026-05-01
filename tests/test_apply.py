@@ -17,7 +17,7 @@ from jobsmith.apply import (
     run_apply,
 )
 from jobsmith.cli import app
-from jobsmith.headless import Event
+from jobsmith.headless import Event, deterministic_session_id
 from jobsmith.render import ApplyRenderer
 
 # ---------------------------------------------------------------------------
@@ -741,3 +741,418 @@ def test_run_apply_non_tty_renderer(tmp_path: Path, monkeypatch) -> None:
     output = buf.getvalue()
     # Tool calls should still appear
     assert "Bash" in output
+
+
+# ---------------------------------------------------------------------------
+# 13. Slug reconciliation after phase 1 (canonical slug, dir rename, threading)
+# ---------------------------------------------------------------------------
+
+
+def _scaffold_apply_config_for_reconcile(root: Path, *, slug: str) -> Path:
+    """Scaffold a minimal jobsmith project with the given slug directory.
+
+    Returns the .apply-state Path.
+    """
+    import yaml
+
+    config_file = root / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {
+                    "applications_dir": "private/applications",
+                },
+            }
+        )
+    )
+    content = root / "assets" / "content"
+    content.mkdir(parents=True, exist_ok=True)
+    for name in ("work.yml", "skill.yml", "education.yml", "author.yml"):
+        (content / name).write_text("# placeholder\n")
+    apply_state = root / "private" / "applications" / slug / ".apply-state"
+    apply_state.mkdir(parents=True, exist_ok=True)
+    return apply_state
+
+
+def test_reconcile_canonical_slug_renames_when_different(tmp_path: Path) -> None:
+    """Helper renames dir from url-slug to canonical and returns canonical slug."""
+    import json
+
+    from jobsmith.apply import _reconcile_canonical_slug
+
+    apply_state = _scaffold_apply_config_for_reconcile(tmp_path, slug="url-slug")
+    (apply_state / "jd-parsed.json").write_text(
+        json.dumps({"company": "Clay", "position": "GTM Data Analyst"})
+    )
+
+    canonical_slug, session_id = _reconcile_canonical_slug("url-slug", tmp_path)
+
+    assert canonical_slug == "clay-gtm-data-analyst"
+    # Canonical dir must exist with the artifact
+    canonical_state = tmp_path / "private" / "applications" / "clay-gtm-data-analyst" / ".apply-state"
+    assert canonical_state.exists()
+    assert (canonical_state / "jd-parsed.json").exists()
+    # Original dir must be gone
+    orig_dir = tmp_path / "private" / "applications" / "url-slug"
+    assert not orig_dir.exists()
+    # session_id matches canonical
+    assert session_id == deterministic_session_id("clay-gtm-data-analyst")
+
+
+def test_reconcile_canonical_slug_noop_when_already_canonical(tmp_path: Path) -> None:
+    """No rename when active slug already equals canonical slug."""
+    import json
+
+    from jobsmith.apply import _reconcile_canonical_slug
+
+    apply_state = _scaffold_apply_config_for_reconcile(tmp_path, slug="acme-ml-engineer")
+    (apply_state / "jd-parsed.json").write_text(
+        json.dumps({"company": "Acme", "position": "ML Engineer"})
+    )
+
+    canonical_slug, session_id = _reconcile_canonical_slug("acme-ml-engineer", tmp_path)
+
+    assert canonical_slug == "acme-ml-engineer"
+    assert session_id == deterministic_session_id("acme-ml-engineer")
+    # Dir must still exist
+    assert (apply_state / "jd-parsed.json").exists()
+
+
+def test_reconcile_canonical_slug_falls_back_to_alt_dir(tmp_path: Path) -> None:
+    """When url-slug .apply-state is empty, finds jd-parsed.json in another dir."""
+    import json
+
+    from jobsmith.apply import _reconcile_canonical_slug
+
+    # Create URL-slug dir with empty .apply-state (no jd-parsed.json)
+    _scaffold_apply_config_for_reconcile(tmp_path, slug="jobs")
+
+    # Phase-1 wrote under canonical dir directly
+    canonical_state = tmp_path / "private" / "applications" / "clay-gtm-data-analyst" / ".apply-state"
+    canonical_state.mkdir(parents=True, exist_ok=True)
+    (canonical_state / "jd-parsed.json").write_text(
+        json.dumps({"company": "Clay", "position": "GTM Data Analyst"})
+    )
+
+    canonical_slug, session_id = _reconcile_canonical_slug("jobs", tmp_path)
+
+    assert canonical_slug == "clay-gtm-data-analyst"
+    assert session_id == deterministic_session_id("clay-gtm-data-analyst")
+    # The canonical dir must still be intact (no rename needed — already correct name)
+    assert (canonical_state / "jd-parsed.json").exists()
+
+
+def test_reconcile_canonical_slug_missing_jd_parsed_returns_active(tmp_path: Path) -> None:
+    """With no jd-parsed.json anywhere, returns (active_slug, session_id) unchanged."""
+    from jobsmith.apply import _reconcile_canonical_slug
+
+    _scaffold_apply_config_for_reconcile(tmp_path, slug="url-slug")
+    # No jd-parsed.json written anywhere
+
+    canonical_slug, session_id = _reconcile_canonical_slug("url-slug", tmp_path)
+
+    assert canonical_slug == "url-slug"
+    assert session_id == deterministic_session_id("url-slug")
+
+
+def test_run_apply_threads_canonical_slug_into_phase_2(tmp_path: Path, monkeypatch) -> None:
+    """After gather, canonical slug is threaded into phase-2 and phase-3 prompts."""
+    import json
+
+    config_file = tmp_path / ".apply-config.yaml"
+    import yaml
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {
+                    "applications_dir": "private/applications",
+                },
+            }
+        )
+    )
+    content = tmp_path / "assets" / "content"
+    content.mkdir(parents=True, exist_ok=True)
+    for name in ("work.yml", "skill.yml", "education.yml", "author.yml"):
+        (content / name).write_text("# placeholder\n")
+
+    plugin_fake = _scaffold_plugin(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    # URL derives to "job-id" slug; canonical will be "clay-gtm-data-analyst"
+    url = "https://jobs.ashbyhq.com/clay/some-path/job-id"
+    url_slug = derive_slug(url)  # "job-id"
+
+    # Pre-create url-slug apply-state dir with jd-parsed.json so reconcile can find it
+    url_apply_state = tmp_path / "private" / "applications" / url_slug / ".apply-state"
+    url_apply_state.mkdir(parents=True, exist_ok=True)
+    (url_apply_state / "jd-parsed.json").write_text(
+        json.dumps({"company": "Clay", "position": "GTM Data Analyst"})
+    )
+
+    captured_prompts: list[tuple[str, str]] = []  # [(phase, prompt), ...]
+    call_count = [0]
+    phase_sequence = ["gather", "draft", "render"]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        captured_prompts.append((phase, prompt))
+        idx = call_count[0]
+        call_count[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: True)
+    # Stub step45 so it doesn't fail on missing bullet-selection.json
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply(url, cwd=tmp_path, skip_confirm=True)
+    assert rc == 0, f"run_apply returned {rc}"
+
+    # phase 2 (draft) and phase 3 (render) prompts must contain canonical slug
+    draft_prompt = next(p for name, p in captured_prompts if name == "draft")
+    render_prompt = next(p for name, p in captured_prompts if name == "render")
+
+    assert "clay-gtm-data-analyst" in draft_prompt, (
+        f"draft prompt should contain canonical slug; got: {draft_prompt!r}"
+    )
+    assert "clay-gtm-data-analyst" in render_prompt, (
+        f"render prompt should contain canonical slug; got: {render_prompt!r}"
+    )
+    # url-slug must NOT appear in phase 2/3 prompts (it was reconciled away)
+    assert url_slug not in draft_prompt, (
+        f"draft prompt must not contain url slug {url_slug!r}; got: {draft_prompt!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 14. ApplyRenderer UX fixes
+# ---------------------------------------------------------------------------
+
+
+def test_renderer_path_mid_truncation() -> None:
+    """Long path args are mid-truncated preserving the filename."""
+    from jobsmith.render import _truncate_path
+
+    long_path = "/Users/shakes/DevProjects/jobsmith/.claude/worktr/system-prompts/phase-1-gather.md"
+    result = _truncate_path(long_path, max_chars=50)
+    # Filename must be preserved at the end
+    assert result.endswith("phase-1-gather.md")
+    # Mid-truncation marker must be present
+    assert "…" in result
+    # Result must be shorter than original
+    assert len(result) < len(long_path)
+
+
+def test_renderer_path_mid_truncation_in_format_tool_args() -> None:
+    """_format_tool_args mid-truncates path values (not tail-truncates)."""
+    from jobsmith.render import _format_tool_args
+
+    long_path = "/Users/shakes/DevProjects/jobsmith/.claude/worktr/system-prompts/phase-1-gather.md"
+    result = _format_tool_args({"path": long_path}, max_chars=120)
+    # Filename must be preserved
+    assert "phase-1-gather.md" in result
+    # Should contain mid-truncation marker
+    assert "…" in result
+
+
+def test_renderer_tool_result_line_numbered_summary() -> None:
+    """Line-numbered file content is summarised as '← N lines (M.K KB)'."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+    line_content = "1 foo\n2 bar\n3 baz\n4 qux\n"
+    rdr.render_event(Event(type="tool_result", tool_result=line_content))
+    output = buf.getvalue()
+    assert "4 lines" in output
+    assert "KB" in output
+    # Raw content should NOT appear
+    assert "foo" not in output
+
+
+def test_renderer_tool_result_json_summary() -> None:
+    """JSON-shaped tool result is summarised as '← {N keys}'."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+    rdr.render_event(Event(type="tool_result", tool_result='{"a":1,"b":2,"c":3}'))
+    output = buf.getvalue()
+    assert "{3 keys}" in output
+
+
+def test_renderer_tool_result_json_array_summary() -> None:
+    """JSON array tool result is summarised as '← [N items]'."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+    rdr.render_event(Event(type="tool_result", tool_result="[1,2,3,4]"))
+    output = buf.getvalue()
+    assert "[4 items]" in output
+
+
+def test_renderer_filters_todowrite() -> None:
+    """TodoWrite tool_use events produce no output; matching tool_result also silenced."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+
+    # Construct a tool_use event for TodoWrite with an id in raw
+    tool_use_id = "toolu_abc123"
+    raw_payload = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": tool_use_id,
+                    "name": "TodoWrite",
+                    "input": {"todos": []},
+                }
+            ]
+        },
+    }
+    tool_use_event = Event(
+        type="tool_use",
+        tool_name="TodoWrite",
+        tool_input={"todos": []},
+        raw=raw_payload,
+    )
+    rdr.render_event(tool_use_event)
+
+    # Matching tool_result (tool_name == tool_use_id per headless.py convention)
+    tool_result_event = Event(
+        type="tool_result",
+        tool_name=tool_use_id,
+        tool_result="OK",
+        raw={},
+    )
+    rdr.render_event(tool_result_event)
+
+    output = buf.getvalue()
+    assert "TodoWrite" not in output
+    assert output.strip() == ""
+
+
+def test_renderer_filters_toolsearch() -> None:
+    """ToolSearch tool_use events produce no output; matching tool_result also silenced."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+
+    tool_use_id = "toolu_xyz789"
+    raw_payload = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": tool_use_id,
+                    "name": "ToolSearch",
+                    "input": {"query": "test"},
+                }
+            ]
+        },
+    }
+    tool_use_event = Event(
+        type="tool_use",
+        tool_name="ToolSearch",
+        tool_input={"query": "test"},
+        raw=raw_payload,
+    )
+    rdr.render_event(tool_use_event)
+
+    tool_result_event = Event(
+        type="tool_result",
+        tool_name=tool_use_id,
+        tool_result="some search results",
+        raw={},
+    )
+    rdr.render_event(tool_result_event)
+
+    output = buf.getvalue()
+    assert "ToolSearch" not in output
+    assert output.strip() == ""
+
+
+def test_renderer_agent_dispatch_indent() -> None:
+    """Agent tool_use events are prefixed with '│ ' for visual nesting."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+    rdr.render_event(
+        Event(
+            type="tool_use",
+            tool_name="Agent",
+            tool_input={"prompt": "do something"},
+            raw={},
+        )
+    )
+    output = buf.getvalue()
+    assert "│ " in output  # │ prefix
+
+
+def test_renderer_phase_summary_renders_known_artifacts(tmp_path: Path) -> None:
+    """render_phase_summary emits content from all four artifact files when present."""
+    import json
+
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+
+    apply_state_dir = tmp_path / ".apply-state"
+    apply_state_dir.mkdir()
+
+    # jd-parsed.json — must_have requirements
+    (apply_state_dir / "jd-parsed.json").write_text(
+        json.dumps(
+            {
+                "must_have": [
+                    {"requirement": "Python 5+ years", "weight": "high"},
+                    {"requirement": "ML experience", "weight": "medium"},
+                ]
+            }
+        )
+    )
+
+    # fit-score.json — must_have_table with met/evidence
+    (apply_state_dir / "fit-score.json").write_text(
+        json.dumps(
+            {
+                "must_have_table": [
+                    {"requirement": "Python 5+ years", "evidence": "10 years", "met": True},
+                    {"requirement": "ML experience", "evidence": "PyTorch", "met": True},
+                ]
+            }
+        )
+    )
+
+    # bullet-diff.md
+    (apply_state_dir / "bullet-diff.md").write_text("kept 8 / dropped 3\n")
+
+    # hm-snippet.md
+    (apply_state_dir / "hm-snippet.md").write_text("HM is Jane Doe, VP Engineering\n")
+
+    rdr.render_phase_summary("gather", apply_state_dir)
+    output = buf.getvalue()
+
+    # Should contain key strings from each artifact
+    assert "Python 5+ years" in output
+    assert "kept 8" in output or "8" in output
+    assert "Jane Doe" in output
+
+
+def test_renderer_phase_summary_tolerates_missing(tmp_path: Path) -> None:
+    """render_phase_summary with empty dir raises no exception."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+
+    apply_state_dir = tmp_path / ".apply-state"
+    apply_state_dir.mkdir()
+
+    # Should not raise; empty dir → no artifacts
+    rdr.render_phase_summary("gather", apply_state_dir)
+    # No assertion on output content — just must not raise
