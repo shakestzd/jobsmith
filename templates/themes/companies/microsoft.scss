@@ -3,10 +3,14 @@
 // Brand: Microsoft Blue #0078D4, dark grey #323130
 // =============================================================================
 
+/*-- scss:defaults --*/
+
 $jobsmith-primary:      #0078D4;   // Microsoft blue (Fluent design)
 $jobsmith-primary-bg:   #E3F2FD;   // pale blue tint
 $jobsmith-accent-color: #005A9E;   // darker blue for borders
 $jobsmith-accent-bg:    #EFF6FF;   // near-white blue tint
+
+/*-- scss:rules --*/
 
 // --- Heading accent border ---
 h1, h2 {

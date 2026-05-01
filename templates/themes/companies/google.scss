@@ -3,10 +3,14 @@
 // Brand: Google Blue #4285F4, Red #EA4335, Yellow #FBBC04, Green #34A853
 // =============================================================================
 
+/*-- scss:defaults --*/
+
 $jobsmith-primary:      #4285F4;   // Google blue
 $jobsmith-primary-bg:   #E8F0FE;   // pale blue tint
 $jobsmith-accent-color: #EA4335;   // Google red
 $jobsmith-accent-bg:    #FEF0EE;   // pale red tint
+
+/*-- scss:rules --*/
 
 // --- Heading accent border ---
 h1, h2 {

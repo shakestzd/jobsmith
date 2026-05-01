@@ -909,3 +909,39 @@ def test_assemble_application_accepts_normal_slug_chars(tmp_path: Path) -> None:
     apps_dir = _setup_app(tmp_path, slug="acme-engineer_v2")
     out = assemble_application("acme-engineer_v2", apps_dir)
     assert out.exists()
+
+
+# ---------- SCSS layer boundary regression (bug-e3596905) ----------
+
+
+def test_all_theme_scss_files_have_quarto_layer_markers() -> None:
+    """Every shipped SCSS theme must contain at least one Quarto layer boundary marker.
+
+    Quarto requires one of: /*-- scss:defaults --*/, /*-- scss:rules --*/,
+    /*-- scss:mixins --*/, /*-- scss:functions --*/, or /*-- scss:uses --*/.
+    Without a marker quarto render fails immediately.
+    """
+    from jobsmith.assemble import PACKAGE_ROOT
+
+    themes_root = PACKAGE_ROOT / "templates" / "themes"
+    scss_files = list(themes_root.rglob("*.scss"))
+    assert scss_files, f"No .scss files found under {themes_root}"
+
+    layer_markers = (
+        "/*-- scss:defaults --*/",
+        "/*-- scss:rules --*/",
+        "/*-- scss:mixins --*/",
+        "/*-- scss:functions --*/",
+        "/*-- scss:uses --*/",
+    )
+
+    missing: list[str] = []
+    for scss_path in sorted(scss_files):
+        content = scss_path.read_text()
+        if not any(marker in content for marker in layer_markers):
+            missing.append(str(scss_path.relative_to(PACKAGE_ROOT)))
+
+    assert not missing, (
+        "The following SCSS files are missing a Quarto layer boundary marker "
+        f"(/*-- scss:defaults --*/ etc.):\n" + "\n".join(f"  {p}" for p in missing)
+    )

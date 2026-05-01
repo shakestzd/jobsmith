@@ -3,10 +3,14 @@
 // Brand: Netflix Red #E50914, near-black #141414
 // =============================================================================
 
+/*-- scss:defaults --*/
+
 $jobsmith-primary:      #E50914;   // Netflix red
 $jobsmith-primary-bg:   #FDEAEB;   // pale red tint
 $jobsmith-accent-color: #B4070F;   // darker red for borders
 $jobsmith-accent-bg:    #FEF3F3;   // near-white red tint
+
+/*-- scss:rules --*/
 
 // --- Heading accent border ---
 h1, h2 {

@@ -11,11 +11,15 @@
 //
 // =============================================================================
 
+/*-- scss:defaults --*/
+
 // --- Variable definitions (neutral slate palette) ---
 $jobsmith-primary:      #2C3E50;   // slate blue-grey
 $jobsmith-primary-bg:   #EAF0F5;   // pale blue-grey tint
 $jobsmith-accent-color: #5D7A8A;   // muted steel
 $jobsmith-accent-bg:    #F0F4F6;   // near-white steel tint
+
+/*-- scss:rules --*/
 
 // --- Heading accent border ---
 h1, h2 {

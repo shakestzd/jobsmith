@@ -3,10 +3,14 @@
 // Brand: Schneider Green #3DCD58, dark grey #333333
 // =============================================================================
 
+/*-- scss:defaults --*/
+
 $jobsmith-primary:      #3DCD58;   // Schneider Electric green
 $jobsmith-primary-bg:   #E8FAE9;   // pale green tint
 $jobsmith-accent-color: #2D9E43;   // darker green for borders
 $jobsmith-accent-bg:    #F2FCF3;   // near-white green tint
+
+/*-- scss:rules --*/
 
 // --- Heading accent border ---
 h1, h2 {

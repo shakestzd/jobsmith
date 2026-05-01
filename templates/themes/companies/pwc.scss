@@ -3,10 +3,14 @@
 // Brand: PwC Orange #DC6B2F, dark grey #21201F
 // =============================================================================
 
+/*-- scss:defaults --*/
+
 $jobsmith-primary:      #DC6B2F;   // PwC orange
 $jobsmith-primary-bg:   #FCF0E9;   // pale orange tint
 $jobsmith-accent-color: #B3561E;   // darker orange for borders
 $jobsmith-accent-bg:    #FEF6F0;   // near-white orange tint
+
+/*-- scss:rules --*/
 
 // --- Heading accent border ---
 h1, h2 {
