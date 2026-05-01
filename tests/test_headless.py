@@ -103,7 +103,7 @@ def test_command_construction_no_resume(monkeypatch):
     assert "Agent Bash WebFetch Read Edit Write" in args
     assert "--max-turns" in args
     assert "30" in args
-    # No --resume flag when resume=False
+    # No --resume flag when resume=False (mutually exclusive)
     assert "--resume" not in args
     # Prompt is the last argument
     assert args[-1] == PROMPT
@@ -129,7 +129,10 @@ def test_command_construction_with_resume(monkeypatch):
     )
 
     args = mock_popen_cls.call_args[0][0]
+    # --resume and --session-id are mutually exclusive.
+    # When resume=True, only --resume should be present.
     assert "--resume" in args
+    assert "--session-id" not in args
     resume_idx = args.index("--resume")
     assert args[resume_idx + 1] == SESSION_ID
 
