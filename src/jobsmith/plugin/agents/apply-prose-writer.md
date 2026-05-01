@@ -21,6 +21,51 @@ Read `.apply-state/spec.json`:
 - `inputs.master_yamls` = work.yml, skill.yml, education.yml, author.yml, publication.yml (ALL READ-ONLY)
 - `inputs.voice_guide` = `${VOICE_GUIDE_PATH}`
 # Configured via .apply-config.yaml voice.voice_guide_path
+- `inputs.benchmark_resume_qmd` = path to benchmark .qmd file, or null
+- `inputs.feedback_dir` = absolute path to `private/feedback/` directory, or null
+- `inputs.role_type` = string (e.g. `data-analyst`, `ai-engineer`) from manifest.json
+
+## Benchmark style reference
+
+<!-- ─── STYLE REFERENCE — READ CAREFULLY ─── -->
+
+If `inputs.benchmark_resume_qmd` is provided (non-null), read that file as a
+**voice, rhythm, and page-fit exemplar only**.
+
+Use it to calibrate:
+- **Voice and rhythm** — sentence length, paragraph cadence, opening-line energy.
+- **Structure** — section ordering, Professional Summary length, bullet density.
+- **Page-fit instincts** — how tightly the benchmark fills a single page; match that density.
+
+**HARD RULE — benchmark is NEVER a source of fact.**
+You MUST NOT copy, paraphrase, or derive from the benchmark:
+- Any dollar amounts, percentages, year counts, or asset counts.
+- Any company names, institution names, or proper nouns.
+- Any project names, tool names, or product claims.
+- Any claim of any kind.
+
+The benchmark teaches *how to write*; master YAML is *what to write*. Violation
+of this rule is equivalent to fabrication and triggers an immediate halt.
+
+<!-- ─── END BENCHMARK STYLE REFERENCE ─── -->
+
+## Prior feedback lessons (soft style guidance)
+
+If `inputs.feedback_dir` is set and the directory has `*.json` files, read up to the 10 most recent records (sorted by filename — they are timestamp-suffixed). Filter:
+1. Prefer records with `kind: prose-bullet` AND `context.role_type == inputs.role_type`
+2. If <3 matches, top up with most-recent `kind: prose-bullet` regardless of role_type
+3. Drop any record with empty `lesson` field — they're placeholders the user hasn't filled in
+
+Treat each `lesson` as a voice/word-choice hint. Examples of valid lesson application:
+- Lesson "Don't lead bullets with the verb 'Built'" → avoid "Built X" openings
+- Lesson "Prefer 'investigated' over 'analyzed'" → swap word choice
+
+FORBIDDEN:
+- A lesson can NEVER introduce a metric, dollar amount, percentage, or proper noun absent from master YAML
+- A lesson can NEVER override a JD requirement
+- If lessons conflict with the bullet-selector's chosen claims, the claims win — log the conflict in `prose-result.json` under `lessons_skipped: [...]`
+
+If `feedback_dir` is null/missing or no records match, proceed without lessons. This is the v0.5 default for new users.
 
 ## Voice rules (read the voice_guide; this is the short version)
 

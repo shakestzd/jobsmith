@@ -22,6 +22,7 @@ import click
 
 from . import headless
 from . import plugin_dir as get_plugin_dir
+from .benchmarks import resolve_benchmark_or_fallback
 from .config import CONFIG_FILENAME, find_config, load_config
 from .guard import check_anchors
 from .paths import resolve
@@ -233,6 +234,30 @@ def _build_paths(slug: str, cwd: Path, plugin_directory: Path) -> dict[str, str]
         # apply_state_dir — absolute path for the current slug
         apps_dir = resolve(config.output.applications_dir, repo_root)
         result["apply_state_dir"] = str(apps_dir / slug / ".apply-state")
+
+        # Benchmark paths — resolve for the three specialists that consume them.
+        # Falls back to Pat Doe files when user hasn't configured benchmarks.
+        # Skip the key entirely when no benchmark is available (resolver returned
+        # None) so we never inject a non-existent path. The bundled Pat Doe pack
+        # only ships resume.qmd + cover-letter.md, so resume_pdf has no fallback;
+        # specialists treat the absent key as "no benchmark available for this
+        # field" rather than reading a missing file.
+        # Raises BenchmarkRequiredError only when benchmarks.required=True and
+        # the field is unset — in that case we propagate up to the caller.
+        for field, key in (
+            ("resume_qmd", "benchmark.resume_qmd"),
+            ("cover_letter_md", "benchmark.cover_letter_md"),
+            ("resume_pdf", "benchmark.resume_pdf"),
+        ):
+            path = resolve_benchmark_or_fallback(field, config, repo_root)
+            if path is not None:
+                result[key] = str(path)
+
+        # Feedback directory — soft style lessons for prose-writer + cover-letter-writer.
+        # Present only when the directory exists; absent key means "no feedback yet".
+        feedback_dir = repo_root / "private" / "feedback"
+        if feedback_dir.exists():
+            result["feedback.dir"] = str(feedback_dir.resolve())
 
     return result
 
@@ -509,6 +534,46 @@ def _apply_state_dir(slug: str, cwd: Path) -> Path | None:
     config = load_config(config_path)
     repo_root = config_path.parent
     return resolve(config.output.applications_dir, repo_root) / slug / ".apply-state"
+
+
+def _snapshot_phase_drafts(phase: str, slug: str, cwd: Path) -> None:
+    """Persist immutable agent-draft snapshots after a phase completes.
+
+    `jobsmith feedback record` needs a stable agent baseline to diff against
+    user edits. Specialists overwrite their drafts on revision (and the user
+    may edit the live files), so we snapshot once at phase-completion and
+    treat ``*-draft.agent.md`` as read-only thereafter.
+
+    - After phase ``draft`` (phase 2): snapshot
+      ``.apply-state/prose-draft.md`` → ``.apply-state/prose-draft.agent.md``.
+    - After phase ``render`` (phase 3): snapshot the agent-written cover
+      letter — usually at ``<app>/cover-letter-draft.md`` (where
+      apply-cover-letter-writer writes), with a fallback to
+      ``.apply-state/cover-letter-draft.md`` if the humanizer pass left one
+      there — into ``.apply-state/cover-letter-draft.agent.md``.
+
+    Silently no-ops when source files are missing or the state dir cannot
+    be resolved; the apply pipeline is the source of truth and we don't
+    want to fail a successful phase on a snapshot hiccup.
+    """
+    state_dir = _apply_state_dir(slug, cwd)
+    if state_dir is None or not state_dir.is_dir():
+        return
+    app_dir = state_dir.parent
+
+    if phase == "draft":
+        src = state_dir / "prose-draft.md"
+        if src.exists():
+            shutil.copy2(src, state_dir / "prose-draft.agent.md")
+
+    elif phase == "render":
+        # Prefer the app-root copy (where apply-cover-letter-writer writes
+        # per its prompt); fall back to the state-dir humanizer artifact.
+        src_root = app_dir / "cover-letter-draft.md"
+        src_state = state_dir / "cover-letter-draft.md"
+        src = src_root if src_root.exists() else src_state
+        if src.exists():
+            shutil.copy2(src, state_dir / "cover-letter-draft.agent.md")
 
 
 # ---------------------------------------------------------------------------
@@ -960,6 +1025,11 @@ def run_apply(
                 "Check output above for errors."
             )
             return 2
+
+        # Step 3f-snap: snapshot agent drafts so `jobsmith feedback record`
+        # has a stable baseline to diff user edits against. Done immediately
+        # after the phase succeeds, before the user can edit anything.
+        _snapshot_phase_drafts(phase_name, slug, resolved_cwd)
 
         # Step 3g: between-phase orchestration. After gather we reconcile the
         # canonical slug (phase 1 may have written artifacts under a different

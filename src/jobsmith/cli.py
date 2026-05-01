@@ -18,6 +18,7 @@ Exposes:
 from __future__ import annotations
 
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
 
@@ -130,6 +131,50 @@ GITIGNORE_ADDITIONS = dedent(
     private/applications/*/documents/*.typ
     private/job_search.db
     private/benchmarks/
+    private/feedback/
+    """
+)
+
+FEEDBACK_README = dedent(
+    """\
+    # private/feedback/ — learning feedback from user edits
+
+    Jobsmith writes JSON records here when you run `feedback record`
+    after hand-editing the agent's drafts. The diff is taken between
+    the live files and the immutable `.agent.md` snapshots that the
+    apply pipeline captures at phase completion:
+
+      - `.apply-state/prose-draft.md` (live, user-edited)
+        vs `.apply-state/prose-draft.agent.md` (snapshot)
+      - `<app>/cover-letter-draft.md` (live, user-edited at app root)
+        vs `.apply-state/cover-letter-draft.agent.md` (snapshot)
+
+    Each record captures what the agent wrote vs. what you changed, so
+    future runs can learn from your edits.
+
+    ## Usage
+
+    ```
+    jobsmith feedback record <slug>   # diff latest user edits
+    jobsmith feedback list            # view records
+    jobsmith feedback export          # YAML summary — review before sharing
+    jobsmith feedback prune --older-than 90d
+    ```
+
+    ## Privacy
+
+    - Raw records contain private application text — the `before`/`after`
+      fields store the actual prose you edited, which can include company
+      names, metrics, and other sensitive details. Treat the directory as
+      private.
+    - `jobsmith feedback export` drops slug + per-app metadata (company /
+      role context) but copies `lesson` strings verbatim. If you author
+      lessons that name a specific employer, claim, or person, that text
+      appears in the export. **Review the YAML before syncing it across
+      machines or pasting it anywhere shared.**
+    - This directory is gitignored by default so personal data stays local;
+      prefer the export over the raw JSON, and double-check what's in the
+      export before sharing.
     """
 )
 
@@ -220,6 +265,13 @@ def init(
     _write_file(target / "private" / "capacity" / "profile.yaml", PROFILE_TEMPLATE, force)
     (target / "private" / "applications").mkdir(parents=True, exist_ok=True)
     console.print(f"  ENSURED {target / 'private' / 'applications'}")
+    (target / "private" / "feedback").mkdir(parents=True, exist_ok=True)
+    console.print(f"  ENSURED {target / 'private' / 'feedback'}")
+    _write_file(
+        target / "private" / "feedback" / "README.md",
+        FEEDBACK_README,
+        force,
+    )
 
     # Benchmarks scaffold
     console.print("\n[bold]Benchmark scaffold:[/bold]")
@@ -239,7 +291,7 @@ def init(
             new_lines.append(GITIGNORE_ADDITIONS)
         else:
             # jobsmith block already present — ensure individual rules are there
-            for rule in ("private/benchmarks/",):
+            for rule in ("private/benchmarks/", "private/feedback/"):
                 if rule not in existing:
                     new_lines.append(f"\n{rule}\n")
         if new_lines:
@@ -743,6 +795,132 @@ def site_review_cmd(
 
     webbrowser.open(target.as_uri())
     console.print(f"Opened: [cyan]{target}[/cyan]")
+
+
+# ---------- feedback subcommand group ----------
+
+
+feedback_app = typer.Typer(
+    help="Capture and manage learning feedback from user edits.",
+    no_args_is_help=True,
+)
+app.add_typer(feedback_app, name="feedback")
+
+
+@feedback_app.command("record")
+def feedback_record(slug: str = typer.Argument(...)) -> None:
+    """Diff user edits against agent output and write feedback JSON records."""
+    from .feedback import record as _record
+
+    repo_root = repo_root_for()
+    # Honour `output.applications_dir` from .apply-config.yaml — repos with a
+    # custom layout (e.g. archive/applications/) would otherwise be invisible
+    # to feedback record. Fall back to the default when no config exists.
+    config_path = find_config(repo_root)
+    if config_path is not None:
+        cfg = load_config(config_path)
+        apps_dir = resolve(cfg.output.applications_dir, config_path.parent)
+    else:
+        apps_dir = repo_root / "private" / "applications"
+    app_dir = apps_dir / slug
+    feedback_dir = repo_root / "private" / "feedback"
+
+    if not app_dir.exists():
+        console.print(f"[red]ERROR:[/red] application directory not found: {app_dir}")
+        raise typer.Exit(code=1)
+
+    records = _record(slug, app_dir=app_dir, feedback_dir=feedback_dir)
+    if not records:
+        console.print(f"[yellow]No significant edits detected for {slug!r}.[/yellow]")
+    else:
+        console.print(f"[green]Recorded {len(records)} feedback item(s) for {slug!r}:[/green]")
+        for r in records:
+            console.print(f"  [{r['kind']}] {r['before'][:60]!r} → {r['after'][:60]!r}")
+
+
+@feedback_app.command("list")
+def feedback_list(
+    kind: str | None = typer.Option(None, "--kind", help="Filter by kind (prose-bullet or cover-letter-paragraph)"),
+    since: str | None = typer.Option(None, "--since", help="ISO date or 'Nd' for N days ago"),
+) -> None:
+    """List feedback records, optionally filtered by kind or date."""
+    from datetime import timedelta
+
+    from .feedback import list_records
+
+    since_dt = None
+    if since is not None:
+        if since.endswith("d") and since[:-1].isdigit():
+            days = int(since[:-1])
+            since_dt = datetime.now(timezone.utc) - timedelta(days=days)
+        else:
+            try:
+                since_dt = datetime.fromisoformat(since)
+            except ValueError:
+                console.print(f"[red]ERROR:[/red] Cannot parse --since value: {since!r}")
+                raise typer.Exit(code=1) from None
+
+    records = list_records(filter_kind=kind, since=since_dt)
+
+    if not records:
+        console.print("[yellow]No feedback records found.[/yellow]")
+        return
+
+    table = Table(title="Feedback records", show_lines=True)
+    table.add_column("Timestamp", style="dim")
+    table.add_column("Slug", style="cyan")
+    table.add_column("Kind")
+    table.add_column("Before", max_width=40)
+    table.add_column("After", max_width=40)
+    table.add_column("Lesson")
+
+    for r in records:
+        table.add_row(
+            r.get("timestamp", "")[:19],
+            r.get("slug", ""),
+            r.get("kind", ""),
+            r.get("before", "")[:40],
+            r.get("after", "")[:40],
+            r.get("lesson", ""),
+        )
+
+    console.print(table)
+
+
+@feedback_app.command("prune")
+def feedback_prune(
+    older_than: str = typer.Option("90d", "--older-than", help="Delete records older than N days (e.g. 90d)"),
+) -> None:
+    """Delete feedback records older than a threshold."""
+    from .feedback import prune
+
+    if older_than.endswith("d") and older_than[:-1].isdigit():
+        days = int(older_than[:-1])
+    elif older_than.isdigit():
+        days = int(older_than)
+    else:
+        console.print(f"[red]ERROR:[/red] Cannot parse --older-than value: {older_than!r}. Use e.g. '90d'.")
+        raise typer.Exit(code=1)
+
+    deleted = prune(older_than_days=days)
+    console.print(f"[green]Pruned {deleted} feedback record(s) older than {days} days.[/green]")
+
+
+@feedback_app.command("export")
+def feedback_export(
+    out: Path | None = typer.Option(None, "--out", help="Output path (default: stdout)"),  # noqa: B008
+) -> None:
+    """Export a sanitized YAML summary of feedback patterns."""
+    from .feedback import export
+
+    yaml_str = export()
+
+    if out is None:
+        console.print(yaml_str, end="")
+    else:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(yaml_str)
+        console.print(f"[green]Exported feedback summary to {out}[/green]")
 
 
 def _read_index_frontmatter(path: Path) -> dict:

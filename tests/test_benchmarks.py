@@ -64,11 +64,20 @@ def test_raises_on_unknown_field(tmp_path: Path) -> None:
 
 
 def test_all_valid_fields_fall_back_silently(tmp_path: Path) -> None:
+    """Every recognised field returns either a real Path or None — never raises and
+    never returns a path to a non-existent file. Markdown fallbacks are
+    bundled (resume.qmd, cover-letter.md); PDFs and HTML aren't, and those
+    return None when the user hasn't configured them."""
     config = _config(required=False)
     fields = ["resume_pdf", "resume_qmd", "cover_letter_md", "cover_letter_pdf", "workflow_html"]
     for field in fields:
         result = resolve_benchmark_or_fallback(field, config, tmp_path)
-        assert isinstance(result, Path)
+        assert result is None or isinstance(result, Path)
+        if isinstance(result, Path):
+            assert result.exists(), (
+                f"{field} fell back to {result!r} which does not exist; "
+                "resolver must return None when the shipped fallback is missing"
+            )
 
 
 # ---------------------------------------------------------------------------

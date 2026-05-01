@@ -653,6 +653,333 @@ def test_renderer_non_tty_no_spinner() -> None:
     assert rdr._use_spinner is False
 
 
+# ---------------------------------------------------------------------------
+# 12. _build_paths injects benchmark paths into phase paths dict
+# ---------------------------------------------------------------------------
+
+
+def test_build_paths_injects_benchmark_paths_when_configured(tmp_path: Path) -> None:
+    """_build_paths includes benchmark.* keys when config has benchmark paths set."""
+    import yaml
+
+    from jobsmith.apply import _build_paths
+
+    # Scaffold a valid config with benchmark paths
+    bm_dir = tmp_path / "private" / "benchmarks"
+    bm_dir.mkdir(parents=True)
+    resume_qmd = bm_dir / "resume.qmd"
+    resume_qmd.write_text("# benchmark resume\n")
+    cover_letter_md = bm_dir / "cover-letter.md"
+    cover_letter_md.write_text("# benchmark cover letter\n")
+    resume_pdf = bm_dir / "resume.pdf"
+    resume_pdf.write_bytes(b"%PDF-1.4")
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+                "benchmarks": {
+                    "resume_qmd": "private/benchmarks/resume.qmd",
+                    "cover_letter_md": "private/benchmarks/cover-letter.md",
+                    "resume_pdf": "private/benchmarks/resume.pdf",
+                    "required": False,
+                },
+            }
+        )
+    )
+
+    plugin_fake = tmp_path / "plugin"
+    plugin_fake.mkdir()
+
+    paths = _build_paths("test-slug", tmp_path, plugin_fake)
+
+    assert "benchmark.resume_qmd" in paths, "benchmark.resume_qmd must be in paths"
+    assert "benchmark.cover_letter_md" in paths, "benchmark.cover_letter_md must be in paths"
+    assert "benchmark.resume_pdf" in paths, "benchmark.resume_pdf must be in paths"
+    assert paths["benchmark.resume_qmd"] == str(resume_qmd.resolve())
+    assert paths["benchmark.cover_letter_md"] == str(cover_letter_md.resolve())
+    assert paths["benchmark.resume_pdf"] == str(resume_pdf.resolve())
+
+
+def test_build_paths_benchmark_fallback_when_not_configured(tmp_path: Path) -> None:
+    """_build_paths uses Pat Doe fallback paths when benchmarks section absent."""
+    import yaml
+
+    import jobsmith
+    from jobsmith.apply import _build_paths
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+
+    plugin_fake = tmp_path / "plugin"
+    plugin_fake.mkdir()
+
+    paths = _build_paths("test-slug", tmp_path, plugin_fake)
+
+    pat_doe_dir = jobsmith.plugin_dir() / "benchmarks"
+    # The bundled Pat Doe pack ships resume.qmd + cover-letter.md (and a
+    # README), but no resume.pdf — so resume_pdf falls back to "no benchmark
+    # available" (key absent), while the two markdown fallbacks resolve.
+    assert "benchmark.resume_qmd" in paths
+    assert "benchmark.cover_letter_md" in paths
+    assert "benchmark.resume_pdf" not in paths, (
+        "resume_pdf has no shipped fallback; key must be omitted, not pointed "
+        "at a non-existent file"
+    )
+    assert paths["benchmark.resume_qmd"] == str(pat_doe_dir / "resume.qmd")
+    assert paths["benchmark.cover_letter_md"] == str(pat_doe_dir / "cover-letter.md")
+
+
+# 13. _build_paths injects feedback_dir + role_type into phase paths dict
+# ---------------------------------------------------------------------------
+
+
+def test_build_paths_injects_feedback_dir_when_present(tmp_path: Path) -> None:
+    """_build_paths includes feedback.dir key when private/feedback/ exists."""
+    import yaml
+
+    from jobsmith.apply import _build_paths
+
+    # Create the feedback directory
+    feedback_dir = tmp_path / "private" / "feedback"
+    feedback_dir.mkdir(parents=True)
+    # Place a placeholder record so the directory is non-empty
+    (feedback_dir / "2025-01-01T000000-prose-bullet.json").write_text(
+        '{"kind": "prose-bullet", "lesson": "Don\'t start with Built"}'
+    )
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+
+    plugin_fake = tmp_path / "plugin"
+    plugin_fake.mkdir()
+
+    paths = _build_paths("test-slug", tmp_path, plugin_fake)
+
+    assert "feedback.dir" in paths, "feedback.dir must be in paths when private/feedback/ exists"
+    assert paths["feedback.dir"] == str(feedback_dir.resolve())
+
+
+def test_build_paths_feedback_dir_null_when_missing(tmp_path: Path) -> None:
+    """_build_paths sets feedback.dir to null/None (key absent) when private/feedback/ does not exist."""
+    import yaml
+
+    from jobsmith.apply import _build_paths
+
+    # Do NOT create private/feedback/
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+
+    plugin_fake = tmp_path / "plugin"
+    plugin_fake.mkdir()
+
+    paths = _build_paths("test-slug", tmp_path, plugin_fake)
+
+    # When feedback dir is absent, the key must either be absent or map to null/None.
+    # Our implementation omits the key entirely when the path does not exist.
+    assert "feedback.dir" not in paths or paths.get("feedback.dir") is None, (
+        "feedback.dir must be absent or None when private/feedback/ does not exist"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 14. Injected fallback benchmark paths must point at files that exist
+# ---------------------------------------------------------------------------
+
+
+def test_injected_fallback_benchmark_paths_exist(tmp_path: Path) -> None:
+    """Every benchmark.* key written into the Paths dict must point at a real file.
+
+    The bundled Pat Doe pack only ships resume.qmd + cover-letter.md, so
+    resume_pdf must be omitted from the Paths dict (rather than pointing at
+    a non-existent ``plugin/benchmarks/resume.pdf``). The Paths block is
+    handed to specialists verbatim — every key it carries is a Read promise.
+    """
+    import yaml
+
+    from jobsmith.apply import _build_paths
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+
+    plugin_fake = tmp_path / "plugin"
+    plugin_fake.mkdir()
+
+    paths = _build_paths("test-slug", tmp_path, plugin_fake)
+
+    benchmark_keys = [k for k in paths if k.startswith("benchmark.")]
+    assert benchmark_keys, "expected at least one benchmark.* key for the markdown fallbacks"
+    for key in benchmark_keys:
+        path_str = paths[key]
+        assert Path(path_str).exists(), (
+            f"{key} resolves to {path_str!r} which does not exist on disk — "
+            "the Paths block must never carry phantom files"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 15. _snapshot_phase_drafts — agent baseline preserved for feedback diffs
+# ---------------------------------------------------------------------------
+
+
+def test_snapshot_phase_drafts_preserves_prose_baseline(tmp_path: Path) -> None:
+    """After phase 'draft' completes, .apply-state/prose-draft.agent.md is created."""
+    import yaml
+
+    from jobsmith.apply import _snapshot_phase_drafts
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+
+    slug = "test-snap-prose"
+    state_dir = tmp_path / "private" / "applications" / slug / ".apply-state"
+    state_dir.mkdir(parents=True)
+    (state_dir / "prose-draft.md").write_text(
+        "- Built scalable data pipelines\n- Led a team of 3\n"
+    )
+
+    _snapshot_phase_drafts("draft", slug, tmp_path)
+
+    snapshot = state_dir / "prose-draft.agent.md"
+    assert snapshot.exists(), "snapshot must be created after phase draft"
+    assert snapshot.read_text() == (state_dir / "prose-draft.md").read_text(), (
+        "snapshot content must match the live draft at the moment of capture"
+    )
+
+
+def test_snapshot_phase_drafts_preserves_cover_letter_baseline(tmp_path: Path) -> None:
+    """After phase 'render' completes, .apply-state/cover-letter-draft.agent.md is created."""
+    import yaml
+
+    from jobsmith.apply import _snapshot_phase_drafts
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+
+    slug = "test-snap-cl"
+    app_dir = tmp_path / "private" / "applications" / slug
+    state_dir = app_dir / ".apply-state"
+    state_dir.mkdir(parents=True)
+    cover_letter_text = "Dear Hiring Manager,\n\nI am applying for...\n"
+    (app_dir / "cover-letter-draft.md").write_text(cover_letter_text)
+
+    _snapshot_phase_drafts("render", slug, tmp_path)
+
+    snapshot = state_dir / "cover-letter-draft.agent.md"
+    assert snapshot.exists(), "snapshot must be created after phase render"
+    assert snapshot.read_text() == cover_letter_text
+
+
+def test_snapshot_phase_drafts_silently_no_ops_when_source_missing(tmp_path: Path) -> None:
+    """No source file → no snapshot, no error (post-phase hook stays soft)."""
+    import yaml
+
+    from jobsmith.apply import _snapshot_phase_drafts
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+
+    slug = "test-snap-empty"
+    state_dir = tmp_path / "private" / "applications" / slug / ".apply-state"
+    state_dir.mkdir(parents=True)
+    # No prose-draft.md written — _snapshot_phase_drafts must not raise.
+
+    _snapshot_phase_drafts("draft", slug, tmp_path)
+
+    assert not (state_dir / "prose-draft.agent.md").exists()
+
+
 def test_renderer_text_event_non_empty() -> None:
     """Non-empty text events are rendered as dim italic at verbosity >= 1."""
     con, buf = _make_test_console()

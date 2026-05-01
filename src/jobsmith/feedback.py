@@ -1,0 +1,422 @@
+"""Feedback capture loop for jobsmith — records, lists, prunes, and exports
+per-application diff records so future runs can learn from user edits.
+
+Public API
+----------
+record(slug, *, app_dir, feedback_dir) -> list[dict]
+list_records(filter_kind, since, *, feedback_dir) -> list[dict]
+prune(older_than_days, *, feedback_dir) -> int
+export(*, feedback_dir) -> str
+lesson_placeholder(before, after) -> str
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from datetime import datetime, timezone
+from difflib import SequenceMatcher
+from pathlib import Path
+
+import yaml
+
+# Minimum changed-character count to count as a "significant" edit.
+# Counted via SequenceMatcher opcodes so substitutions of similar length
+# (e.g. swapping a 12-char phrase for a different 12-char phrase) still
+# register, not just length deltas.
+_SIGNIFICANT_THRESHOLD = 5
+
+# Default subdirectory names.
+_DEFAULT_FEEDBACK_SUBDIR = Path("private") / "feedback"
+_DEFAULT_APPLICATIONS_SUBDIR = Path("private") / "applications"
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _repo_root() -> Path:
+    """Best-effort repo root: walk up from cwd looking for .apply-config.yaml."""
+    cwd = Path.cwd()
+    for parent in [cwd, *cwd.parents]:
+        if (parent / ".apply-config.yaml").exists():
+            return parent
+    return cwd
+
+
+def _is_significant(before: str, after: str) -> bool:
+    """Return True when the edit changes more than the threshold of characters
+    (substitutions count, not just length delta) and is not whitespace-only.
+    """
+    if before.strip() == after.strip():
+        return False
+    matcher = SequenceMatcher(a=before, b=after, autojunk=False)
+    changed = sum(
+        max(i2 - i1, j2 - j1)
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes()
+        if tag != "equal"
+    )
+    return changed >= _SIGNIFICANT_THRESHOLD
+
+
+def _load_role_type(state_dir: Path) -> str | None:
+    """Read role_type from manifest.json (preferred) or jd-parsed.json.
+
+    The wave-3 read-back filter in apply-prose-writer + apply-cover-letter-writer
+    matches `context.role_type == inputs.role_type`, so role-typed records must
+    carry it. Returns None when neither file exists or role_type is absent.
+    """
+    for filename in ("manifest.json", "jd-parsed.json"):
+        path = state_dir / filename
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        role_type = data.get("role_type")
+        if isinstance(role_type, str) and role_type:
+            return role_type
+    return None
+
+
+def _aligned_edits(agent_items: list[str], user_items: list[str]) -> list[tuple[str, str]]:
+    """Return (before, after) pairs by aligning items via SequenceMatcher.
+
+    Positional matching produces false positives when the user inserts or
+    deletes one item — every following item shifts and looks "edited".
+    SequenceMatcher.get_opcodes() aligns unchanged items first, then emits
+    only the genuine replace/insert/delete operations:
+
+    - ``replace``: pair each old item with its new counterpart in order;
+      excess items on the longer side become inserts/deletes.
+    - ``delete``: ``(item, "")`` — a removed item.
+    - ``insert``: ``("", item)`` — a newly added item.
+
+    Items are considered equal when their stripped text matches, so
+    whitespace-only differences don't break alignment.
+    """
+    matcher = SequenceMatcher(
+        a=[s.strip() for s in agent_items],
+        b=[s.strip() for s in user_items],
+        autojunk=False,
+    )
+    edits: list[tuple[str, str]] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        if tag == "replace":
+            old = agent_items[i1:i2]
+            new = user_items[j1:j2]
+            paired = min(len(old), len(new))
+            for k in range(paired):
+                if _is_significant(old[k], new[k]):
+                    edits.append((old[k], new[k]))
+            for k in range(paired, len(old)):
+                if _is_significant(old[k], ""):
+                    edits.append((old[k], ""))
+            for k in range(paired, len(new)):
+                if _is_significant("", new[k]):
+                    edits.append(("", new[k]))
+        elif tag == "delete":
+            for item in agent_items[i1:i2]:
+                if _is_significant(item, ""):
+                    edits.append((item, ""))
+        elif tag == "insert":
+            for item in user_items[j1:j2]:
+                if _is_significant("", item):
+                    edits.append(("", item))
+    return edits
+
+
+def _diff_bullets(agent_text: str, user_text: str) -> list[tuple[str, str]]:
+    """Return (before, after) pairs for prose-bullet lines that differ significantly.
+
+    Bullets are aligned via :func:`_aligned_edits` so an insertion/deletion
+    of a single bullet doesn't cascade into N false-positive edits.
+    """
+    def _bullets(text: str) -> list[str]:
+        return [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+
+    return _aligned_edits(_bullets(agent_text), _bullets(user_text))
+
+
+def _diff_paragraphs(agent_text: str, user_text: str) -> list[tuple[str, str]]:
+    """Return (before, after) pairs for cover-letter paragraphs that differ significantly.
+
+    Paragraphs are delimited by blank lines and aligned via
+    :func:`_aligned_edits` — an inserted or deleted paragraph won't cause
+    every later paragraph to register as a false edit.
+    """
+    def _paras(text: str) -> list[str]:
+        raw = text.strip().split("\n\n")
+        return [p.strip() for p in raw if p.strip()]
+
+    return _aligned_edits(_paras(agent_text), _paras(user_text))
+
+
+def _write_record(
+    feedback_dir: Path,
+    slug: str,
+    kind: str,
+    before: str,
+    after: str,
+    context: dict | None = None,
+) -> dict:
+    """Construct a feedback record dict, write it as JSON, and return it.
+
+    Filename layout is ``<timestamp>__<slug>.json`` (timestamp-leading so
+    lexicographic sort matches chronological order). The specialist
+    read-back prompts in apply-prose-writer / apply-cover-letter-writer
+    rely on this — sorting filenames descending yields most-recent first
+    regardless of slug.
+    """
+    ts = datetime.now(timezone.utc).isoformat()
+    record: dict = {
+        "slug": slug,
+        "timestamp": ts,
+        "kind": kind,
+        "before": before,
+        "after": after,
+        "lesson": lesson_placeholder(before, after),
+        "context": context,
+    }
+    feedback_dir.mkdir(parents=True, exist_ok=True)
+    safe_ts = ts.replace(":", "-").replace("+", "p")
+    # Timestamp leads so lexicographic sort = chronological sort. ISO 8601
+    # is constant-width up to the offset, which makes "sort by filename" a
+    # safe primitive for the readback specialists. Append a -NN counter on
+    # collision so back-to-back records (multiple edits in one record()
+    # call landing in the same microsecond) don't overwrite each other.
+    # We avoid Path.with_suffix here because safe_ts contains dots in the
+    # microsecond field — with_suffix would replace the ".microseconds"
+    # token and mangle the filename.
+    path = feedback_dir / f"{safe_ts}__{slug}.json"
+    counter = 1
+    while path.exists():
+        path = feedback_dir / f"{safe_ts}__{slug}-{counter:02d}.json"
+        counter += 1
+    path.write_text(json.dumps(record, indent=2))
+    return record
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def lesson_placeholder(before: str, after: str) -> str:  # noqa: ARG001
+    """Placeholder heuristic — returns empty string; wave-3 will auto-suggest.
+
+    The function signature is stable so prose-writer (wave 3) can call it.
+    """
+    return ""
+
+
+def record(
+    slug: str,
+    *,
+    app_dir: Path | None = None,
+    feedback_dir: Path | None = None,
+) -> list[dict]:
+    """Diff user edits against agent output and write feedback JSON records.
+
+    Parameters
+    ----------
+    slug:
+        Application slug (directory name under private/applications/).
+    app_dir:
+        Override the application directory (default: <repo_root>/private/applications/<slug>).
+    feedback_dir:
+        Override the feedback directory (default: <repo_root>/private/feedback/).
+
+    Returns
+    -------
+    list[dict]
+        The feedback records that were produced (one per significant edit).
+        An empty list is returned when no significant edits are found.
+    """
+    repo_root = _repo_root()
+    if app_dir is None:
+        app_dir = repo_root / _DEFAULT_APPLICATIONS_SUBDIR / slug
+    if feedback_dir is None:
+        feedback_dir = repo_root / _DEFAULT_FEEDBACK_SUBDIR
+
+    state_dir = app_dir / ".apply-state"
+    role_type = _load_role_type(state_dir)
+    context = {"role_type": role_type} if role_type else None
+    records: list[dict] = []
+
+    # --- prose-draft diff ---
+    # Agent baseline is the immutable snapshot written by `apply` at the end
+    # of phase 2 (see :func:`jobsmith.apply._snapshot_phase_drafts`). The
+    # live ``.apply-state/prose-draft.md`` is the user-editable copy —
+    # specialists never overwrite the .agent.md snapshot. If either file is
+    # missing the pipeline never reached the snapshot step and we skip.
+    prose_agent = state_dir / "prose-draft.agent.md"
+    prose_user = state_dir / "prose-draft.md"
+    if prose_agent.exists() and prose_user.exists():
+        edits = _diff_bullets(prose_agent.read_text(), prose_user.read_text())
+        for before, after in edits:
+            r = _write_record(
+                feedback_dir, slug, "prose-bullet", before, after, context=context
+            )
+            records.append(r)
+
+    # --- cover-letter diff ---
+    # Agent baseline is the snapshot written at end of phase 3. The user
+    # edits ``<app_dir>/cover-letter-draft.md`` in place (where
+    # apply-cover-letter-writer wrote it).
+    cl_agent = state_dir / "cover-letter-draft.agent.md"
+    cl_user = app_dir / "cover-letter-draft.md"
+    if cl_agent.exists() and cl_user.exists():
+        edits = _diff_paragraphs(cl_agent.read_text(), cl_user.read_text())
+        for before, after in edits:
+            r = _write_record(
+                feedback_dir, slug, "cover-letter-paragraph", before, after, context=context
+            )
+            records.append(r)
+
+    return records
+
+
+def list_records(
+    filter_kind: str | None,
+    since: datetime | None,
+    *,
+    feedback_dir: Path | None = None,
+) -> list[dict]:
+    """Load all feedback JSON files and return them as a list of dicts.
+
+    Parameters
+    ----------
+    filter_kind:
+        If given, only records with a matching ``kind`` are returned.
+        E.g. ``"prose-bullet"`` or ``"cover-letter-paragraph"``.
+    since:
+        If given, only records whose ``timestamp`` is at or after this
+        datetime are returned.
+    feedback_dir:
+        Override the feedback directory (default: <repo_root>/private/feedback/).
+    """
+    repo_root = _repo_root()
+    if feedback_dir is None:
+        feedback_dir = repo_root / _DEFAULT_FEEDBACK_SUBDIR
+
+    if not feedback_dir.exists():
+        return []
+
+    results: list[dict] = []
+    for path in sorted(feedback_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        if filter_kind is not None and data.get("kind") != filter_kind:
+            continue
+
+        if since is not None:
+            ts_str = data.get("timestamp", "")
+            try:
+                ts = datetime.fromisoformat(ts_str)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                since_aware = since if since.tzinfo is not None else since.replace(tzinfo=timezone.utc)
+                if ts < since_aware:
+                    continue
+            except ValueError:
+                pass
+
+        results.append(data)
+
+    return results
+
+
+def prune(
+    older_than_days: int,
+    *,
+    feedback_dir: Path | None = None,
+) -> int:
+    """Delete feedback records older than N days (by file mtime).
+
+    Parameters
+    ----------
+    older_than_days:
+        Records whose mtime is more than this many days in the past are deleted.
+    feedback_dir:
+        Override the feedback directory (default: <repo_root>/private/feedback/).
+
+    Returns
+    -------
+    int
+        The number of records deleted.
+    """
+    repo_root = _repo_root()
+    if feedback_dir is None:
+        feedback_dir = repo_root / _DEFAULT_FEEDBACK_SUBDIR
+
+    if not feedback_dir.exists():
+        return 0
+
+    cutoff = time.time() - older_than_days * 86400
+    deleted = 0
+    for path in feedback_dir.glob("*.json"):
+        if path.stat().st_mtime < cutoff:
+            path.unlink()
+            deleted += 1
+
+    return deleted
+
+
+def export(
+    *,
+    feedback_dir: Path | None = None,
+) -> str:
+    """Produce a YAML summary of recurring lesson patterns for cross-machine sync.
+
+    Groups records by ``kind`` and emits lesson texts. Drops slug and
+    per-app metadata (company, context) but copies ``lesson`` strings
+    verbatim — the export is **partially** sanitized, not fully. If a
+    user-authored lesson contains a company name, person, or other
+    identifier, it appears in the output. The caller is expected to
+    review the YAML before sharing it; this function does not redact
+    free-text lesson content.
+
+    Parameters
+    ----------
+    feedback_dir:
+        Override the feedback directory (default: <repo_root>/private/feedback/).
+
+    Returns
+    -------
+    str
+        YAML-formatted string suitable for writing to a file or stdout.
+    """
+    all_records = list_records(None, None, feedback_dir=feedback_dir)
+
+    grouped: dict[str, list[dict]] = {}
+    for r in all_records:
+        kind = r.get("kind", "unknown")
+        grouped.setdefault(kind, []).append(r)
+
+    summary: dict = {}
+    for kind, recs in grouped.items():
+        lessons = [r.get("lesson", "") for r in recs]
+        # Include all lessons (even empty ones so counts are correct).
+        summary[kind] = {
+            "count": len(recs),
+            "lessons": lessons,
+        }
+
+    return yaml.dump(summary, default_flow_style=False, allow_unicode=True)
+
+
+__all__ = [
+    "export",
+    "lesson_placeholder",
+    "list_records",
+    "prune",
+    "record",
+]

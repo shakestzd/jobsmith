@@ -402,6 +402,16 @@ specialists:
         - gap_resolutions: ".apply-state/gap-resolutions.md  (if exists)"
         - master_yamls: "[work, skill, education, author, publication]  (READ-ONLY)"
         - voice_guide: "${VOICE_GUIDE_PATH}"
+        - benchmark_resume_qmd: |
+            path (string) or null — style reference only.
+            Resolved by orchestrator via resolve_benchmark_or_fallback("resume_qmd").
+            SEMANTICS: voice/rhythm/structure exemplar; NEVER source of fact.
+            Agent MUST NOT copy claims, metrics, proper nouns, or dollar amounts from it.
+        - feedback_dir: |
+            Path | null — directory of JSON feedback records; soft style hints only.
+            Injected by orchestrator when private/feedback/ exists in the repo root.
+            Agent uses Read tool to access individual record files. NEVER source of fact.
+        - role_type: "string — from manifest.json; used to filter feedback records by role context"
     outputs:
       writes:
         - .apply-state/prose-draft.md:
@@ -544,6 +554,16 @@ specialists:
         - exemplars: "list of 2-3 exemplar paths from index_exemplars.py / retrieve_exemplars.py"
         - master_yamls: "[work, skill, education, author, publication]  (READ-ONLY)"
         - gap_resolutions: ".apply-state/gap-resolutions.md  (if exists)"
+        - benchmark_cover_letter_md: |
+            path (string) or null — style reference only.
+            Resolved by orchestrator via resolve_benchmark_or_fallback("cover_letter_md").
+            SEMANTICS: voice/rhythm/5-component-structure exemplar; NEVER source of fact.
+            Agent MUST NOT copy claims, metrics, proper nouns, or dollar amounts from it.
+        - feedback_dir: |
+            Path | null — directory of JSON feedback records; soft style hints only.
+            Injected by orchestrator when private/feedback/ exists in the repo root.
+            Agent uses Read tool to access individual record files. NEVER source of fact.
+        - role_type: "string — from manifest.json; used to filter feedback records by role context"
     outputs:
       writes:
         - applications/{slug}/cover-letter-draft.md:
@@ -760,6 +780,12 @@ specialists:
         - resume_qmd: "applications/{slug}/documents/resume.qmd"
         - work_yml: "applications/{slug}/documents/work.yml"
         - iteration: "int 0-1"
+        - benchmark_resume_pdf: |
+            path (string) or null — layout reference only.
+            Resolved by orchestrator via resolve_benchmark_or_fallback("resume_pdf").
+            SEMANTICS: page-count target + text/whitespace density target.
+            Overrides internal one-page heuristic when provided.
+            Agent reads geometry only — NEVER reads content from this file.
     outputs:
       writes:
         - .apply-state/resume-preview.png:
