@@ -6,11 +6,13 @@ interactions for the three-phase apply pipeline.
 Design goals
 ------------
 - Phase headers as cyan ``rich.panel.Panel``
-- Per-phase ``rich.progress.Progress`` spinner (skipped in --yes / non-TTY modes)
+- Per-phase ``rich.progress.Progress`` spinner with rolling status (quiet mode)
+- Verbosity levels: 0=quiet, 1=-v (filtered), 2=-vv (unfiltered)
 - Tool calls as ``[cyan]→[/] [bold]Tool[/]([dim]args[/])``
 - Tool results as ``[dim]← result…[/]``
 - Phase complete / failed as styled summary panels
 - Non-TTY fallback: plain line-by-line output, no spinners
+- Transcript JSONL always written to .apply-state/transcript.jsonl
 """
 
 from __future__ import annotations
@@ -18,7 +20,11 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
+from datetime import datetime, timezone
+from io import IOBase
 from pathlib import Path
+from typing import TextIO
 
 from rich.console import Console
 from rich.panel import Panel
@@ -43,6 +49,16 @@ _PATH_KEYS = {"path", "file_path"}
 
 # Tool names to filter entirely (no output for tool_use or its tool_result)
 _FILTERED_TOOLS = {"TodoWrite", "ToolSearch"}
+
+# Verbosity levels
+VERBOSITY_QUIET = 0
+VERBOSITY_VERBOSE = 1
+VERBOSITY_DEBUG = 2
+
+
+def _now_iso() -> str:
+    """Return current time as ISO 8601 string with UTC offset."""
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
 def _truncate_path(s: str, max_chars: int = 50) -> str:
@@ -187,6 +203,10 @@ class ApplyRenderer:
     yes:
         When True, suppress the progress spinner (--yes / CI-unattended mode).
         Phase panels and event lines are still rendered.
+    verbosity:
+        0 = quiet (default): phase panels + rolling spinner + sub-agent lines only.
+        1 = -v: also shows tool calls/results (filtered: no TodoWrite/ToolSearch).
+        2 = -vv: shows everything including TodoWrite, ToolSearch (dim styled).
     console:
         Optionally supply a pre-built Console (useful for tests).  When None,
         one is constructed automatically with TTY-aware defaults.
@@ -196,6 +216,7 @@ class ApplyRenderer:
         self,
         *,
         yes: bool = False,
+        verbosity: int = VERBOSITY_QUIET,
         console: Console | None = None,
     ) -> None:
         if console is not None:
@@ -212,12 +233,25 @@ class ApplyRenderer:
             )
 
         self._yes = yes
-        self._use_spinner = (not yes) and self.console.is_terminal
+        self._verbosity = verbosity
+        self._use_spinner = (
+            (not yes)
+            and self.console.is_terminal
+            and verbosity == VERBOSITY_QUIET
+        )
         self._progress: Progress | None = None
+        self._progress_task_id = None
         # Track tool_use_ids for filtered tools so we can drop their tool_results
         self._filtered_tool_use_ids: set[str] = set()
         # Track whether we're currently inside an Agent dispatch
         self._inside_agent: bool = False
+        # Sub-agent dispatch timing: name -> start time
+        self._agent_dispatch_times: dict[str, float] = {}
+        # Current phase name (for transcript)
+        self._current_phase: str | None = None
+        # Transcript file handle (append-only, opened per phase)
+        self._transcript_fh: TextIO | None = None
+        self._transcript_path: Path | None = None
 
     # ------------------------------------------------------------------
     # Public lifecycle
@@ -230,6 +264,7 @@ class ApplyRenderer:
 
     def start_phase(self, phase_name: str) -> None:
         """Start the spinner for a new phase (no-op in non-spinner mode)."""
+        self._current_phase = phase_name
         if not self._use_spinner:
             return
         self._progress = Progress(
@@ -239,73 +274,254 @@ class ApplyRenderer:
             transient=False,
         )
         self._progress.start()
-        self._progress.add_task(description=f"Running {phase_name}…", total=None)
+        task_id = self._progress.add_task(
+            description=f"Running {phase_name}…", total=None
+        )
+        self._progress_task_id = task_id
 
     def stop_phase(self) -> None:
         """Stop the spinner (no-op if not running)."""
         if self._progress is not None:
             self._progress.stop()
             self._progress = None
+            self._progress_task_id = None
+
+    def open_transcript(self, transcript_path: Path, phase_name: str) -> None:
+        """Open the transcript JSONL file for append and write a phase boundary marker.
+
+        Parameters
+        ----------
+        transcript_path:
+            Absolute path to the transcript.jsonl file.
+        phase_name:
+            Current phase name (used in the boundary marker).
+        """
+        transcript_path.parent.mkdir(parents=True, exist_ok=True)
+        self._transcript_path = transcript_path
+        self._transcript_fh = transcript_path.open("a", encoding="utf-8")
+        # Write phase boundary marker
+        marker = {"_phase_boundary": phase_name, "ts": _now_iso()}
+        self._transcript_fh.write(json.dumps(marker) + "\n")
+        self._transcript_fh.flush()
+
+    def close_transcript(self) -> None:
+        """Flush and close the transcript file handle."""
+        if self._transcript_fh is not None:
+            try:
+                self._transcript_fh.flush()
+                self._transcript_fh.close()
+            except OSError:
+                pass
+            self._transcript_fh = None
+            self._transcript_path = None
+
+    def _write_transcript(self, record: dict) -> None:
+        """Append a JSON record to the transcript file (best-effort, never raises)."""
+        if self._transcript_fh is None:
+            return
+        try:
+            self._transcript_fh.write(json.dumps(record) + "\n")
+            self._transcript_fh.flush()
+        except OSError:
+            pass
+
+    def update_status(self, text: str) -> None:
+        """Update the rolling spinner status line (quiet mode only)."""
+        if self._progress is None or self._progress_task_id is None:
+            return
+        width = self.console.width or 120
+        prefix_width = 4  # spinner + space + prefix
+        max_len = max(width - prefix_width, 20)
+        if len(text) > max_len:
+            text = text[: max_len - 1] + "…"
+        self._progress.update(self._progress_task_id, description=text)
 
     def render_event(self, event: headless.Event) -> None:
-        """Render a single event to the console."""
+        """Render a single event to the console, gated by verbosity."""
         width = self.console.width or 120
+        phase = self._current_phase or "unknown"
 
         if event.type == "tool_use":
             name = event.tool_name or "?"
+            is_filtered_tool = name in _FILTERED_TOOLS
 
-            # Filter: skip TodoWrite and ToolSearch entirely
-            if name in _FILTERED_TOOLS:
+            # Capture tool_use_id for filtered tools so we can drop their results
+            if is_filtered_tool:
                 tool_use_id = _extract_tool_use_id(event)
                 if tool_use_id:
                     self._filtered_tool_use_ids.add(tool_use_id)
-                return
+
+            # Write transcript always
+            raw_dict = event.raw if isinstance(event.raw, dict) else {}
+            tool_input_preview = ""
+            if event.tool_input:
+                try:
+                    tool_input_preview = json.dumps(event.tool_input)[:200]
+                except (TypeError, ValueError):
+                    tool_input_preview = str(event.tool_input)[:200]
+            self._write_transcript(
+                {
+                    "ts": _now_iso(),
+                    "phase": phase,
+                    "type": "tool_call",
+                    "tool_name": name,
+                    "tool_input_truncated": tool_input_preview,
+                    "raw": raw_dict,
+                }
+            )
 
             args = _format_tool_args(event.tool_input, max_chars=width - 12)
 
-            # Agent dispatch: use nesting prefix
+            # Agent dispatch handling
             if name == "Agent":
                 self._inside_agent = True
-                indent = "│ "
+                indent = ""
+                # Record dispatch time for duration calculation
+                agent_name = ""
+                if event.tool_input:
+                    agent_name = str(event.tool_input.get("name", ""))
+                self._agent_dispatch_times[agent_name] = time.monotonic()
+                # Always print sub-agent dispatch line (all verbosity levels)
+                self.stop_phase()
+                self.console.print(
+                    f"[cyan]→[/cyan] Agent([bold]{agent_name}[/bold])"
+                )
+                # Restart spinner after printing dispatch line
+                if self._use_spinner and self._progress is None:
+                    self._start_spinner_for_current_phase()
+                return
+
+            # Non-Agent tool_use handling
+            if self._inside_agent:
+                self._inside_agent = False
+                indent = ""
             else:
-                if self._inside_agent:
-                    self._inside_agent = False
                 indent = ""
 
-            # Update spinner description when active
-            if self._progress is not None:
-                tasks = self._progress.tasks
-                if tasks:
-                    desc = f"[cyan]→[/cyan] {name}…"
-                    # Truncate to _MAX_SPINNER_CHARS
-                    if len(desc) > _MAX_SPINNER_CHARS:
-                        desc = desc[: _MAX_SPINNER_CHARS - 1] + "…"
-                    self._progress.update(tasks[0].id, description=desc)
+            # Quiet mode: update spinner, don't print tool call line
+            if self._verbosity == VERBOSITY_QUIET:
+                self.update_status(f"[cyan]→[/cyan] {name}…")
+                return
 
-            # Print below spinner
-            self.console.print(
-                f"{indent}[cyan]→[/cyan] [bold]{name}[/bold]([dim]{args}[/dim])"
-            )
+            # -v: show filtered tools only
+            if self._verbosity == VERBOSITY_VERBOSE:
+                if is_filtered_tool:
+                    return
+                self.console.print(
+                    f"{indent}[cyan]→[/cyan] [bold]{name}[/bold]([dim]{args}[/dim])"
+                )
+                return
+
+            # -vv: show everything, dim filtered tools
+            if is_filtered_tool:
+                self.console.print(
+                    f"{indent}[dim][cyan]→[/cyan] [bold]{name}[/bold]({args})[/dim]"
+                )
+            else:
+                self.console.print(
+                    f"{indent}[cyan]→[/cyan] [bold]{name}[/bold]([dim]{args}[/dim])"
+                )
 
         elif event.type == "tool_result":
+            # tool_result: tool_name stores the tool_use_id in headless.py
+            tool_use_id = event.tool_name
+
+            # Write transcript always
+            raw_dict = event.raw if isinstance(event.raw, dict) else {}
+            result_preview = (event.tool_result or "")[:200]
+            self._write_transcript(
+                {
+                    "ts": _now_iso(),
+                    "phase": phase,
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "result_truncated": result_preview,
+                    "raw": raw_dict,
+                }
+            )
+
+            # Check if result corresponds to an Agent completing
+            # Best-effort: check agent dispatch times for sub-agent completion
+            if self._agent_dispatch_times:
+                # Sub-agent result: print completion line with duration
+                # We emit for the most recently dispatched agent (heuristic)
+                agent_names = list(self._agent_dispatch_times.keys())
+                if agent_names:
+                    last_agent = agent_names[-1]
+                    elapsed = time.monotonic() - self._agent_dispatch_times.pop(last_agent)
+                    elapsed_s = int(elapsed)
+                    self.stop_phase()
+                    self.console.print(
+                        f"[green]✓[/green] {last_agent} ({elapsed_s}s)"
+                    )
+                    if self._use_spinner and self._progress is None:
+                        self._start_spinner_for_current_phase()
+                    return
+
             # Filter: drop results whose tool_use_id was filtered
-            tool_use_id = event.tool_name  # headless.py stores tool_use_id in tool_name
             if tool_use_id and tool_use_id in self._filtered_tool_use_ids:
                 return
 
+            # Quiet mode: don't print result lines
+            if self._verbosity == VERBOSITY_QUIET:
+                return
+
+            # -v: filtered (already handled above via _filtered_tool_use_ids)
+            if self._verbosity == VERBOSITY_VERBOSE:
+                if tool_use_id and tool_use_id in self._filtered_tool_use_ids:
+                    return
+                preview = _format_result(event.tool_result, max_chars=_MAX_RESULT_CHARS)
+                self.console.print(f"[dim]← {preview}[/dim]")
+                return
+
+            # -vv: show everything
             preview = _format_result(event.tool_result, max_chars=_MAX_RESULT_CHARS)
             self.console.print(f"[dim]← {preview}[/dim]")
 
         elif event.type == "text" and event.text:
-            stripped = event.text.strip()
-            if stripped:
-                self.console.print(f"[dim italic]{stripped}[/dim italic]")
+            # Write transcript always
+            raw_dict = event.raw if isinstance(event.raw, dict) else {}
+            self._write_transcript(
+                {
+                    "ts": _now_iso(),
+                    "phase": phase,
+                    "type": "text",
+                    "text_truncated": (event.text or "")[:200],
+                    "raw": raw_dict,
+                }
+            )
+
+            # Only print text in non-quiet modes
+            if self._verbosity > VERBOSITY_QUIET:
+                stripped = event.text.strip()
+                if stripped:
+                    self.console.print(f"[dim italic]{stripped}[/dim italic]")
 
         elif event.type == "error":
+            raw_dict = event.raw if isinstance(event.raw, dict) else {}
+            self._write_transcript(
+                {
+                    "ts": _now_iso(),
+                    "phase": phase,
+                    "type": "error",
+                    "error": event.error,
+                    "raw": raw_dict,
+                }
+            )
             self.stop_phase()
             self.console.print(f"[red]✗ {event.error}[/red]")
 
         elif event.type == "phase_complete":
+            raw_dict = event.raw if isinstance(event.raw, dict) else {}
+            self._write_transcript(
+                {
+                    "ts": _now_iso(),
+                    "phase": phase,
+                    "type": "phase_complete",
+                    "name": event.name,
+                    "raw": raw_dict,
+                }
+            )
             self.stop_phase()
             name = event.name or "?"
             self.console.print(
@@ -317,6 +533,17 @@ class ApplyRenderer:
             )
 
         elif event.type == "phase_failed":
+            raw_dict = event.raw if isinstance(event.raw, dict) else {}
+            self._write_transcript(
+                {
+                    "ts": _now_iso(),
+                    "phase": phase,
+                    "type": "phase_failed",
+                    "name": event.name,
+                    "error": event.error,
+                    "raw": raw_dict,
+                }
+            )
             self.stop_phase()
             name = event.name or "?"
             reason = f"\n[dim]{event.error}[/dim]" if event.error else ""
@@ -327,6 +554,22 @@ class ApplyRenderer:
                     expand=False,
                 )
             )
+
+    def _start_spinner_for_current_phase(self) -> None:
+        """Re-start the spinner after printing a persistent sub-agent line."""
+        if not self._use_spinner or self._current_phase is None:
+            return
+        self._progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+            transient=False,
+        )
+        self._progress.start()
+        task_id = self._progress.add_task(
+            description=f"Running {self._current_phase}…", total=None
+        )
+        self._progress_task_id = task_id
 
     def render_phase_summary(self, phase_name: str, apply_state_dir: Path) -> None:
         """Render a summary panel of gather-phase artifacts before the confirm gate.
