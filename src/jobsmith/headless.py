@@ -194,6 +194,7 @@ def _build_command(
         session_id,
         "--output-format",
         "stream-json",
+        "--verbose",
         "--allowedTools",
         "Agent Bash WebFetch Read Edit Write",
         "--max-turns",
