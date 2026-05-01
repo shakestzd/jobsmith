@@ -230,6 +230,74 @@ jobsmith review <slug>        # Open the per-application page in browser
 
 ---
 
+## Privacy model
+
+### Why privacy must be the default
+
+Each application page contains sensitive intelligence that must never accidentally
+reach a public host:
+
+| Category | Examples |
+|---|---|
+| Compensation | `salary_range`, `salary` |
+| Scoring | `fit_score`, `must_have_table` (evidence column + full table) |
+| Bullet analysis | `bullet_decisions`, `bullet_diff`, `gap_resolutions` |
+| Hiring-manager intel | `hm_name`, `hm_email`, `hm_signals` |
+| Outreach internals | `outreach_snippets`, `humanizer_audit` |
+
+These values live in the assembled `_variables.yml` for every application.
+A naive `quarto render` would embed them into every portfolio page.
+
+### Two rendering modes
+
+| Mode | Output dir | What's in it |
+|---|---|---|
+| **private** (default) | `_site/` | Everything — full `_variables.yml` unchanged |
+| **public** (opt-in) | `_site-public/` | Sensitive keys stripped; only public-safe fields remain |
+
+Public-safe fields that are always kept: `company`, `position`, `slug`,
+`status`, `date_found`, `date_applied`.
+
+### Gitignore contract
+
+Both output directories must be gitignored in the **user's repo** (the repo
+that holds `private/applications/`).  Add these lines to `~/<your-repo>/.gitignore`:
+
+```gitignore
+# jobsmith site output — never commit rendered sites
+_site/
+_site-public/
+```
+
+The `_site/` directory is the default render destination and must be gitignored
+unconditionally.  The `_site-public/` directory is also gitignored by default
+even though it is sanitized — publishing is an intentional act that goes through
+an explicit deployment step (e.g. `gh-pages` push or a static host upload), not
+a `git push`.
+
+### Public mode is explicit, not accidental
+
+The `--public` flag on the site CLI (feat-9377b64d) is the only way to
+produce a `_site-public/` render.  There is no automatic sanitization on
+normal renders.  The sequence is:
+
+1. `jobsmith assemble --all` refreshes `_variables.yml` for every application.
+2. In public mode, `sanitize_variables(vars_dict, mode='public')` strips sensitive
+   keys before the Quarto render step.
+3. `quarto render` produces the sanitized site to `_site-public/`.
+4. The full `_variables.yml` is restored so private state is not lost.
+
+The sanitization function and the `SENSITIVE_KEYS` constant live in
+`src/jobsmith/site.py` and are tested in `tests/test_site.py`.
+
+### Never push `_site/` to a public host
+
+Even if your hosting pipeline gives you the option, never point a public host at
+the default `_site/` output.  Always re-generate with `--public` immediately
+before deployment so you have an explicit audit trail of what was published.
+
+---
+
 ## What this does NOT change
 
 - **Existing `.apply-state/` contracts remain compatible.** No fields are renamed, removed, or restructured. New optional artifacts are added (`company-research.md`, `outreach-snippets.md`, per-application `_variables.yml`) but every specialist's existing output schema is preserved. Older applications missing the new artifacts render with empty sections rather than failing.
