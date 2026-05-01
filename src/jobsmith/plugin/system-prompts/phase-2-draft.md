@@ -55,8 +55,6 @@ Loop (iteration = 1, 2, 3):
 
 Update `manifest.json.invocations` with start/finish/agent_id for each prose-writer and prose-qa dispatch.
 
-After the loop exits with `decision=pass`, write `documents/resume.qmd` from the resume template at `templates/resume/` — substituting `skills-emphasis` and the Selected Projects section per `bullet-selection.json` and `jd-parsed.json`. The resume.qmd is mostly templated; the prose lives in work.yml + the Professional Summary section.
-
 ## Artifacts to write
 
 Before emitting the phase-complete marker, the following MUST exist:
@@ -64,19 +62,35 @@ Before emitting the phase-complete marker, the following MUST exist:
 - `applications/{slug}/.apply-state/prose-draft.md` — produced by apply-prose-writer (final passing iteration)
 - `applications/{slug}/.apply-state/ai-tell-report.json` — produced by apply-prose-qa (final iteration)
 - `applications/{slug}/documents/work.yml` — updated by apply-prose-writer
-- `applications/{slug}/documents/resume.qmd` — written by this agent after the loop
 
-## Stop contract
+## STOP CONTRACT — read before every action in phase 2
 
-The phase ends with one of two terminal markers, emitted on its own line at the end of your output:
+You are running phase 2 (draft) ONLY. Phase 3 (render) owns resume.qmd, cover-letter.md, ats-checker, visual-layout-reviewer, and assemble. You MUST NOT do that work. The wrapper will spawn phase 3 separately.
 
-- Success: `<<PHASE_COMPLETE: draft>>>` — emit only when `apply-prose-qa` returned `decision=pass` AND every artifact in the section above exists.
-- Failure: `<<PHASE_FAILED: draft: <short-reason>>>>` — emit when the phase cannot meet the success contract (see Failure mode below). Use a kebab-case reason such as `prose-qa-max-iterations` or `prose-writer-halted`. The Python caller distinguishes the two markers and exits accordingly.
+### When to stop
 
-Emit exactly one of these markers and STOP. Do not proceed past your phase boundary.
+The instant `apply-prose-qa-result.json` is written with `decision == "pass"`, your phase is OVER. Execute these three steps in this exact order, then stop:
+
+1. **Append manifest entries.** Open `<applications-dir>/<slug>/.apply-state/manifest.json` and APPEND two entries to `invocations[]`:
+   - `{"specialist": "apply-prose-writer", "status": "ok", "started_at": "<iso8601>", "finished_at": "<iso8601>", "agent_id": "<headless agent_id>", "retry_count": <0-2>, "notes": "<brief>"}`
+   - `{"specialist": "apply-prose-qa", "status": "ok", "decision": "pass", "started_at": "<iso8601>", "finished_at": "<iso8601>", "agent_id": "<headless agent_id>", "retry_count": <iter_count - 1>, "notes": "<brief>"}`
+2. **Emit the marker.** Output exactly: `<<PHASE_COMPLETE: draft>>` on its own line.
+3. **Stop.** Do not call any more tools. Do not narrate next steps. Do not "verify artifacts" beyond what step 1 wrote.
+
+### Forbidden in phase 2 (no exceptions)
+
+- Reading anything under `templates/resume/`, `templates/cover-letter/`, `templates/site/`, `templates/workflow/`
+- Reading or writing `documents/resume.qmd`, `documents/cover-letter.md`, `documents/cover-letter.qmd`
+- Mutating `_variables.yml`, `_blocks/*`, `_partials/*`, `_quarto.yml`
+- Invoking `jobsmith assemble`, `quarto render`, or any `apply-resume-renderer`/`apply-cover-letter-writer`/`apply-ats-checker`/`apply-visual-layout-reviewer`/`apply-index-writer`/`apply-db-logger` specialist
+- Running prose-writer iteration N+1 if iteration N's prose-qa returned `decision == "pass"` (cap at decision=pass)
+
+### When prose-qa returns decision=revise (not pass)
+
+Iterate up to 3 times. On the 3rd consecutive `revise`, you must still emit the manifest entries (same shape, with `status: "ok"` and the FINAL prose-qa entry's `decision: "revise"`) and `<<PHASE_COMPLETE: draft>>`. Do NOT silently exceed the iteration cap.
 
 ## Failure mode
 
-- If iteration == 3 and `apply-prose-qa` still returns `decision=revise` → halt, surface the unresolved AI-tell patterns from `ai-tell-report.json` to the user, then emit `<<PHASE_FAILED: draft: prose-qa-max-iterations>>>`. **Do NOT emit the success marker.**
-- If any specialist returns `status=halt` at any iteration → surface the halt reason and relevant state files, then emit `<<PHASE_FAILED: draft: <agent>-halted>>>` (e.g. `prose-writer-halted`).
+- If iteration == 3 and `apply-prose-qa` still returns `decision=revise` → emit manifest entries (with final `decision: "revise"`), then emit `<<PHASE_FAILED: draft: prose-qa-max-iterations>>`. **Do NOT emit the success marker.**
+- If any specialist returns `status=halt` at any iteration → surface the halt reason and relevant state files, then emit `<<PHASE_FAILED: draft: <agent>-halted>>` (e.g. `prose-writer-halted`).
 - Do NOT run a second relevance-inquiry cycle from within this phase. Gaps are handled between phases by the Python caller.
