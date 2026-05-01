@@ -58,10 +58,15 @@ Before emitting the phase-complete marker, the following MUST exist:
 
 ## Stop contract
 
-When the phase is complete, emit exactly the line `<<PHASE_COMPLETE: draft>>>` on its own and STOP. Do not proceed past your phase boundary.
+The phase ends with one of two terminal markers, emitted on its own line at the end of your output:
+
+- Success: `<<PHASE_COMPLETE: draft>>>` — emit only when `apply-prose-qa` returned `decision=pass` AND every artifact in the section above exists.
+- Failure: `<<PHASE_FAILED: draft: <short-reason>>>>` — emit when the phase cannot meet the success contract (see Failure mode below). Use a kebab-case reason such as `prose-qa-max-iterations` or `prose-writer-halted`. The Python caller distinguishes the two markers and exits accordingly.
+
+Emit exactly one of these markers and STOP. Do not proceed past your phase boundary.
 
 ## Failure mode
 
-- If iteration == 3 and `apply-prose-qa` still returns `decision=revise` → halt, surface the unresolved AI-tell patterns from `ai-tell-report.json` to the user. Emit `<<PHASE_COMPLETE: draft>>>` with a trailing `status=fail` note on the next line (e.g., `status=fail reason=prose-qa-max-iterations`). The Python caller reads both lines.
-- If any specialist returns `status=halt` at any iteration → surface the halt reason and relevant state files. Do NOT emit the phase-complete marker.
+- If iteration == 3 and `apply-prose-qa` still returns `decision=revise` → halt, surface the unresolved AI-tell patterns from `ai-tell-report.json` to the user, then emit `<<PHASE_FAILED: draft: prose-qa-max-iterations>>>`. **Do NOT emit the success marker.**
+- If any specialist returns `status=halt` at any iteration → surface the halt reason and relevant state files, then emit `<<PHASE_FAILED: draft: <agent>-halted>>>` (e.g. `prose-writer-halted`).
 - Do NOT run a second relevance-inquiry cycle from within this phase. Gaps are handled between phases by the Python caller.
