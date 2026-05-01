@@ -26,7 +26,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
-from .assemble import assemble_all, assemble_application
+from .assemble import PACKAGE_ROOT, assemble_all, assemble_application
 from .site import discover_applications, init_site, render_site
 from .config import CONFIG_FILENAME, find_config, load_config
 from .factcheck import check_draft
@@ -42,7 +42,10 @@ app = typer.Typer(
 console = Console()
 
 # Path to the package root for locating example master YAML
-PACKAGE_ROOT = Path(__file__).resolve().parent.parent.parent
+# PACKAGE_ROOT is sourced from jobsmith.assemble._find_package_root so the
+# same discovery logic handles both checkout (templates/ as sibling of src/)
+# and wheel (templates/ inside the package) layouts. Don't recompute here —
+# the parent.parent.parent walk only works for editable installs.
 EXAMPLES_DIR = PACKAGE_ROOT / "examples" / "master-yaml"
 
 

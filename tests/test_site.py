@@ -136,7 +136,7 @@ def test_render_site_resolves_private_output_dir(tmp_path: Path, monkeypatch) ->
         stdout = ""
         stderr = ""
 
-    def fake_run(cmd, capture_output=True, text=True):
+    def fake_run(cmd, capture_output=True, text=True, timeout=None):
         captured["cmd"] = cmd
         return _StubResult()
 
@@ -566,7 +566,7 @@ def test_render_site_public_sanitizes_then_restores_variables(
 
     captured_during_run: dict = {}
 
-    def fake_run(cmd, capture_output=True, text=True):
+    def fake_run(cmd, capture_output=True, text=True, timeout=None):
         # While quarto would be running, the on-disk files should be sanitized.
         captured_during_run["vars"] = (app / "_variables.yml").read_text()
         captured_during_run["hm_dossier"] = (
@@ -641,7 +641,7 @@ def test_render_site_private_does_not_mutate_or_restore(
 
     captured: dict = {}
 
-    def fake_run(cmd, capture_output=True, text=True):
+    def fake_run(cmd, capture_output=True, text=True, timeout=None):
         captured["vars"] = (app / "_variables.yml").read_text()
 
         class _R:
@@ -664,3 +664,90 @@ def test_render_site_private_does_not_mutate_or_restore(
     # so assemble_all skips this dir, leaving _variables.yml untouched.
     assert captured["vars"] == original_vars
     assert (app / "_blocks" / "hm-dossier.md").read_text() == original_hm_dossier
+
+
+# ---------- T1.1 / T1.5 — sensitive paths added per PR #1 review ----------
+
+
+def test_sanitize_strips_company_research_in_public_mode() -> None:
+    """company_research is mirrored into _variables.yml from .apply-state/.
+    Block file is redacted by sanitize_blocks_dir; the raw text in the
+    variables dict must also be stripped to keep the privacy guarantee."""
+    sample = {
+        "company": "Acme",
+        "company_research": (
+            "# Mission\nDemocratize energy.\n## Selected Reasons\n"
+            "Topical: my Invenergy work overlaps directly."
+        ),
+    }
+    out = sanitize_variables(sample, mode="public")
+    assert "company_research" not in out
+    assert out["company"] == "Acme"
+
+
+def test_sanitize_strips_jd_text_clean_in_public_mode() -> None:
+    """jd.text_clean often contains salary ranges, internal req IDs, and
+    named-HM mentions left in by the parser."""
+    sample = {
+        "company": "Acme",
+        "jd": {
+            "must_haves": ["Python"],
+            "text_clean": "Salary: $200k. Reporting to Pat Director.",
+        },
+    }
+    out = sanitize_variables(sample, mode="public")
+    assert "text_clean" not in out["jd"]
+    # Sibling jd keys survive — only text_clean is private
+    assert out["jd"]["must_haves"] == ["Python"]
+
+
+# ---------- T1.2 — empty-file restore (PR #1 review) ----------
+
+
+def test_restore_snapshot_handles_empty_variables_yml(tmp_path: Path) -> None:
+    """An app whose _variables.yml exists but is empty must come back as
+    empty after a public render — not as the sanitized YAML the snapshot
+    pass might have written."""
+    from jobsmith.site import _restore_snapshot, _snapshot_and_sanitize
+
+    apps_root = tmp_path / "private" / "applications"
+    app = apps_root / "empty-vars-app"
+    (app / ".apply-state").mkdir(parents=True)
+    (app / "_variables.yml").write_text("")  # present but empty
+    (app / "_blocks").mkdir()
+    (app / "_blocks" / "hm-dossier.md").write_text("private dossier\n")
+
+    snapshot = _snapshot_and_sanitize(apps_root)
+
+    # The sanitize pass should NOT have rewritten the empty file with
+    # sanitized content (loaded YAML is None, so it would be {}).
+    assert (app / "_variables.yml").read_text() == ""
+    # Block file got redacted
+    assert "omitted in the public variant" in (
+        app / "_blocks" / "hm-dossier.md"
+    ).read_text()
+
+    _restore_snapshot(snapshot)
+
+    # After restore: file is still present and still empty (the snapshot
+    # remembered "" via the present-but-empty path, distinguished from
+    # absent via None).
+    assert (app / "_variables.yml").is_file()
+    assert (app / "_variables.yml").read_text() == ""
+    # Block file restored
+    assert (app / "_blocks" / "hm-dossier.md").read_text() == "private dossier\n"
+
+
+def test_restore_snapshot_does_not_create_absent_variables_yml(tmp_path: Path) -> None:
+    """If _variables.yml never existed, restore must NOT create it."""
+    from jobsmith.site import _restore_snapshot, _snapshot_and_sanitize
+
+    apps_root = tmp_path / "private" / "applications"
+    app = apps_root / "no-vars-app"
+    (app / ".apply-state").mkdir(parents=True)
+    # Note: no _variables.yml, no _blocks/
+
+    snapshot = _snapshot_and_sanitize(apps_root)
+    _restore_snapshot(snapshot)
+
+    assert not (app / "_variables.yml").exists()

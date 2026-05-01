@@ -47,6 +47,7 @@ import yaml
 
 from .config import load_config
 from .paths import repo_root_for
+from .research import slugify
 
 # Resolve the directory containing the bundled `templates/` tree. Two layouts
 # need to work:
@@ -76,30 +77,20 @@ DEFAULT_INDEX_SRC = PACKAGE_ROOT / "templates" / "workflow" / "_index.qmd"
 # website-page convention.
 DEFAULT_WORKFLOW_SRC = DEFAULT_INDEX_SRC
 
+# Slug whitelist — used by assemble_application to reject path-traversal
+# input. Matches the slugify rule emitted by jobsmith.research.slugify and
+# the directory naming convention enforced by the orchestrator
+# (lowercase alphanumerics + hyphens + underscores, no separators or dots).
+_SLUG_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+
 
 # ---------- theme helpers ----------
 
 
-def _slugify_company(company: str) -> str:
-    """Convert a company name to a filesystem-safe slug.
-
-    Rules:
-      - Lowercase
-      - Spaces and underscores → hyphens
-      - Strip any character not in [a-z0-9-]
-      - Collapse multiple consecutive hyphens to one
-      - Strip leading/trailing hyphens
-
-    Examples:
-      "Schneider Electric" → "schneider-electric"
-      "PwC"               → "pwc"
-      "Microsoft Corp."   → "microsoft-corp"
-    """
-    slug = company.lower()
-    slug = re.sub(r"[ _]+", "-", slug)
-    slug = re.sub(r"[^a-z0-9-]", "", slug)
-    slug = re.sub(r"-{2,}", "-", slug)
-    return slug.strip("-")
+# Single source of truth for the slug rule lives in jobsmith.research.
+# This module-level alias keeps the existing call sites readable while
+# routing every implementation back to one place.
+_slugify_company = slugify
 
 
 def _resolve_theme(
@@ -734,9 +725,20 @@ def assemble_application(
       <app>/index.qmd            (copy of templates/workflow/_index.qmd)
       <app>/theme.scss           (symlink/copy of resolved per-company theme)
 
-    Returns the path of _variables.yml. Raises ValueError if the
-    application directory or .apply-state subdir doesn't exist.
+    Returns the path of _variables.yml. Raises ValueError if *slug* is
+    malformed or the application directory / .apply-state subdir doesn't
+    exist.
     """
+    # Validate the slug BEFORE composing any path. This is called directly
+    # from the CLI (`jobsmith assemble <slug>`) so untrusted input can reach
+    # this function. assemble_all is safe (it iterates real directory
+    # entries) — the guard exists to keep direct callers from writing
+    # outside applications_dir via a traversal slug like "../../etc/foo".
+    if not _SLUG_PATTERN.match(slug):
+        raise ValueError(
+            f"invalid slug {slug!r} — must match {_SLUG_PATTERN.pattern}"
+        )
+
     app_dir = applications_dir / slug
     state_dir = app_dir / ".apply-state"
     if not app_dir.is_dir():
@@ -931,6 +933,12 @@ def assemble_application(
     # Make the application directory a self-contained Quarto project so
     # project-root-absolute include paths (`/_blocks/foo.md`,
     # `/_partials/foo.qmd`) resolve correctly.
+    #
+    # Intentionally written only when absent: this file is part of the user's
+    # editable surface (per-app theme tweaks, navbar items, format overrides).
+    # If the bundled _quarto_project_yml() schema gains new required fields,
+    # users on existing apps should run `jobsmith assemble --force-quarto-yml`
+    # (not yet implemented) or delete the per-app _quarto.yml manually.
     quarto_yml = app_dir / "_quarto.yml"
     if not quarto_yml.exists():
         quarto_yml.write_text(_quarto_project_yml(slug))
@@ -1024,10 +1032,4 @@ def assemble_all(applications_dir: Path) -> list[Path]:
 __all__ = [
     "assemble_all",
     "assemble_application",
-    "_company_research_block",
-    "_load_ai_tell_report",
-    "_outreach_snippets_block",
-    "_render_humanizer_audit_block",
-    "_resolve_theme",
-    "_slugify_company",
 ]

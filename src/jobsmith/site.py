@@ -66,6 +66,13 @@ SENSITIVE_VARIABLE_PATHS: tuple[tuple[str, ...], ...] = (
     ("humanizer_audit",),
     # Cover letter draft is the user's working text — not for public sharing.
     ("cover_letter_draft",),
+    # Company research is synthesized intel (mission/values/selected reasons)
+    # that the user owns. The block file is also redacted; this strips the
+    # raw text mirrored into _variables.yml.
+    ("company_research",),
+    # Cleaned JD text often contains salary ranges, internal req IDs, and
+    # named-HM mentions that the JD parser left in. Redact for public mode.
+    ("jd", "text_clean"),
 )
 
 # Block files (under <app>/_blocks/) that must be replaced with a redaction
@@ -276,12 +283,23 @@ def render_site(
     if mode == "public":
         snapshot = _snapshot_and_sanitize(apps_root)
 
-    # Step 5: invoke quarto.
+    # Step 5: invoke quarto. 10-minute hard cap so a hung render never
+    # leaves snapshot state stripped on disk indefinitely (the finally
+    # restores either way).
     import subprocess
 
     cmd = [quarto, "render", str(root), "--output-dir", str(output_dir)]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=600
+        )
+    except subprocess.TimeoutExpired as exc:
+        # Restore happens in the finally below; re-raise as RuntimeError so
+        # callers handle it the same way as a non-zero exit.
+        raise RuntimeError(
+            f"`quarto render` exceeded {exc.timeout}s timeout. "
+            "Check for hung subprocess or split the project."
+        ) from exc
     finally:
         # Step 6: ALWAYS restore, even if quarto fails — never leave the
         # private state corrupted by a failed public render.
@@ -299,16 +317,19 @@ def render_site(
 
 def _snapshot_and_sanitize(
     apps_root: Path,
-) -> list[tuple[Path, str, dict[Path, str]]]:
+) -> list[tuple[Path, str | None, dict[Path, str]]]:
     """Snapshot every app's _variables.yml + sensitive blocks, then rewrite
     them with sanitized content. Returned snapshot is consumed by
     _restore_snapshot to undo the public-mode mutations.
 
-    Each entry: (variables_yml_path, original_yaml_text, {block_path: original_text})
+    Each entry: ``(variables_yml_path, original_yaml_text_or_None, {block_path: original_text})``.
+    ``original_yaml_text`` is ``None`` when the file did not exist before the
+    sanitize pass and an empty string when it existed but was empty — the
+    distinction matters so restore knows whether to write or skip.
     """
     import yaml as _yaml
 
-    snapshot: list[tuple[Path, str, dict[Path, str]]] = []
+    snapshot: list[tuple[Path, str | None, dict[Path, str]]] = []
     if not apps_root.is_dir():
         return snapshot
 
@@ -321,7 +342,9 @@ def _snapshot_and_sanitize(
         vars_path = app_dir / "_variables.yml"
         blocks_dir = app_dir / "_blocks"
 
-        original_vars = vars_path.read_text() if vars_path.is_file() else ""
+        original_vars: str | None = (
+            vars_path.read_text() if vars_path.is_file() else None
+        )
         original_blocks: dict[Path, str] = {}
         if blocks_dir.is_dir():
             for block in sorted(blocks_dir.iterdir()):
@@ -330,7 +353,7 @@ def _snapshot_and_sanitize(
 
         snapshot.append((vars_path, original_vars, original_blocks))
 
-        if vars_path.is_file():
+        if original_vars is not None and original_vars.strip():
             try:
                 loaded = _yaml.safe_load(original_vars) or {}
             except _yaml.YAMLError:
@@ -347,11 +370,16 @@ def _snapshot_and_sanitize(
 
 
 def _restore_snapshot(
-    snapshot: list[tuple[Path, str, dict[Path, str]]],
+    snapshot: list[tuple[Path, str | None, dict[Path, str]]],
 ) -> None:
-    """Undo the public-mode mutations performed by _snapshot_and_sanitize."""
+    """Undo the public-mode mutations performed by _snapshot_and_sanitize.
+
+    Writes the original ``_variables.yml`` whenever the snapshot recorded
+    one (including a present-but-empty file — distinguished from absent via
+    ``None``). Block files are always restored verbatim.
+    """
     for vars_path, original_vars, original_blocks in snapshot:
-        if original_vars:
+        if original_vars is not None:
             vars_path.write_text(original_vars)
         for block_path, original_text in original_blocks.items():
             block_path.write_text(original_text)

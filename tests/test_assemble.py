@@ -880,3 +880,32 @@ def test_assemble_injection_handles_index_with_no_frontmatter(tmp_path: Path) ->
     assemble_application("test-co-engineer", apps_dir)
     front = yaml.safe_load(target.read_text().split("---\n", 2)[1])
     assert front["company"] == "Test Co"
+
+
+# ---------- T1.3 — slug path-traversal validation (PR #1 review) ----------
+
+
+def test_assemble_application_rejects_traversal_slug(tmp_path: Path) -> None:
+    """slug='../etc/foo' must not write outside applications_dir."""
+    apps_dir = _setup_app(tmp_path)
+    with pytest.raises(ValueError, match="invalid slug"):
+        assemble_application("../escaped", apps_dir)
+
+
+def test_assemble_application_rejects_absolute_slug(tmp_path: Path) -> None:
+    apps_dir = _setup_app(tmp_path)
+    with pytest.raises(ValueError, match="invalid slug"):
+        assemble_application("/etc/passwd", apps_dir)
+
+
+def test_assemble_application_rejects_slug_with_separator(tmp_path: Path) -> None:
+    apps_dir = _setup_app(tmp_path)
+    with pytest.raises(ValueError, match="invalid slug"):
+        assemble_application("foo/bar", apps_dir)
+
+
+def test_assemble_application_accepts_normal_slug_chars(tmp_path: Path) -> None:
+    """Hyphens, underscores, alphanumerics — all the slugify output forms."""
+    apps_dir = _setup_app(tmp_path, slug="acme-engineer_v2")
+    out = assemble_application("acme-engineer_v2", apps_dir)
+    assert out.exists()
