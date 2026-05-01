@@ -371,6 +371,25 @@ def _reconcile_canonical_slug(active_slug: str, cwd: Path) -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Path resolution helper
+# ---------------------------------------------------------------------------
+
+
+def _apply_state_dir(slug: str, cwd: Path) -> Path | None:
+    """Resolve the ``.apply-state`` directory for *slug* under the project root.
+
+    Returns None if ``.apply-config.yaml`` cannot be found, so callers can
+    silently skip operations that require the directory.
+    """
+    config_path = find_config(cwd)
+    if config_path is None:
+        return None
+    config = load_config(config_path)
+    repo_root = config_path.parent
+    return resolve(config.output.applications_dir, repo_root) / slug / ".apply-state"
+
+
+# ---------------------------------------------------------------------------
 # Steps 4-5: between-phase anchor guard + relevance inquiry
 # ---------------------------------------------------------------------------
 
@@ -578,6 +597,10 @@ def run_apply(
             rc = _run_step45_orchestration(slug, resolved_cwd)
             if rc != 0:
                 return rc
+            # Render per-phase summary panel before the confirm gate
+            state_dir = _apply_state_dir(slug, resolved_cwd)
+            if state_dir is not None:
+                rdr.render_phase_summary("gather", state_dir)
 
         # Step 3g: confirm gate (not after the last phase)
         if not skip_confirm and phase_name != "render":
