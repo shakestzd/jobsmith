@@ -363,28 +363,37 @@ def _render_event(event: headless.Event) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _reconcile_canonical_slug(active_slug: str, cwd: Path) -> tuple[str, str]:
-    """Return ``(canonical_slug, session_id)`` after an optional directory rename.
+def _reconcile_canonical_slug(
+    active_slug: str, cwd: Path, started_at: float
+) -> str:
+    """Return the canonical slug after an optional directory rename.
 
     After phase 1 (gather), the specialist ``apply-jd-parser`` derives a
     canonical slug of the form ``{company-slug}-{position-slug}`` and writes
     artifacts under *that* directory.  The wrapper may have pre-created a
     different directory from the raw URL.  This helper reconciles the two.
 
+    The session id is intentionally NOT returned: Claude Code stores its
+    session JSONL file under the deterministic id derived from the original
+    ``active_slug``.  Switching the id mid-run would orphan that file and
+    break ``--resume`` for phases 2/3.  Callers keep the original session id.
+
     Strategy
     --------
     1. Try ``applications/{active_slug}/.apply-state/jd-parsed.json``.
     2. Fallback: glob ``applications/*/.apply-state/jd-parsed.json`` and pick
-       the file with the latest mtime (phase 1 may have written under a
-       different directory).
+       the most recently modified candidate **whose mtime is >= started_at**
+       (produced during this run).  Stale prior-run artifacts are skipped to
+       prevent picking up an unrelated job's slug.
     3. Compute canonical = ``_slugify_part(company) + "-" + _slugify_part(position)``.
-    4. If the *owning* directory's name differs from canonical, rename it via
-       ``shutil.move``.
-    5. Return ``(canonical, deterministic_session_id(canonical))``.
+    4. If the *owning* directory's name differs from canonical, rename it.
+       If the canonical directory already exists and is non-empty, halt with
+       a controlled error and return ``active_slug`` unchanged — the user
+       must resolve the collision manually.
+    5. Return ``canonical``.
 
-    When no ``jd-parsed.json`` is found anywhere, returns
-    ``(active_slug, deterministic_session_id(active_slug))`` unchanged and
-    logs a warning — the caller decides whether to abort.
+    When no qualifying ``jd-parsed.json`` is found, returns ``active_slug``
+    unchanged and logs a warning — the caller decides whether to abort.
     """
     config_path = find_config(cwd)
     if config_path is None:
@@ -392,7 +401,7 @@ def _reconcile_canonical_slug(active_slug: str, cwd: Path) -> tuple[str, str]:
             "reconcile: cannot locate .apply-config.yaml — skipping slug reconciliation.",
             err=True,
         )
-        return active_slug, headless.deterministic_session_id(active_slug)
+        return active_slug
 
     config = load_config(config_path)
     repo_root = config_path.parent
@@ -404,14 +413,20 @@ def _reconcile_canonical_slug(active_slug: str, cwd: Path) -> tuple[str, str]:
         jd_path = primary
         owning_dir = apps_dir / active_slug
     else:
-        # 2. Fallback: find the most recently modified jd-parsed.json under any slug
-        candidates = list(apps_dir.glob("*/.apply-state/jd-parsed.json"))
+        # 2. Fallback: candidates produced during this run only
+        # (mtime >= started_at, with a 1s buffer for filesystem clock drift).
+        threshold = started_at - 1.0
+        candidates = [
+            p
+            for p in apps_dir.glob("*/.apply-state/jd-parsed.json")
+            if p.stat().st_mtime >= threshold
+        ]
         if not candidates:
             click.echo(
-                "reconcile: jd-parsed.json not found — cannot derive canonical slug.",
+                "reconcile: no jd-parsed.json produced in this run — cannot derive canonical slug.",
                 err=True,
             )
-            return active_slug, headless.deterministic_session_id(active_slug)
+            return active_slug
         jd_path = max(candidates, key=lambda p: p.stat().st_mtime)
         owning_dir = jd_path.parent.parent  # strip "/.apply-state/jd-parsed.json"
 
@@ -425,28 +440,53 @@ def _reconcile_canonical_slug(active_slug: str, cwd: Path) -> tuple[str, str]:
             f"reconcile: failed to parse jd-parsed.json ({exc}) — skipping.",
             err=True,
         )
-        return active_slug, headless.deterministic_session_id(active_slug)
+        return active_slug
 
     if not company or not position:
         click.echo(
             "reconcile: jd-parsed.json missing company or position — skipping.",
             err=True,
         )
-        return active_slug, headless.deterministic_session_id(active_slug)
+        return active_slug
 
     canonical = f"{_slugify_part(company)}-{_slugify_part(position)}"
 
-    # 4. Rename owning dir if it doesn't already have the canonical name
+    # 4. Rename owning dir if it doesn't already have the canonical name.
+    # shutil.move into an existing directory NESTS the source inside the
+    # target rather than renaming, which would leave phase 2/3 reading stale
+    # canonical artifacts. Detect collisions and refuse to merge.
     if owning_dir.name != canonical:
         canonical_dir = apps_dir / canonical
-        shutil.move(str(owning_dir), str(canonical_dir))
-        click.echo(
-            f"reconcile: renamed {owning_dir.name!r} → {canonical!r}",
-            err=True,
-        )
+        if canonical_dir.exists():
+            try:
+                same = canonical_dir.resolve() == owning_dir.resolve()
+            except OSError:
+                same = False
+            if same:
+                pass
+            elif any(canonical_dir.iterdir()):
+                click.echo(
+                    f"reconcile: canonical dir {canonical_dir} already exists "
+                    f"and is non-empty; refusing to merge with {owning_dir.name!r}. "
+                    "Resolve manually (rename or remove the stale directory) and re-run.",
+                    err=True,
+                )
+                return active_slug
+            else:
+                canonical_dir.rmdir()
+                shutil.move(str(owning_dir), str(canonical_dir))
+                click.echo(
+                    f"reconcile: renamed {owning_dir.name!r} → {canonical!r}",
+                    err=True,
+                )
+        else:
+            shutil.move(str(owning_dir), str(canonical_dir))
+            click.echo(
+                f"reconcile: renamed {owning_dir.name!r} → {canonical!r}",
+                err=True,
+            )
 
-    # 5. Return canonical slug + recomputed session id
-    return canonical, headless.deterministic_session_id(canonical)
+    return canonical
 
 
 # ---------------------------------------------------------------------------
@@ -599,7 +639,11 @@ def run_apply(
         rdr.print_error(f"Bootstrap failed: {exc}")
         return 1
 
-    # Step 2: derive slug and session
+    # Step 2: derive slug and session. Capture started_at so the post-gather
+    # reconciliation can scope its fallback to artifacts produced in this run.
+    import time
+
+    started_at = time.time()
     slug = derive_slug(url)
     session_id = headless.deterministic_session_id(slug)
     plugin_directory = get_plugin_dir()
@@ -676,7 +720,9 @@ def run_apply(
         # anchor guard + relevance inquiry to produce the bullet-decisions.json
         # that phase 2 (draft) requires as input.
         if phase_name == "gather":
-            slug, session_id = _reconcile_canonical_slug(slug, resolved_cwd)
+            # Reconcile slug only — keep the original session_id so phase 2/3
+            # can resume the Claude session created during gather.
+            slug = _reconcile_canonical_slug(slug, resolved_cwd, started_at)
             rc = _run_step45_orchestration(slug, resolved_cwd)
             if rc != 0:
                 return rc

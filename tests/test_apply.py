@@ -780,6 +780,13 @@ def _scaffold_apply_config_for_reconcile(root: Path, *, slug: str) -> Path:
     return apply_state
 
 
+def _past_started_at() -> float:
+    """Return a started_at value far enough in the past to accept any test mtime."""
+    import time
+
+    return time.time() - 3600.0
+
+
 def test_reconcile_canonical_slug_renames_when_different(tmp_path: Path) -> None:
     """Helper renames dir from url-slug to canonical and returns canonical slug."""
     import json
@@ -791,7 +798,7 @@ def test_reconcile_canonical_slug_renames_when_different(tmp_path: Path) -> None
         json.dumps({"company": "Clay", "position": "GTM Data Analyst"})
     )
 
-    canonical_slug, session_id = _reconcile_canonical_slug("url-slug", tmp_path)
+    canonical_slug = _reconcile_canonical_slug("url-slug", tmp_path, _past_started_at())
 
     assert canonical_slug == "clay-gtm-data-analyst"
     # Canonical dir must exist with the artifact
@@ -801,8 +808,6 @@ def test_reconcile_canonical_slug_renames_when_different(tmp_path: Path) -> None
     # Original dir must be gone
     orig_dir = tmp_path / "private" / "applications" / "url-slug"
     assert not orig_dir.exists()
-    # session_id matches canonical
-    assert session_id == deterministic_session_id("clay-gtm-data-analyst")
 
 
 def test_reconcile_canonical_slug_noop_when_already_canonical(tmp_path: Path) -> None:
@@ -816,10 +821,11 @@ def test_reconcile_canonical_slug_noop_when_already_canonical(tmp_path: Path) ->
         json.dumps({"company": "Acme", "position": "ML Engineer"})
     )
 
-    canonical_slug, session_id = _reconcile_canonical_slug("acme-ml-engineer", tmp_path)
+    canonical_slug = _reconcile_canonical_slug(
+        "acme-ml-engineer", tmp_path, _past_started_at()
+    )
 
     assert canonical_slug == "acme-ml-engineer"
-    assert session_id == deterministic_session_id("acme-ml-engineer")
     # Dir must still exist
     assert (apply_state / "jd-parsed.json").exists()
 
@@ -840,25 +846,129 @@ def test_reconcile_canonical_slug_falls_back_to_alt_dir(tmp_path: Path) -> None:
         json.dumps({"company": "Clay", "position": "GTM Data Analyst"})
     )
 
-    canonical_slug, session_id = _reconcile_canonical_slug("jobs", tmp_path)
+    canonical_slug = _reconcile_canonical_slug("jobs", tmp_path, _past_started_at())
 
     assert canonical_slug == "clay-gtm-data-analyst"
-    assert session_id == deterministic_session_id("clay-gtm-data-analyst")
     # The canonical dir must still be intact (no rename needed — already correct name)
     assert (canonical_state / "jd-parsed.json").exists()
 
 
 def test_reconcile_canonical_slug_missing_jd_parsed_returns_active(tmp_path: Path) -> None:
-    """With no jd-parsed.json anywhere, returns (active_slug, session_id) unchanged."""
+    """With no jd-parsed.json anywhere, returns active_slug unchanged."""
     from jobsmith.apply import _reconcile_canonical_slug
 
     _scaffold_apply_config_for_reconcile(tmp_path, slug="url-slug")
     # No jd-parsed.json written anywhere
 
-    canonical_slug, session_id = _reconcile_canonical_slug("url-slug", tmp_path)
+    canonical_slug = _reconcile_canonical_slug(
+        "url-slug", tmp_path, _past_started_at()
+    )
 
     assert canonical_slug == "url-slug"
-    assert session_id == deterministic_session_id("url-slug")
+
+
+def test_reconcile_canonical_slug_skips_stale_fallback_candidates(
+    tmp_path: Path,
+) -> None:
+    """Fallback ignores jd-parsed.json files older than started_at (prior runs)."""
+    import json
+    import os
+    import time
+
+    from jobsmith.apply import _reconcile_canonical_slug
+
+    # URL-slug dir empty (no jd-parsed.json there).
+    _scaffold_apply_config_for_reconcile(tmp_path, slug="url-slug")
+
+    # A *stale* prior-run dir from a different job — must NOT be picked.
+    stale_state = (
+        tmp_path / "private" / "applications" / "old-corp-old-role" / ".apply-state"
+    )
+    stale_state.mkdir(parents=True, exist_ok=True)
+    stale_jd = stale_state / "jd-parsed.json"
+    stale_jd.write_text(
+        json.dumps({"company": "Old Corp", "position": "Old Role"})
+    )
+    # Backdate the stale file by 1 hour.
+    one_hour_ago = time.time() - 3600.0
+    os.utime(stale_jd, (one_hour_ago, one_hour_ago))
+
+    # started_at = "now-ish"; anything older than ~1s must be filtered out.
+    canonical_slug = _reconcile_canonical_slug(
+        "url-slug", tmp_path, time.time()
+    )
+
+    # Helper must NOT pick up the stale unrelated job.
+    assert canonical_slug == "url-slug"
+    # Stale dir must still exist untouched.
+    assert stale_state.exists()
+
+
+def test_reconcile_canonical_slug_halts_on_existing_canonical_collision(
+    tmp_path: Path,
+) -> None:
+    """If the canonical dir already exists with content, refuse to merge."""
+    import json
+
+    from jobsmith.apply import _reconcile_canonical_slug
+
+    # Active URL-slug dir has fresh jd-parsed.json from this run.
+    apply_state = _scaffold_apply_config_for_reconcile(tmp_path, slug="url-slug")
+    (apply_state / "jd-parsed.json").write_text(
+        json.dumps({"company": "Clay", "position": "GTM Data Analyst"})
+    )
+
+    # Stale canonical dir from a previous run (already has content).
+    canonical_dir = (
+        tmp_path / "private" / "applications" / "clay-gtm-data-analyst"
+    )
+    canonical_state = canonical_dir / ".apply-state"
+    canonical_state.mkdir(parents=True, exist_ok=True)
+    (canonical_state / "jd-parsed.json").write_text(
+        json.dumps({"company": "Clay", "position": "Old Role"})
+    )
+
+    canonical_slug = _reconcile_canonical_slug(
+        "url-slug", tmp_path, _past_started_at()
+    )
+
+    # Must refuse to merge — return active_slug, leave both dirs intact.
+    assert canonical_slug == "url-slug"
+    assert (apply_state / "jd-parsed.json").exists(), "active dir must be untouched"
+    assert (canonical_state / "jd-parsed.json").exists(), "stale canonical dir must be untouched"
+    # The active dir must NOT have been moved INSIDE the canonical dir
+    # (which is exactly the shutil.move-into-existing-dir bug we are fixing).
+    assert not (canonical_dir / "url-slug").exists(), (
+        "active dir must not be nested inside canonical dir"
+    )
+
+
+def test_reconcile_canonical_slug_replaces_empty_canonical_dir(tmp_path: Path) -> None:
+    """An empty pre-existing canonical dir is removed and the source rename succeeds."""
+    import json
+
+    from jobsmith.apply import _reconcile_canonical_slug
+
+    apply_state = _scaffold_apply_config_for_reconcile(tmp_path, slug="url-slug")
+    (apply_state / "jd-parsed.json").write_text(
+        json.dumps({"company": "Clay", "position": "GTM Data Analyst"})
+    )
+    # Empty canonical dir (no .apply-state inside) — common when wrapper
+    # pre-created the directory but phase 1 did not populate it.
+    canonical_dir = (
+        tmp_path / "private" / "applications" / "clay-gtm-data-analyst"
+    )
+    canonical_dir.mkdir(parents=True, exist_ok=True)
+
+    canonical_slug = _reconcile_canonical_slug(
+        "url-slug", tmp_path, _past_started_at()
+    )
+
+    assert canonical_slug == "clay-gtm-data-analyst"
+    # The rename succeeded — content lives directly under canonical dir.
+    assert (canonical_dir / ".apply-state" / "jd-parsed.json").exists()
+    # No nested url-slug subdir.
+    assert not (canonical_dir / "url-slug").exists()
 
 
 def test_run_apply_threads_canonical_slug_into_phase_2(tmp_path: Path, monkeypatch) -> None:
@@ -901,12 +1011,12 @@ def test_run_apply_threads_canonical_slug_into_phase_2(tmp_path: Path, monkeypat
         json.dumps({"company": "Clay", "position": "GTM Data Analyst"})
     )
 
-    captured_prompts: list[tuple[str, str]] = []  # [(phase, prompt), ...]
+    captured: list[tuple[str, str, str]] = []  # [(phase, session_id, prompt), ...]
     call_count = [0]
     phase_sequence = ["gather", "draft", "render"]
 
     def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
-        captured_prompts.append((phase, prompt))
+        captured.append((phase, session_id, prompt))
         idx = call_count[0]
         call_count[0] += 1
         return iter(_make_phase_events(phase_sequence[idx]))
@@ -921,8 +1031,8 @@ def test_run_apply_threads_canonical_slug_into_phase_2(tmp_path: Path, monkeypat
     assert rc == 0, f"run_apply returned {rc}"
 
     # phase 2 (draft) and phase 3 (render) prompts must contain canonical slug
-    draft_prompt = next(p for name, p in captured_prompts if name == "draft")
-    render_prompt = next(p for name, p in captured_prompts if name == "render")
+    draft_prompt = next(p for name, _, p in captured if name == "draft")
+    render_prompt = next(p for name, _, p in captured if name == "render")
 
     assert "clay-gtm-data-analyst" in draft_prompt, (
         f"draft prompt should contain canonical slug; got: {draft_prompt!r}"
@@ -934,6 +1044,82 @@ def test_run_apply_threads_canonical_slug_into_phase_2(tmp_path: Path, monkeypat
     assert url_slug not in draft_prompt, (
         f"draft prompt must not contain url slug {url_slug!r}; got: {draft_prompt!r}"
     )
+
+    # Session id must remain the ORIGINAL (URL-slug-derived) one across all
+    # three phases — Claude's session JSONL file is keyed on this id, and
+    # switching it would break --resume for phases 2/3.
+    expected_session_id = deterministic_session_id(url_slug)
+    for phase, sid, _ in captured:
+        assert sid == expected_session_id, (
+            f"session_id for phase {phase!r} should remain {expected_session_id!r}, got {sid!r}"
+        )
+
+
+def test_run_apply_session_id_unchanged_after_reconcile(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """After slug reconciliation, session_id must remain the URL-slug-derived id."""
+    import json
+
+    import yaml
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+    content = tmp_path / "assets" / "content"
+    content.mkdir(parents=True, exist_ok=True)
+    for name in ("work.yml", "skill.yml", "education.yml", "author.yml"):
+        (content / name).write_text("# placeholder\n")
+
+    plugin_fake = _scaffold_plugin(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    url = "https://example.com/jobs/x"
+    url_slug = derive_slug(url)
+    original_session_id = deterministic_session_id(url_slug)
+
+    apply_state = (
+        tmp_path / "private" / "applications" / url_slug / ".apply-state"
+    )
+    apply_state.mkdir(parents=True, exist_ok=True)
+    (apply_state / "jd-parsed.json").write_text(
+        json.dumps({"company": "Acme", "position": "ML Engineer"})
+    )
+
+    seen_sessions: list[str] = []
+    call_count = [0]
+    phase_sequence = ["gather", "draft", "render"]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        seen_sessions.append(session_id)
+        idx = call_count[0]
+        call_count[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: True)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply(url, cwd=tmp_path, skip_confirm=True)
+    assert rc == 0
+    assert all(s == original_session_id for s in seen_sessions), (
+        f"all phases must share the URL-derived session_id {original_session_id!r}; got {seen_sessions!r}"
+    )
+    # Sanity: slug DID get reconciled to canonical (the URL's path slug 'x' is not canonical)
+    canonical_dir = tmp_path / "private" / "applications" / "acme-ml-engineer"
+    assert canonical_dir.exists()
 
 
 # ---------------------------------------------------------------------------
