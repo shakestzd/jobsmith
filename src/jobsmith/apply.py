@@ -22,6 +22,7 @@ import click
 
 from . import headless
 from . import plugin_dir as get_plugin_dir
+from .benchmarks import BenchmarkRequiredError, resolve_benchmark_or_fallback
 from .config import CONFIG_FILENAME, find_config, load_config
 from .guard import check_anchors
 from .paths import resolve
@@ -233,6 +234,17 @@ def _build_paths(slug: str, cwd: Path, plugin_directory: Path) -> dict[str, str]
         # apply_state_dir — absolute path for the current slug
         apps_dir = resolve(config.output.applications_dir, repo_root)
         result["apply_state_dir"] = str(apps_dir / slug / ".apply-state")
+
+        # Benchmark paths — resolve for the three specialists that consume them.
+        # Falls back to Pat Doe files when user hasn't configured benchmarks.
+        # Raises BenchmarkRequiredError only when benchmarks.required=True and
+        # the field is unset — in that case we propagate up to the caller.
+        for field, key in (
+            ("resume_qmd", "benchmark.resume_qmd"),
+            ("cover_letter_md", "benchmark.cover_letter_md"),
+            ("resume_pdf", "benchmark.resume_pdf"),
+        ):
+            result[key] = str(resolve_benchmark_or_fallback(field, config, repo_root))
 
     return result
 

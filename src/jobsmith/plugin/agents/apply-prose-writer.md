@@ -21,6 +21,31 @@ Read `.apply-state/spec.json`:
 - `inputs.master_yamls` = work.yml, skill.yml, education.yml, author.yml, publication.yml (ALL READ-ONLY)
 - `inputs.voice_guide` = `${VOICE_GUIDE_PATH}`
 # Configured via .apply-config.yaml voice.voice_guide_path
+- `inputs.benchmark_resume_qmd` = path to benchmark .qmd file, or null
+
+## Benchmark style reference
+
+<!-- ─── STYLE REFERENCE — READ CAREFULLY ─── -->
+
+If `inputs.benchmark_resume_qmd` is provided (non-null), read that file as a
+**voice, rhythm, and page-fit exemplar only**.
+
+Use it to calibrate:
+- **Voice and rhythm** — sentence length, paragraph cadence, opening-line energy.
+- **Structure** — section ordering, Professional Summary length, bullet density.
+- **Page-fit instincts** — how tightly the benchmark fills a single page; match that density.
+
+**HARD RULE — benchmark is NEVER a source of fact.**
+You MUST NOT copy, paraphrase, or derive from the benchmark:
+- Any dollar amounts, percentages, year counts, or asset counts.
+- Any company names, institution names, or proper nouns.
+- Any project names, tool names, or product claims.
+- Any claim of any kind.
+
+The benchmark teaches *how to write*; master YAML is *what to write*. Violation
+of this rule is equivalent to fabrication and triggers an immediate halt.
+
+<!-- ─── END BENCHMARK STYLE REFERENCE ─── -->
 
 ## Voice rules (read the voice_guide; this is the short version)
 

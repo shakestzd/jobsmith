@@ -653,6 +653,97 @@ def test_renderer_non_tty_no_spinner() -> None:
     assert rdr._use_spinner is False
 
 
+# ---------------------------------------------------------------------------
+# 12. _build_paths injects benchmark paths into phase paths dict
+# ---------------------------------------------------------------------------
+
+
+def test_build_paths_injects_benchmark_paths_when_configured(tmp_path: Path) -> None:
+    """_build_paths includes benchmark.* keys when config has benchmark paths set."""
+    import yaml
+
+    from jobsmith.apply import _build_paths
+
+    # Scaffold a valid config with benchmark paths
+    bm_dir = tmp_path / "private" / "benchmarks"
+    bm_dir.mkdir(parents=True)
+    resume_qmd = bm_dir / "resume.qmd"
+    resume_qmd.write_text("# benchmark resume\n")
+    cover_letter_md = bm_dir / "cover-letter.md"
+    cover_letter_md.write_text("# benchmark cover letter\n")
+    resume_pdf = bm_dir / "resume.pdf"
+    resume_pdf.write_bytes(b"%PDF-1.4")
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+                "benchmarks": {
+                    "resume_qmd": "private/benchmarks/resume.qmd",
+                    "cover_letter_md": "private/benchmarks/cover-letter.md",
+                    "resume_pdf": "private/benchmarks/resume.pdf",
+                    "required": False,
+                },
+            }
+        )
+    )
+
+    plugin_fake = tmp_path / "plugin"
+    plugin_fake.mkdir()
+
+    paths = _build_paths("test-slug", tmp_path, plugin_fake)
+
+    assert "benchmark.resume_qmd" in paths, "benchmark.resume_qmd must be in paths"
+    assert "benchmark.cover_letter_md" in paths, "benchmark.cover_letter_md must be in paths"
+    assert "benchmark.resume_pdf" in paths, "benchmark.resume_pdf must be in paths"
+    assert paths["benchmark.resume_qmd"] == str(resume_qmd.resolve())
+    assert paths["benchmark.cover_letter_md"] == str(cover_letter_md.resolve())
+    assert paths["benchmark.resume_pdf"] == str(resume_pdf.resolve())
+
+
+def test_build_paths_benchmark_fallback_when_not_configured(tmp_path: Path) -> None:
+    """_build_paths uses Pat Doe fallback paths when benchmarks section absent."""
+    import yaml
+
+    import jobsmith
+    from jobsmith.apply import _build_paths
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+
+    plugin_fake = tmp_path / "plugin"
+    plugin_fake.mkdir()
+
+    paths = _build_paths("test-slug", tmp_path, plugin_fake)
+
+    pat_doe_dir = jobsmith.plugin_dir() / "benchmarks"
+    assert "benchmark.resume_qmd" in paths
+    assert "benchmark.cover_letter_md" in paths
+    assert "benchmark.resume_pdf" in paths
+    assert paths["benchmark.resume_qmd"] == str(pat_doe_dir / "resume.qmd")
+    assert paths["benchmark.cover_letter_md"] == str(pat_doe_dir / "cover-letter.md")
+    assert paths["benchmark.resume_pdf"] == str(pat_doe_dir / "resume.pdf")
+
+
 def test_renderer_text_event_non_empty() -> None:
     """Non-empty text events are rendered as dim italic at verbosity >= 1."""
     con, buf = _make_test_console()
