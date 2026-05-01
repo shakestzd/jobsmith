@@ -1,4 +1,4 @@
-"""Site rendering with privacy model.
+"""Site rendering with privacy model + listings scaffolding.
 
 Two modes:
 - private (default): renders to _site/, includes everything (gitignored by the
@@ -9,13 +9,21 @@ Sensitive: salary, fit_score, must_have_table, bullet_decisions, bullet_diff,
 gap_resolutions, hm_*, outreach_snippets, humanizer_audit.
 
 CLI wiring is handled by feat-9377b64d (jobsmith site render / --public flag).
-This module exposes the sanitization core so the CLI can import it.
+This module exposes the sanitization core, the listings discovery helpers,
+and the init_site scaffolder so the CLI can import them.
 """
 
 from __future__ import annotations
 
 import shutil
 from pathlib import Path
+
+# Bundled site templates live next to the package (templates/site/) so
+# `init_site` can copy them into the user's repo. Resolved as
+# <package_root>/templates/site/ (matches DEFAULT_PARTIALS_SRC convention
+# in jobsmith.assemble).
+PACKAGE_ROOT = Path(__file__).resolve().parent.parent.parent
+DEFAULT_SITE_TEMPLATE_SRC = PACKAGE_ROOT / "templates" / "site"
 
 # ---------------------------------------------------------------------------
 # Privacy contract: keys stripped in public mode
@@ -144,3 +152,91 @@ def render_site(
     # )
 
     return output_dir
+
+
+# ---------------------------------------------------------------------------
+# Site scaffolding — copies templates/site/ into the user's repo
+# ---------------------------------------------------------------------------
+
+
+def init_site(
+    root: Path,
+    template_src: Path | None = None,
+    overwrite: bool = False,
+) -> list[Path]:
+    """Scaffold the website project at *root*.
+
+    Copies bundled `templates/site/` (the project ``_quarto.yml``, listings
+    ``index.qmd``, listings stylesheet, and ``.gitignore``) into the target
+    repository so ``quarto render`` produces an aggregator page over every
+    ``private/applications/<slug>/index.qmd``.
+
+    Args:
+        root: Destination directory (the user's repo root). Created if missing.
+        template_src: Override the bundled templates directory. Defaults to
+            ``DEFAULT_SITE_TEMPLATE_SRC``.
+        overwrite: When False (default) existing files are left untouched —
+            jobsmith never clobbers user edits to ``_quarto.yml`` /
+            ``index.qmd``. When True every file is replaced.
+
+    Returns:
+        List of files that were written (in copy order). May be empty when
+        every file already existed and *overwrite* is False.
+
+    Raises:
+        FileNotFoundError: If *template_src* does not exist.
+    """
+    src = template_src or DEFAULT_SITE_TEMPLATE_SRC
+    if not src.is_dir():
+        raise FileNotFoundError(
+            f"site template directory not found: {src}. "
+            "Reinstall jobsmith or pass an explicit template_src."
+        )
+
+    root.mkdir(parents=True, exist_ok=True)
+
+    written: list[Path] = []
+    for source_file in sorted(src.rglob("*")):
+        if source_file.is_dir():
+            continue
+        rel = source_file.relative_to(src)
+        dest = root / rel
+        if dest.exists() and not overwrite:
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_file, dest)
+        written.append(dest)
+
+    return written
+
+
+# ---------------------------------------------------------------------------
+# Listings discovery — used by the CLI's `site list` command
+# ---------------------------------------------------------------------------
+
+
+def discover_applications(root: Path) -> list[Path]:
+    """Return every application directory under ``private/applications/`` that
+    has been assembled by jobsmith (i.e. contains both ``index.qmd`` and
+    ``.apply-state/``). Stable sort: alphabetical by slug.
+
+    Empty directories, directories without ``.apply-state/``, and directories
+    whose name starts with ``_`` or ``.`` are skipped — same convention as
+    ``jobsmith.assemble.assemble_all``.
+    """
+    apps_root = root / "private" / "applications"
+    if not apps_root.is_dir():
+        return []
+
+    discovered: list[Path] = []
+    for entry in sorted(apps_root.iterdir()):
+        if not entry.is_dir():
+            continue
+        if entry.name.startswith("_") or entry.name.startswith("."):
+            continue
+        if not (entry / ".apply-state").is_dir():
+            continue
+        if not (entry / "index.qmd").is_file():
+            continue
+        discovered.append(entry)
+    return discovered

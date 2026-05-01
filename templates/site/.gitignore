@@ -1,0 +1,4 @@
+# jobsmith site — never commit rendered output or hidden caches.
+_site/
+_site-public/
+.quarto/

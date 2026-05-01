@@ -147,3 +147,132 @@ def test_render_site_unknown_mode_raises() -> None:
 
     with pytest.raises(ValueError, match="mode"):
         render_site(Path("/tmp"), mode="typo")
+
+
+# ---------- init_site ----------
+
+from jobsmith.site import (  # noqa: E402  (intentional grouping)
+    DEFAULT_SITE_TEMPLATE_SRC,
+    discover_applications,
+    init_site,
+)
+
+
+def test_init_site_copies_bundled_templates(tmp_path: Path) -> None:
+    """init_site copies _quarto.yml + index.qmd + styles/jobsmith.scss + .gitignore."""
+    written = init_site(tmp_path)
+
+    assert (tmp_path / "_quarto.yml").is_file()
+    assert (tmp_path / "index.qmd").is_file()
+    assert (tmp_path / "styles" / "jobsmith.scss").is_file()
+    assert (tmp_path / ".gitignore").is_file()
+
+    # Returns the list of files actually written
+    assert len(written) >= 4
+    written_names = {p.name for p in written}
+    assert {"_quarto.yml", "index.qmd", "jobsmith.scss", ".gitignore"} <= written_names
+
+
+def test_init_site_creates_root_when_missing(tmp_path: Path) -> None:
+    """init_site mkdirs *root* and any nested style directories."""
+    target = tmp_path / "fresh-repo"
+    assert not target.exists()
+    init_site(target)
+    assert target.is_dir()
+    assert (target / "styles").is_dir()
+
+
+def test_init_site_does_not_overwrite_by_default(tmp_path: Path) -> None:
+    """Existing files are preserved (jobsmith never clobbers user edits)."""
+    (tmp_path / "_quarto.yml").write_text("user-edited\n")
+    (tmp_path / "index.qmd").write_text("user listings\n")
+
+    written = init_site(tmp_path)
+
+    assert (tmp_path / "_quarto.yml").read_text() == "user-edited\n"
+    assert (tmp_path / "index.qmd").read_text() == "user listings\n"
+    # Only the not-already-present files were written
+    assert all(f.name not in {"_quarto.yml", "index.qmd"} for f in written)
+
+
+def test_init_site_overwrite_replaces_files(tmp_path: Path) -> None:
+    """overwrite=True replaces existing files with bundled copies."""
+    (tmp_path / "_quarto.yml").write_text("user-edited\n")
+
+    init_site(tmp_path, overwrite=True)
+
+    # The bundled _quarto.yml is non-trivial — assert against any signature
+    # string to confirm the file was replaced.
+    refreshed = (tmp_path / "_quarto.yml").read_text()
+    assert "user-edited" not in refreshed
+    assert "type: website" in refreshed
+
+
+def test_init_site_unknown_template_raises(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="site template"):
+        init_site(tmp_path, template_src=tmp_path / "does-not-exist")
+
+
+def test_default_site_template_src_exists() -> None:
+    """The bundled templates/site/ directory ships with the package."""
+    assert DEFAULT_SITE_TEMPLATE_SRC.is_dir()
+    assert (DEFAULT_SITE_TEMPLATE_SRC / "_quarto.yml").is_file()
+    assert (DEFAULT_SITE_TEMPLATE_SRC / "index.qmd").is_file()
+
+
+# ---------- discover_applications ----------
+
+
+def _make_app(root: Path, slug: str, with_index: bool = True, with_state: bool = True) -> Path:
+    app = root / "private" / "applications" / slug
+    app.mkdir(parents=True)
+    if with_state:
+        (app / ".apply-state").mkdir()
+    if with_index:
+        (app / "index.qmd").write_text(f"# {slug}\n")
+    return app
+
+
+def test_discover_applications_finds_assembled_apps(tmp_path: Path) -> None:
+    _make_app(tmp_path, "acme-engineer")
+    _make_app(tmp_path, "stripe-platform")
+
+    found = discover_applications(tmp_path)
+    slugs = [p.name for p in found]
+    assert slugs == ["acme-engineer", "stripe-platform"]  # stable alphabetical
+
+
+def test_discover_applications_skips_apps_without_state(tmp_path: Path) -> None:
+    _make_app(tmp_path, "acme-engineer")
+    _make_app(tmp_path, "no-state-yet", with_state=False)
+
+    slugs = [p.name for p in discover_applications(tmp_path)]
+    assert slugs == ["acme-engineer"]
+
+
+def test_discover_applications_skips_apps_without_index(tmp_path: Path) -> None:
+    _make_app(tmp_path, "acme-engineer")
+    _make_app(tmp_path, "draft-only", with_index=False)
+
+    slugs = [p.name for p in discover_applications(tmp_path)]
+    assert slugs == ["acme-engineer"]
+
+
+def test_discover_applications_skips_underscore_and_dot_dirs(tmp_path: Path) -> None:
+    _make_app(tmp_path, "acme-engineer")
+    _make_app(tmp_path, "_pending")
+    _make_app(tmp_path, ".cache")
+
+    slugs = [p.name for p in discover_applications(tmp_path)]
+    assert slugs == ["acme-engineer"]
+
+
+def test_discover_applications_returns_empty_when_root_missing(tmp_path: Path) -> None:
+    found = discover_applications(tmp_path / "not-a-repo")
+    assert found == []
+
+
+def test_discover_applications_returns_empty_when_no_applications_dir(tmp_path: Path) -> None:
+    """Repo exists but private/applications/ has not been created yet."""
+    found = discover_applications(tmp_path)
+    assert found == []

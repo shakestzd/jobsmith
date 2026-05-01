@@ -1,0 +1,47 @@
+---
+title: "Job applications"
+listing:
+  id: applications
+  contents:
+    - private/applications/*/index.qmd
+  type: table
+  fields:
+    - title
+    - company
+    - position
+    - status
+    - fit_score
+    - date_found
+  sort:
+    - "fit_score desc"
+    - "date_found desc"
+  sort-ui:
+    - title
+    - company
+    - status
+    - fit_score
+    - date_found
+  filter-ui:
+    - title
+    - company
+    - status
+  date-format: "YYYY-MM-DD"
+  feed: false
+  table-striped: true
+  table-hover: true
+  page-size: 50
+---
+
+::: {.callout-note appearance="minimal"}
+This page aggregates every application directory under `private/applications/`
+that has been assembled by jobsmith. Sortable / filterable; click any row to
+open the per-application review surface.
+
+Privacy: this site renders to `_site/` and should stay local — application
+pages contain salary ranges, fit scores, and hiring-manager intelligence.
+Run `jobsmith site render --public` to produce a sanitized variant in
+`_site-public/` for sharing.
+:::
+
+::: {#applications}
+:::

@@ -1,0 +1,34 @@
+# jobsmith site project — aggregates per-application pages.
+#
+# Scaffolded by `jobsmith site init`. Edit freely; jobsmith won't overwrite
+# this file once it exists.
+#
+# Privacy: by default this project renders to _site/ which should be
+# gitignored. The --public flag (added by feat-9377b64d) re-renders to
+# _site-public/ with sensitive variables (salary, fit_score, hm_*, etc.)
+# stripped. See docs/architecture.md "Privacy model".
+
+project:
+  type: website
+  title: "Job applications"
+  output-dir: _site
+  render:
+    - "index.qmd"
+    - "private/applications/*/index.qmd"
+
+website:
+  title: "Job applications"
+  navbar:
+    left:
+      - text: "Pipeline"
+        href: index.qmd
+  sidebar: false
+
+format:
+  html:
+    toc: false
+    page-layout: full
+    theme:
+      - cosmo
+      - styles/jobsmith.scss
+    embed-resources: false
