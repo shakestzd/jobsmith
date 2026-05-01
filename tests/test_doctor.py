@@ -76,12 +76,33 @@ def test_check_anthropic_api_key_fail_empty(monkeypatch: pytest.MonkeyPatch) -> 
 # check_apply_config
 # ---------------------------------------------------------------------------
 
-def test_check_apply_config_pass(tmp_path: Path) -> None:
-    config_file = tmp_path / ".apply-config.yaml"
+def _scaffold_project(root: Path, *, masters: bool = True) -> Path:
+    """Create a minimal valid jobsmith project at ``root``. Returns the config path."""
+    config_file = root / ".apply-config.yaml"
     config_file.write_text("master:\n  work_yml: assets/content/work.yml\n")
+    if masters:
+        content = root / "assets" / "content"
+        content.mkdir(parents=True, exist_ok=True)
+        for name in ("work.yml", "skill.yml", "education.yml", "author.yml"):
+            (content / name).write_text(f"# {name}\n")
+    return config_file
+
+
+def test_check_apply_config_pass(tmp_path: Path) -> None:
+    _scaffold_project(tmp_path, masters=False)
     result = check_apply_config(cwd=tmp_path)
     assert result.ok is True
     assert result.name == "apply_config"
+
+
+def test_check_apply_config_pass_from_subdir(tmp_path: Path) -> None:
+    """Invoking from a subdirectory must walk up to find the config."""
+    _scaffold_project(tmp_path, masters=False)
+    subdir = tmp_path / "deep" / "nested"
+    subdir.mkdir(parents=True)
+    result = check_apply_config(cwd=subdir)
+    assert result.ok is True
+    assert ".apply-config.yaml" in result.message
 
 
 def test_check_apply_config_fail(tmp_path: Path) -> None:
@@ -95,20 +116,45 @@ def test_check_apply_config_fail(tmp_path: Path) -> None:
 # check_master_yaml
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("filename", ["work.yml", "work.yaml", ".work.yaml"])
-def test_check_master_yaml_pass(tmp_path: Path, filename: str) -> None:
-    (tmp_path / filename).write_text("# master work yaml\n")
+def test_check_master_yaml_pass_with_config(tmp_path: Path) -> None:
+    """Scaffold a project under cwd; all configured master YAMLs present → pass."""
+    _scaffold_project(tmp_path)
     result = check_master_yaml(cwd=tmp_path)
     assert result.ok is True
     assert result.name == "master_yaml"
-    assert filename in result.message
 
 
-def test_check_master_yaml_fail_none_present(tmp_path: Path) -> None:
+def test_check_master_yaml_pass_from_subdir(tmp_path: Path) -> None:
+    """Subdir invocation must still resolve master paths via the parent config."""
+    _scaffold_project(tmp_path)
+    subdir = tmp_path / "private" / "applications"
+    subdir.mkdir(parents=True)
+    result = check_master_yaml(cwd=subdir)
+    assert result.ok is True
+
+
+def test_check_master_yaml_fail_missing_files(tmp_path: Path) -> None:
+    """Config exists but the configured master YAML files do not → fail listing missing."""
+    _scaffold_project(tmp_path, masters=False)
     result = check_master_yaml(cwd=tmp_path)
     assert result.ok is False
-    assert result.remediation is not None
-    assert "work.yml" in result.remediation or "jobsmith init" in result.remediation
+    assert "missing master YAML" in result.message
+    assert "assets/content/work.yml" in result.message
+
+
+def test_check_master_yaml_fail_no_config(tmp_path: Path) -> None:
+    """No config and no bare work.yml fallback → fail."""
+    result = check_master_yaml(cwd=tmp_path)
+    assert result.ok is False
+    assert "no .apply-config.yaml" in result.message
+
+
+def test_check_master_yaml_fallback_bare_workfile(tmp_path: Path) -> None:
+    """No config but a plain work.yml in cwd → pass with a note."""
+    (tmp_path / "work.yml").write_text("# bare master\n")
+    result = check_master_yaml(cwd=tmp_path)
+    assert result.ok is True
+    assert "no .apply-config.yaml" in result.message
 
 
 # ---------------------------------------------------------------------------

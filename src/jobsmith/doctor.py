@@ -67,10 +67,16 @@ def check_anthropic_api_key() -> CheckResult:
 
 
 def check_apply_config(cwd: Optional[Path] = None) -> CheckResult:
-    """Verify ``.apply-config.yaml`` exists in the working directory."""
+    """Verify ``.apply-config.yaml`` is reachable from the working directory.
+
+    Walks up the directory tree like ``jobsmith.config.find_config`` so that
+    invocation from a project subdirectory still passes.
+    """
+    from .config import find_config
+
     directory = cwd or Path.cwd()
-    config_path = directory / ".apply-config.yaml"
-    if config_path.is_file():
+    config_path = find_config(directory)
+    if config_path is not None:
         return CheckResult(
             name="apply_config",
             ok=True,
@@ -79,40 +85,69 @@ def check_apply_config(cwd: Optional[Path] = None) -> CheckResult:
     return CheckResult(
         name="apply_config",
         ok=False,
-        message=f".apply-config.yaml not found in {directory}",
-        remediation="run `jobsmith init` in this directory",
+        message=f".apply-config.yaml not found from {directory} (walked up to filesystem root)",
+        remediation="run `jobsmith init` in the project root",
     )
 
 
-# Accepted master work YAML filenames (in order of preference).
-_MASTER_WORK_FILENAMES = ("work.yml", "work.yaml", ".work.yaml")
-
-
 def check_master_yaml(cwd: Optional[Path] = None) -> CheckResult:
-    """Verify at least one master work YAML file exists in the working directory.
+    """Verify every master YAML file declared by ``.apply-config.yaml`` exists.
 
-    Looks for: work.yml, work.yaml, .work.yaml  (in that order).
-    The canonical filename used by ``jobsmith init`` is ``work.yml``
-    (via ``assets/content/work.yml``); the alternatives provide grace for
-    users who placed their file at the repo root under alternate names.
+    Resolves the config via ``find_config`` (subdirectory-aware), loads it,
+    and validates every path returned by ``all_master_paths(config, repo_root)``.
+    Falls back to a plain ``work.yml`` lookup in ``cwd`` when no config is
+    discoverable so that callers without a configured project still get a
+    sensible diagnostic.
     """
+    from .config import find_config, load_config
+    from .paths import all_master_paths
+
     directory = cwd or Path.cwd()
-    for filename in _MASTER_WORK_FILENAMES:
-        candidate = directory / filename
+    config_path = find_config(directory)
+
+    if config_path is None:
+        # No config — fall back to a plain ``work.yml`` lookup so users in a
+        # bare directory get a useful message rather than a config error.
+        candidate = directory / "work.yml"
         if candidate.is_file():
             return CheckResult(
                 name="master_yaml",
                 ok=True,
-                message=f"master work YAML found at {candidate}",
+                message=f"master work YAML found at {candidate} (no .apply-config.yaml present)",
             )
-    checked = ", ".join(_MASTER_WORK_FILENAMES)
+        return CheckResult(
+            name="master_yaml",
+            ok=False,
+            message=f"no .apply-config.yaml found from {directory}; cannot determine master YAML paths",
+            remediation="run `jobsmith init` to scaffold the project layout",
+        )
+
+    try:
+        config = load_config(config_path)
+    except Exception as exc:
+        return CheckResult(
+            name="master_yaml",
+            ok=False,
+            message=f"failed to load {config_path}: {exc}",
+            remediation="run `jobsmith validate` to see the underlying config error",
+        )
+
+    repo_root = config_path.parent
+    expected = all_master_paths(config, repo_root)
+    missing = [p for p in expected if not p.exists()]
+    if not missing:
+        return CheckResult(
+            name="master_yaml",
+            ok=True,
+            message=f"all {len(expected)} master YAML files present (relative to {repo_root})",
+        )
+    rendered = ", ".join(str(p) for p in missing)
     return CheckResult(
         name="master_yaml",
         ok=False,
-        message=f"no master work YAML found in {directory} (checked: {checked})",
+        message=f"missing master YAML file(s): {rendered}",
         remediation=(
-            "create work.yml (or work.yaml) in the working directory, "
-            "or run `jobsmith init` to scaffold the full repo layout"
+            "create the missing files, or run `jobsmith init` to scaffold from examples"
         ),
     )
 
