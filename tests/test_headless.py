@@ -89,7 +89,7 @@ def test_command_construction_no_resume(monkeypatch):
 
     assert args[0] == "claude"
     assert "-p" in args
-    assert "--bare" in args
+    assert "--bare" not in args  # dropped: allow keychain/OAuth for Claude Max users
     assert "--plugin-dir" in args
     assert str(PLUGIN_DIR) in args
     assert "--system-prompt-file" in args

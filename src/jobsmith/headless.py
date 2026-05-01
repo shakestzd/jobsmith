@@ -180,10 +180,12 @@ def _build_command(
     resume: bool,
     max_turns: int,
 ) -> list[str]:
+    # No --bare: allow claude to read macOS keychain / OAuth so that
+    # Claude Max / Pro subscribers work without an API key.
+    # ANTHROPIC_API_KEY is still honoured by claude when set.
     cmd = [
         "claude",
         "-p",
-        "--bare",
         "--plugin-dir",
         str(plugin_dir),
         "--system-prompt-file",

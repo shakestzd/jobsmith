@@ -9,8 +9,10 @@ should import and call ``preflight()`` directly.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,21 +51,56 @@ def check_claude_binary() -> CheckResult:
     )
 
 
-def check_anthropic_api_key() -> CheckResult:
-    """Verify ANTHROPIC_API_KEY environment variable is set and non-empty."""
-    key = os.environ.get("ANTHROPIC_API_KEY", "")
+def check_claude_auth() -> CheckResult:
+    """Verify Claude authentication via OAuth/keychain or ANTHROPIC_API_KEY.
+
+    1. Runs ``claude auth status`` (JSON output). If ``loggedIn == true``, PASS.
+    2. Falls back to ANTHROPIC_API_KEY env var (strips whitespace per F6 nit).
+    3. Otherwise FAIL with remediation for both auth paths.
+    """
+    try:
+        proc = subprocess.run(
+            ["claude", "auth", "status", "--output-format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        data = json.loads(proc.stdout)
+        if data.get("loggedIn") is True:
+            email = data.get("email", "unknown")
+            plan = data.get("subscriptionType", "unknown")
+            return CheckResult(
+                name="claude_auth",
+                ok=True,
+                message=f"authenticated as {email} ({plan})",
+            )
+    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError):
+        pass
+
+    # Fallback: API key (strip whitespace so "   " is treated as not set)
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if key:
         return CheckResult(
-            name="anthropic_api_key",
+            name="claude_auth",
             ok=True,
-            message="ANTHROPIC_API_KEY is set",
+            message="ANTHROPIC_API_KEY set",
         )
+
     return CheckResult(
-        name="anthropic_api_key",
+        name="claude_auth",
         ok=False,
-        message="ANTHROPIC_API_KEY is not set",
-        remediation="export ANTHROPIC_API_KEY=sk-...",
+        message="no Claude authentication found",
+        remediation=(
+            "run 'claude /login' (Max/Pro subscription) "
+            "or export ANTHROPIC_API_KEY=sk-..."
+        ),
     )
+
+
+# Keep old name as an alias so external callers aren't immediately broken.
+def check_anthropic_api_key() -> CheckResult:
+    """Deprecated alias for check_claude_auth(); kept for backwards compatibility."""
+    return check_claude_auth()
 
 
 def check_apply_config(cwd: Optional[Path] = None) -> CheckResult:
@@ -216,7 +253,7 @@ def run_all_checks(cwd: Optional[Path] = None) -> list[CheckResult]:
     return [
         check_python_version(),
         check_claude_binary(),
-        check_anthropic_api_key(),
+        check_claude_auth(),
         check_apply_config(cwd),
         check_master_yaml(cwd),
         check_plugin_dir_resolves(),
@@ -245,7 +282,8 @@ def preflight(cwd: Optional[Path] = None) -> bool:
 
 __all__ = [
     "CheckResult",
-    "check_anthropic_api_key",
+    "check_anthropic_api_key",  # deprecated alias
+    "check_claude_auth",
     "check_apply_config",
     "check_claude_binary",
     "check_master_yaml",

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 from io import StringIO
 from pathlib import Path
 from unittest import mock
+from unittest.mock import MagicMock
 
 import pytest
 from typer.testing import CliRunner
@@ -14,6 +16,7 @@ from typer.testing import CliRunner
 from jobsmith.doctor import (
     CheckResult,
     check_anthropic_api_key,
+    check_claude_auth,
     check_apply_config,
     check_claude_binary,
     check_master_yaml,
@@ -46,30 +49,75 @@ def test_check_claude_binary_fail(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# check_anthropic_api_key
+# check_claude_auth
 # ---------------------------------------------------------------------------
 
-def test_check_anthropic_api_key_pass(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
-    result = check_anthropic_api_key()
-    assert result.ok is True
-    assert result.name == "anthropic_api_key"
-    # Must not reveal the key
-    assert "sk-test-key" not in result.message
+def _make_auth_proc(logged_in: bool, email: str = "user@example.com", plan: str = "max") -> object:
+    """Return a mock CompletedProcess-like object for ``claude auth status``."""
+    payload = {"loggedIn": logged_in, "email": email, "subscriptionType": plan}
+    mock = MagicMock()
+    mock.stdout = json.dumps(payload)
+    mock.returncode = 0
+    return mock
 
 
-def test_check_anthropic_api_key_fail_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_check_claude_auth_pass_oauth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """claude auth status returns loggedIn=true → PASS via OAuth."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    result = check_anthropic_api_key()
+    with mock.patch("subprocess.run", return_value=_make_auth_proc(True, "alice@example.com", "max")):
+        result = check_claude_auth()
+    assert result.ok is True
+    assert result.name == "claude_auth"
+    assert "alice@example.com" in result.message
+    assert "max" in result.message
+
+
+def test_check_claude_auth_fail_logged_out_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """loggedIn=false, no API key → FAIL."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with mock.patch("subprocess.run", return_value=_make_auth_proc(False)):
+        result = check_claude_auth()
     assert result.ok is False
     assert result.remediation is not None
+    assert "claude /login" in result.remediation
     assert "ANTHROPIC_API_KEY" in result.remediation
 
 
-def test_check_anthropic_api_key_fail_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
-    result = check_anthropic_api_key()
+def test_check_claude_auth_fallback_api_key_when_binary_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """claude not on PATH (FileNotFoundError), API key set → PASS via fallback."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-real-key")
+    with mock.patch("subprocess.run", side_effect=FileNotFoundError):
+        result = check_claude_auth()
+    assert result.ok is True
+    assert "ANTHROPIC_API_KEY" in result.message
+    # Must not reveal the key value
+    assert "sk-real-key" not in result.message
+
+
+def test_check_claude_auth_fail_binary_missing_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """claude not on PATH, no API key → FAIL."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with mock.patch("subprocess.run", side_effect=FileNotFoundError):
+        result = check_claude_auth()
     assert result.ok is False
+    assert result.remediation is not None
+
+
+def test_check_claude_auth_fail_binary_missing_whitespace_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """claude not on PATH, API key is only whitespace → FAIL (F6 nit)."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "   ")
+    with mock.patch("subprocess.run", side_effect=FileNotFoundError):
+        result = check_claude_auth()
+    assert result.ok is False
+
+
+# Backwards-compat alias still importable and delegates correctly.
+def test_check_anthropic_api_key_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+    with mock.patch("subprocess.run", side_effect=FileNotFoundError):
+        result = check_anthropic_api_key()
+    assert result.ok is True
+    assert result.name == "claude_auth"
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +276,7 @@ def test_run_all_checks_stable_order() -> None:
     expected_names = [
         "python_version",
         "claude_binary",
-        "anthropic_api_key",
+        "claude_auth",
         "apply_config",
         "master_yaml",
         "plugin_dir",
