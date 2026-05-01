@@ -21,7 +21,9 @@ import click
 
 from . import plugin_dir as get_plugin_dir
 from . import headless
-from .config import CONFIG_FILENAME
+from .config import CONFIG_FILENAME, find_config, load_config
+from .guard import check_anchors
+from .paths import resolve
 
 # ---------------------------------------------------------------------------
 # Phase definitions
@@ -262,8 +264,101 @@ def _render_event(event: headless.Event) -> Optional[str]:
     if event.type == "phase_complete":
         return f"  [ok] phase {event.name} complete"
 
+    if event.type == "phase_failed":
+        reason = f": {event.error}" if event.error else ""
+        return f"  [fail] phase {event.name} failed{reason}"
+
     # Skip text events (too verbose) and other pass-through types
     return None
+
+
+# ---------------------------------------------------------------------------
+# Steps 4-5: between-phase anchor guard + relevance inquiry
+# ---------------------------------------------------------------------------
+
+
+def _run_step45_orchestration(slug: str, cwd: Path) -> int:
+    """Run Steps 4-5 between gather (phase 1) and draft (phase 2).
+
+    Step 4 (anchor guard): cross-references anchor bullets in the master
+    work YAML against the gather phase's ``bullet-selection.json``. Anchor
+    bullets dropped without a reason are reported.
+
+    Step 5 (relevance inquiry): currently surfaces unresolved drops to the
+    user with a remediation hint. Full automation of the relevance-inquiry
+    sub-pipeline is a follow-up; for now this guarantees the draft phase
+    cannot start with missing or stale ``bullet-decisions.json``.
+
+    Writes ``bullet-decisions.json`` (an empty mapping when anchors are
+    clean — selection-side ``reason_if_dropped`` carries any drop rationale).
+
+    Returns
+    -------
+    int
+        ``0`` on success, ``2`` when anchors require manual resolution, or
+        ``1`` when prerequisite artifacts are missing.
+    """
+    import json as _json
+
+    config_path = find_config(cwd)
+    if config_path is None:
+        click.echo(
+            "Step 4-5: cannot locate .apply-config.yaml — skipping anchor guard.",
+            err=True,
+        )
+        return 1
+    config = load_config(config_path)
+    repo_root = config_path.parent
+
+    apply_state = (
+        resolve(config.output.applications_dir, repo_root) / slug / ".apply-state"
+    )
+    selection_path = apply_state / "bullet-selection.json"
+    decisions_path = apply_state / "bullet-decisions.json"
+    master_path = resolve(config.master.work_yml, repo_root)
+
+    if not selection_path.exists():
+        click.echo(
+            f"Step 4-5: bullet-selection.json missing at {selection_path}. "
+            "Phase 1 (gather) must produce it before draft can proceed.",
+            err=True,
+        )
+        return 1
+
+    result = check_anchors(master_path, selection_path)
+
+    if result.exit_code == 0:
+        # All anchors preserved (or dropped with reason via selection's
+        # reason_if_dropped). Guarantee bullet-decisions.json exists so
+        # the draft prompt's "MUST already exist" precondition is met.
+        if not decisions_path.exists():
+            apply_state.mkdir(parents=True, exist_ok=True)
+            decisions_path.write_text(_json.dumps({}) + "\n")
+        click.echo(
+            f"Step 4: anchor guard passed — {len(result.kept)} kept, "
+            f"{len(result.dropped_with_reason)} dropped with reason.",
+            err=True,
+        )
+        return 0
+
+    click.echo(
+        f"Step 4: anchor guard FAILED — {len(result.dropped_without_reason)} "
+        "anchor bullet(s) dropped without a reason:",
+        err=True,
+    )
+    for bullet in result.dropped_without_reason[:5]:
+        click.echo(f"  - {bullet.text[:100]}", err=True)
+    if len(result.dropped_without_reason) > 5:
+        click.echo(
+            f"  ... and {len(result.dropped_without_reason) - 5} more", err=True
+        )
+    click.echo(
+        "\nStep 5 (relevance inquiry) is not yet automated. Manually edit "
+        f"{decisions_path} with reasons keyed by bullet_id, then re-invoke "
+        "`jobsmith apply` to resume.",
+        err=True,
+    )
+    return 2
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +434,14 @@ def run_apply(url: str, *, cwd: Optional[Path] = None, skip_confirm: bool = Fals
                     phase_succeeded = True
                     break
 
+                if event.type == "phase_failed":
+                    click.echo(
+                        f"Phase {event.name} failed: {event.error or '(no reason given)'}. "
+                        "Aborting before subsequent phases.",
+                        err=True,
+                    )
+                    return 3
+
                 if event.type == "error":
                     click.echo(f"Phase {phase_name} encountered an error. Aborting.", err=True)
                     return 2
@@ -354,7 +457,15 @@ def run_apply(url: str, *, cwd: Optional[Path] = None, skip_confirm: bool = Fals
             )
             return 2
 
-        # Step 3e: confirm gate (not after the last phase)
+        # Step 3e: between-phase orchestration. After gather (phase 1) we
+        # run the anchor guard + relevance inquiry to produce the
+        # bullet-decisions.json that phase 2 (draft) requires as input.
+        if phase_name == "gather":
+            rc = _run_step45_orchestration(slug, resolved_cwd)
+            if rc != 0:
+                return rc
+
+        # Step 3f: confirm gate (not after the last phase)
         if not skip_confirm and phase_name != "render":
             if not click.confirm(f"Phase {phase_num} ({phase_name}) complete. Proceed to next phase?"):
                 click.echo("Stopped at user request. Partial work saved.", err=True)

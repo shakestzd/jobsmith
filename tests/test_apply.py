@@ -163,6 +163,14 @@ def _make_error_events() -> list[Event]:
     ]
 
 
+def _make_phase_failed_events(phase_name: str, reason: str | None = None) -> list[Event]:
+    """Return a minimal event list ending with phase_failed."""
+    return [
+        Event(type="tool_use", tool_name="Bash", tool_input={"command": "echo hi"}),
+        Event(type="phase_failed", name=phase_name, error=reason),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # 4. run_apply happy path
 # ---------------------------------------------------------------------------
@@ -198,6 +206,9 @@ def test_run_apply_happy_path(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
     monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: True)
+    # Stub the between-phase Step 4-5 helper — its behavior is exercised in
+    # dedicated tests below.
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
 
     # Patch click.confirm to always return True
     monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
@@ -234,6 +245,7 @@ def test_run_apply_user_declines_after_phase1(tmp_path: Path, monkeypatch) -> No
 
     monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
     monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
     # User says no at the first gate
     monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: False)
 
@@ -329,3 +341,170 @@ def test_cli_apply_without_yes_default_confirm_false(tmp_path: Path, monkeypatch
 
     assert result.exit_code == 0
     assert captured.get("skip_confirm") is False
+
+
+# ---------------------------------------------------------------------------
+# 8. phase_failed event handling — distinct exit code, no further phases
+# ---------------------------------------------------------------------------
+
+
+def test_run_apply_phase_failed_event_aborts_with_distinct_exit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A phase_failed event aborts the pipeline with rc=3 (distinct from rc=2 errors)
+    and prevents subsequent phases from running."""
+    from jobsmith.apply import run_apply as run_apply_fn
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text("# config\n")
+
+    plugin_fake = tmp_path / "plugin"
+    sp_dir = plugin_fake / "system-prompts"
+    sp_dir.mkdir(parents=True)
+    for n, name in [(1, "gather"), (2, "draft"), (3, "render")]:
+        (sp_dir / f"phase-{n}-{name}.md").write_text(f"# Phase {n}\n")
+
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    call_count = [0]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        call_count[0] += 1
+        # First (and only) call: gather emits phase_failed
+        return iter(_make_phase_failed_events("gather", reason="prerequisites-missing"))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply_fn("https://example.com/jobs/ml-engineer", cwd=tmp_path)
+
+    assert rc == 3, f"phase_failed should produce rc=3, got {rc}"
+    assert call_count[0] == 1, "subsequent phases must not run after phase_failed"
+
+
+# ---------------------------------------------------------------------------
+# 9. _run_step45_orchestration — anchor guard between gather and draft
+# ---------------------------------------------------------------------------
+
+
+def _scaffold_apply_config(root: Path, *, slug: str = "ml-engineer") -> Path:
+    """Scaffold a minimal valid jobsmith project with an application directory."""
+    import yaml
+
+    config_file = root / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {
+                    "applications_dir": "private/applications",
+                },
+            }
+        )
+    )
+    content = root / "assets" / "content"
+    content.mkdir(parents=True, exist_ok=True)
+    for name in ("work.yml", "skill.yml", "education.yml", "author.yml"):
+        (content / name).write_text("# placeholder\n")
+    apply_state = root / "private" / "applications" / slug / ".apply-state"
+    apply_state.mkdir(parents=True, exist_ok=True)
+    return apply_state
+
+
+def test_step45_orchestration_passes_when_anchors_clean(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Anchor guard returns exit_code=0 → bullet-decisions.json is written and rc=0."""
+    from jobsmith.apply import _run_step45_orchestration
+    from jobsmith.guard import GuardResult
+
+    apply_state = _scaffold_apply_config(tmp_path)
+    (apply_state / "bullet-selection.json").write_text('{"positions": []}')
+
+    fake_result = GuardResult(
+        exit_code=0,
+        anchor_bullets=[],
+        kept=[],
+        dropped_with_reason=[],
+        dropped_without_reason=[],
+    )
+    monkeypatch.setattr("jobsmith.apply.check_anchors", lambda *a, **kw: fake_result)
+
+    rc = _run_step45_orchestration("ml-engineer", tmp_path)
+    assert rc == 0
+    decisions = apply_state / "bullet-decisions.json"
+    assert decisions.exists(), "anchor guard must guarantee bullet-decisions.json exists"
+
+
+def test_step45_orchestration_aborts_on_missing_selection(tmp_path: Path) -> None:
+    """No bullet-selection.json from gather → rc=1 with clear remediation."""
+    from jobsmith.apply import _run_step45_orchestration
+
+    _scaffold_apply_config(tmp_path)  # apply-state dir exists but no selection
+
+    rc = _run_step45_orchestration("ml-engineer", tmp_path)
+    assert rc == 1
+
+
+def test_step45_orchestration_aborts_on_anchor_violation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Anchors dropped without reason → rc=2; bullet-decisions.json is NOT written."""
+    from jobsmith.apply import _run_step45_orchestration
+    from jobsmith.guard import Bullet, GuardResult
+
+    apply_state = _scaffold_apply_config(tmp_path)
+    (apply_state / "bullet-selection.json").write_text('{"positions": []}')
+
+    dropped = Bullet(
+        bullet_id="abc123",
+        text="Saved $40M in cloud costs",
+        company="Acme",
+        position_title="Eng",
+        position_index=0,
+        bullet_index=0,
+        anchors=[],
+    )
+    fake_result = GuardResult(
+        exit_code=1,
+        anchor_bullets=[dropped],
+        kept=[],
+        dropped_with_reason=[],
+        dropped_without_reason=[dropped],
+    )
+    monkeypatch.setattr("jobsmith.apply.check_anchors", lambda *a, **kw: fake_result)
+
+    rc = _run_step45_orchestration("ml-engineer", tmp_path)
+    assert rc == 2
+    decisions = apply_state / "bullet-decisions.json"
+    assert not decisions.exists(), "must not auto-create decisions when anchors violated"
+
+
+# ---------------------------------------------------------------------------
+# 10. _render_event handles phase_failed
+# ---------------------------------------------------------------------------
+
+
+def test_render_event_phase_failed_includes_reason() -> None:
+    from jobsmith.apply import _render_event
+
+    line = _render_event(Event(type="phase_failed", name="draft", error="prose-qa-max-iterations"))
+    assert line is not None
+    assert "draft" in line
+    assert "prose-qa-max-iterations" in line
+    assert "fail" in line.lower()
+
+
+def test_render_event_phase_failed_no_reason() -> None:
+    from jobsmith.apply import _render_event
+
+    line = _render_event(Event(type="phase_failed", name="gather", error=None))
+    assert line is not None
+    assert "gather" in line
+    assert "fail" in line.lower()
