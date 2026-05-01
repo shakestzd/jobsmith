@@ -285,71 +285,10 @@ def status():
 
 
 @app.command()
-def doctor():
-    """Diagnose common setup issues. Exit non-zero if any are blocking."""
-    issues: list[tuple[str, str, bool]] = []  # (category, description, is_blocking)
-
-    config = load_config()
-    repo_root = repo_root_for()
-
-    # 1. Config presence
-    config_path = find_config(Path.cwd())
-    if config_path is None:
-        issues.append(
-            ("config", "No .apply-config.yaml found — run `jobsmith init` first", True)
-        )
-        config_dir = Path.cwd()
-    else:
-        config_dir = config_path.parent
-
-    # 2. Master YAML presence
-    for path in all_master_paths(config, config_dir):
-        if not path.exists():
-            issues.append(("master", f"Missing: {path}", True))
-
-    # 3. User identity
-    if not config.user.name:
-        issues.append(("identity", "user.name is unset — cover letters will be unsigned", False))
-    if not config.user.email:
-        issues.append(("identity", "user.email is unset", False))
-
-    # 4. Quarto presence
-    if shutil.which("quarto") is None:
-        issues.append(("tooling", "quarto not found on PATH — required for resume rendering", True))
-
-    # 5. uv presence
-    if shutil.which("uv") is None:
-        issues.append(("tooling", "uv not found on PATH — recommended for Python execution", False))
-
-    # 6. pdftotext (used by ATS checker)
-    if shutil.which("pdftotext") is None:
-        issues.append(
-            (
-                "tooling",
-                "pdftotext not found — install poppler (brew install poppler)",
-                False,
-            )
-        )
-
-    # Render results
-    if not issues:
-        console.print("[bold green]All checks passed.[/bold green]")
-        return
-
-    table = Table(show_header=True, header_style="bold")
-    table.add_column("Severity")
-    table.add_column("Category")
-    table.add_column("Issue")
-    blocking = 0
-    for category, description, is_blocking in issues:
-        if is_blocking:
-            blocking += 1
-            table.add_row("[red]BLOCK[/red]", category, description)
-        else:
-            table.add_row("[yellow]WARN[/yellow]", category, description)
-    console.print(table)
-    if blocking:
-        raise typer.Exit(code=1)
+def doctor() -> None:
+    """Run preflight environment checks."""
+    from .doctor import preflight
+    raise typer.Exit(0 if preflight() else 1)
 
 
 @app.command()
