@@ -179,3 +179,37 @@ portfolio:
     - data-analyst
 
   # When NOT in the blocking list, the portfolio check is advisory only.
+
+# ----------------------------------------------------------------------------
+# benchmarks — personal style-reference files used by quality checks
+# ----------------------------------------------------------------------------
+# These paths point to a "gold standard" application the user is proud of.
+# Specialists compare new output against these files to assess style and
+# quality consistency.  All paths are relative to the repo root.
+#
+# When a field is omitted (null), jobsmith falls back to the generic
+# "Pat Doe" example files shipped inside the plugin so quality checks can
+# always run — even on a fresh install.  The fallback is style guidance only;
+# it never copies Pat Doe content into your application.
+#
+# Populate private/benchmarks/ with your own files (symlinks work well) and
+# point the fields below at them.  Run `jobsmith doctor` to verify resolution.
+benchmarks:
+  # Path to your best previous resume (rendered PDF, for visual reference).
+  resume_pdf: null            # e.g., private/benchmarks/resume.pdf
+
+  # Path to your best previous resume source (Quarto .qmd, for structure reference).
+  resume_qmd: null            # e.g., private/benchmarks/resume.qmd
+
+  # Path to your best previous cover letter (markdown source).
+  cover_letter_md: null       # e.g., private/benchmarks/cover-letter.md
+
+  # Optional. PDF render of the cover letter above.
+  cover_letter_pdf: null      # e.g., private/benchmarks/cover-letter.pdf
+
+  # Optional. Workflow HTML snapshot (rendered index.qmd) you liked.
+  workflow_html: null         # e.g., private/benchmarks/workflow.html
+
+  # When false (default): missing user benchmarks fall back to Pat Doe silently.
+  # When true: missing user benchmarks are a hard FAIL in `jobsmith doctor`.
+  required: false

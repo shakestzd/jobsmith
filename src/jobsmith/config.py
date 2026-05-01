@@ -127,6 +127,24 @@ class PortfolioSettings(BaseModel):
     )
 
 
+class BenchmarkConfig(BaseModel):
+    """Paths to the user's personal style-reference files (benchmarks).
+
+    All paths are relative to the repo root (resolved via ``resolve()``).
+    When a field is ``None`` the helper ``resolve_benchmark_or_fallback``
+    automatically falls back to the generic Pat Doe files shipped inside the
+    plugin.  Set ``required=True`` to make missing user benchmarks a hard
+    failure instead of a silent fallback.
+    """
+
+    resume_pdf: Path | None = None
+    resume_qmd: Path | None = None
+    cover_letter_md: Path | None = None
+    cover_letter_pdf: Path | None = None
+    workflow_html: Path | None = None
+    required: bool = False
+
+
 class JobsmithConfig(BaseModel):
     """Full jobsmith configuration loaded from `.apply-config.yaml`."""
 
@@ -139,6 +157,7 @@ class JobsmithConfig(BaseModel):
     resume: ResumeSettings = Field(default_factory=ResumeSettings)
     fit_scorer: FitScorerSettings = Field(default_factory=FitScorerSettings)
     portfolio: PortfolioSettings = Field(default_factory=PortfolioSettings)
+    benchmarks: BenchmarkConfig = Field(default_factory=BenchmarkConfig)
 
     @field_validator("anchor_thresholds")
     @classmethod
@@ -181,6 +200,7 @@ def find_config(start: Path) -> Path | None:
 
 __all__ = [
     "AnchorThresholds",
+    "BenchmarkConfig",
     "CONFIG_FILENAME",
     "CoverLetterSettings",
     "FitScorerSettings",

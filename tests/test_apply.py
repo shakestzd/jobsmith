@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -303,10 +304,11 @@ def test_cli_apply_yes_flag(tmp_path: Path, monkeypatch) -> None:
 
     captured: dict = {}
 
-    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False):
+    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0):
         captured["url"] = url
         captured["skip_confirm"] = skip_confirm
         captured["force"] = force
+        captured["verbosity"] = verbosity
         return 0
 
     # Patch at the apply module level AND in cli namespace (lazy import resolves to apply module)
@@ -331,7 +333,7 @@ def test_cli_apply_force_flag(tmp_path: Path, monkeypatch) -> None:
     runner = CliRunner()
     captured: dict = {}
 
-    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False):
+    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0):
         captured["force"] = force
         return 0
 
@@ -351,7 +353,7 @@ def test_cli_apply_without_yes_default_confirm_false(tmp_path: Path, monkeypatch
 
     captured: dict = {}
 
-    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False):
+    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0):
         captured["skip_confirm"] = skip_confirm
         return 0
 
@@ -553,9 +555,9 @@ def _make_test_console() -> tuple[Console, io.StringIO]:
 
 
 def test_renderer_tool_use_line() -> None:
-    """Tool-use events render with → prefix and tool name."""
+    """Tool-use events render with → prefix and tool name at verbosity=2 (-vv)."""
     con, buf = _make_test_console()
-    rdr = ApplyRenderer(yes=True, console=con)
+    rdr = ApplyRenderer(yes=True, verbosity=2, console=con)
     rdr.render_event(Event(type="tool_use", tool_name="Bash", tool_input={"command": "echo hi"}))
     output = buf.getvalue()
     assert "Bash" in output
@@ -564,9 +566,9 @@ def test_renderer_tool_use_line() -> None:
 
 
 def test_renderer_tool_result_line() -> None:
-    """Tool-result events render with ← prefix dimmed."""
+    """Tool-result events render with ← prefix dimmed at verbosity=2 (-vv)."""
     con, buf = _make_test_console()
-    rdr = ApplyRenderer(yes=True, console=con)
+    rdr = ApplyRenderer(yes=True, verbosity=2, console=con)
     rdr.render_event(Event(type="tool_result", tool_result="hello world"))
     output = buf.getvalue()
     assert "hello world" in output
@@ -574,9 +576,9 @@ def test_renderer_tool_result_line() -> None:
 
 
 def test_renderer_tool_result_truncated() -> None:
-    """Long tool results are truncated to max 100 chars + ellipsis."""
+    """Long tool results are truncated to max 100 chars + ellipsis at verbosity=2."""
     con, buf = _make_test_console()
-    rdr = ApplyRenderer(yes=True, console=con)
+    rdr = ApplyRenderer(yes=True, verbosity=2, console=con)
     long_result = "x" * 200
     rdr.render_event(Event(type="tool_result", tool_result=long_result))
     output = buf.getvalue()
@@ -652,9 +654,9 @@ def test_renderer_non_tty_no_spinner() -> None:
 
 
 def test_renderer_text_event_non_empty() -> None:
-    """Non-empty text events are rendered as dim italic."""
+    """Non-empty text events are rendered as dim italic at verbosity >= 1."""
     con, buf = _make_test_console()
-    rdr = ApplyRenderer(yes=True, console=con)
+    rdr = ApplyRenderer(yes=True, verbosity=1, console=con)
     rdr.render_event(Event(type="text", text="Parsing job description…"))
     output = buf.getvalue()
     assert "Parsing job description" in output
@@ -747,7 +749,7 @@ def test_run_apply_non_tty_renderer(tmp_path: Path, monkeypatch) -> None:
     buf = io.StringIO()
     # force_terminal=False → non-TTY simulation
     con = Console(file=buf, force_terminal=False, no_color=True, width=120)
-    rdr = ApplyRenderer(yes=True, console=con)
+    rdr = ApplyRenderer(yes=True, verbosity=2, console=con)
 
     assert rdr._use_spinner is False
 
@@ -760,7 +762,7 @@ def test_run_apply_non_tty_renderer(tmp_path: Path, monkeypatch) -> None:
 
     assert rc == 0
     output = buf.getvalue()
-    # Tool calls should still appear
+    # Tool calls should still appear at verbosity=2
     assert "Bash" in output
 
 
@@ -1210,9 +1212,9 @@ def test_renderer_path_mid_truncation_in_format_tool_args() -> None:
 
 
 def test_renderer_tool_result_line_numbered_summary() -> None:
-    """Line-numbered file content is summarised as '← N lines (M.K KB)'."""
+    """Line-numbered file content is summarised as '← N lines (M.K KB)' at verbosity=2."""
     con, buf = _make_test_console()
-    rdr = ApplyRenderer(yes=True, console=con)
+    rdr = ApplyRenderer(yes=True, verbosity=2, console=con)
     line_content = "1 foo\n2 bar\n3 baz\n4 qux\n"
     rdr.render_event(Event(type="tool_result", tool_result=line_content))
     output = buf.getvalue()
@@ -1223,18 +1225,18 @@ def test_renderer_tool_result_line_numbered_summary() -> None:
 
 
 def test_renderer_tool_result_json_summary() -> None:
-    """JSON-shaped tool result is summarised as '← {N keys}'."""
+    """JSON-shaped tool result is summarised as '← {N keys}' at verbosity=2."""
     con, buf = _make_test_console()
-    rdr = ApplyRenderer(yes=True, console=con)
+    rdr = ApplyRenderer(yes=True, verbosity=2, console=con)
     rdr.render_event(Event(type="tool_result", tool_result='{"a":1,"b":2,"c":3}'))
     output = buf.getvalue()
     assert "{3 keys}" in output
 
 
 def test_renderer_tool_result_json_array_summary() -> None:
-    """JSON array tool result is summarised as '← [N items]'."""
+    """JSON array tool result is summarised as '← [N items]' at verbosity=2."""
     con, buf = _make_test_console()
-    rdr = ApplyRenderer(yes=True, console=con)
+    rdr = ApplyRenderer(yes=True, verbosity=2, console=con)
     rdr.render_event(Event(type="tool_result", tool_result="[1,2,3,4]"))
     output = buf.getvalue()
     assert "[4 items]" in output
@@ -1322,20 +1324,21 @@ def test_renderer_filters_toolsearch() -> None:
     assert output.strip() == ""
 
 
-def test_renderer_agent_dispatch_indent() -> None:
-    """Agent tool_use events are prefixed with '│ ' for visual nesting."""
+def test_renderer_agent_dispatch_line() -> None:
+    """Agent tool_use events are always printed as '→ Agent(name)' at all verbosity levels."""
     con, buf = _make_test_console()
-    rdr = ApplyRenderer(yes=True, console=con)
+    rdr = ApplyRenderer(yes=True, console=con)  # quiet mode
     rdr.render_event(
         Event(
             type="tool_use",
             tool_name="Agent",
-            tool_input={"prompt": "do something"},
+            tool_input={"name": "apply-jd-parser"},
             raw={},
         )
     )
     output = buf.getvalue()
-    assert "│ " in output  # │ prefix
+    assert "Agent" in output
+    assert "apply-jd-parser" in output
 
 
 def test_renderer_phase_summary_renders_known_artifacts(tmp_path: Path) -> None:
@@ -2227,3 +2230,228 @@ def test_step_45_skipped_when_gather_skipped_and_decisions_present(
     assert step45_calls == [], (
         f"step 4/5 must be skipped when bullet-decisions.json exists; got: {step45_calls!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# 20. Progressive verbosity + persistent transcript (bug-2f08dd10)
+# ---------------------------------------------------------------------------
+
+
+def _make_tool_events_with_filtered() -> list[Event]:
+    """Return events including Bash (normal), TodoWrite (filtered), and ToolSearch."""
+    return [
+        Event(type="tool_use", tool_name="Bash", tool_input={"command": "ls"}, raw={}),
+        Event(type="tool_result", tool_result="file1.txt\nfile2.txt", tool_name="id_bash", raw={}),
+        Event(
+            type="tool_use",
+            tool_name="TodoWrite",
+            tool_input={"todos": ["do something"]},
+            raw={
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "tool_use", "id": "id_todo", "name": "TodoWrite", "input": {}}
+                    ]
+                },
+            },
+        ),
+        Event(type="tool_result", tool_name="id_todo", tool_result="OK", raw={}),
+        Event(
+            type="tool_use",
+            tool_name="ToolSearch",
+            tool_input={"query": "python"},
+            raw={
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "tool_use", "id": "id_search", "name": "ToolSearch", "input": {}}
+                    ]
+                },
+            },
+        ),
+        Event(type="tool_result", tool_name="id_search", tool_result="results", raw={}),
+        Event(type="phase_complete", name="gather"),
+    ]
+
+
+def test_quiet_mode_hides_tool_calls_but_keeps_sub_agents() -> None:
+    """Quiet mode (verbosity=0): tool call lines hidden; Agent dispatch printed."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, verbosity=0, console=con)
+    rdr._current_phase = "gather"
+
+    # Agent dispatch: always shown
+    rdr.render_event(
+        Event(
+            type="tool_use",
+            tool_name="Agent",
+            tool_input={"name": "apply-jd-parser"},
+            raw={},
+        )
+    )
+    # Regular tool call: must be hidden in quiet mode
+    rdr.render_event(
+        Event(type="tool_use", tool_name="Bash", tool_input={"command": "echo hi"}, raw={})
+    )
+
+    output = buf.getvalue()
+    # Agent line is always shown
+    assert "apply-jd-parser" in output
+    # Bash tool call line must not appear
+    assert "echo hi" not in output
+    assert "command" not in output
+
+
+def test_verbose_mode_shows_filtered_tool_calls() -> None:
+    """-v (verbosity=1): non-filtered tool calls shown; TodoWrite + ToolSearch absent."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, verbosity=1, console=con)
+    rdr._current_phase = "gather"
+
+    for event in _make_tool_events_with_filtered():
+        rdr.render_event(event)
+
+    output = buf.getvalue()
+    # Regular tool call must appear
+    assert "Bash" in output
+    # Filtered tools must NOT appear
+    assert "TodoWrite" not in output
+    assert "ToolSearch" not in output
+
+
+def test_debug_mode_shows_unfiltered() -> None:
+    """-vv (verbosity=2): all tool calls shown including TodoWrite + ToolSearch (dim)."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, verbosity=2, console=con)
+    rdr._current_phase = "gather"
+
+    for event in _make_tool_events_with_filtered():
+        rdr.render_event(event)
+
+    output = buf.getvalue()
+    # All tools must appear
+    assert "Bash" in output
+    assert "TodoWrite" in output
+    assert "ToolSearch" in output
+
+
+def test_transcript_file_written_for_every_verbosity(tmp_path: Path) -> None:
+    """All verbosity levels (0, 1, 2) write the same transcript JSONL file."""
+    for verbosity in (0, 1, 2):
+        transcript_dir = tmp_path / f"v{verbosity}" / ".apply-state"
+        transcript_path = transcript_dir / "transcript.jsonl"
+
+        con, buf = _make_test_console()
+        rdr = ApplyRenderer(yes=True, verbosity=verbosity, console=con)
+        rdr.open_transcript(transcript_path, "gather")
+        rdr._current_phase = "gather"
+
+        rdr.render_event(
+            Event(type="tool_use", tool_name="Bash", tool_input={"command": "echo hi"}, raw={})
+        )
+        rdr.render_event(Event(type="tool_result", tool_result="hi", raw={}))
+        rdr.close_transcript()
+
+        assert transcript_path.exists(), f"verbosity={verbosity}: transcript not created"
+        lines = [
+            line for line in transcript_path.read_text().splitlines() if line.strip()
+        ]
+        assert len(lines) >= 2, f"verbosity={verbosity}: expected at least 2 lines, got {len(lines)}"
+        # Every line must be valid JSON
+        for line in lines:
+            parsed = json.loads(line)
+            assert isinstance(parsed, dict)
+
+
+def test_transcript_has_phase_boundary_markers(tmp_path: Path) -> None:
+    """Transcript contains one boundary marker per phase open call."""
+    transcript_path = tmp_path / ".apply-state" / "transcript.jsonl"
+
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, verbosity=0, console=con)
+
+    for phase in ("gather", "draft", "render"):
+        rdr.open_transcript(transcript_path, phase)
+        rdr._current_phase = phase
+        rdr.render_event(
+            Event(type="tool_use", tool_name="Bash", tool_input={"command": "ls"}, raw={})
+        )
+        rdr.close_transcript()
+
+    lines = [
+        json.loads(line)
+        for line in transcript_path.read_text().splitlines()
+        if line.strip()
+    ]
+    boundary_lines = [l for l in lines if "_phase_boundary" in l]
+    assert len(boundary_lines) == 3, (
+        f"expected 3 boundary markers, got {len(boundary_lines)}: {boundary_lines!r}"
+    )
+    phase_names = {l["_phase_boundary"] for l in boundary_lines}
+    assert phase_names == {"gather", "draft", "render"}
+
+
+def test_rolling_status_updates_on_tool_call_in_quiet_mode() -> None:
+    """Quiet mode: tool call events update the spinner description, not print a line."""
+    from unittest.mock import MagicMock, patch
+
+    con, buf = _make_test_console()
+    # Use a TTY-like console so spinner would activate (but yes=False, verbosity=0)
+    # We'll manually set up progress tracking by patching
+    rdr = ApplyRenderer(yes=True, verbosity=0, console=con)
+
+    # Manually install a mock Progress task to verify update_status calls
+    mock_progress = MagicMock()
+    mock_task = MagicMock()
+    mock_task.id = 0
+    mock_progress.tasks = [mock_task]
+    rdr._progress = mock_progress
+    rdr._progress_task_id = 0
+    rdr._current_phase = "gather"
+
+    rdr.render_event(
+        Event(type="tool_use", tool_name="Write", tool_input={"file_path": "/tmp/x.txt"}, raw={})
+    )
+
+    # update should have been called on the mock progress
+    mock_progress.update.assert_called_once()
+    call_kwargs = mock_progress.update.call_args
+    # The description arg should contain the tool name
+    description_arg = call_kwargs[1].get("description", "") or str(call_kwargs)
+    assert "Write" in description_arg
+
+    # The tool call must NOT appear in printed output
+    output = buf.getvalue()
+    assert "Write" not in output or "file_path" not in output
+
+
+def test_sub_agent_completion_includes_duration(tmp_path: Path) -> None:
+    """Sub-agent completion line includes duration in seconds (best-effort)."""
+    import time
+
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, verbosity=0, console=con)
+    rdr._current_phase = "gather"
+
+    # Dispatch the agent
+    rdr.render_event(
+        Event(
+            type="tool_use",
+            tool_name="Agent",
+            tool_input={"name": "apply-jd-parser"},
+            raw={},
+        )
+    )
+    # Small sleep to ensure non-zero duration
+    time.sleep(0.05)
+
+    # Trigger tool_result which signals sub-agent completion
+    rdr.render_event(
+        Event(type="tool_result", tool_result="done", raw={})
+    )
+
+    output = buf.getvalue()
+    # Completion line should contain the agent name and duration
+    assert "apply-jd-parser" in output
+    # Duration in seconds format: e.g. "(0s)" or "(1s)"
+    assert "s)" in output

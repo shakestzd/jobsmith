@@ -771,6 +771,7 @@ def run_apply(
     cwd: Path | None = None,
     skip_confirm: bool = False,
     force: bool = False,
+    verbosity: int = 0,
     renderer: ApplyRenderer | None = None,
 ) -> int:
     """Run the three-phase apply pipeline.
@@ -787,6 +788,8 @@ def run_apply(
         When True, ignore ``.url-index.json`` and any prior ``manifest.json``;
         start fresh from phase 1 even if a canonical directory already
         contains completed work.  Maps to the ``--force`` CLI flag.
+    verbosity:
+        0 = quiet (default), 1 = -v (filtered tool calls), 2 = -vv (all).
     renderer:
         Optional :class:`~jobsmith.render.ApplyRenderer` instance.  When None,
         one is constructed automatically (TTY-aware, using *skip_confirm* for
@@ -798,7 +801,7 @@ def run_apply(
         Exit code: 0 on success or clean user abort, non-zero on error.
     """
     resolved_cwd = cwd or Path.cwd()
-    rdr = renderer or ApplyRenderer(yes=skip_confirm)
+    rdr = renderer or ApplyRenderer(yes=skip_confirm, verbosity=verbosity)
 
     # Step 1: ensure bootstrap
     try:
@@ -906,6 +909,12 @@ def run_apply(
         rdr.print_header(phase_num, total_phases, phase_name)
         rdr.start_phase(phase_name)
 
+        # Step 3e2: open transcript for this phase (always, regardless of verbosity)
+        state_dir_for_transcript = _apply_state_dir(slug, resolved_cwd)
+        if state_dir_for_transcript is not None:
+            transcript_path = state_dir_for_transcript / "transcript.jsonl"
+            rdr.open_transcript(transcript_path, phase_name)
+
         # Step 3f: stream events
         phase_succeeded = False
         try:
@@ -925,6 +934,7 @@ def run_apply(
                     break
 
                 if event.type == "phase_failed":
+                    rdr.close_transcript()
                     rdr.print_error(
                         "Aborting before subsequent phases."
                     )
@@ -932,12 +942,16 @@ def run_apply(
 
                 if event.type == "error":
                     rdr.stop_phase()
+                    rdr.close_transcript()
                     rdr.print_error(f"Phase {phase_name} encountered an error. Aborting.")
                     return 2
         except Exception as exc:
             rdr.stop_phase()
+            rdr.close_transcript()
             rdr.print_error(f"Unexpected error in phase {phase_name}: {exc}")
             return 2
+
+        rdr.close_transcript()
 
         if not phase_succeeded:
             rdr.stop_phase()
