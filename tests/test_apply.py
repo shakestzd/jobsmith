@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
+from rich.console import Console
 from typer.testing import CliRunner
 
 from jobsmith.apply import (
@@ -16,7 +18,7 @@ from jobsmith.apply import (
 )
 from jobsmith.cli import app
 from jobsmith.headless import Event
-
+from jobsmith.render import ApplyRenderer
 
 # ---------------------------------------------------------------------------
 # 1. derive_slug — table-driven tests
@@ -508,3 +510,234 @@ def test_render_event_phase_failed_no_reason() -> None:
     assert line is not None
     assert "gather" in line
     assert "fail" in line.lower()
+
+
+# ---------------------------------------------------------------------------
+# 11. ApplyRenderer — rich rendering helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_test_console() -> tuple[Console, io.StringIO]:
+    """Return a (Console, buffer) pair for capturing rendered output in tests."""
+    buf = io.StringIO()
+    con = Console(
+        file=buf,
+        force_terminal=False,
+        no_color=True,
+        highlight=False,
+        markup=True,
+        width=120,
+    )
+    return con, buf
+
+
+def test_renderer_tool_use_line() -> None:
+    """Tool-use events render with → prefix and tool name."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+    rdr.render_event(Event(type="tool_use", tool_name="Bash", tool_input={"command": "echo hi"}))
+    output = buf.getvalue()
+    assert "Bash" in output
+    assert "command" in output
+    assert "echo hi" in output
+
+
+def test_renderer_tool_result_line() -> None:
+    """Tool-result events render with ← prefix dimmed."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+    rdr.render_event(Event(type="tool_result", tool_result="hello world"))
+    output = buf.getvalue()
+    assert "hello world" in output
+    assert "←" in output
+
+
+def test_renderer_tool_result_truncated() -> None:
+    """Long tool results are truncated to max 100 chars + ellipsis."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+    long_result = "x" * 200
+    rdr.render_event(Event(type="tool_result", tool_result=long_result))
+    output = buf.getvalue()
+    # Should contain ellipsis
+    assert "…" in output
+    # The raw long string should NOT appear in full
+    assert "x" * 150 not in output
+
+
+def test_renderer_phase_complete_panel() -> None:
+    """phase_complete events render a green success panel."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+    rdr.render_event(Event(type="phase_complete", name="gather"))
+    output = buf.getvalue()
+    assert "gather" in output
+    assert "complete" in output.lower()
+    assert "✓" in output
+
+
+def test_renderer_phase_failed_panel() -> None:
+    """phase_failed events render a red failure panel with reason."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+    rdr.render_event(
+        Event(type="phase_failed", name="draft", error="prose-qa-max-iterations")
+    )
+    output = buf.getvalue()
+    assert "draft" in output
+    assert "failed" in output.lower()
+    assert "prose-qa-max-iterations" in output
+    assert "✗" in output
+
+
+def test_renderer_error_event() -> None:
+    """Error events render with ✗ in red."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+    rdr.render_event(Event(type="error", error="claude exited with code 1"))
+    output = buf.getvalue()
+    assert "claude exited with code 1" in output
+    assert "✗" in output
+
+
+def test_renderer_phase_header() -> None:
+    """Phase header renders a cyan panel with phase number and name."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+    rdr.print_header(1, 3, "gather")
+    output = buf.getvalue()
+    assert "Phase 1" in output
+    assert "3" in output
+    assert "Gather" in output
+
+
+def test_renderer_yes_mode_no_spinner() -> None:
+    """In yes=True mode, _use_spinner is False; start_phase is a no-op."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+    assert rdr._use_spinner is False
+    # start_phase should not raise and should not create a Progress
+    rdr.start_phase("gather")
+    assert rdr._progress is None
+
+
+def test_renderer_non_tty_no_spinner() -> None:
+    """When console.is_terminal is False, spinner is suppressed."""
+    con, buf = _make_test_console()
+    # force_terminal=False means is_terminal returns False
+    assert con.is_terminal is False
+    rdr = ApplyRenderer(yes=False, console=con)
+    assert rdr._use_spinner is False
+
+
+def test_renderer_text_event_non_empty() -> None:
+    """Non-empty text events are rendered as dim italic."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+    rdr.render_event(Event(type="text", text="Parsing job description…"))
+    output = buf.getvalue()
+    assert "Parsing job description" in output
+
+
+def test_renderer_text_event_empty_skipped() -> None:
+    """Empty text events produce no output."""
+    con, buf = _make_test_console()
+    rdr = ApplyRenderer(yes=True, console=con)
+    rdr.render_event(Event(type="text", text=""))
+    output = buf.getvalue()
+    assert output.strip() == ""
+
+
+# ---------------------------------------------------------------------------
+# 12. run_apply with custom renderer — --yes path and non-TTY path
+# ---------------------------------------------------------------------------
+
+
+def _scaffold_plugin(tmp_path: Path) -> Path:
+    plugin_fake = tmp_path / "plugin"
+    sp_dir = plugin_fake / "system-prompts"
+    sp_dir.mkdir(parents=True)
+    for n, name in [(1, "gather"), (2, "draft"), (3, "render")]:
+        (sp_dir / f"phase-{n}-{name}.md").write_text(f"# Phase {n}\n")
+    return plugin_fake
+
+
+def test_run_apply_yes_mode_renderer_used(tmp_path: Path, monkeypatch) -> None:
+    """run_apply with skip_confirm=True uses ApplyRenderer(yes=True), no spinner."""
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text("# config\n")
+
+    plugin_fake = _scaffold_plugin(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    call_count = [0]
+    phase_sequence = ["gather", "draft", "render"]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        idx = call_count[0]
+        call_count[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: True)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+
+    buf = io.StringIO()
+    con = Console(file=buf, force_terminal=False, no_color=True, width=120)
+    rdr = ApplyRenderer(yes=True, console=con)
+
+    rc = run_apply(
+        "https://example.com/jobs/ml-engineer",
+        cwd=tmp_path,
+        skip_confirm=True,
+        renderer=rdr,
+    )
+
+    assert rc == 0
+    output = buf.getvalue()
+    # Phase headers should appear
+    assert "Phase 1" in output
+    assert "Phase 2" in output
+    assert "Phase 3" in output
+    # phase_complete panels should appear
+    assert "complete" in output.lower()
+
+
+def test_run_apply_non_tty_renderer(tmp_path: Path, monkeypatch) -> None:
+    """run_apply with a non-TTY console renders events without spinner."""
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text("# config\n")
+
+    plugin_fake = _scaffold_plugin(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    call_count = [0]
+    phase_sequence = ["gather", "draft", "render"]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        idx = call_count[0]
+        call_count[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: True)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+
+    buf = io.StringIO()
+    # force_terminal=False → non-TTY simulation
+    con = Console(file=buf, force_terminal=False, no_color=True, width=120)
+    rdr = ApplyRenderer(yes=True, console=con)
+
+    assert rdr._use_spinner is False
+
+    rc = run_apply(
+        "https://example.com/jobs/engineer",
+        cwd=tmp_path,
+        skip_confirm=True,
+        renderer=rdr,
+    )
+
+    assert rc == 0
+    output = buf.getvalue()
+    # Tool calls should still appear
+    assert "Bash" in output

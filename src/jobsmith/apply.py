@@ -12,18 +12,17 @@ from __future__ import annotations
 
 import hashlib
 import re
-import sys
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urlparse
 
 import click
 
-from . import plugin_dir as get_plugin_dir
 from . import headless
+from . import plugin_dir as get_plugin_dir
 from .config import CONFIG_FILENAME, find_config, load_config
 from .guard import check_anchors
 from .paths import resolve
+from .render import ApplyRenderer
 
 # ---------------------------------------------------------------------------
 # Phase definitions
@@ -129,7 +128,7 @@ def _run_init(target: Path) -> None:
     Avoids importing the Typer-decorated command directly (which raises
     SystemExit) — instead calls the underlying helpers.
     """
-    from .cli import CONFIG_TEMPLATE, PROFILE_TEMPLATE, GITIGNORE_ADDITIONS, EXAMPLES_DIR
+    from .cli import CONFIG_TEMPLATE, EXAMPLES_DIR, GITIGNORE_ADDITIONS, PROFILE_TEMPLATE
 
     target.mkdir(parents=True, exist_ok=True)
 
@@ -234,7 +233,7 @@ def build_phase_prompt(phase: str, slug: str, url: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _render_event(event: headless.Event) -> Optional[str]:
+def _render_event(event: headless.Event) -> str | None:
     """Format a single event as a one-line summary for stderr output.
 
     Returns None for events that should be skipped (e.g. verbose text).
@@ -366,7 +365,13 @@ def _run_step45_orchestration(slug: str, cwd: Path) -> int:
 # ---------------------------------------------------------------------------
 
 
-def run_apply(url: str, *, cwd: Optional[Path] = None, skip_confirm: bool = False) -> int:
+def run_apply(
+    url: str,
+    *,
+    cwd: Path | None = None,
+    skip_confirm: bool = False,
+    renderer: ApplyRenderer | None = None,
+) -> int:
     """Run the three-phase apply pipeline.
 
     Parameters
@@ -377,6 +382,10 @@ def run_apply(url: str, *, cwd: Optional[Path] = None, skip_confirm: bool = Fals
         Working directory (defaults to current directory).
     skip_confirm:
         When True, phase-gate confirmations are bypassed (--yes flag).
+    renderer:
+        Optional :class:`~jobsmith.render.ApplyRenderer` instance.  When None,
+        one is constructed automatically (TTY-aware, using *skip_confirm* for
+        the ``yes`` flag).
 
     Returns
     -------
@@ -384,12 +393,13 @@ def run_apply(url: str, *, cwd: Optional[Path] = None, skip_confirm: bool = Fals
         Exit code: 0 on success or clean user abort, non-zero on error.
     """
     resolved_cwd = cwd or Path.cwd()
+    rdr = renderer or ApplyRenderer(yes=skip_confirm)
 
     # Step 1: ensure bootstrap
     try:
         ensure_bootstrap(resolved_cwd)
     except Exception as exc:
-        click.echo(f"Bootstrap failed: {exc}", err=True)
+        rdr.print_error(f"Bootstrap failed: {exc}")
         return 1
 
     # Step 2: derive slug and session
@@ -397,7 +407,9 @@ def run_apply(url: str, *, cwd: Optional[Path] = None, skip_confirm: bool = Fals
     session_id = headless.deterministic_session_id(slug)
     plugin_directory = get_plugin_dir()
 
-    click.echo(f"jobsmith apply: slug={slug!r}  session={session_id}", err=True)
+    rdr.print_info(f"jobsmith apply: slug={slug!r}  session={session_id}")
+
+    total_phases = len(_PHASES)
 
     for phase_name, phase_num in _PHASES:
         # Step 3a: determine resume flag
@@ -406,15 +418,17 @@ def run_apply(url: str, *, cwd: Optional[Path] = None, skip_confirm: bool = Fals
         # Step 3b: resolve system prompt path
         system_prompt = plugin_directory / "system-prompts" / f"phase-{phase_num}-{phase_name}.md"
         if not system_prompt.exists():
-            click.echo(f"ERROR: system prompt not found: {system_prompt}", err=True)
+            rdr.print_error(f"ERROR: system prompt not found: {system_prompt}")
             return 1
 
         # Step 3c: build prompt text
         prompt_text = build_phase_prompt(phase_name, slug, url)
 
-        click.echo(f"\n--- Phase {phase_num} ({phase_name}) ---", err=True)
+        # Step 3d: render phase header and start spinner
+        rdr.print_header(phase_num, total_phases, phase_name)
+        rdr.start_phase(phase_name)
 
-        # Step 3d: stream events
+        # Step 3e: stream events
         phase_succeeded = False
         try:
             for event in headless.run_phase(
@@ -426,38 +440,36 @@ def run_apply(url: str, *, cwd: Optional[Path] = None, skip_confirm: bool = Fals
                 resume=resume,
                 cwd=resolved_cwd,
             ):
-                line = _render_event(event)
-                if line:
-                    click.echo(line, err=True)
+                rdr.render_event(event)
 
                 if event.type == "phase_complete":
                     phase_succeeded = True
                     break
 
                 if event.type == "phase_failed":
-                    click.echo(
-                        f"Phase {event.name} failed: {event.error or '(no reason given)'}. "
-                        "Aborting before subsequent phases.",
-                        err=True,
+                    rdr.print_error(
+                        "Aborting before subsequent phases."
                     )
                     return 3
 
                 if event.type == "error":
-                    click.echo(f"Phase {phase_name} encountered an error. Aborting.", err=True)
+                    rdr.stop_phase()
+                    rdr.print_error(f"Phase {phase_name} encountered an error. Aborting.")
                     return 2
         except Exception as exc:
-            click.echo(f"Unexpected error in phase {phase_name}: {exc}", err=True)
+            rdr.stop_phase()
+            rdr.print_error(f"Unexpected error in phase {phase_name}: {exc}")
             return 2
 
         if not phase_succeeded:
-            click.echo(
+            rdr.stop_phase()
+            rdr.print_error(
                 f"Phase {phase_name} did not emit a phase_complete signal. "
-                "Check output above for errors.",
-                err=True,
+                "Check output above for errors."
             )
             return 2
 
-        # Step 3e: between-phase orchestration. After gather (phase 1) we
+        # Step 3f: between-phase orchestration. After gather (phase 1) we
         # run the anchor guard + relevance inquiry to produce the
         # bullet-decisions.json that phase 2 (draft) requires as input.
         if phase_name == "gather":
@@ -465,11 +477,12 @@ def run_apply(url: str, *, cwd: Optional[Path] = None, skip_confirm: bool = Fals
             if rc != 0:
                 return rc
 
-        # Step 3f: confirm gate (not after the last phase)
+        # Step 3g: confirm gate (not after the last phase)
         if not skip_confirm and phase_name != "render":
+            rdr.pause_before_confirm()
             if not click.confirm(f"Phase {phase_num} ({phase_name}) complete. Proceed to next phase?"):
-                click.echo("Stopped at user request. Partial work saved.", err=True)
+                rdr.print_info("Stopped at user request. Partial work saved.")
                 return 0
 
-    click.echo("\njobsmith apply complete.", err=True)
+    rdr.print_complete()
     return 0
