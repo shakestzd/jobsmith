@@ -77,6 +77,24 @@ jobsmith init  # writes assets/content/{work,skill,education,author}.yml stubs
 claude /apply https://example.com/jobs/12345
 ```
 
+## CLI — feedback loop
+
+After you hand-edit the agent's draft, capture those edits as structured lessons:
+
+```bash
+jobsmith feedback record <slug>          # diff prose-draft.md + cover-letter-final.md
+                                         # against agent snapshots; write JSON records
+jobsmith feedback list                   # Rich table of all records
+jobsmith feedback list --kind prose-bullet --since 30d
+jobsmith feedback prune --older-than 90d # rotate old records
+jobsmith feedback export --out feedback-export.yaml  # sanitized YAML — safe to sync
+```
+
+Records live in `private/feedback/` (gitignored by default). The `export`
+subcommand strips slug and company names so the output is safe to commit to a
+private dotfiles repo. See [docs/render-benchmark.md](docs/render-benchmark.md)
+for the full record schema and read-back integration roadmap.
+
 ## Key principles
 
 - **Evidence > assumptions.** Every metric on the rendered resume must trace back to your master YAML. Halt the pipeline rather than fabricate.
