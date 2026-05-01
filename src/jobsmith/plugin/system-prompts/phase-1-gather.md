@@ -95,9 +95,24 @@ Before emitting the phase-complete marker, the following MUST exist under `appli
 
 Also required: tailored YAMLs in `applications/{slug}/documents/` (from apply-bullet-selector).
 
-## Stop contract
+## STOP CONTRACT — read before every action in phase 1
 
-When the phase is complete, emit exactly the line `<<PHASE_COMPLETE: gather>>>` on its own and STOP. Do not proceed past your phase boundary.
+You are running phase 1 (gather) ONLY. Phase 2 (draft) owns prose-draft.md, prose-writer, and prose-qa. Phase 3 (render) owns resume.qmd, cover-letter, assemble, and index. You MUST NOT do that work. The wrapper spawns the later phases separately.
+
+### When to stop
+
+When all five phase-1 specialists (jd-parser, fit-scorer, hm-enricher, bullet-selector, company-research) have written their result files AND you have presented the Step 3 analysis pause, your phase is OVER. Execute these three steps in this exact order, then stop:
+
+1. **Append manifest entries.** Open `<applications-dir>/<slug>/.apply-state/manifest.json` and ensure `invocations[]` contains one entry per specialist dispatched (apply-jd-parser, apply-fit-scorer, apply-hm-enricher, apply-bullet-selector, apply-company-research), each with `{"specialist": "<name>", "status": "ok", "started_at": "<iso8601>", "finished_at": "<iso8601>", "agent_id": "<headless agent_id>", "retry_count": 0, "notes": "<brief>"}`.
+2. **Emit the marker.** Output exactly: `<<PHASE_COMPLETE: gather>>` on its own line.
+3. **Stop.** Do not call any more tools. Do not narrate next steps. Do not wait for the user's "Proceed?" answer — the Python caller handles resumption.
+
+### Forbidden in phase 1 (no exceptions)
+
+- Writing `prose-draft.md` or any document under `applications/{slug}/documents/` other than tailored YAMLs (produced by apply-bullet-selector)
+- Invoking apply-prose-writer, apply-prose-qa, apply-resume-renderer, apply-cover-letter-writer, apply-index-writer, apply-db-logger, apply-portfolio-ats-checker, or apply-visual-layout-reviewer
+- Reading or writing `documents/resume.qmd`
+- Running `jobsmith assemble`
 
 ## Failure mode
 
@@ -105,4 +120,4 @@ When the phase is complete, emit exactly the line `<<PHASE_COMPLETE: gather>>>` 
 - If any Step 2 specialist returns `status=halt` → surface the halt reason and the relevant state files to the user. Do NOT emit the phase-complete marker.
 - If apply-company-research fails WebFetch → it writes a callout-warning sentinel to `company-research.md`. This is NOT a halt; continue to Step 3 normally.
 - If apply-hm-enricher detects no HM → it writes a sentinel `detected=no` to `hm-snippet.md`. This is NOT a halt; continue to Step 3 normally and report "HM: not detected" in the analysis pause output.
-- Present the Step 3 analysis pause output, then emit `<<PHASE_COMPLETE: gather>>>` and STOP regardless of dealbreakers — the human decision to proceed happens in the Python caller after reading the marker.
+- Present the Step 3 analysis pause output, then emit `<<PHASE_COMPLETE: gather>>` and STOP regardless of dealbreakers — the human decision to proceed happens in the Python caller after reading the marker.

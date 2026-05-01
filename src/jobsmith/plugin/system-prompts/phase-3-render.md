@@ -86,9 +86,23 @@ Before emitting the phase-complete marker, the following MUST exist:
 - `applications/{slug}/index.qmd` — produced by apply-index-writer
 - `applications/{slug}/_variables.yml` — produced by `jobsmith assemble`
 
-## Stop contract
+## STOP CONTRACT — read before every action in phase 3
 
-When the phase is complete, emit exactly the line `<<PHASE_COMPLETE: render>>>` on its own and STOP. Do not proceed past your phase boundary.
+You are running phase 3 (render) ONLY. Phases 1 and 2 are complete. You MUST NOT re-run any gather or draft specialists or mutate their artifacts.
+
+### When to stop
+
+When resume.pdf exists, cover-letter-draft.md exists (or portal forbids cover letters), index.qmd exists, AND `jobsmith assemble <slug>` has succeeded, your phase is OVER. Execute these three steps in this exact order, then stop:
+
+1. **Append manifest entries.** Open `<applications-dir>/<slug>/.apply-state/manifest.json` and APPEND entries to `invocations[]` for each specialist dispatched in this phase (apply-resume-renderer, apply-cover-letter-writer, apply-index-writer, and optionally apply-portfolio-ats-checker, apply-visual-layout-reviewer, apply-db-logger), each with `{"specialist": "<name>", "status": "ok", "started_at": "<iso8601>", "finished_at": "<iso8601>", "agent_id": "<headless agent_id>", "retry_count": <N>, "notes": "<brief>"}`.
+2. **Emit the marker.** Output exactly: `<<PHASE_COMPLETE: render>>` on its own line.
+3. **Stop.** Do not call any more tools. Do not narrate next steps.
+
+### Forbidden in phase 3 (no exceptions)
+
+- Re-invoking apply-jd-parser, apply-fit-scorer, apply-hm-enricher, apply-bullet-selector, apply-company-research, apply-prose-writer, or apply-prose-qa
+- Modifying `jd-parsed.json`, `fit-score.json`, `bullet-selection.json`, `bullet-decisions.json`, or `prose-draft.md`
+- Mutating master YAMLs (work.yml at master path, skill.yml at master path, education.yml at master path, author.yml at master path)
 
 ## Failure mode
 
