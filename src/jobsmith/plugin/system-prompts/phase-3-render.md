@@ -53,6 +53,21 @@ specialist needs. Read `manifest.json` once for `role_type`. Pull benchmark
 key is absent from the Paths block (no benchmark configured / no feedback
 yet), omit it from `inputs` rather than passing an empty string.
 
+**`spec.json` is a single shared file.** A specialist reads it as the very
+first action; if a second dispatch overwrites the file before the first
+specialist has read it, that specialist gets the wrong inputs. Therefore
+**you MUST serialize all dispatches in this phase**:
+
+1. Write `spec.json` for specialist A.
+2. Dispatch A; **wait for A's result file** (`<specialist>-result.json`)
+   to appear in `.apply-state/` before continuing.
+3. Then write `spec.json` for specialist B and dispatch B.
+
+This applies to Step 7 and Step 8 too — **do not run them in parallel**,
+even though their work is otherwise independent. The serialization cost
+is small relative to specialist runtime, and it eliminates the
+spec.json race condition entirely.
+
 Per-specialist `inputs` to include:
 
 - `apply-cover-letter-writer`: `benchmark_cover_letter_md` (Paths:
@@ -77,9 +92,11 @@ Per-specialist `inputs` to include:
 
 Update `manifest.json.invocations` with start/finish/agent_id for each dispatch.
 
-### Step 8 — Cover letter (parallel branch)
+### Step 8 — Cover letter (sequential after Step 7)
 
-Step 8 can begin in parallel with Step 7 once Step 5 (handled between phases) has converged.
+Run **after** Step 7's reviewer loop converges, not in parallel — the
+shared `spec.json` cannot service two specialists at once (see "Spec.json
+wiring" above).
 
 Write `spec.json` for `apply-cover-letter-writer` with `benchmark_cover_letter_md`, `feedback_dir`, and `role_type` populated from the Paths block + manifest (omit absent keys), then dispatch. Skip only if `jd-parsed.json` says portal explicitly forbids cover letters. The fact-check gate is the writer's responsibility (blocking).
 

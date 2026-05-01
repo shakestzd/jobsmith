@@ -133,7 +133,14 @@ def _write_record(
     after: str,
     context: dict | None = None,
 ) -> dict:
-    """Construct a feedback record dict, write it as JSON, and return it."""
+    """Construct a feedback record dict, write it as JSON, and return it.
+
+    Filename layout is ``<timestamp>__<slug>.json`` (timestamp-leading so
+    lexicographic sort matches chronological order). The specialist
+    read-back prompts in apply-prose-writer / apply-cover-letter-writer
+    rely on this — sorting filenames descending yields most-recent first
+    regardless of slug.
+    """
     ts = datetime.now(timezone.utc).isoformat()
     record: dict = {
         "slug": slug,
@@ -146,7 +153,10 @@ def _write_record(
     }
     feedback_dir.mkdir(parents=True, exist_ok=True)
     safe_ts = ts.replace(":", "-").replace("+", "p")
-    path = feedback_dir / f"{slug}-{safe_ts}.json"
+    # Timestamp leads so lexicographic sort = chronological sort. ISO 8601
+    # is constant-width up to the offset, which makes "sort by filename" a
+    # safe primitive for the readback specialists.
+    path = feedback_dir / f"{safe_ts}__{slug}.json"
     path.write_text(json.dumps(record, indent=2))
     return record
 

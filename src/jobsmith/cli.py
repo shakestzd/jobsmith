@@ -154,11 +154,15 @@ FEEDBACK_README = dedent(
     jobsmith feedback prune --older-than 90d
     ```
 
-    ## Notes
+    ## Privacy
 
-    - Records contain no secrets — company names are stored in context{}
-      and stripped during export.
-    - This directory is gitignored so your personal data stays private.
+    - Raw records may contain private application text — the `before`/`after`
+      fields store the actual prose you edited, which can include company
+      names, metrics, and other sensitive details. Treat the directory as
+      private. Only `jobsmith feedback export` is sanitized: it groups
+      lessons by kind and drops slug + per-app metadata.
+    - This directory is gitignored by default so personal data stays local;
+      sync the export YAML, never the raw JSON.
     """
 )
 

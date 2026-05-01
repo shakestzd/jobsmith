@@ -41,7 +41,7 @@ def _write_feedback_record(
     }
     feedback_dir.mkdir(parents=True, exist_ok=True)
     safe_ts = ts.replace(":", "-").replace("+", "p")
-    path = feedback_dir / f"{slug}-{safe_ts}.json"
+    path = feedback_dir / f"{safe_ts}__{slug}.json"
     path.write_text(json.dumps(record))
 
     if age_days is not None:
@@ -134,7 +134,7 @@ def test_record_writes_json_to_feedback_dir(tmp_path: Path) -> None:
     records = feedback_record(slug, app_dir=app_dir, feedback_dir=feedback_dir)
     assert len(records) == 1
 
-    json_files = list(feedback_dir.glob(f"{slug}-*.json"))
+    json_files = list(feedback_dir.glob(f"*__{slug}.json"))
     assert len(json_files) == 1
 
     data = json.loads(json_files[0].read_text())
@@ -334,3 +334,45 @@ def test_significance_detects_substitution_with_similar_length(tmp_path: Path) -
     records = feedback_record(slug, app_dir=app_dir, feedback_dir=feedback_dir)
     assert len(records) == 1
     assert "investigated" in records[0]["after"]
+
+
+# ---------------------------------------------------------------------------
+# test_filename_layout_sorts_chronologically_across_slugs
+# ---------------------------------------------------------------------------
+
+
+def test_filename_layout_sorts_chronologically_across_slugs(tmp_path: Path) -> None:
+    """Filenames must lead with timestamp so lexicographic sort = chronological.
+
+    The specialist read-back prompts in apply-prose-writer + apply-cover-letter-writer
+    select the most-recent N records by filename. If filenames led with slug,
+    a recent record from "acme-corp" would sort before an older record from
+    "zeta-inc" — readback would skip recent edits from later-alphabetical slugs.
+    """
+    feedback_dir = tmp_path / "private" / "feedback"
+
+    # Three records: chronological order is (zeta-old, acme-mid, mid-new),
+    # but if we sorted by slug we'd get (acme-mid, mid-new, zeta-old).
+    paths = [
+        _write_feedback_record(
+            feedback_dir, "zeta-inc", "prose-bullet", "old", "x",
+            timestamp="2025-01-01T00:00:00+00:00",
+        ),
+        _write_feedback_record(
+            feedback_dir, "acme-corp", "prose-bullet", "old", "y",
+            timestamp="2025-06-15T00:00:00+00:00",
+        ),
+        _write_feedback_record(
+            feedback_dir, "midas-bank", "prose-bullet", "old", "z",
+            timestamp="2025-12-31T00:00:00+00:00",
+        ),
+    ]
+
+    sorted_names = sorted(p.name for p in paths)
+    # Lexicographic sort by filename must yield chronological order.
+    assert sorted_names[0].startswith("2025-01-01"), (
+        f"oldest record should sort first, got {sorted_names[0]}"
+    )
+    assert sorted_names[-1].startswith("2025-12-31"), (
+        f"newest record should sort last, got {sorted_names[-1]}"
+    )
