@@ -744,6 +744,82 @@ def test_build_paths_benchmark_fallback_when_not_configured(tmp_path: Path) -> N
     assert paths["benchmark.resume_pdf"] == str(pat_doe_dir / "resume.pdf")
 
 
+# 13. _build_paths injects feedback_dir + role_type into phase paths dict
+# ---------------------------------------------------------------------------
+
+
+def test_build_paths_injects_feedback_dir_when_present(tmp_path: Path) -> None:
+    """_build_paths includes feedback.dir key when private/feedback/ exists."""
+    import yaml
+
+    from jobsmith.apply import _build_paths
+
+    # Create the feedback directory
+    feedback_dir = tmp_path / "private" / "feedback"
+    feedback_dir.mkdir(parents=True)
+    # Place a placeholder record so the directory is non-empty
+    (feedback_dir / "2025-01-01T000000-prose-bullet.json").write_text(
+        '{"kind": "prose-bullet", "lesson": "Don\'t start with Built"}'
+    )
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+
+    plugin_fake = tmp_path / "plugin"
+    plugin_fake.mkdir()
+
+    paths = _build_paths("test-slug", tmp_path, plugin_fake)
+
+    assert "feedback.dir" in paths, "feedback.dir must be in paths when private/feedback/ exists"
+    assert paths["feedback.dir"] == str(feedback_dir.resolve())
+
+
+def test_build_paths_feedback_dir_null_when_missing(tmp_path: Path) -> None:
+    """_build_paths sets feedback.dir to null/None (key absent) when private/feedback/ does not exist."""
+    import yaml
+
+    from jobsmith.apply import _build_paths
+
+    # Do NOT create private/feedback/
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+
+    plugin_fake = tmp_path / "plugin"
+    plugin_fake.mkdir()
+
+    paths = _build_paths("test-slug", tmp_path, plugin_fake)
+
+    # When feedback dir is absent, the key must either be absent or map to null/None.
+    # Our implementation omits the key entirely when the path does not exist.
+    assert "feedback.dir" not in paths or paths.get("feedback.dir") is None, (
+        "feedback.dir must be absent or None when private/feedback/ does not exist"
+    )
+
+
 def test_renderer_text_event_non_empty() -> None:
     """Non-empty text events are rendered as dim italic at verbosity >= 1."""
     con, buf = _make_test_console()
