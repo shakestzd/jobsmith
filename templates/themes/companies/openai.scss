@@ -3,10 +3,14 @@
 // Brand: OpenAI green #10A37F, dark #202123
 // =============================================================================
 
+/*-- scss:defaults --*/
+
 $jobsmith-primary:      #10A37F;   // OpenAI green
 $jobsmith-primary-bg:   #E8F5F1;   // pale green tint
 $jobsmith-accent-color: #202123;   // OpenAI dark
 $jobsmith-accent-bg:    #F7F7F8;   // near-white dark tint
+
+/*-- scss:rules --*/
 
 // --- Heading accent border ---
 h1, h2 {

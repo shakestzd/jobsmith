@@ -3,10 +3,14 @@
 // Brand: Apple silver #A1A1A6, blue #007AFF, near-black #1D1D1F
 // =============================================================================
 
+/*-- scss:defaults --*/
+
 $jobsmith-primary:      #1D1D1F;   // Apple near-black
 $jobsmith-primary-bg:   #F5F5F7;   // Apple system gray bg
 $jobsmith-accent-color: #007AFF;   // Apple blue (system)
 $jobsmith-accent-bg:    #E5F0FF;   // pale blue tint
+
+/*-- scss:rules --*/
 
 // --- Heading accent border ---
 h1, h2 {

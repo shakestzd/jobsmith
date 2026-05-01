@@ -3,10 +3,14 @@
 // Brand: Stripe purple #635BFF, indigo #0A2540
 // =============================================================================
 
+/*-- scss:defaults --*/
+
 $jobsmith-primary:      #635BFF;   // Stripe purple
 $jobsmith-primary-bg:   #EFEDFF;   // pale purple tint
 $jobsmith-accent-color: #0A2540;   // Stripe indigo
 $jobsmith-accent-bg:    #F6F9FC;   // near-white indigo tint
+
+/*-- scss:rules --*/
 
 // --- Heading accent border ---
 h1, h2 {
