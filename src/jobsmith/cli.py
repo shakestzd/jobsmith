@@ -139,8 +139,15 @@ FEEDBACK_README = dedent(
     """\
     # private/feedback/ — learning feedback from user edits
 
-    Jobsmith automatically writes JSON records here when you edit
-    prose-draft.md or cover-letter-final.md after a /apply run.
+    Jobsmith writes JSON records here when you run `feedback record`
+    after hand-editing the agent's drafts. The diff is taken between
+    the live files and the immutable `.agent.md` snapshots that the
+    apply pipeline captures at phase completion:
+
+      - `.apply-state/prose-draft.md` (live, user-edited)
+        vs `.apply-state/prose-draft.agent.md` (snapshot)
+      - `<app>/cover-letter-draft.md` (live, user-edited at app root)
+        vs `.apply-state/cover-letter-draft.agent.md` (snapshot)
 
     Each record captures what the agent wrote vs. what you changed, so
     future runs can learn from your edits.
@@ -150,19 +157,24 @@ FEEDBACK_README = dedent(
     ```
     jobsmith feedback record <slug>   # diff latest user edits
     jobsmith feedback list            # view records
-    jobsmith feedback export          # YAML summary (safe to share)
+    jobsmith feedback export          # YAML summary — review before sharing
     jobsmith feedback prune --older-than 90d
     ```
 
     ## Privacy
 
-    - Raw records may contain private application text — the `before`/`after`
+    - Raw records contain private application text — the `before`/`after`
       fields store the actual prose you edited, which can include company
       names, metrics, and other sensitive details. Treat the directory as
-      private. Only `jobsmith feedback export` is sanitized: it groups
-      lessons by kind and drops slug + per-app metadata.
+      private.
+    - `jobsmith feedback export` drops slug + per-app metadata (company /
+      role context) but copies `lesson` strings verbatim. If you author
+      lessons that name a specific employer, claim, or person, that text
+      appears in the export. **Review the YAML before syncing it across
+      machines or pasting it anywhere shared.**
     - This directory is gitignored by default so personal data stays local;
-      sync the export YAML, never the raw JSON.
+      prefer the export over the raw JSON, and double-check what's in the
+      export before sharing.
     """
 )
 

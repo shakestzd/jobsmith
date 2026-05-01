@@ -164,13 +164,22 @@ runs can account for your preferences.
 
 Specifically:
 
-- If you edit `private/applications/{slug}/documents/prose-draft.md` after the
-  pipeline writes it, the diff is recorded as `prose-bullet` records.
-- If you edit `private/applications/{slug}/documents/cover-letter-final.md`
-  after the pipeline writes it, the diff is recorded as
-  `cover-letter-paragraph` records.
+- The apply pipeline writes prose to
+  `private/applications/{slug}/.apply-state/prose-draft.md` and the
+  cover letter to `private/applications/{slug}/cover-letter-draft.md`
+  (at the application root, where `apply-cover-letter-writer` puts it).
+  At the end of each phase, jobsmith snapshots the agent's version into
+  `.apply-state/<name>.agent.md` (read-only).
+- Edit the **live** files in place. `feedback record` diffs:
+  - `.apply-state/prose-draft.md` (live, user-edited) vs
+    `.apply-state/prose-draft.agent.md` (immutable snapshot) → `prose-bullet`
+    records.
+  - `cover-letter-draft.md` (live, user-edited at app root) vs
+    `.apply-state/cover-letter-draft.agent.md` (immutable snapshot) →
+    `cover-letter-paragraph` records.
 
-The records are stored in `private/feedback/` as timestamped JSON files.
+The records are stored in `private/feedback/` as `<timestamp>__<slug>.json`
+files (timestamp leading so filename order = chronological order).
 
 ### Running the feedback subcommand
 
@@ -187,14 +196,17 @@ jobsmith feedback record acme-senior-de-2024
 
 The command looks for:
 
-- `prose-draft.md` (user version) vs `prose-draft-agent.md` (agent snapshot)
-- `cover-letter-final.md` (user version) vs `cover-letter-agent.md` (agent snapshot)
+- `.apply-state/prose-draft.md` (live, user-edited) vs
+  `.apply-state/prose-draft.agent.md` (snapshot taken after phase 2)
+- `cover-letter-draft.md` at the application root (live, user-edited) vs
+  `.apply-state/cover-letter-draft.agent.md` (snapshot taken after phase 3)
 
-A change is "significant" if it alters more than 5 characters and is not
-whitespace-only. Insignificant diffs (trimming trailing spaces, minor
-reformatting) are silently skipped.
+A change is "significant" if more than 5 characters differ (counted via
+`difflib.SequenceMatcher` so similar-length substitutions still register)
+and the diff is not whitespace-only.
 
-Records are written to `private/feedback/<slug>-<iso-timestamp>.json`.
+Records are written to `private/feedback/<iso-timestamp>__<slug>.json`
+(timestamp leads so filename sort = chronological sort).
 
 #### `jobsmith feedback list`
 

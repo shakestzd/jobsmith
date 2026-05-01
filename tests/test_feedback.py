@@ -376,3 +376,52 @@ def test_filename_layout_sorts_chronologically_across_slugs(tmp_path: Path) -> N
     assert sorted_names[-1].startswith("2025-12-31"), (
         f"newest record should sort last, got {sorted_names[-1]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# test_diff_aligns_around_inserted_bullet
+# ---------------------------------------------------------------------------
+
+
+def test_diff_aligns_around_inserted_bullet(tmp_path: Path) -> None:
+    """Inserting one bullet must NOT make every following bullet look edited.
+
+    Positional matching (the pre-fix behaviour) would cascade: insert at index
+    0 makes index 1 the agent's old index 0, etc., so every line registers as
+    a "replace" diff. SequenceMatcher alignment correctly identifies the
+    insertion as a single new item.
+    """
+    from jobsmith.feedback import record as feedback_record
+
+    slug = "test-insert"
+    app_dir = tmp_path / "private" / "applications" / slug
+    feedback_dir = tmp_path / "private" / "feedback"
+    state_dir = app_dir / ".apply-state"
+    state_dir.mkdir(parents=True)
+
+    agent = (
+        "- Built scalable data pipelines\n"
+        "- Led team of 3 engineers\n"
+        "- Reduced costs by 30%\n"
+    )
+    # User added a fresh first bullet; the rest are unchanged.
+    user = (
+        "- Investigated user attrition across cohorts\n"
+        "- Built scalable data pipelines\n"
+        "- Led team of 3 engineers\n"
+        "- Reduced costs by 30%\n"
+    )
+
+    (state_dir / "prose-draft.agent.md").write_text(agent)
+    (state_dir / "prose-draft.md").write_text(user)
+
+    records = feedback_record(slug, app_dir=app_dir, feedback_dir=feedback_dir)
+
+    # Exactly ONE record — the inserted bullet — not three (one per shifted line).
+    assert len(records) == 1, (
+        f"expected 1 insert record, got {len(records)}: "
+        f"{[(r['before'], r['after']) for r in records]}"
+    )
+    r = records[0]
+    assert r["before"] == ""
+    assert "Investigated" in r["after"]

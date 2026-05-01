@@ -82,17 +82,19 @@ claude /apply https://example.com/jobs/12345
 After you hand-edit the agent's draft, capture those edits as structured lessons:
 
 ```bash
-jobsmith feedback record <slug>          # diff prose-draft.md + cover-letter-final.md
-                                         # against agent snapshots; write JSON records
+jobsmith feedback record <slug>          # diff live drafts vs .agent.md snapshots:
+                                         #   .apply-state/prose-draft.md vs prose-draft.agent.md
+                                         #   <app>/cover-letter-draft.md vs .apply-state/cover-letter-draft.agent.md
 jobsmith feedback list                   # Rich table of all records
 jobsmith feedback list --kind prose-bullet --since 30d
 jobsmith feedback prune --older-than 90d # rotate old records
-jobsmith feedback export --out feedback-export.yaml  # sanitized YAML — safe to sync
+jobsmith feedback export --out feedback-export.yaml  # YAML summary — review before sharing
 ```
 
-Records live in `private/feedback/` (gitignored by default). The `export`
-subcommand strips slug and company names so the output is safe to commit to a
-private dotfiles repo. See [docs/render-benchmark.md](docs/render-benchmark.md)
+Records live in `private/feedback/` (gitignored by default) as
+`<iso-timestamp>__<slug>.json`. The `export` subcommand drops slug + per-app
+context but copies user-authored `lesson` strings verbatim; review the YAML
+before syncing it. See [docs/render-benchmark.md](docs/render-benchmark.md)
 for the full record schema and read-back integration roadmap.
 
 ## Key principles

@@ -81,48 +81,79 @@ def _load_role_type(state_dir: Path) -> str | None:
     return None
 
 
+def _aligned_edits(agent_items: list[str], user_items: list[str]) -> list[tuple[str, str]]:
+    """Return (before, after) pairs by aligning items via SequenceMatcher.
+
+    Positional matching produces false positives when the user inserts or
+    deletes one item — every following item shifts and looks "edited".
+    SequenceMatcher.get_opcodes() aligns unchanged items first, then emits
+    only the genuine replace/insert/delete operations:
+
+    - ``replace``: pair each old item with its new counterpart in order;
+      excess items on the longer side become inserts/deletes.
+    - ``delete``: ``(item, "")`` — a removed item.
+    - ``insert``: ``("", item)`` — a newly added item.
+
+    Items are considered equal when their stripped text matches, so
+    whitespace-only differences don't break alignment.
+    """
+    matcher = SequenceMatcher(
+        a=[s.strip() for s in agent_items],
+        b=[s.strip() for s in user_items],
+        autojunk=False,
+    )
+    edits: list[tuple[str, str]] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        if tag == "replace":
+            old = agent_items[i1:i2]
+            new = user_items[j1:j2]
+            paired = min(len(old), len(new))
+            for k in range(paired):
+                if _is_significant(old[k], new[k]):
+                    edits.append((old[k], new[k]))
+            for k in range(paired, len(old)):
+                if _is_significant(old[k], ""):
+                    edits.append((old[k], ""))
+            for k in range(paired, len(new)):
+                if _is_significant("", new[k]):
+                    edits.append(("", new[k]))
+        elif tag == "delete":
+            for item in agent_items[i1:i2]:
+                if _is_significant(item, ""):
+                    edits.append((item, ""))
+        elif tag == "insert":
+            for item in user_items[j1:j2]:
+                if _is_significant("", item):
+                    edits.append(("", item))
+    return edits
+
+
 def _diff_bullets(agent_text: str, user_text: str) -> list[tuple[str, str]]:
     """Return (before, after) pairs for prose-bullet lines that differ significantly.
 
-    Lines are matched positionally; extra lines on either side are treated as
-    additions/deletions and emitted if the change is significant.
+    Bullets are aligned via :func:`_aligned_edits` so an insertion/deletion
+    of a single bullet doesn't cascade into N false-positive edits.
     """
     def _bullets(text: str) -> list[str]:
         return [ln.rstrip() for ln in text.splitlines() if ln.strip()]
 
-    agent_lines = _bullets(agent_text)
-    user_lines = _bullets(user_text)
-
-    edits: list[tuple[str, str]] = []
-    max_len = max(len(agent_lines), len(user_lines))
-    for i in range(max_len):
-        before = agent_lines[i] if i < len(agent_lines) else ""
-        after = user_lines[i] if i < len(user_lines) else ""
-        if before != after and _is_significant(before, after):
-            edits.append((before, after))
-    return edits
+    return _aligned_edits(_bullets(agent_text), _bullets(user_text))
 
 
 def _diff_paragraphs(agent_text: str, user_text: str) -> list[tuple[str, str]]:
     """Return (before, after) pairs for cover-letter paragraphs that differ significantly.
 
-    Paragraphs are delimited by blank lines.
+    Paragraphs are delimited by blank lines and aligned via
+    :func:`_aligned_edits` — an inserted or deleted paragraph won't cause
+    every later paragraph to register as a false edit.
     """
     def _paras(text: str) -> list[str]:
         raw = text.strip().split("\n\n")
         return [p.strip() for p in raw if p.strip()]
 
-    agent_paras = _paras(agent_text)
-    user_paras = _paras(user_text)
-
-    edits: list[tuple[str, str]] = []
-    max_len = max(len(agent_paras), len(user_paras))
-    for i in range(max_len):
-        before = agent_paras[i] if i < len(agent_paras) else ""
-        after = user_paras[i] if i < len(user_paras) else ""
-        if before != after and _is_significant(before, after):
-            edits.append((before, after))
-    return edits
+    return _aligned_edits(_paras(agent_text), _paras(user_text))
 
 
 def _write_record(
@@ -334,10 +365,15 @@ def export(
     *,
     feedback_dir: Path | None = None,
 ) -> str:
-    """Produce a sanitized YAML summary of recurring patterns for cross-machine sync.
+    """Produce a YAML summary of recurring lesson patterns for cross-machine sync.
 
-    Groups records by ``kind``, emits lesson texts. Drops slug and per-app
-    metadata (company, context) so the output is safe to commit or share.
+    Groups records by ``kind`` and emits lesson texts. Drops slug and
+    per-app metadata (company, context) but copies ``lesson`` strings
+    verbatim — the export is **partially** sanitized, not fully. If a
+    user-authored lesson contains a company name, person, or other
+    identifier, it appears in the output. The caller is expected to
+    review the YAML before sharing it; this function does not redact
+    free-text lesson content.
 
     Parameters
     ----------
