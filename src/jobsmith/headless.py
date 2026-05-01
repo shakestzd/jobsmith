@@ -190,8 +190,6 @@ def _build_command(
         str(plugin_dir),
         "--system-prompt-file",
         str(system_prompt),
-        "--session-id",
-        session_id,
         "--output-format",
         "stream-json",
         "--verbose",
@@ -200,8 +198,13 @@ def _build_command(
         "--max-turns",
         str(max_turns),
     ]
+    # --session-id and --resume are mutually exclusive with claude.
+    # On fresh runs (resume=False): claim the session ID.
+    # On resuming (resume=True): continue the existing session.
     if resume:
         cmd += ["--resume", session_id]
+    else:
+        cmd += ["--session-id", session_id]
     cmd.append(prompt)
     return cmd
 
