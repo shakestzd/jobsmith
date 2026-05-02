@@ -344,7 +344,11 @@ def _compute_profile(config, benchmark_path: Path | None) -> VoiceProfile:
 # ---------------------------------------------------------------------------
 
 
-def load_voice_profile(config, cache_dir: Path | None = None) -> VoiceProfile:
+def load_voice_profile(
+    config,
+    cache_dir: Path | None = None,
+    benchmark_path_override: Path | None = None,
+) -> VoiceProfile:
     """Read benchmark + config + GENERIC seeds → VoiceProfile.
 
     Parameters
@@ -353,21 +357,31 @@ def load_voice_profile(config, cache_dir: Path | None = None) -> VoiceProfile:
         Jobsmith config object. Uses:
           - config.benchmarks.resume_qmd (optional Path)
           - config.voice.result_verbs, action_verbs, banned_action_verbs,
-            banned_adjectives
+            banned_adjectives, banned_buzzwords, banned_marketer_phrases
     cache_dir:
         Where to read/write voice-profile.json.
         Defaults to .apply-state/ relative to cwd.
+    benchmark_path_override:
+        If provided, used as the benchmark path directly (already resolved
+        against repo root by the caller). Bypasses the
+        ``Path(config.benchmarks.resume_qmd)`` lookup which is CWD-relative
+        and would silently miss the file when ``jobsmith apply`` is invoked
+        from a subdirectory. Pass ``None`` to fall back to config lookup
+        (only safe when the caller's CWD == repo root).
 
-    Cache keying: mtime + content_hash composite (Q4 option-a).
-    Recomputes on: hash change, mtime change, or schema validation failure.
-    Corrupt cache → warning + live recompute.
+    Cache keying: mtime + content_hash + config_hash composite.
+    Recomputes on: hash change, mtime change, config change, or schema
+    validation failure. Corrupt cache → warning + live recompute.
     """
     cache_dir = cache_dir or Path(".apply-state")
     cache_path = cache_dir / "voice-profile.json"
 
-    bm_cfg = getattr(config, "benchmarks", None)
-    raw_bm_path = getattr(bm_cfg, "resume_qmd", None)
-    benchmark_path: Path | None = Path(raw_bm_path) if raw_bm_path else None
+    if benchmark_path_override is not None:
+        benchmark_path: Path | None = benchmark_path_override
+    else:
+        bm_cfg = getattr(config, "benchmarks", None)
+        raw_bm_path = getattr(bm_cfg, "resume_qmd", None)
+        benchmark_path = Path(raw_bm_path) if raw_bm_path else None
 
     current_config_hash = _config_hash(config)
 

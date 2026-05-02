@@ -274,10 +274,18 @@ def _build_paths(slug: str, cwd: Path, plugin_directory: Path) -> dict[str, str]
         # banned_adjectives / result_verbs from this JSON instead of inlining
         # them. We compute the profile here so the cache is written before any
         # specialist runs; load_voice_profile() handles cache hit/miss internally.
+        # Pass the already-resolved benchmark path so voice.py never has to
+        # re-resolve relative to CWD (would silently miss the file when
+        # `jobsmith apply` is invoked from a subdirectory).
         from .voice import load_voice_profile  # local import — avoid circular at module load
         voice_cache_dir = apps_dir / slug / ".apply-state"
+        resolved_benchmark = result.get("benchmark.resume_qmd")
         try:
-            load_voice_profile(config, cache_dir=voice_cache_dir)
+            load_voice_profile(
+                config,
+                cache_dir=voice_cache_dir,
+                benchmark_path_override=Path(resolved_benchmark) if resolved_benchmark else None,
+            )
         except Exception:
             # Voice profile is non-blocking: if computation fails (corrupt
             # benchmark, etc.), specialists fall back to seed defaults.
@@ -309,8 +317,11 @@ def _build_paths(slug: str, cwd: Path, plugin_directory: Path) -> dict[str, str]
                     except Exception:
                         author_homepage = None
                 try:
+                    # Pass the EXACT projects file path — load_projects accepts
+                    # a file or directory. Earlier we passed parent which only
+                    # worked for files literally named "projects.yml".
                     filtered = load_projects(
-                        projects_path.parent, config.resume, author_homepage
+                        projects_path, config.resume, author_homepage
                     )
                     voice_cache_dir.mkdir(parents=True, exist_ok=True)
                     filtered_path = voice_cache_dir / "projects-filtered.json"

@@ -387,3 +387,39 @@ def test_voice_profile_cache_hit_on_unchanged_config_and_benchmark(tmp_path: Pat
     p2 = load_voice_profile(config, cache_dir=cache_dir)
     assert p1.config_hash is not None
     assert p1.config_hash == p2.config_hash
+
+
+# ---------------------------------------------------------------------------
+# Roborev fix #4: benchmark_path_override prevents CWD-relative resolution bug
+# ---------------------------------------------------------------------------
+
+
+def test_load_voice_profile_benchmark_path_override(tmp_path: Path) -> None:
+    """When benchmark_path_override is given, voice.py uses it directly.
+
+    Regression test: previously load_voice_profile resolved
+    config.benchmarks.resume_qmd as Path(raw) — relative to CWD. When
+    `jobsmith apply` ran from a subdirectory, the benchmark was silently
+    missed and a generic profile was cached.
+    """
+    qmd = tmp_path / "resume.qmd"
+    qmd.write_text(SAMPLE_QMD)
+    cache_dir = tmp_path / ".apply-state"
+
+    # Config carries a CWD-relative path that does NOT exist anywhere
+    config = _make_config(benchmark_path="this/does/not/exist.qmd")
+
+    # Without override → "generic" source (no benchmark loaded)
+    p_no_override = load_voice_profile(config, cache_dir=cache_dir)
+    assert p_no_override.source in ("generic", "config-override")
+    assert p_no_override.benchmark_path is None or "exist" in p_no_override.benchmark_path
+
+    # Reset cache for fresh recompute
+    (cache_dir / "voice-profile.json").unlink()
+
+    # With override pointing at the real file → "benchmark" source
+    p_with_override = load_voice_profile(
+        config, cache_dir=cache_dir, benchmark_path_override=qmd
+    )
+    assert p_with_override.source == "benchmark"
+    assert p_with_override.benchmark_path == str(qmd)

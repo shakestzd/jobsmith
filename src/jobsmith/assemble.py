@@ -426,25 +426,53 @@ def _load_user_identity(
     return user
 
 
+def _normalize_url(url: str | None) -> str:
+    """Normalize a URL for cross-format equality.
+
+    Strips scheme (`http://`, `https://`), leading `www.`, trailing slash,
+    and surrounding whitespace. Lowercased. So `https://patdoe.dev/`,
+    `www.patdoe.dev`, and `patdoe.dev` all collapse to `patdoe.dev`.
+    """
+    if not url:
+        return ""
+    s = url.strip().lower()
+    for prefix in ("https://", "http://"):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+            break
+    if s.startswith("www."):
+        s = s[4:]
+    return s.rstrip("/")
+
+
 def load_projects(
-    master_dir: Path,
+    projects_path_or_master_dir: Path,
     resume_settings,
     author_homepage: str | None,
 ) -> list[dict]:
-    """Load and filter projects.yml from a master directory (Slice C).
+    """Load and filter a projects.yml file (Slice C).
 
-    Returns ``[]`` when ``master_dir/projects.yml`` is absent — fully
-    backward compatible with masters that haven't adopted the schema yet.
+    Accepts either:
+      - the exact projects.yml path (preferred — supports
+        ``master.projects_yml: data/portfolio-projects.yml`` configs)
+      - a master directory (legacy — looks for ``<dir>/projects.yml``)
+
+    Returns ``[]`` when the resolved file is absent — fully backward
+    compatible with masters that haven't adopted the schema yet.
 
     Filters out:
       - entries with ``excluded_from_resume: true``
       - entries with ``kind`` in ``resume_settings.excluded_project_kinds``
       - entries with ``is_project: false``
-      - entries whose ``url`` exactly matches ``author_homepage`` (defense
-        in depth — a portfolio site URL slipping through other filters
-        still won't appear twice in the rendered resume)
+      - entries whose ``url`` matches ``author_homepage`` after URL
+        normalization (scheme, www, trailing slash) — defense in depth
+        against the portfolio site appearing twice in the rendered resume
     """
-    projects_path = master_dir / "projects.yml"
+    p = Path(projects_path_or_master_dir)
+    if p.is_dir():
+        projects_path = p / "projects.yml"
+    else:
+        projects_path = p
     if not projects_path.exists():
         return []
 
@@ -458,7 +486,7 @@ def load_projects(
         return []
 
     excluded_kinds = set(getattr(resume_settings, "excluded_project_kinds", []) or [])
-    homepage = (author_homepage or "").strip().rstrip("/")
+    homepage_norm = _normalize_url(author_homepage)
 
     out: list[dict] = []
     for entry in raw:
@@ -470,7 +498,7 @@ def load_projects(
             continue
         if entry.get("is_project") is False:
             continue
-        if homepage and (entry.get("url") or "").strip().rstrip("/") == homepage:
+        if homepage_norm and _normalize_url(entry.get("url")) == homepage_norm:
             continue
         out.append(entry)
     return out

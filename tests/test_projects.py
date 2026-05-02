@@ -261,3 +261,73 @@ def test_apply_visual_layout_reviewer_md_documents_restoration() -> None:
     assert "restoration_queue" in md, "Reviewer must consume restoration_queue"
     assert "RESTORATION_STALE" in md, "Staleness halt reason must be documented"
     assert "RESTORATION_LIMIT" in md, "Hard cap halt reason must be documented"
+
+
+# ---------- Roborev fix: URL normalization (job 917 finding 3) ----------
+
+
+def test_load_projects_homepage_match_is_scheme_and_www_insensitive(tmp_path: Path) -> None:
+    """patdoe.dev vs https://patdoe.dev vs https://www.patdoe.dev/ must all match."""
+    from jobsmith.assemble import _normalize_url, load_projects
+
+    # Direct unit test of the normalizer
+    assert _normalize_url("patdoe.dev") == "patdoe.dev"
+    assert _normalize_url("https://patdoe.dev") == "patdoe.dev"
+    assert _normalize_url("https://patdoe.dev/") == "patdoe.dev"
+    assert _normalize_url("https://www.patdoe.dev") == "patdoe.dev"
+    assert _normalize_url("HTTP://Patdoe.Dev/") == "patdoe.dev"
+    assert _normalize_url(None) == ""
+    assert _normalize_url("") == ""
+
+    # End-to-end: all three URL spellings get filtered when homepage = patdoe.dev
+    projects = [
+        {"title": "scheme-less match", "url": "patdoe.dev", "kind": "open-source",
+         "is_project": True, "excluded_from_resume": False},
+        {"title": "https match", "url": "https://patdoe.dev", "kind": "open-source",
+         "is_project": True, "excluded_from_resume": False},
+        {"title": "www match", "url": "https://www.patdoe.dev/", "kind": "open-source",
+         "is_project": True, "excluded_from_resume": False},
+        {"title": "Other Project", "url": "https://github.com/p/other",
+         "kind": "open-source", "is_project": True, "excluded_from_resume": False},
+    ]
+    projects_yml = tmp_path / "projects.yml"
+    _write_projects_yml(projects_yml, projects)
+    config = ResumeSettings()
+    result = load_projects(tmp_path, config, author_homepage="patdoe.dev")
+    titles = [p["title"] for p in result]
+    assert titles == ["Other Project"], (
+        f"All three patdoe.dev URL spellings should be filtered. Got: {titles}"
+    )
+
+
+# ---------- Roborev fix: load_projects accepts exact file path (job 917 finding 2) ----------
+
+
+def test_load_projects_accepts_exact_file_path(tmp_path: Path) -> None:
+    """load_projects works when given a non-projects.yml filename (e.g. portfolio-projects.yml)."""
+    from jobsmith.assemble import load_projects
+
+    # Custom-named file, NOT projects.yml
+    custom = tmp_path / "portfolio-projects.yml"
+    _write_projects_yml(custom, [
+        {"title": "Custom Path Project", "url": "https://example.com/x",
+         "kind": "open-source", "is_project": True, "excluded_from_resume": False},
+    ])
+    config = ResumeSettings()
+    result = load_projects(custom, config, author_homepage=None)
+    assert len(result) == 1
+    assert result[0]["title"] == "Custom Path Project"
+
+
+def test_load_projects_directory_form_still_works(tmp_path: Path) -> None:
+    """Back-compat: passing a directory still finds <dir>/projects.yml."""
+    from jobsmith.assemble import load_projects
+
+    _write_projects_yml(tmp_path / "projects.yml", [
+        {"title": "Dir Form Project", "url": "https://example.com/y",
+         "kind": "open-source", "is_project": True, "excluded_from_resume": False},
+    ])
+    config = ResumeSettings()
+    result = load_projects(tmp_path, config, author_homepage=None)
+    assert len(result) == 1
+    assert result[0]["title"] == "Dir Form Project"
