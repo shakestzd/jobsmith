@@ -17,6 +17,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    pass
 
 # ---------- regex library ----------
 
@@ -132,6 +136,30 @@ def extract_anchors(
     return anchors
 
 
+class _BulletLike(Protocol):
+    """Structural interface for is_anchor() — avoids circular import with guard.py."""
+
+    text: str
+    anchor_explicit: bool | None
+
+
+def is_anchor(
+    bullet: _BulletLike,
+    money_threshold: float = DEFAULT_MONEY_THRESHOLD_USD,
+    percent_threshold: float = DEFAULT_PERCENT_THRESHOLD,
+    asset_count_threshold: float = DEFAULT_ASSET_COUNT_THRESHOLD,
+) -> bool:
+    """Return True if bullet is load-bearing.
+
+    Precedence:
+      1. If bullet.anchor_explicit is not None, that value wins (user override).
+      2. Otherwise, fall back to regex detection via extract_anchors().
+    """
+    if bullet.anchor_explicit is not None:
+        return bullet.anchor_explicit
+    return bool(extract_anchors(bullet.text, money_threshold, percent_threshold, asset_count_threshold))
+
+
 __all__ = [
     "Anchor",
     "DEFAULT_ASSET_COUNT_THRESHOLD",
@@ -141,6 +169,7 @@ __all__ = [
     "_MONEY_RE",
     "_PERCENT_RE",
     "extract_anchors",
+    "is_anchor",
     "parse_asset_count",
     "parse_money_to_usd",
     "parse_percent",

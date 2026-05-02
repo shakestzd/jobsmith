@@ -5,11 +5,16 @@
 #
 # CONVENTIONS
 # - Each position has: title, location, date, description, details
-# - "details" is a list of bullet strings — one bullet per element
-# - Anchor bullets contain a load-bearing metric: ≥$10M dollar amount,
-#   ≥50% percentage gain, or ≥100K asset/user/record count.
-#   The anchor-bullet-guard regex catches these automatically — you don't
-#   need to mark them by hand. Just write the bullet naturally.
+# - "details" entries can be either:
+#     a) a plain string — anchors detected via regex (≥$10M / ≥50% / ≥100K-asset)
+#     b) a dict with explicit user-declared metadata (Slice A object form):
+#          - bullet:        the bullet text
+#          - anchor:        true|false — overrides regex anchor detection
+#          - anchor_reason: human rationale (propagated into bullet-decisions.json)
+#          - tags:          list of free-form tags (e.g. [cost-out, ops])
+#          - drop_when:     condition string consulted by bullet-selector
+#   Use the dict form when your anchor signal isn't a $/%/asset-count
+#   (e.g. "served 200K students", "shipped 12 design systems").
 # - Anchors are preserved across applications unless an explicit reason
 #   to drop them is logged in the application's bullet-decisions.json.
 
@@ -39,7 +44,17 @@
   location: "Atlas Climate Capital"
   date: "Jun 2020 - Oct 2022"
   description: "Remote"
+  # This position demonstrates the dict-form bullet schema (Slice A).
+  # The first bullet is plain string (regex anchor); the second is dict
+  # form with anchor:true and anchor_reason; the third is dict form with
+  # anchor:false (treat as droppable even though it has a regex match).
   details:
     - "Modeled portfolio risk for a $1B+ renewable energy fund using Python, SQL, and Monte Carlo simulation across 50+ project finance scenarios"
-    - "Built quarterly investor reporting pipelines (Tableau + SQL) that reduced manual report assembly from 5 days to 4 hours"
-    - "Co-designed an internal data dictionary and PostgreSQL schema for portfolio asset tracking adopted across Finance, Operations, and Investor Relations"
+    - bullet: "Built quarterly investor reporting pipelines (Tableau + SQL) that reduced manual report assembly from 5 days to 4 hours"
+      anchor: true
+      anchor_reason: "Story-of-impact bullet for ops-leaning JDs — the time delta is the wedge"
+      tags: [reporting, automation]
+    - bullet: "Co-designed an internal data dictionary and PostgreSQL schema for portfolio asset tracking adopted across Finance, Operations, and Investor Relations"
+      anchor: false
+      tags: [collaboration, data-governance]
+      drop_when: "role_type == 'data-analyst' and page_is_full"

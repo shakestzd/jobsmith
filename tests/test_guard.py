@@ -244,3 +244,133 @@ def test_check_anchors_kept_when_included_true(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert len(result.kept) == 1
     assert isinstance(result, GuardResult)
+
+
+# ---------- parse_master_bullets — object-form (new) ----------
+
+
+def test_parse_master_bullets_accepts_string_form(tmp_path: Path) -> None:
+    """Plain string items in details continue to work as before."""
+    master = tmp_path / "work.yml"
+    _write_master(
+        master,
+        [
+            {
+                "title": "Engineer",
+                "location": "Co",
+                "details": ["Cut accounts payable time by 75%"],
+            }
+        ],
+    )
+    bullets = parse_master_bullets(master)
+    assert len(bullets) == 1
+    b = bullets[0]
+    assert b.text == "Cut accounts payable time by 75%"
+    assert b.anchor_explicit is None
+    assert b.anchor_reason is None
+
+
+def test_parse_master_bullets_accepts_dict_form(tmp_path: Path) -> None:
+    """Dict-form entry with anchor:true and anchor_reason is parsed correctly."""
+    master = tmp_path / "work.yml"
+    _write_master(
+        master,
+        [
+            {
+                "title": "Engineer",
+                "location": "Co",
+                "details": [
+                    {
+                        "bullet": "Cut by 75%",
+                        "anchor": True,
+                        "anchor_reason": "Largest cost-out program",
+                    }
+                ],
+            }
+        ],
+    )
+    bullets = parse_master_bullets(master)
+    assert len(bullets) == 1
+    b = bullets[0]
+    assert b.text == "Cut by 75%"
+    assert b.anchor_explicit is True
+    assert b.anchor_reason == "Largest cost-out program"
+
+
+def test_parse_master_bullets_mixed_shapes_in_one_position(tmp_path: Path) -> None:
+    """String and dict items coexist in the same details list."""
+    master = tmp_path / "work.yml"
+    _write_master(
+        master,
+        [
+            {
+                "title": "Engineer",
+                "location": "Co",
+                "details": [
+                    "Plain string bullet",
+                    {
+                        "bullet": "Cut by 75%",
+                        "anchor": True,
+                        "anchor_reason": "Key initiative",
+                    },
+                    {
+                        "bullet": "Improved comms",
+                        "anchor": False,
+                    },
+                ],
+            }
+        ],
+    )
+    bullets = parse_master_bullets(master)
+    assert len(bullets) == 3
+
+    plain, dict_true, dict_false = bullets
+    assert plain.anchor_explicit is None
+    assert dict_true.anchor_explicit is True
+    assert dict_true.anchor_reason == "Key initiative"
+    assert dict_false.anchor_explicit is False
+    assert dict_false.anchor_reason is None
+
+
+def test_check_anchors_honors_explicit_true_without_metric(tmp_path: Path) -> None:
+    """A bullet with anchor:true but no regex-detectable metric is still load-bearing."""
+    master = tmp_path / "work.yml"
+    _write_master(
+        master,
+        [
+            {
+                "title": "Engineer",
+                "location": "Co",
+                "details": [
+                    {
+                        "bullet": "Led the most impactful restructuring program",
+                        "anchor": True,
+                        "anchor_reason": "Strategically critical, no numeric metric available",
+                    }
+                ],
+            }
+        ],
+    )
+    selection = tmp_path / "selection.json"
+    text = "Led the most impactful restructuring program"
+    _write_selection(
+        selection,
+        [
+            {
+                "company": "Co",
+                "title": "Engineer",
+                "bullets": [
+                    {
+                        "master_bullet_id": _bullet_id(text),
+                        "included": False,
+                        "rephrased": None,
+                        "reason_if_dropped": None,
+                    }
+                ],
+            }
+        ],
+    )
+    result = check_anchors(master_path=master, selection_path=selection)
+    # Bullet is an anchor via explicit flag — drop without reason → exit 1
+    assert result.exit_code == 1
+    assert len(result.dropped_without_reason) == 1

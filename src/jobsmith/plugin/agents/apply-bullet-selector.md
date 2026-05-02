@@ -23,12 +23,20 @@ Read `.apply-state/spec.json`:
 
 ## Anchor rule (NON-NEGOTIABLE)
 
-A master bullet is an **anchor** if its text contains ANY of:
-- A dollar amount ≥ $10M (regex `_MONEY_RE` from the `jobsmith.anchors` package)
-- A percentage ≥ 50% (regex `_PERCENT_RE` from same file)
-- An asset count ≥ 100K (e.g. "200K solar assets")
+A master bullet is an **anchor** if EITHER condition holds:
+- It is declared explicitly via the dict form (Slice A): `{bullet, anchor: true, anchor_reason: ...}` — the user's mark wins regardless of regex.
+- (Fallback) Its text contains ANY of:
+    - A dollar amount ≥ $10M (regex `_MONEY_RE` from the `jobsmith.anchors` package)
+    - A percentage ≥ 50% (regex `_PERCENT_RE` from same file)
+    - An asset count ≥ 100K (e.g. "200K solar assets")
+
+A bullet declared `anchor: false` in the dict form is **droppable** even if its text matches a regex anchor — the explicit non-anchor mark wins.
 
 **Anchors are preserved unless dropped with a logged reason in `bullet-decisions.json`.** Reasons must be specific: "JD is finance-lite, $250M ITC unlock framing reads enterprise-IT" is acceptable; "didn't fit" is not. If you cannot articulate a real reason, halt — do not silently drop.
+
+**Anchor-reason propagation (Slice A contract):** When dropping a bullet whose master entry has `anchor_reason` set, the `bullet-decisions.json` `reason` value MUST be prefixed with `anchor_reason: <user's reason>; <your drop reason>`. This preserves provenance for downstream auditing — the reader sees both the user's original rationale for marking it an anchor AND why it was dropped despite that.
+
+You receive each bullet's `anchor_reason` (when present) in the inputs payload alongside `master_bullet_id` and `text`.
 
 When in doubt, KEEP the anchor. Re-rank it lower if the JD doesn't reward it, but keep it.
 
