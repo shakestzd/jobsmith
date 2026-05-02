@@ -672,6 +672,181 @@ def lint(
     console.print("[green]lint passed[/green]")
 
 
+# ---------- mark-anchors subcommand (Slice A.1 — feat-beb6becf) ----------
+
+
+def _normalize_yes_no_skip(answer: str) -> str:
+    """Map keystroke to canonical action: a|n|s|q. Returns '?' for unknown."""
+    a = (answer or "").strip().lower()
+    if a in ("a", "anchor", "yes", "y"):
+        return "a"
+    if a in ("n", "non-anchor", "no"):
+        return "n"
+    if a in ("s", "skip"):
+        return "s"
+    if a in ("q", "quit"):
+        return "q"
+    return "?"
+
+
+def _bullet_already_annotated(entry) -> bool:
+    """Object-form entry with explicit anchor flag — skip in non-force mode."""
+    return isinstance(entry, dict) and "anchor" in entry
+
+
+def _convert_to_object_form(text: str, anchor: bool, reason: str | None):
+    """Build a CommentedMap so ruamel.yaml emits a flow-friendly mapping."""
+    from ruamel.yaml.comments import CommentedMap
+
+    entry = CommentedMap()
+    entry["bullet"] = text
+    entry["anchor"] = anchor
+    if reason:
+        entry["anchor_reason"] = reason
+    return entry
+
+
+@app.command(name="mark-anchors")
+def mark_anchors(
+    master: Path = typer.Option(
+        Path("master/work.yml"),
+        "--master",
+        help="Path to master/work.yml (the file to annotate)",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print proposed changes as a unified diff; do not write"
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Re-prompt bullets that already carry an explicit anchor flag"
+    ),
+    batch: bool = typer.Option(
+        False,
+        "--batch",
+        help="Generate bullet-anchor-todo.md (the user edits, then re-runs) instead of prompting",
+    ),
+) -> None:
+    """Walk master/work.yml and mark each bullet as anchor / non-anchor / skip.
+
+    Object-form entries with explicit ``anchor`` are skipped unless --force.
+    YAML round-trips via ruamel.yaml so existing comments and key order survive.
+
+    Keys: a (anchor), n (non-anchor), s (skip), q (quit-and-save).
+    On `a`, you'll be prompted for a one-line ``anchor_reason`` rationale.
+    """
+    from ruamel.yaml import YAML
+    import difflib
+    import io
+    import sys
+
+    if not master.exists():
+        console.print(f"[red]ERROR:[/red] master file not found: {master}")
+        raise typer.Exit(code=2)
+
+    yaml_rt = YAML(typ="rt")  # round-trip — preserves comments, key order
+    yaml_rt.preserve_quotes = True
+    yaml_rt.indent(mapping=2, sequence=4, offset=2)
+
+    original_text = master.read_text(encoding="utf-8")
+    data = yaml_rt.load(original_text)
+
+    if not isinstance(data, list):
+        console.print(f"[red]ERROR:[/red] {master} root must be a list of positions")
+        raise typer.Exit(code=2)
+
+    if batch:
+        # Generate bullet-anchor-todo.md and exit. The user edits it,
+        # then re-runs with --apply (future work). For now we emit the
+        # template and inform the user.
+        todo_path = master.parent / "bullet-anchor-todo.md"
+        lines = [
+            f"# bullet-anchor-todo for {master}",
+            "",
+            "Mark each bullet by replacing `[ ]` with `[a]` (anchor),",
+            "`[n]` (non-anchor), or `[s]` (skip).",
+            "For anchors, fill in the `reason:` line.",
+            "",
+        ]
+        for pi, pos in enumerate(data):
+            title = pos.get("title", "(untitled)")
+            company = pos.get("location", "")
+            lines.append(f"## {pi}. {title} @ {company}")
+            for bi, entry in enumerate(pos.get("details") or []):
+                text = entry["bullet"] if isinstance(entry, dict) else entry
+                marked = "[a]" if _bullet_already_annotated(entry) and entry.get("anchor") else "[ ]"
+                lines.append(f"- {marked} {text}")
+                lines.append("  reason:")
+            lines.append("")
+        todo_path.write_text("\n".join(lines), encoding="utf-8")
+        console.print(f"[green]wrote[/green] {todo_path}")
+        console.print("Edit the file, then re-run with --batch (apply mode coming soon).")
+        return
+
+    # Interactive walk
+    changed = False
+    quit_early = False
+    for pi, pos in enumerate(data):
+        if quit_early:
+            break
+        title = pos.get("title", "(untitled)")
+        company = pos.get("location", "")
+        details = pos.get("details")
+        if not isinstance(details, list):
+            continue
+
+        for bi, entry in enumerate(details):
+            if _bullet_already_annotated(entry) and not force:
+                continue
+            text = entry["bullet"] if isinstance(entry, dict) else entry
+
+            console.print()
+            console.print(f"[bold cyan]{title} @ {company}[/bold cyan]  (position {pi}, bullet {bi})")
+            console.print(f"  {text}")
+            answer = typer.prompt(
+                "[a]nchor / [n]on-anchor / [s]kip / [q]uit",
+                default="s",
+                show_default=False,
+            )
+            action = _normalize_yes_no_skip(answer)
+            while action == "?":
+                answer = typer.prompt("Please enter a, n, s, or q", default="s", show_default=False)
+                action = _normalize_yes_no_skip(answer)
+
+            if action == "q":
+                quit_early = True
+                break
+            if action == "s":
+                continue
+            if action == "a":
+                reason = typer.prompt("Why is this an anchor?", default="").strip() or None
+                details[bi] = _convert_to_object_form(text, anchor=True, reason=reason)
+            elif action == "n":
+                details[bi] = _convert_to_object_form(text, anchor=False, reason=None)
+            changed = True
+
+    if not changed:
+        console.print("[yellow]No changes.[/yellow]")
+        return
+
+    # Render updated YAML to a string
+    buf = io.StringIO()
+    yaml_rt.dump(data, buf)
+    new_text = buf.getvalue()
+
+    if dry_run:
+        diff = difflib.unified_diff(
+            original_text.splitlines(keepends=True),
+            new_text.splitlines(keepends=True),
+            fromfile=str(master),
+            tofile=str(master) + " (proposed)",
+        )
+        sys.stdout.writelines(diff)
+        console.print("[yellow](dry-run — no file written)[/yellow]")
+        return
+
+    master.write_text(new_text, encoding="utf-8")
+    console.print(f"[green]wrote[/green] {master}")
+
+
 # ---------- site subcommand group ----------
 
 

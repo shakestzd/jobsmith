@@ -445,3 +445,56 @@ This keeps the cache robust to:
 - Filesystem clock skew (mtime-only would be unsafe)
 - Hand-edits to the cache file (validation catches malformed JSON)
 - Schema migrations (older caches recompute cleanly)
+
+---
+
+## Marking anchors (Slice A.1 — feat-beb6becf)
+
+`jobsmith mark-anchors` is the migration helper for moving from
+plain-string bullets to the Slice A object form with explicit `anchor:`
+declarations.
+
+### Interactive walk (default)
+
+```bash
+jobsmith mark-anchors --master master/work.yml
+```
+
+Walks every bullet in the master file. For each one:
+
+- `a` → mark as anchor; you'll be asked for a one-line `anchor_reason`.
+- `n` → mark as non-anchor (overrides regex).
+- `s` → skip (leave as plain string; regex fallback applies).
+- `q` → quit-and-save (commits choices made so far).
+
+Bullets already in object form with explicit `anchor:` are skipped
+unless you pass `--force`.
+
+### Dry-run
+
+```bash
+jobsmith mark-anchors --master master/work.yml --dry-run
+```
+
+Prints a unified diff of proposed edits without touching the file.
+Useful for previewing changes before committing.
+
+### Batch mode (power users)
+
+```bash
+jobsmith mark-anchors --master master/work.yml --batch
+```
+
+Generates `master/bullet-anchor-todo.md` listing every bullet with a
+`[ ]` checkbox. You edit the file in your text editor, replacing each
+`[ ]` with `[a]`, `[n]`, or `[s]` and filling in `reason:` lines for
+anchors. Re-run with `--batch` to apply (apply mode is on the roadmap;
+the current `--batch` only writes the template).
+
+### Round-trip safety
+
+Comments, key order, and indentation are preserved via
+[`ruamel.yaml`](https://yaml.readthedocs.io). The original file's
+header comments and per-position descriptions survive every annotation
+pass. Idempotent: re-running over an already-annotated file is a no-op
+unless `--force` is set.
