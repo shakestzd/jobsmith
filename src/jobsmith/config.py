@@ -45,18 +45,57 @@ class UserIdentity(BaseModel):
 
 
 class VoiceSettings(BaseModel):
-    """Controls for prose-writer + cover-letter-writer phrasing."""
+    """Controls for prose-writer + cover-letter-writer phrasing.
+
+    Voice precedence chain (high to low):
+      1. result_verbs / action_verbs — user overrides; empty list = use seeds
+      2. benchmark-derived — extracted from benchmarks.resume_qmd by voice.py
+      3. GENERIC seed defaults — grounded in published authority (Harvard FAS,
+         MIT CAPD, Yale OCS, The Muse, Resume Worded, novoresume)
+
+    banned_adjectives: tier-1 puffery banned by default (Q6 option-c).
+      'innovative' and 'passionate' live here, NOT in banned_buzzwords.
+
+    Feedback (feedback.py) is a SEPARATE PARALLEL pathway — soft lessons read
+    by specialists, NOT structured verb lists. Do not merge into VoiceSettings.
+    """
 
     voice_guide_path: Path | None = None
     employment_gap_snippet: str | None = None
+
+    # Verb lists — empty means "use benchmark-derived or GENERIC seeds"
+    result_verbs: list[str] = Field(default_factory=list)
+    action_verbs: list[str] = Field(default_factory=list)
+
+    # Q6 option-c: tier-1 puffery defaults (hard-ban)
+    # NOTE: 'innovative' and 'passionate' live HERE, not in banned_buzzwords
+    banned_adjectives: list[str] = Field(
+        default_factory=lambda: [
+            "innovative",
+            "passionate",
+            "dynamic",
+            "results-driven",
+            "self-starter",
+        ]
+    )
+
+    # AI-tell banned action verbs (extended from original 6)
     banned_action_verbs: list[str] = Field(
         default_factory=lambda: [
+            # Original 6 — overly corporate / AI-generated tells
             "Architected",
             "Leveraged",
             "Orchestrated",
             "Spearheaded",
             "Delivered end-to-end",
             "Shipped end-to-end",
+            # AI-tell additions — passive or vague constructions
+            "Utilized",
+            "Responsible for",
+            "Worked on",
+            "Helped with",
+            "Participated in",
+            "Handled",
         ]
     )
     banned_buzzwords: list[str] = Field(
@@ -64,8 +103,7 @@ class VoiceSettings(BaseModel):
             "enterprise",
             "proprietary",
             "comprehensive",
-            "innovative",
-            "passionate",
+            # NOTE: 'innovative' and 'passionate' moved to banned_adjectives
         ]
     )
     banned_marketer_phrases: list[str] = Field(
@@ -75,6 +113,19 @@ class VoiceSettings(BaseModel):
             "proven track record",
         ]
     )
+
+    @field_validator("banned_adjectives")
+    @classmethod
+    def _no_overlap_with_buzzwords(cls, v: list[str], info) -> list[str]:
+        """Enforce: no token appears in both banned_adjectives and banned_buzzwords."""
+        buzzwords = (info.data.get("banned_buzzwords") or [])
+        overlap = set(v) & set(buzzwords)
+        if overlap:
+            raise ValueError(
+                f"Tokens in both banned_adjectives and banned_buzzwords: {sorted(overlap)}. "
+                "Move them to one list only."
+            )
+        return v
 
 
 class AnchorThresholds(BaseModel):

@@ -23,6 +23,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import typer
+import yaml
 from rich.console import Console
 from rich.table import Table
 
@@ -33,6 +34,7 @@ from .config import CONFIG_FILENAME, find_config, load_config
 from .factcheck import check_draft
 from .guard import check_anchors, render_diff_md
 from .paths import all_master_paths, repo_root_for, resolve
+from .voice import _extract_bullets_from_qmd
 
 app = typer.Typer(
     name="jobsmith",
@@ -585,6 +587,89 @@ def anchor_check_cmd(
         )
 
     raise typer.Exit(code=result.exit_code)
+
+
+@app.command()
+def lint(
+    master: Path = typer.Option(
+        Path("master"),
+        help="Path to master/ directory containing *.yml files",
+    ),
+    benchmark: Path | None = typer.Option(
+        None,
+        help="Path to benchmark resume.qmd (optional)",
+    ),
+) -> None:
+    """Validate master YAML schema and benchmark before assemble.
+
+    Checks:
+      - Each *.yml in master/ parses as a valid YAML list of positions
+      - Each position has the expected keys (title, details list)
+      - benchmark.qmd (if given) contains at least one bullet line
+    Prints errors with filename; exits non-zero on any error.
+    """
+    errors: list[str] = []
+
+    # Validate master YAML files
+    if not master.exists():
+        console.print(f"[red]ERROR:[/red] master directory not found: {master}")
+        raise typer.Exit(code=1)
+
+    yml_files = sorted(master.glob("*.yml"))
+    if not yml_files:
+        console.print(f"[yellow]WARNING:[/yellow] No *.yml files found in {master}")
+
+    for yml_path in yml_files:
+        try:
+            data = yaml.safe_load(yml_path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            errors.append(f"{yml_path}: YAML parse error — {exc}")
+            continue
+
+        if data is None:
+            # Empty file is acceptable (no positions)
+            continue
+
+        # work.yml must be a list of positions
+        if yml_path.name == "work.yml":
+            if not isinstance(data, list):
+                errors.append(
+                    f"{yml_path}:1: root must be a list of positions, "
+                    f"got {type(data).__name__}"
+                )
+                continue
+            for i, pos in enumerate(data):
+                if not isinstance(pos, dict):
+                    errors.append(
+                        f"{yml_path}: position[{i}] must be a mapping, "
+                        f"got {type(pos).__name__}"
+                    )
+                    continue
+                details = pos.get("details")
+                if details is not None and not isinstance(details, list):
+                    errors.append(
+                        f"{yml_path}: position[{i}].details must be a list, "
+                        f"got {type(details).__name__}"
+                    )
+
+    # Validate benchmark if provided
+    if benchmark is not None:
+        if not benchmark.exists():
+            errors.append(f"benchmark: file not found — {benchmark}")
+        else:
+            bullets = _extract_bullets_from_qmd(benchmark)
+            if not bullets:
+                errors.append(
+                    f"benchmark {benchmark}: no bullet lines found (lines starting with '- '). "
+                    "Ensure the benchmark resume contains at least one bullet."
+                )
+
+    if errors:
+        for err in errors:
+            console.print(f"[red]LINT ERROR:[/red] {err}")
+        raise typer.Exit(code=1)
+
+    console.print("[green]lint passed[/green]")
 
 
 # ---------- site subcommand group ----------
