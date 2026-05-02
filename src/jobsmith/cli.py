@@ -961,21 +961,33 @@ def site_render_cmd(
         "salary, fit_score, hm_*, etc. — see docs/architecture.md "
         "Privacy model). Default is private (everything → _site/).",
     ),
+    profile: str = typer.Option(
+        "private",
+        "--profile",
+        help="Quarto profile to activate (passes --profile to quarto render). "
+        "Defaults to 'private' so _quarto-private.yml is used and "
+        "private/applications/**/*.qmd files are compiled. "
+        "Pass an empty string to use Quarto's default profile.",
+    ),
 ) -> None:
     """Run `quarto render` on the website project.
 
     Privacy model: default mode renders to `_site/` (gitignored). The
     `--public` flag re-renders to `_site-public/` after applying
     `jobsmith.site.sanitize_variables` so sensitive keys are stripped.
+
+    The --profile option (default: private) activates the matching
+    _quarto-<profile>.yml override so per-application pages under
+    private/ are included in the render.
     """
     mode = "public" if public else "private"
     try:
-        out = render_site(root.resolve(), mode=mode)
+        out = render_site(root.resolve(), mode=mode, profile=profile)
     except (RuntimeError, FileNotFoundError, ValueError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=2) from exc
     label = "[red bold]PUBLIC[/red bold]" if public else "[green]private[/green]"
-    console.print(f"Rendered ({label}) to: [cyan]{out}[/cyan]")
+    console.print(f"Rendered ({label}, profile={profile!r}) to: [cyan]{out}[/cyan]")
 
 
 @site_app.command("serve")

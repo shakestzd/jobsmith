@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from typer.testing import CliRunner
 
 from jobsmith.cli import app
@@ -220,8 +219,9 @@ def test_site_render_public_flag_parsed(tmp_path: Path, monkeypatch) -> None:
     """
     captured: dict = {}
 
-    def fake_render(root: Path, mode: str = "private", output_dir=None):
+    def fake_render(root: Path, mode: str = "private", output_dir=None, profile: str = "private"):
         captured["mode"] = mode
+        captured["profile"] = profile
         return root / ("_site-public" if mode == "public" else "_site")
 
     monkeypatch.setattr("jobsmith.cli.render_site", fake_render)
@@ -236,8 +236,9 @@ def test_site_render_public_flag_parsed(tmp_path: Path, monkeypatch) -> None:
 def test_site_render_default_is_private(tmp_path: Path, monkeypatch) -> None:
     captured: dict = {}
 
-    def fake_render(root: Path, mode: str = "private", output_dir=None):
+    def fake_render(root: Path, mode: str = "private", output_dir=None, profile: str = "private"):
         captured["mode"] = mode
+        captured["profile"] = profile
         return root / "_site"
 
     monkeypatch.setattr("jobsmith.cli.render_site", fake_render)
@@ -249,13 +250,65 @@ def test_site_render_default_is_private(tmp_path: Path, monkeypatch) -> None:
     assert "private" in result.output
 
 
+def test_site_render_default_profile_is_private(tmp_path: Path, monkeypatch) -> None:
+    """By default, --profile private is passed to render_site so the
+    _quarto-private.yml profile is activated and private/applications/**/*.qmd
+    pages are compiled. This is the core fix for bug-08a3ad82."""
+    captured: dict = {}
+
+    def fake_render(root: Path, mode: str = "private", output_dir=None, profile: str = "private"):
+        captured["profile"] = profile
+        return root / "_site"
+
+    monkeypatch.setattr("jobsmith.cli.render_site", fake_render)
+
+    result = runner.invoke(app, ["site", "render", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert captured["profile"] == "private"
+
+
+def test_site_render_profile_option_overrides_default(tmp_path: Path, monkeypatch) -> None:
+    """Passing --profile <name> forwards the custom profile to render_site."""
+    captured: dict = {}
+
+    def fake_render(root: Path, mode: str = "private", output_dir=None, profile: str = "private"):
+        captured["profile"] = profile
+        return root / "_site"
+
+    monkeypatch.setattr("jobsmith.cli.render_site", fake_render)
+
+    result = runner.invoke(app, ["site", "render", str(tmp_path), "--profile", "public"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["profile"] == "public"
+
+
+def test_site_render_profile_empty_string_skips_flag(tmp_path: Path, monkeypatch) -> None:
+    """Passing --profile '' forwards an empty string so render_site omits
+    the --profile flag from the quarto subprocess call."""
+    captured: dict = {}
+
+    def fake_render(root: Path, mode: str = "private", output_dir=None, profile: str = "private"):
+        captured["profile"] = profile
+        return root / "_site"
+
+    monkeypatch.setattr("jobsmith.cli.render_site", fake_render)
+
+    result = runner.invoke(app, ["site", "render", str(tmp_path), "--profile", ""])
+
+    assert result.exit_code == 0, result.output
+    assert captured["profile"] == ""
+
+
 # ---------- jobsmith init — benchmarks scaffold ----------
 
 
 def _run_init(tmp_path: Path, extra_args: list[str] | None = None) -> object:
     """Run `jobsmith init <tmp_path>` with example copy patched out."""
-    import jobsmith.cli as cli_module
     from unittest.mock import patch
+
+    import jobsmith.cli as cli_module
 
     # Patch EXAMPLES_DIR so init doesn't try to copy real master YAML examples
     with patch.object(cli_module, "EXAMPLES_DIR", tmp_path / "_fake_examples"):

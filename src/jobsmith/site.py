@@ -211,6 +211,7 @@ def render_site(
     mode: str = "private",
     output_dir: Path | None = None,
     runner: "subprocess.CompletedProcess | None" = None,  # type: ignore[name-defined]  # noqa: F821
+    profile: str = "private",
 ) -> Path:
     """Render the Quarto site with the given privacy mode.
 
@@ -227,10 +228,11 @@ def render_site(
        sensitive ``_blocks/*.md`` with a redaction notice. The original
        contents are kept in memory and restored on exit so private state
        is never lost.
-    5. Invoke ``quarto render <root> --output-dir <output_dir>``. The site
-       project's ``_quarto.yml`` only renders the listings page; per-app
-       pages must be rendered separately by the user with
-       ``quarto render private/applications/<slug>``.
+    5. Invoke ``quarto render <root> --output-dir <output_dir>
+       [--profile <profile>]``. The ``private`` Quarto profile activates
+       ``_quarto-private.yml``, which includes ``private/**/*.qmd`` — this
+       is required to compile per-application pages. Pass ``profile=""``
+       to skip the flag and use Quarto's default profile.
     6. Restore the original variables and block files (public mode).
 
     Args:
@@ -239,6 +241,9 @@ def render_site(
         mode: 'private' or 'public'. Public strips sensitive variables and
             block files before render, restores them after.
         output_dir: Override the default output directory.
+        profile: Quarto profile name to pass via ``--profile``. Defaults to
+            ``"private"`` so ``_quarto-private.yml`` is activated. Pass an
+            empty string to omit the flag entirely.
 
     Returns:
         The resolved output directory path.
@@ -289,6 +294,8 @@ def render_site(
     import subprocess
 
     cmd = [quarto, "render", str(root), "--output-dir", str(output_dir)]
+    if profile:
+        cmd += ["--profile", profile]
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=600
