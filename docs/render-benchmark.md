@@ -391,3 +391,57 @@ The bullet-selector follows this rule (Slice C; tightened in Slice C.1):
 `author.yml.homepage` flows into the rendered resume header. Don't
 duplicate your portfolio URL as a project entry — the loader auto-suppresses
 URL matches as a defense-in-depth measure.
+
+---
+
+## Voice rubric (Slice B.1 — feat-2740cc2f)
+
+The voice rubric controls verb choice, adjective bans, and marketer-phrase
+filters across the resume and cover-letter specialists. As of Slice B.1 the
+rubric lives in `.apply-state/voice-profile.json`, written by
+`jobsmith.voice.load_voice_profile()` and read by:
+
+- `apply-resume-tell-fixer` (banned verbs / adjectives / marketer phrases)
+- `apply-prose-writer` (banned verbs + result_verbs preferred openers)
+- `apply-cover-letter-writer` (banned marketer phrases for the opening)
+
+### Precedence chain
+
+```
+(highest priority)
+  3. user config — .apply-config.yaml `voice` section
+                   (result_verbs, action_verbs, banned_adjectives, ...)
+  2. benchmark-derived — first-word frequency from benchmarks.resume_qmd,
+                          classified by metric proximity
+  1. GENERIC seeds — 12 result verbs + 12 action verbs + 5 banned adjectives,
+                     grounded in published authority
+(lowest priority)
+```
+
+`load_voice_profile()` resolves these layers and writes a single resolved
+profile. Specialists never re-derive the rubric.
+
+### Where feedback fits
+
+`feedback.py` (live since feat-cb20674f) is a **separate parallel pathway**.
+Feedback records are free-text "soft lessons" that prose-writer and
+cover-letter-writer read alongside (but separately from) the voice profile.
+Feedback is NEVER merged into the structured `banned_verbs` /
+`banned_adjectives` lists — it stays semantically distinct so:
+
+- Voice rules answer "what tokens are off-limits across the whole user".
+- Feedback records answer "in similar past contexts, what did the user
+  rewrite that the agent missed?"
+
+The two layers compose at specialist read-time, not at config-merge time.
+
+### Cache invalidation
+
+Cache key = `(benchmark_qmd_mtime, content_hash(qmd_text))`. Either change
+triggers recompute. The on-disk `voice-profile.json` is also Pydantic-validated
+on load — schema mismatch falls back to live recompute with a warning.
+This keeps the cache robust to:
+
+- Filesystem clock skew (mtime-only would be unsafe)
+- Hand-edits to the cache file (validation catches malformed JSON)
+- Schema migrations (older caches recompute cleanly)

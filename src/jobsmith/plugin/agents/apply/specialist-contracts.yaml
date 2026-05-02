@@ -505,14 +505,27 @@ specialists:
       Detect and propose fixes for AI tells in RESUME prose. NOT a
       wrapper on tzd-labs:ai-tell-fixer (its word list is academic).
       Calibrated against the 2026-04-23 Google + OpenAI failures.
+    voice_profile_source: |
+      Slice B.1: read banned_verbs / banned_adjectives / banned_marketer_phrases
+      from voice_profile_json (Paths block; .apply-state/voice-profile.json).
+      The lists below are FALLBACK defaults when no voice profile exists.
     detection_categories:
-      action_verb_tells:
+      action_verb_tells_fallback:
+        # Authoritative source: voice_profile_json.banned_verbs.
+        # Listed here only as the back-compat default for runs without a profile.
         - Architected
         - Leveraged
         - Orchestrated
         - Spearheaded
         - "Delivered end-to-end"
         - "Shipped end-to-end"
+        # AI-tell additions (Slice B):
+        - Utilized
+        - "Responsible for"
+        - "Worked on"
+        - "Helped with"
+        - "Participated in"
+        - Handled
       em_dash_density:
         rule: "more than 2 em-dashes per paragraph flagged"
       parallel_sentence_rhythm:

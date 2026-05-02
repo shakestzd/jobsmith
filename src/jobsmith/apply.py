@@ -259,6 +259,22 @@ def _build_paths(slug: str, cwd: Path, plugin_directory: Path) -> dict[str, str]
         if feedback_dir.exists():
             result["feedback.dir"] = str(feedback_dir.resolve())
 
+        # Voice profile (Slice B.1) — derived from benchmarks.resume_qmd by
+        # voice.load_voice_profile() and cached at .apply-state/voice-profile.json.
+        # tell-fixer / prose-writer / cover-letter-writer read banned_verbs /
+        # banned_adjectives / result_verbs from this JSON instead of inlining
+        # them. We compute the profile here so the cache is written before any
+        # specialist runs; load_voice_profile() handles cache hit/miss internally.
+        from .voice import load_voice_profile  # local import — avoid circular at module load
+        voice_cache_dir = apps_dir / slug / ".apply-state"
+        try:
+            load_voice_profile(config, cache_dir=voice_cache_dir)
+        except Exception:
+            # Voice profile is non-blocking: if computation fails (corrupt
+            # benchmark, etc.), specialists fall back to seed defaults.
+            pass
+        result["voice_profile_json"] = str(voice_cache_dir / "voice-profile.json")
+
     return result
 
 

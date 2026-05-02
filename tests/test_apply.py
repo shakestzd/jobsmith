@@ -826,6 +826,53 @@ def test_build_paths_feedback_dir_null_when_missing(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 13a. _build_paths injects voice_profile_json (Slice B.1 — feat-2740cc2f)
+# ---------------------------------------------------------------------------
+
+
+def test_build_paths_injects_voice_profile_json(tmp_path: Path) -> None:
+    """voice_profile_json key always present, pointing into the slug's .apply-state."""
+    import json
+    import yaml
+
+    from jobsmith.apply import _build_paths
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+
+    plugin_fake = tmp_path / "plugin"
+    plugin_fake.mkdir()
+
+    paths = _build_paths("test-slug", tmp_path, plugin_fake)
+
+    assert "voice_profile_json" in paths
+    expected = (
+        tmp_path / "private" / "applications" / "test-slug" / ".apply-state" / "voice-profile.json"
+    )
+    assert paths["voice_profile_json"] == str(expected)
+    # Cache file should now exist on disk (load_voice_profile writes it).
+    assert expected.exists(), "load_voice_profile() should have written the cache file"
+
+    # Cache content is Pydantic-valid JSON
+    data = json.loads(expected.read_text())
+    assert "result_verbs" in data
+    assert "banned_adjectives" in data
+    assert "source" in data
+
+
+# ---------------------------------------------------------------------------
 # 14. Injected fallback benchmark paths must point at files that exist
 # ---------------------------------------------------------------------------
 

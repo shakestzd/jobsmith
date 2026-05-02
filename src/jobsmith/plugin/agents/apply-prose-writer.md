@@ -69,12 +69,18 @@ If `feedback_dir` is null/missing or no records match, proceed without lessons. 
 
 ## Voice rules (read the voice_guide; this is the short version)
 
-- **Explorer not marketer.** "I'm investigating how X enables Y" not "I'm passionate about driving Y."
+- **Explorer not marketer.** "I'm investigating how X enables Y" not the user's banned puffery (read `voice_profile_json.banned_adjectives`).
 - **Thesis not product.** Lead with the question or claim, not the product name.
 - **Specific not sweeping.** Numbers, places, dates. Not "extensive experience".
 - **No labels.** Don't end sentences with a credential summary like "MIT-trained engineer."
 - **Generous credit.** "Built with team X" not "I single-handedly".
-- **Banned in the resume tells list:** Architected, Leveraged, Orchestrated, Spearheaded, Delivered/Shipped end-to-end, enterprise, proprietary, comprehensive, innovative, passionate, perfect fit, proven track record. (Full list lives in `resume-tell-fixer.md`.)
+- **Voice profile (Slice B.1).** Read `voice_profile_json` (path injected via Paths block, typically `.apply-state/voice-profile.json`). Use these fields:
+  - `banned_verbs` — never use these as opening verbs.
+  - `banned_adjectives` — never use these as adjectives.
+  - `banned_marketer_phrases` — never use these phrases.
+  - `result_verbs` — strong openers. Lead bullets with these.
+  - `action_verbs` — usable but require restructure if they lead a bullet (put the result/metric first).
+  See `resume-tell-fixer.md` for the full taxonomy.
 
 ## Steps
 
@@ -87,7 +93,7 @@ If `feedback_dir` is null/missing or no records match, proceed without lessons. 
    - Start with impact, not activity.
    - Mirror JD keywords ONLY where the verb-object is honest.
    - Preserve metrics exactly as they appear in master.
-   - Drop the noun "solution" — banned by the user's voice rules.
+   - Apply the user's `voice_profile_json.banned_*` rules — drop or paraphrase any banned tokens (e.g. nouns like "solution" if listed in the user's banned_buzzwords).
 4. Verify every claim against master YAML. If you wrote a number that doesn't appear in master and isn't in gap-resolutions, halt with `reason=WOULD_FABRICATE` + the offending claim.
 5. Write to `.apply-state/prose-draft.md` and update `private/applications/{slug}/documents/work.yml` with the rephrased bullets in place.
 
@@ -123,5 +129,5 @@ Updates `private/applications/{slug}/documents/work.yml` (keep YAML structure in
 ## Hard rules
 - Never write a metric not in master or gap-resolutions.
 - Never end a sentence with a credential label.
-- Never use "Architected" or "Leveraged" — prose-qa will reject and you'll loop.
+- Never use any verb in `voice_profile_json.banned_verbs` — prose-qa will reject and you'll loop.
 - Length budgets: Professional Summary 50-70 words. Bullets 18-28 words each.
