@@ -350,6 +350,61 @@ def test_phase_failed_marker_two_brackets(monkeypatch):
     assert failed[0].error == "test-reason"
 
 
+def test_phase_failed_gather_contracts_not_frozen(monkeypatch):
+    """`<<PHASE_FAILED: gather: Contracts not frozen; freeze specialist-contracts.yaml before running apply.>>`
+    yields a phase_failed event with phase=gather and reason captured."""
+    payload = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "<<PHASE_FAILED: gather: Contracts not frozen; freeze specialist-contracts.yaml before running apply.>>",
+                }
+            ]
+        },
+    }
+    _mock_popen_with_lines(monkeypatch, [json.dumps(payload) + "\n"])
+    events = list(run_phase(PHASE, SESSION_ID, PROMPT, PLUGIN_DIR, SYSTEM_PROMPT))
+
+    failed = [e for e in events if e.type == "phase_failed"]
+    assert len(failed) == 1
+    assert failed[0].name == "gather"
+    assert "Contracts not frozen" in failed[0].error
+    assert "freeze specialist-contracts.yaml" in failed[0].error
+
+
+def test_phase_failed_with_angle_brackets_in_description(monkeypatch):
+    """Regression: description containing `>` (e.g., `<id>`) must be captured fully.
+
+    The marker contains literal angle-bracket placeholders like `<id>` and `<trk-id>`,
+    which previously caused the regex to terminate early at the first `>`.
+    Now with `.+?` instead of `[^>]+?`, the full description is preserved."""
+    payload = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "<<PHASE_FAILED: gather: htmlgraph PreToolUse hook blocks all Write/Bash calls until an htmlgraph work item is active. Resolve by either (a) running `htmlgraph feature start <id>` (or `htmlgraph feature create \"Apply: Duke AI Engineer\" --track <trk-id>`) before re-invoking /apply.>>",
+                }
+            ]
+        },
+    }
+    _mock_popen_with_lines(monkeypatch, [json.dumps(payload) + "\n"])
+    events = list(run_phase(PHASE, SESSION_ID, PROMPT, PLUGIN_DIR, SYSTEM_PROMPT))
+
+    failed = [e for e in events if e.type == "phase_failed"]
+    assert len(failed) == 1
+    assert failed[0].name == "gather"
+    # Verify that the description captures the full text including <id> and <trk-id>
+    assert failed[0].error is not None
+    assert "<id>" in failed[0].error
+    assert "<trk-id>" in failed[0].error
+    assert "htmlgraph PreToolUse hook" in failed[0].error
+    assert "feature start" in failed[0].error
+
+
 def test_phase_complete_marker_one_bracket_no_match(monkeypatch):
     """Marker with only 1 closing bracket (`<<PHASE_COMPLETE: gather>`) must NOT match."""
     payload = {
@@ -379,7 +434,7 @@ def test_subprocess_reaped_before_stderr_read(monkeypatch):
     Verifies that proc.wait (or terminate/kill) is invoked before proc.stderr.read
     in the cleanup path.
     """
-    from unittest.mock import MagicMock, call
+    from unittest.mock import MagicMock
 
     call_log: list[str] = []
 

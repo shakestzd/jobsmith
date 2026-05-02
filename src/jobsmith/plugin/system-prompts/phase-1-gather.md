@@ -116,7 +116,7 @@ When all five phase-1 specialists (jd-parser, fit-scorer, hm-enricher, bullet-se
 
 ## Failure mode
 
-- If `specialist-contracts.yaml` has `frozen_at: null` → halt immediately with message "Contracts not frozen; aborting." Do NOT emit the phase-complete marker.
+- If `specialist-contracts.yaml` has `frozen_at: null` → emit `<<PHASE_FAILED: gather: Contracts not frozen; freeze specialist-contracts.yaml before running apply.>>` and stop immediately. Do NOT emit the phase-complete marker.
 - If any Step 2 specialist returns `status=halt` → surface the halt reason and the relevant state files to the user. Do NOT emit the phase-complete marker.
 - If apply-company-research fails WebFetch → it writes a callout-warning sentinel to `company-research.md`. This is NOT a halt; continue to Step 3 normally.
 - If apply-hm-enricher detects no HM → it writes a sentinel `detected=no` to `hm-snippet.md`. This is NOT a halt; continue to Step 3 normally and report "HM: not detected" in the analysis pause output.
