@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,13 +13,14 @@ from rich.console import Console
 from typer.testing import CliRunner
 
 from jobsmith.apply import (
+    _get_or_create_session_id,
     build_phase_prompt,
     derive_slug,
     ensure_bootstrap,
     run_apply,
 )
 from jobsmith.cli import app
-from jobsmith.headless import Event, deterministic_session_id
+from jobsmith.headless import JOBSMITH_NAMESPACE, Event
 from jobsmith.render import ApplyRenderer
 
 # ---------------------------------------------------------------------------
@@ -200,15 +202,14 @@ def test_run_apply_happy_path(tmp_path: Path, monkeypatch) -> None:
     def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
         idx = call_count[0]
         call_count[0] += 1
-        # Validate resume flag: gather=False, draft/render=True once session_exists returns True
-        if phase == "gather":
-            assert resume is False, f"gather should not resume, got resume={resume}"
-        else:
-            assert resume is True, f"{phase} should resume, got resume={resume}"
+        # All phases use resume=False: gather never resumes; draft/render get
+        # fresh session IDs (Option A) whose JSONL files don't exist yet, so
+        # session_exists returns False and --session-id is used, not --resume.
+        assert resume is False, f"phase {phase} should not resume, got resume={resume}"
         return iter(_make_phase_events(phase_sequence[idx]))
 
     monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
-    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: True)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
     # Stub the between-phase Step 4-5 helper — its behavior is exercised in
     # dedicated tests below.
     monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
@@ -220,6 +221,50 @@ def test_run_apply_happy_path(tmp_path: Path, monkeypatch) -> None:
 
     assert rc == 0
     assert call_count[0] == 3
+
+
+def test_run_apply_passes_phase_specific_max_turns(tmp_path: Path, monkeypatch) -> None:
+    """Each phase receives the correct max_turns from _PHASE_MAX_TURNS."""
+    from jobsmith.apply import _PHASE_MAX_TURNS
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text("# config\n")
+
+    plugin_fake = tmp_path / "plugin"
+    sp_dir = plugin_fake / "system-prompts"
+    sp_dir.mkdir(parents=True)
+    for n, name in [(1, "gather"), (2, "draft"), (3, "render")]:
+        (sp_dir / f"phase-{n}-{name}.md").write_text(f"# Phase {n}\n")
+
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    captured: list[tuple[str, int]] = []
+    phase_sequence = ["gather", "draft", "render"]
+    call_index = [0]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        captured.append((phase, kwargs.get("max_turns")))
+        idx = call_index[0]
+        call_index[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply("https://example.com/jobs/ml-engineer", cwd=tmp_path)
+
+    assert rc == 0
+    assert len(captured) == 3
+    for phase_name, max_turns in captured:
+        assert max_turns == _PHASE_MAX_TURNS[phase_name], (
+            f"phase {phase_name!r}: expected max_turns={_PHASE_MAX_TURNS[phase_name]}, got {max_turns}"
+        )
+    # Explicit spot-checks
+    assert captured[0] == ("gather", 30)
+    assert captured[1] == ("draft", 30)
+    assert captured[2] == ("render", 60)
 
 
 # ---------------------------------------------------------------------------
@@ -833,6 +878,7 @@ def test_build_paths_feedback_dir_null_when_missing(tmp_path: Path) -> None:
 def test_build_paths_injects_voice_profile_json(tmp_path: Path) -> None:
     """voice_profile_json key always present, pointing into the slug's .apply-state."""
     import json
+
     import yaml
 
     from jobsmith.apply import _build_paths
@@ -885,6 +931,7 @@ def test_build_paths_injects_projects_paths_when_configured(tmp_path: Path) -> N
     master.projects_yml and projects_filtered_json keys are injected, and the
     filtered JSON contains only entries that passed all filters."""
     import json
+
     import yaml
 
     from jobsmith.apply import _build_paths
@@ -1555,22 +1602,28 @@ def test_run_apply_threads_canonical_slug_into_phase_2(tmp_path: Path, monkeypat
         f"draft prompt must not contain url slug {url_slug!r}; got: {draft_prompt!r}"
     )
 
-    # Option A: phase 1 runs under the URL-slug-derived session id, but
-    # phase 2/3 must run under the CANONICAL-slug-derived session id (a
+    # Option A: phase 1 runs under the URL-slug app-dir session id, but
+    # phase 2/3 must run under the CANONICAL-slug app-dir session id (a
     # fresh claude -p session — phase prompts read .apply-state/* directly
     # so phase-1 conversation continuity is unnecessary).
-    url_session = deterministic_session_id(url_slug)
-    canonical_session = deterministic_session_id("clay-gtm-data-analyst")
+    # Session IDs are now uuid4-based (persisted per application dir), not
+    # uuid5/slug-derived, so we check structural properties instead of exact values.
     sessions_by_phase = {phase: sid for phase, sid, _ in captured}
-    assert sessions_by_phase["gather"] == url_session, (
-        f"gather should use URL-slug session {url_session!r}, got {sessions_by_phase['gather']!r}"
+    gather_session = sessions_by_phase["gather"]
+    draft_session = sessions_by_phase["draft"]
+    render_session = sessions_by_phase["render"]
+    # draft and render must share the same (canonical) session
+    assert draft_session == render_session, (
+        f"draft and render should share canonical session; got draft={draft_session!r} render={render_session!r}"
     )
-    assert sessions_by_phase["draft"] == canonical_session, (
-        f"draft should use canonical-slug session {canonical_session!r}, got {sessions_by_phase['draft']!r}"
+    # gather must use a different session than draft/render (different app dirs)
+    assert gather_session != draft_session, (
+        f"gather session {gather_session!r} should differ from canonical session {draft_session!r}"
     )
-    assert sessions_by_phase["render"] == canonical_session, (
-        f"render should use canonical-slug session {canonical_session!r}, got {sessions_by_phase['render']!r}"
-    )
+    # Both must be valid UUID strings
+    import uuid as _uuid
+    _uuid.UUID(gather_session)
+    _uuid.UUID(draft_session)
 
 
 def test_run_apply_session_id_switches_to_canonical_after_reconcile(
@@ -1605,8 +1658,6 @@ def test_run_apply_session_id_switches_to_canonical_after_reconcile(
 
     url = "https://example.com/jobs/x"
     url_slug = derive_slug(url)
-    url_session_id = deterministic_session_id(url_slug)
-    canonical_session_id = deterministic_session_id("acme-ml-engineer")
 
     apply_state = (
         tmp_path / "private" / "applications" / url_slug / ".apply-state"
@@ -1635,19 +1686,126 @@ def test_run_apply_session_id_switches_to_canonical_after_reconcile(
     assert rc == 0
 
     sessions_by_phase = dict(seen_sessions)
-    assert sessions_by_phase["gather"] == url_session_id, (
-        f"gather should use URL session {url_session_id!r}; got {sessions_by_phase['gather']!r}"
+    gather_session = sessions_by_phase["gather"]
+    draft_session = sessions_by_phase["draft"]
+    render_session = sessions_by_phase["render"]
+    # draft and render must share the same (canonical) session
+    assert draft_session == render_session, (
+        f"draft and render should share canonical session; got draft={draft_session!r} render={render_session!r}"
     )
-    assert sessions_by_phase["draft"] == canonical_session_id, (
-        f"draft should switch to canonical session {canonical_session_id!r}; got {sessions_by_phase['draft']!r}"
+    # gather must use a different session than draft/render (different app dirs)
+    assert gather_session != draft_session, (
+        f"gather session {gather_session!r} should differ from canonical session {draft_session!r}"
     )
-    assert sessions_by_phase["render"] == canonical_session_id, (
-        f"render should switch to canonical session {canonical_session_id!r}; got {sessions_by_phase['render']!r}"
-    )
+    # Both must be valid UUID strings
+    import uuid as _uuid
+    _uuid.UUID(gather_session)
+    _uuid.UUID(draft_session)
 
     # Sanity: slug DID get reconciled to canonical (the URL's path slug 'x' is not canonical)
     canonical_dir = tmp_path / "private" / "applications" / "acme-ml-engineer"
     assert canonical_dir.exists()
+
+
+def test_run_apply_phase2_fresh_session_without_reconcile(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Option A (no reconcile): draft/render get a fresh session ID even when
+    gather's slug is not changed by reconcile.
+
+    Regression test for bug-1b7fea73: previously the fresh-session logic only
+    ran inside the ``if new_slug != slug`` branch, so when reconcile did not
+    rename the directory, phase 2 inherited gather's session ID and hit the
+    max-turns cap (gathered turns counted against draft's budget).
+
+    After the fix the session-id file is always deleted at the gather→draft
+    boundary and a new uuid4 is minted, giving phase 2 a clean turn budget.
+    """
+    import yaml
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+    content = tmp_path / "assets" / "content"
+    content.mkdir(parents=True, exist_ok=True)
+    for name in ("work.yml", "skill.yml", "education.yml", "author.yml"):
+        (content / name).write_text("# placeholder\n")
+
+    plugin_fake = _scaffold_plugin(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    # URL whose slug is already canonical — reconcile will NOT rename the dir.
+    url = "https://example.com/jobs/acme-ml-engineer"
+    url_slug = derive_slug(url)  # e.g. "acme-ml-engineer"
+
+    # Pre-create the app dir so _get_or_create_session_id has somewhere to
+    # write (apply sets up apps_dir from config, so the dir exists after
+    # bootstrap, but we need it here for the session-id file seeding).
+    apply_state = (
+        tmp_path / "private" / "applications" / url_slug / ".apply-state"
+    )
+    apply_state.mkdir(parents=True, exist_ok=True)
+
+    seen_sessions: list[tuple[str, str]] = []  # [(phase, session_id), ...]
+    call_count = [0]
+    phase_sequence = ["gather", "draft", "render"]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        seen_sessions.append((phase, session_id))
+        idx = call_count[0]
+        call_count[0] += 1
+        # After the fix, NO phase should use --resume: gather never resumes,
+        # and draft/render have a fresh session ID whose JSONL doesn't exist.
+        assert resume is False, (
+            f"phase {phase!r} must not resume; got resume=True. "
+            "draft/render should use a fresh session (Option A)."
+        )
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    # session_exists always returns False: fresh session IDs have no JSONL yet.
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply(url, cwd=tmp_path, skip_confirm=True)
+    assert rc == 0
+    assert call_count[0] == 3, "All three phases should have run"
+
+    sessions_by_phase = dict(seen_sessions)
+    gather_session = sessions_by_phase["gather"]
+    draft_session = sessions_by_phase["draft"]
+    render_session = sessions_by_phase["render"]
+
+    # Core assertion: draft must NOT reuse gather's session ID.
+    assert gather_session != draft_session, (
+        f"draft must get a fresh session (Option A), not inherit gather's. "
+        f"gather={gather_session!r}, draft={draft_session!r}"
+    )
+    # draft and render share the same fresh session (render reads .apply-state
+    # files too, but currently the loop only refreshes at gather→draft).
+    assert draft_session == render_session, (
+        f"draft and render should share the post-gather fresh session; "
+        f"got draft={draft_session!r}, render={render_session!r}"
+    )
+    # All session IDs must be valid UUIDs.
+    uuid.UUID(gather_session)
+    uuid.UUID(draft_session)
+
+    # Confirm no slug rename happened (this tests the *no-reconcile* path).
+    app_dir = tmp_path / "private" / "applications" / url_slug
+    assert app_dir.exists(), "App dir must exist under the URL-derived slug"
 
 
 # ---------------------------------------------------------------------------
@@ -2925,3 +3083,142 @@ def test_sub_agent_completion_includes_duration(tmp_path: Path) -> None:
     assert "apply-jd-parser" in output
     # Duration in seconds format: e.g. "(0s)" or "(1s)"
     assert "s)" in output
+
+
+# ---------------------------------------------------------------------------
+# _get_or_create_session_id — persistence and uuid4 guarantee
+# ---------------------------------------------------------------------------
+
+
+def test_get_or_create_session_id_persists_across_calls(tmp_path: Path) -> None:
+    """Second call must return the same UUID as the first (phase-2/3 resume)."""
+    app_dir = tmp_path / "acme-corp-engineer"
+    cwd = tmp_path / "project"
+
+    # First call: no .apply-state dir exists yet — should create and persist.
+    id1 = _get_or_create_session_id(app_dir, cwd)
+
+    # Second call: reads the persisted file — must return the identical UUID.
+    id2 = _get_or_create_session_id(app_dir, cwd)
+
+    assert id1 == id2, "Session ID must be stable across calls (phase-2/3 resume)"
+
+    # Must be a valid UUID string (raises ValueError if malformed).
+    uuid.UUID(id1)
+
+    # Must be uuid4 (random), NOT uuid5 of the slug — i.e. not equal to the
+    # old deterministic_session_id output for the same slug.
+    slug = app_dir.name
+    assert id1 != str(uuid.uuid5(JOBSMITH_NAMESPACE, slug)), (
+        "Session ID must not be the deterministic uuid5 of the slug"
+    )
+
+    # Confirm the persisted file exists and matches.
+    session_file = app_dir / ".apply-state" / "session-id"
+    assert session_file.exists()
+    assert session_file.read_text(encoding="utf-8").strip() == id1
+
+
+# ---------------------------------------------------------------------------
+# _get_or_create_session_id — stale-orphan detection
+# ---------------------------------------------------------------------------
+
+
+def test_get_or_create_session_id_stale_orphan_regenerates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stale orphan: persisted ID with no completed gather and existing .jsonl
+    must trigger regeneration, returning a new UUID and overwriting the file."""
+    app_dir = tmp_path / "acme-corp-engineer"
+    cwd = tmp_path / "project"
+    stale_id = str(uuid.uuid4())
+
+    # Write the persisted session-id (simulating a mid-gather failure).
+    state_dir = app_dir / ".apply-state"
+    state_dir.mkdir(parents=True)
+    (state_dir / "session-id").write_text(stale_id, encoding="utf-8")
+    # No manifest.json → gather not complete.
+
+    # Create the fake orphan .jsonl that the SDK would leave behind.
+    encoded_cwd = str(cwd).replace("/", "-")
+    orphan_dir = tmp_path / "fake-home" / ".claude" / "projects" / encoded_cwd
+    orphan_dir.mkdir(parents=True)
+    orphan_file = orphan_dir / f"{stale_id}.jsonl"
+    orphan_file.write_text("{}", encoding="utf-8")
+
+    # Monkeypatch Path.home() so the helper looks in tmp_path/fake-home.
+    fake_home = tmp_path / "fake-home"
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
+
+    new_id = _get_or_create_session_id(app_dir, cwd)
+
+    assert new_id != stale_id, "Must regenerate when orphan is present"
+    uuid.UUID(new_id)  # must be a valid UUID
+    session_file = state_dir / "session-id"
+    assert session_file.read_text(encoding="utf-8").strip() == new_id
+
+
+def test_get_or_create_session_id_resumable_when_gather_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If gather is marked complete in the manifest, return the persisted ID
+    even when the orphan .jsonl is present (legitimate --resume scenario)."""
+    app_dir = tmp_path / "acme-corp-engineer"
+    cwd = tmp_path / "project"
+    persisted_id = str(uuid.uuid4())
+
+    state_dir = app_dir / ".apply-state"
+    state_dir.mkdir(parents=True)
+    (state_dir / "session-id").write_text(persisted_id, encoding="utf-8")
+
+    # Write a manifest that marks all gather specialists as complete.
+    manifest = {
+        "invocations": [
+            {"specialist": "apply-jd-parser", "status": "ok"},
+            {"specialist": "apply-fit-scorer", "status": "ok"},
+            {"specialist": "apply-hm-enricher", "status": "ok"},
+            {"specialist": "apply-bullet-selector", "status": "ok"},
+            {"specialist": "apply-company-research", "status": "ok"},
+        ]
+    }
+    (state_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    # Also create the orphan file (should be ignored when gather is done).
+    encoded_cwd = str(cwd).replace("/", "-")
+    orphan_dir = tmp_path / "fake-home" / ".claude" / "projects" / encoded_cwd
+    orphan_dir.mkdir(parents=True)
+    (orphan_dir / f"{persisted_id}.jsonl").write_text("{}", encoding="utf-8")
+
+    fake_home = tmp_path / "fake-home"
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
+
+    returned_id = _get_or_create_session_id(app_dir, cwd)
+
+    assert returned_id == persisted_id, (
+        "Must return the persisted ID when gather is complete (resume path)"
+    )
+
+
+def test_get_or_create_session_id_no_orphan_returns_persisted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Persisted ID exists, gather not complete, but no orphan file — return
+    the persisted ID unchanged (no unnecessary churn)."""
+    app_dir = tmp_path / "acme-corp-engineer"
+    cwd = tmp_path / "project"
+    persisted_id = str(uuid.uuid4())
+
+    state_dir = app_dir / ".apply-state"
+    state_dir.mkdir(parents=True)
+    (state_dir / "session-id").write_text(persisted_id, encoding="utf-8")
+    # No manifest.json and no orphan file.
+
+    fake_home = tmp_path / "fake-home"
+    fake_home.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
+
+    returned_id = _get_or_create_session_id(app_dir, cwd)
+
+    assert returned_id == persisted_id, (
+        "Must return the persisted ID when no orphan file exists"
+    )
