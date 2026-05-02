@@ -189,6 +189,36 @@ def test_site_review_opens_rendered_html_when_present(tmp_path: Path, monkeypatc
     assert opened[0].endswith("_site/private/applications/acme-engineer/index.html")
 
 
+def test_site_review_opens_inplace_html_when_site_not_rendered(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Strategy B: in-place per-app rendered HTML is preferred over QMD fallback.
+
+    This covers the standalone JobApplications project where each app is its
+    own self-contained Quarto project and renders ``index.html`` in-place
+    (rather than into a top-level ``_site/``) via ``quarto render <slug-dir>``.
+    """
+    app_dir = _make_app(tmp_path, "duke-university-ai-engineer")
+    # Simulate an in-place render: index.html exists alongside index.qmd.
+    (app_dir / "index.html").write_text("<html><body>in-place render</body></html>")
+    # No _site/ rendered output exists.
+
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "webbrowser.open", lambda url: opened.append(url) or True
+    )
+
+    result = runner.invoke(
+        app,
+        ["site", "review", "duke-university-ai-engineer", "--root", str(tmp_path)],
+    )
+
+    assert result.exit_code == 0, result.output
+    # Must open the in-place HTML, not the QMD source.
+    assert opened[0].endswith("duke-university-ai-engineer/index.html")
+    assert "QMD" not in result.output
+
+
 # ---------- jobsmith site render ----------
 
 

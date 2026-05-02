@@ -453,16 +453,25 @@ def init_site(
 # ---------------------------------------------------------------------------
 
 
-def discover_applications(root: Path) -> list[Path]:
-    """Return every application directory under ``private/applications/`` that
-    has been assembled by jobsmith (i.e. contains both ``index.qmd`` and
-    ``.apply-state/``). Stable sort: alphabetical by slug.
+def discover_applications(root: Path, apps_root: Path | None = None) -> list[Path]:
+    """Return every application directory that has been assembled by jobsmith
+    (i.e. contains both ``index.qmd`` and ``.apply-state/``).
+    Stable sort: alphabetical by slug.
+
+    Args:
+        root: Root of the project (used to derive the default *apps_root*).
+        apps_root: Explicit path to the applications directory.  When *None*,
+            falls back to ``root / "private" / "applications"`` — the
+            historical default.  Pass the value from
+            ``config.output.applications_dir`` (resolved against the config
+            file's parent) to honour custom layouts.
 
     Empty directories, directories without ``.apply-state/``, and directories
     whose name starts with ``_`` or ``.`` are skipped — same convention as
     ``jobsmith.assemble.assemble_all``.
     """
-    apps_root = root / "private" / "applications"
+    if apps_root is None:
+        apps_root = root / "private" / "applications"
     if not apps_root.is_dir():
         return []
 

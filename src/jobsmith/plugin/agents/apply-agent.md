@@ -28,7 +28,7 @@ Write `applications/_pending/.apply-state/spec.json` with `{specialist: "apply-j
 After it writes `jd-parsed.json`:
 - Derive slug = `{company-slug}-{position-slug}` (lowercase, hyphenated).
 - Create `applications/{slug}/.apply-state/` and move `_pending` artifacts in.
-- Create `applications/{slug}/documents/` with `_extensions` symlink: `(cd applications/{slug}/documents && ln -sf ../../../../templates/extensions/_extensions _extensions)`.
+- Create `applications/{slug}/documents/` with `_extensions` symlink: `(cd applications/{slug}/documents && ln -sf ../../../../shared/extensions/_extensions _extensions)`.
 - Initialize `manifest.json` with `{run_id, slug, started_at, role_type, invocations: []}`.
 
 ## Step 2 — Fan-out (parallel)

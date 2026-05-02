@@ -3,11 +3,15 @@
 // Per-application pages get their own theme; this file is for the aggregator.
 // =============================================================================
 
+/*-- scss:defaults --*/
+
 $jobsmith-site-bg:        #FAFAFA;   // near-white page background
 $jobsmith-site-fg:        #1A1A1A;   // near-black body text
 $jobsmith-site-accent:    #2C3E50;   // slate accent (matches default theme)
 $jobsmith-site-accent-bg: #EAF0F5;   // pale slate tint
 $jobsmith-site-border:    #E0E0E0;   // table dividers
+
+/*-- scss:rules --*/
 
 body {
   background-color: $jobsmith-site-bg;

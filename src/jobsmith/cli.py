@@ -913,13 +913,22 @@ def site_list_cmd(
     Apps without an index.qmd or .apply-state/ are skipped silently —
     same convention as `assemble_all` / Quarto listings.
     """
-    apps = discover_applications(root.resolve())
+    resolved_root = root.resolve()
+    config_path = find_config(resolved_root)
+    if config_path is not None:
+        cfg = load_config(config_path)
+        apps_root = resolve(cfg.output.applications_dir, config_path.parent)
+    else:
+        apps_root = resolved_root / "private" / "applications"
+    apps = discover_applications(resolved_root, apps_root=apps_root)
     if not apps:
         console.print(
             "[yellow]No assembled applications found[/yellow] under "
-            f"{(root / 'private' / 'applications').resolve()}.\n"
+            f"{apps_root}.\n"
             "Run [cyan]jobsmith assemble <slug>[/cyan] (or "
-            "[cyan]jobsmith assemble --all[/cyan]) first."
+            "[cyan]jobsmith assemble --all[/cyan]) first.\n"
+            "Check [cyan]output.applications_dir[/cyan] in .apply-config.yaml "
+            "if using a custom layout."
         )
         raise typer.Exit(code=0)
 
@@ -1034,41 +1043,57 @@ def site_review_cmd(
 ) -> None:
     """Open the rendered review surface for one application in the default browser.
 
-    Resolves to `<root>/_site/private/applications/<slug>/index.html` if the
-    site has been rendered; otherwise falls back to opening
-    `<root>/private/applications/<slug>/index.qmd` so the user can render manually.
+    Resolution order:
+    1. ``<root>/_site/.../applications/<slug>/index.html`` — site-aggregator render.
+    2. ``<apps_root>/<slug>/index.html`` — in-place per-app render (standalone
+       Quarto project, rendered with ``quarto render private/applications/<slug>``).
+    3. ``<apps_root>/<slug>/index.qmd`` — source fallback (prompts user to render).
+
+    ``apps_root`` is read from ``output.applications_dir`` in ``.apply-config.yaml``
+    when present; otherwise defaults to ``private/applications``.
     """
     import webbrowser
 
-    site_html = (
-        root.resolve()
-        / "_site"
-        / "private"
-        / "applications"
-        / slug
-        / "index.html"
-    )
-    raw_qmd = (
-        root.resolve()
-        / "private"
-        / "applications"
-        / slug
-        / "index.qmd"
-    )
+    resolved_root = root.resolve()
+    config_path = find_config(resolved_root)
+    if config_path is not None:
+        cfg = load_config(config_path)
+        apps_root = resolve(cfg.output.applications_dir, config_path.parent)
+    else:
+        apps_root = resolved_root / "private" / "applications"
 
-    if site_html.is_file():
+    # 1. Site-aggregator rendered HTML (mirrors apps_root structure under _site/).
+    try:
+        apps_rel = apps_root.relative_to(resolved_root)
+        site_html: Path | None = resolved_root / "_site" / apps_rel / slug / "index.html"
+    except ValueError:
+        # apps_root is outside the project root — site-aggregator path doesn't apply.
+        site_html = None
+    # 2. In-place per-app rendered HTML (standalone Quarto project render).
+    inplace_html = apps_root / slug / "index.html"
+    # 3. Source QMD fallback.
+    raw_qmd = apps_root / slug / "index.qmd"
+
+    if site_html is not None and site_html.is_file():
         target = site_html
+    elif inplace_html.is_file():
+        target = inplace_html
     elif raw_qmd.is_file():
+        try:
+            render_hint = str(apps_root.relative_to(resolved_root) / slug)
+        except ValueError:
+            render_hint = str(inplace_html.parent)
         console.print(
             f"[yellow]No rendered HTML found for {slug}.[/yellow] "
-            "Opening the source QMD instead — run "
-            "[cyan]jobsmith site render[/cyan] first to get rendered output."
+            f"Opening the source QMD instead — run "
+            f"[cyan]quarto render {render_hint}[/cyan] "
+            "first to get rendered output."
         )
         target = raw_qmd
     else:
         console.print(
             f"[red]Application {slug!r} not found[/red] under "
-            f"{(root / 'private' / 'applications').resolve()}."
+            f"{apps_root}."
         )
         raise typer.Exit(code=2)
 

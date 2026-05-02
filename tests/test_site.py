@@ -446,6 +446,22 @@ def test_discover_applications_returns_empty_when_no_applications_dir(tmp_path: 
     assert found == []
 
 
+def test_discover_applications_custom_apps_root(tmp_path: Path) -> None:
+    """apps_root kwarg lets callers override the default private/applications path."""
+    custom_root = tmp_path / "data" / "jobs"
+    slug_dir = custom_root / "acme-engineer"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / ".apply-state").mkdir()
+    (slug_dir / "index.qmd").touch()
+
+    # No private/applications/ exists — but custom root should find the app.
+    found = discover_applications(tmp_path, apps_root=custom_root)
+    assert [p.name for p in found] == ["acme-engineer"]
+
+    # Default lookup (no apps_root kwarg) should return nothing.
+    assert discover_applications(tmp_path) == []
+
+
 # ---------- nested sanitization (fix-roborev-906) ----------
 
 from jobsmith.site import (  # noqa: E402
