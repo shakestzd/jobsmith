@@ -10,6 +10,20 @@ personal = resume_data['personal']
 experience = resume_data['experience']
 education = resume_data['education']
 skills = resume_data['skills']
+
+
+def _strip_url_scheme(url: str) -> str:
+    """Strip http(s):// prefix and trailing slash for display."""
+    s = (url or "").strip()
+    for prefix in ("https://", "http://"):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+            break
+    return s.rstrip("/")
+
+
+homepage_display = _strip_url_scheme(personal.get('homepage', ''))
+homepage_link = f"https://{homepage_display}" if homepage_display else ""
 ```
 
 # `{python} personal['firstname']` `{python} personal['lastname']`
@@ -26,6 +40,7 @@ skills = resume_data['skills']
 **Professional Links**
 - 🔗 [LinkedIn](https://linkedin.com/in/`{python} personal['linkedin']`)
 - 💻 [GitHub](https://github.com/`{python} personal['github']`)
+`{python} f"- 🌐 [{homepage_display}]({homepage_link})" if homepage_display else ""`
 :::
 ::::
 

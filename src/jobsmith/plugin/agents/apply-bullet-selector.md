@@ -69,12 +69,21 @@ When in doubt, KEEP the anchor. Re-rank it lower if the JD doesn't reward it, bu
    c. When projects ARE included, prioritize: `is_project: true` with a public link → JD-keyword match in title/description → `fillability: high`.
    d. **One-slot tiebreaker.** If only one slot is available, prefer adding ONE MORE work bullet from a kept position over adding ANY project — UNLESS `resume.bullet_type_ordering` is set to `[project, work]` (escape hatch for portfolio-heavy careers; default is `[work, project]`).
 
-10. **Restoration queue (Slice C.1, BREAKING SCHEMA CHANGE — coordinated with specialist-contracts.yaml).** Emit a `restoration_queue` field in `.apply-state/bullet-selection.json` listing the bullet_ids you DROPPED but would happily restore if page space opens up. Order by:
-    1. Anchor status (anchor-flagged bullets first)
-    2. Position recency (most recent positions first within anchor tier)
-    3. JD-keyword overlap
+10. **Restoration queue (Slice C.1, BREAKING SCHEMA CHANGE — coordinated with specialist-contracts.yaml).** Emit a `restoration_queue` object in `.apply-state/bullet-selection.json` with this shape:
+    ```json
+    {
+      "bullets": ["<bullet_id_1>", "<bullet_id_2>", ...],
+      "context_hash": "<sha256-hex>"
+    }
+    ```
+    Where:
+    - `bullets` lists the bullet_ids you DROPPED but would happily restore if page space opens up. Order by:
+      1. Anchor status (anchor-flagged bullets first)
+      2. Position recency (most recent positions first within anchor tier)
+      3. JD-keyword overlap
+    - `context_hash` is `sha256(jd-parsed.json bytes + your bullet-selection.json bytes)` computed at queue-creation time. The reviewer recomputes the same hash and halts with `reason=RESTORATION_STALE` on mismatch (prevents reflow loops on stale queue data).
 
-    The `apply-visual-layout-reviewer` agent reads this queue to restore bullets WITHOUT re-invoking you (avoids extra LLM round-trips during page-fit retries).
+    The `apply-visual-layout-reviewer` agent reads `restoration_queue.bullets` to restore content WITHOUT re-invoking you (avoids extra LLM round-trips during page-fit retries).
 
 11. Run the anchor guard before finalizing:
    ```bash

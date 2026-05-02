@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 CONFIG_FILENAME = ".apply-config.yaml"
 
@@ -118,18 +118,22 @@ class VoiceSettings(BaseModel):
         ]
     )
 
-    @field_validator("banned_adjectives")
-    @classmethod
-    def _no_overlap_with_buzzwords(cls, v: list[str], info) -> list[str]:
-        """Enforce: no token appears in both banned_adjectives and banned_buzzwords."""
-        buzzwords = (info.data.get("banned_buzzwords") or [])
-        overlap = set(v) & set(buzzwords)
+    @model_validator(mode="after")
+    def _no_overlap_between_banned_lists(self):
+        """Enforce: no token appears in both banned_adjectives and banned_buzzwords.
+
+        Uses model_validator(mode="after") so both lists are fully resolved
+        regardless of declaration order. The previous field_validator on
+        banned_adjectives ran before banned_buzzwords was set in the
+        validation context — overlap on defaults silently slipped through.
+        """
+        overlap = set(self.banned_adjectives or []) & set(self.banned_buzzwords or [])
         if overlap:
             raise ValueError(
                 f"Tokens in both banned_adjectives and banned_buzzwords: {sorted(overlap)}. "
                 "Move them to one list only."
             )
-        return v
+        return self
 
 
 class AnchorThresholds(BaseModel):

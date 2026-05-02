@@ -57,6 +57,18 @@ class Bullet:
 
     @property
     def is_anchor(self) -> bool:
+        """Explicit-aware anchor view (Slice A).
+
+        Precedence matches ``jobsmith.anchors.is_anchor()``:
+          1. ``anchor_explicit is not None`` → that value wins (user mark).
+          2. otherwise → regex fallback (``bool(self.anchors)``).
+
+        This keeps public callers consistent with check_anchors() so a
+        bullet marked ``anchor: true`` without a regex metric is still
+        load-bearing, and ``anchor: false`` with a metric is droppable.
+        """
+        if self.anchor_explicit is not None:
+            return self.anchor_explicit
         return bool(self.anchors)
 
 

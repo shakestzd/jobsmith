@@ -423,3 +423,34 @@ def test_load_voice_profile_benchmark_path_override(tmp_path: Path) -> None:
     )
     assert p_with_override.source == "benchmark"
     assert p_with_override.benchmark_path == str(qmd)
+
+
+# ---------------------------------------------------------------------------
+# Roborev fix #5 (job 918): banned_adjectives ↔ banned_buzzwords overlap
+#                            check uses model_validator now (was field_validator
+#                            on a field declared before banned_buzzwords)
+# ---------------------------------------------------------------------------
+
+
+def test_voice_settings_overlap_validator_catches_overlap() -> None:
+    """Pydantic must reject construction when a token is in both lists."""
+    import pytest as _pytest
+    from jobsmith.config import VoiceSettings
+
+    with _pytest.raises(ValueError, match="both banned_adjectives and banned_buzzwords"):
+        VoiceSettings(
+            banned_adjectives=["innovative", "passionate", "shared-token"],
+            banned_buzzwords=["enterprise", "shared-token"],
+        )
+
+
+def test_voice_settings_overlap_validator_passes_when_disjoint() -> None:
+    """Disjoint lists construct cleanly."""
+    from jobsmith.config import VoiceSettings
+
+    vs = VoiceSettings(
+        banned_adjectives=["innovative", "passionate"],
+        banned_buzzwords=["enterprise", "proprietary"],
+    )
+    assert "innovative" in vs.banned_adjectives
+    assert "enterprise" in vs.banned_buzzwords

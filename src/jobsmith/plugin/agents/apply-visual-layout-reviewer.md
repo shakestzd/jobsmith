@@ -84,18 +84,22 @@ Example fix proposal:
 
 ### Step 4 — Restoration check (Slice C.1, BEFORE proposing word swaps)
 
-When the rendered PDF has whitespace ≥ 20% of a column AND `bullet-selection.json.restoration_queue` is non-empty:
+`bullet-selection.json.restoration_queue` is an object:
+```json
+{"bullets": ["<bullet_id_1>", ...], "context_hash": "<sha256-hex>"}
+```
 
-1. Pop the next K bullets from `restoration_queue` (typically K=1 or 2; pick based on whitespace size).
-2. Restore them to `private/applications/{slug}/documents/work.yml` in their original position-and-rank order.
-3. Set `decision = re-render` and emit a directive: `restore: [bullet_id, ...]`. The orchestrator re-dispatches the renderer with the updated work.yml.
-4. **Do NOT re-invoke the bullet-selector** — the queue was pre-computed. This avoids extra LLM round-trips during page-fit retries.
+When the rendered PDF has whitespace ≥ 20% of a column AND `restoration_queue.bullets` is non-empty:
+
+1. **Staleness check FIRST.** Recompute `sha256(jd-parsed.json bytes + bullet-selection.json bytes)`. If it does not match `restoration_queue.context_hash`, halt with `reason=RESTORATION_STALE` — request a fresh bullet-selector run rather than risk reflow loops on stale queue data.
+2. Pop the next K ids from `restoration_queue.bullets` (typically K=1 or 2; pick based on whitespace size).
+3. Restore them to `private/applications/{slug}/documents/work.yml` in their original position-and-rank order.
+4. Set `decision = re-render` and emit a directive: `restore: [bullet_id, ...]`. The orchestrator re-dispatches the renderer with the updated work.yml.
+5. **Do NOT re-invoke the bullet-selector** — the queue was pre-computed. This avoids extra LLM round-trips during page-fit retries.
 
 Only after the queue is empty (or whitespace < 20%) should you proceed to the word-swap fixes below.
 
 **Hard cap: 2 restoration retries per render.** On the third retry, halt with `reason=RESTORATION_LIMIT`.
-
-**Staleness check.** If the restoration_queue's `context_hash` (computed from jd-parsed.json + bullet-selection.json hash at queue-creation time) does not match the current context hash, halt with `reason=RESTORATION_STALE` and request a fresh bullet-selector run rather than risk reflow loops on out-of-date queue data.
 
 ### Step 5 — Apply or escalate (word-swap fallback)
 

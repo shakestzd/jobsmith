@@ -180,3 +180,23 @@ def test_is_anchor_string_form_falls_through_to_regex() -> None:
     """anchor_explicit=None (string-form bullet) falls through to regex detection."""
     bullet = _make_bullet("Cut by 75%", anchor_explicit=None)
     assert is_anchor(bullet) is True
+
+
+# Roborev fix (job 918): Bullet.is_anchor PROPERTY must also honor anchor_explicit
+# (the standalone is_anchor function did, but the property was still bool(self.anchors))
+
+
+def test_bullet_is_anchor_property_explicit_true_overrides_no_metric() -> None:
+    """Bullet.is_anchor property: anchor_explicit=True wins even with no metric."""
+    bullet = _make_bullet("Improved team dynamics", anchor_explicit=True)
+    assert bullet.is_anchor is True
+
+
+def test_bullet_is_anchor_property_explicit_false_overrides_regex_match() -> None:
+    """Bullet.is_anchor property: anchor_explicit=False wins even when text matches regex."""
+    from jobsmith.anchors import Anchor
+    bullet = _make_bullet("Cut waste by $50M", anchor_explicit=False)
+    bullet.anchors = [Anchor(kind="money", raw="$50M", value=50_000_000.0)]
+    assert bullet.is_anchor is False, (
+        "Property must honor anchor_explicit=False even when bullet.anchors is non-empty"
+    )
