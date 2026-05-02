@@ -1612,18 +1612,22 @@ def test_run_apply_threads_canonical_slug_into_phase_2(tmp_path: Path, monkeypat
     gather_session = sessions_by_phase["gather"]
     draft_session = sessions_by_phase["draft"]
     render_session = sessions_by_phase["render"]
-    # draft and render must share the same (canonical) session
-    assert draft_session == render_session, (
-        f"draft and render should share canonical session; got draft={draft_session!r} render={render_session!r}"
-    )
-    # gather must use a different session than draft/render (different app dirs)
+    # Finding 1 fix: each phase gets its own fresh session.
     assert gather_session != draft_session, (
-        f"gather session {gather_session!r} should differ from canonical session {draft_session!r}"
+        f"gather session {gather_session!r} should differ from draft session {draft_session!r}"
     )
-    # Both must be valid UUID strings
+    assert draft_session != render_session, (
+        f"draft and render must each get a fresh session (Option A per-phase); "
+        f"got draft={draft_session!r} render={render_session!r}"
+    )
+    assert gather_session != render_session, (
+        f"gather session {gather_session!r} should differ from render session {render_session!r}"
+    )
+    # All must be valid UUID strings
     import uuid as _uuid
     _uuid.UUID(gather_session)
     _uuid.UUID(draft_session)
+    _uuid.UUID(render_session)
 
 
 def test_run_apply_session_id_switches_to_canonical_after_reconcile(
@@ -1689,18 +1693,22 @@ def test_run_apply_session_id_switches_to_canonical_after_reconcile(
     gather_session = sessions_by_phase["gather"]
     draft_session = sessions_by_phase["draft"]
     render_session = sessions_by_phase["render"]
-    # draft and render must share the same (canonical) session
-    assert draft_session == render_session, (
-        f"draft and render should share canonical session; got draft={draft_session!r} render={render_session!r}"
-    )
-    # gather must use a different session than draft/render (different app dirs)
+    # Finding 1 fix: each phase must have its own unique session ID.
     assert gather_session != draft_session, (
-        f"gather session {gather_session!r} should differ from canonical session {draft_session!r}"
+        f"gather session {gather_session!r} should differ from draft session {draft_session!r}"
     )
-    # Both must be valid UUID strings
+    assert draft_session != render_session, (
+        f"draft and render must each get a fresh session (Option A per-phase); "
+        f"got draft={draft_session!r} render={render_session!r}"
+    )
+    assert gather_session != render_session, (
+        f"gather session {gather_session!r} should differ from render session {render_session!r}"
+    )
+    # All must be valid UUID strings
     import uuid as _uuid
     _uuid.UUID(gather_session)
     _uuid.UUID(draft_session)
+    _uuid.UUID(render_session)
 
     # Sanity: slug DID get reconciled to canonical (the URL's path slug 'x' is not canonical)
     canonical_dir = tmp_path / "private" / "applications" / "acme-ml-engineer"
@@ -1788,24 +1796,229 @@ def test_run_apply_phase2_fresh_session_without_reconcile(
     draft_session = sessions_by_phase["draft"]
     render_session = sessions_by_phase["render"]
 
-    # Core assertion: draft must NOT reuse gather's session ID.
+    # Finding 1 fix: each phase must receive its own unique session ID.
     assert gather_session != draft_session, (
         f"draft must get a fresh session (Option A), not inherit gather's. "
         f"gather={gather_session!r}, draft={draft_session!r}"
     )
-    # draft and render share the same fresh session (render reads .apply-state
-    # files too, but currently the loop only refreshes at gather→draft).
-    assert draft_session == render_session, (
-        f"draft and render should share the post-gather fresh session; "
-        f"got draft={draft_session!r}, render={render_session!r}"
+    # render must also get its own fresh session (Finding 1 fix: per-phase, not just gather→draft).
+    assert draft_session != render_session, (
+        f"render must get its own fresh session, not inherit draft's. "
+        f"draft={draft_session!r}, render={render_session!r}"
+    )
+    assert gather_session != render_session, (
+        f"render must not reuse gather's session. "
+        f"gather={gather_session!r}, render={render_session!r}"
     )
     # All session IDs must be valid UUIDs.
     uuid.UUID(gather_session)
     uuid.UUID(draft_session)
+    uuid.UUID(render_session)
 
     # Confirm no slug rename happened (this tests the *no-reconcile* path).
     app_dir = tmp_path / "private" / "applications" / url_slug
     assert app_dir.exists(), "App dir must exist under the URL-derived slug"
+
+
+# ---------------------------------------------------------------------------
+# 13b. Fresh-session-per-phase and force-regenerates-session regressions
+# ---------------------------------------------------------------------------
+
+
+def test_run_apply_each_phase_gets_fresh_session(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Regression for Finding 1: all three phases must receive DIFFERENT
+    session IDs.  Previously, draft's freshly-minted session was shared with
+    render; this test encodes the corrected invariant (Option A per-phase)."""
+    import yaml
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+    content = tmp_path / "assets" / "content"
+    content.mkdir(parents=True, exist_ok=True)
+    for name in ("work.yml", "skill.yml", "education.yml", "author.yml"):
+        (content / name).write_text("# placeholder\n")
+
+    plugin_fake = _scaffold_plugin(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    url = "https://example.com/jobs/acme-each-phase"
+    url_slug = derive_slug(url)
+
+    apply_state = (
+        tmp_path / "private" / "applications" / url_slug / ".apply-state"
+    )
+    apply_state.mkdir(parents=True, exist_ok=True)
+
+    captured_sessions: list[tuple[str, str]] = []  # [(phase, session_id)]
+    call_count = [0]
+    phase_sequence = ["gather", "draft", "render"]
+
+    def fake_run_phase(
+        phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs
+    ):
+        captured_sessions.append((phase, session_id))
+        idx = call_count[0]
+        call_count[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    # Fresh IDs have no JSONL yet; session_exists returns False for all phases.
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply(url, cwd=tmp_path, skip_confirm=True)
+    assert rc == 0
+    assert call_count[0] == 3
+
+    sessions_by_phase = dict(captured_sessions)
+    gather_id = sessions_by_phase["gather"]
+    draft_id = sessions_by_phase["draft"]
+    render_id = sessions_by_phase["render"]
+
+    assert gather_id != draft_id, (
+        f"gather and draft must have different session IDs; both={gather_id!r}"
+    )
+    assert draft_id != render_id, (
+        f"draft and render must have different session IDs; both={draft_id!r}"
+    )
+    assert gather_id != render_id, (
+        f"gather and render must have different session IDs; both={gather_id!r}"
+    )
+    uuid.UUID(gather_id)
+    uuid.UUID(draft_id)
+    uuid.UUID(render_id)
+
+
+def test_run_apply_resume_false_for_all_phases_after_fresh_session(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Regression for Finding 1: after the per-phase fresh-session fix,
+    session_exists returns False for every freshly-minted ID, so resume=False
+    is passed to run_phase for all three phases."""
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text("# config\n")
+
+    plugin_fake = tmp_path / "plugin"
+    sp_dir = plugin_fake / "system-prompts"
+    sp_dir.mkdir(parents=True)
+    for n, name in [(1, "gather"), (2, "draft"), (3, "render")]:
+        (sp_dir / f"phase-{n}-{name}.md").write_text(f"# Phase {n}\n")
+
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    resume_values: list[tuple[str, bool]] = []
+    call_count = [0]
+    phase_sequence = ["gather", "draft", "render"]
+
+    def fake_run_phase(
+        phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs
+    ):
+        resume_values.append((phase, resume))
+        idx = call_count[0]
+        call_count[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    # Fresh IDs: session_exists returns False — simulates realistic post-fix behavior.
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply("https://example.com/jobs/ml-engineer", cwd=tmp_path)
+    assert rc == 0
+
+    resume_by_phase = dict(resume_values)
+    for phase in ("gather", "draft", "render"):
+        assert resume_by_phase[phase] is False, (
+            f"phase {phase!r} should receive resume=False when session is fresh; "
+            f"got resume={resume_by_phase[phase]!r}"
+        )
+
+
+def test_run_apply_force_regenerates_session_id(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Regression for Finding 2: --force must clear the persisted session-id
+    so that gather starts with a brand-new uuid4, even when a prior successful
+    run left a session-id file that would otherwise be reused."""
+    import yaml
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {"applications_dir": "private/applications"},
+            }
+        )
+    )
+    content = tmp_path / "assets" / "content"
+    content.mkdir(parents=True, exist_ok=True)
+    for name in ("work.yml", "skill.yml", "education.yml", "author.yml"):
+        (content / name).write_text("# placeholder\n")
+
+    plugin_fake = _scaffold_plugin(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    url = "https://example.com/jobs/acme-force-regen"
+    url_slug = derive_slug(url)
+
+    # Pre-populate the session-id file with a "stale" ID from a prior run.
+    apply_state = (
+        tmp_path / "private" / "applications" / url_slug / ".apply-state"
+    )
+    apply_state.mkdir(parents=True, exist_ok=True)
+    stale_id = str(uuid.uuid4())
+    (apply_state / "session-id").write_text(stale_id, encoding="utf-8")
+
+    captured_sessions: list[tuple[str, str]] = []
+    call_count = [0]
+    phase_sequence = ["gather", "draft", "render"]
+
+    def fake_run_phase(
+        phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs
+    ):
+        captured_sessions.append((phase, session_id))
+        idx = call_count[0]
+        call_count[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply(url, cwd=tmp_path, skip_confirm=True, force=True)
+    assert rc == 0
+
+    sessions_by_phase = dict(captured_sessions)
+    gather_id = sessions_by_phase["gather"]
+
+    assert gather_id != stale_id, (
+        f"--force must regenerate session ID; gather used stale ID {stale_id!r}. "
+        "SDK would have rejected it with 'Session ID already in use'."
+    )
+    uuid.UUID(gather_id)
 
 
 # ---------------------------------------------------------------------------

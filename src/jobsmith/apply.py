@@ -1061,6 +1061,15 @@ def run_apply(
     # that a retry after a failed gather gets a fresh ID the Claude Code SDK
     # will accept.  When there is no config (app_dir is None) fall back to
     # the deterministic ID so the no-config path is unchanged.
+    #
+    # Finding 2 fix: when --force is set, the entire pipeline reruns from
+    # gather.  The persisted session-id may point to a previous successful
+    # run whose JSONL still exists in ~/.claude/projects/ — the SDK would
+    # reject it with "Session ID already in use".  Unlink it here so
+    # _get_or_create_session_id always mints a fresh uuid4 on a forced run.
+    if force and app_dir is not None:
+        _session_id_file = app_dir / ".apply-state" / "session-id"
+        _session_id_file.unlink(missing_ok=True)
     session_id = (
         _get_or_create_session_id(app_dir, resolved_cwd)
         if app_dir is not None
@@ -1108,13 +1117,27 @@ def run_apply(
             rdr.print_phase_skipped(phase_num, phase_name)
             continue
 
+        # Finding 1 fix (Option A): each non-gather phase gets its own fresh
+        # session at the phase boundary.  Deleting the persisted session-id
+        # forces _get_or_create_session_id to mint a new uuid4.  Because the
+        # new JSONL does not yet exist in ~/.claude/projects/, session_exists()
+        # returns False → resume stays False → run_phase uses --session-id
+        # (not --resume), giving every phase a clean turn budget.
+        # For draft this runs after Step 3g has already reconciled the slug,
+        # so the new ID is minted under the correct (canonical) app_dir.
+        if phase_name != "gather" and apps_dir is not None:
+            (apps_dir / slug / ".apply-state" / "session-id").unlink(
+                missing_ok=True
+            )
+            session_id = _get_or_create_session_id(apps_dir / slug, resolved_cwd)
+
         # Step 3a: determine resume flag (Claude session continuity).
-        # Invariant for phase 2/3: session_id was freshly minted at the
-        # gather→draft boundary (Step 3g below), so its JSONL does not yet
-        # exist in ~/.claude/projects/…  session_exists() therefore returns
-        # False, resume stays False, and _build_command uses --session-id
-        # (claim a new session) rather than --resume.  This gives each phase
-        # a clean turn budget and avoids inheriting gather's spent turns.
+        # Invariant: session_id was freshly minted just above for phase 2/3,
+        # so its JSONL does not yet exist in ~/.claude/projects/…
+        # session_exists() therefore returns False, resume stays False, and
+        # _build_command uses --session-id (claim a new session) rather than
+        # --resume.  This gives each phase a clean turn budget and avoids
+        # inheriting any prior phase's spent turns.
         resume = (phase_name != "gather") and headless.session_exists(
             session_id, cwd=resolved_cwd
         )
@@ -1211,9 +1234,10 @@ def run_apply(
             if new_slug != slug:
                 slug = new_slug
                 # When reconcile renames the directory the session-id file
-                # is copied verbatim into the new location.  Remove it so
-                # the unconditional fresh-session block below generates a
-                # clean uuid4 rather than re-using the carried-over value.
+                # is copied verbatim into the new location.  Remove it now so
+                # the per-phase fresh-session block at the top of each
+                # non-gather iteration (Finding 1 fix) generates a clean
+                # uuid4 rather than re-using the carried-over value.
                 if apps_dir is not None:
                     carried_session_file = (
                         apps_dir / slug / ".apply-state" / "session-id"
@@ -1221,24 +1245,6 @@ def run_apply(
                     carried_session_file.unlink(missing_ok=True)
             if reconciled:
                 _record_url_mapping(url, slug, resolved_cwd)
-
-            # Option A (unconditional): phase 2/3 read .apply-state/* directly
-            # so conversation continuity with gather is NOT required.  Always
-            # start a fresh session at the gather→draft boundary regardless of
-            # whether the slug was reconciled.  Deleting the session-id file
-            # forces _get_or_create_session_id to mint a new uuid4; because
-            # the new JSONL does not yet exist, headless.session_exists() will
-            # return False for this ID and run_phase will use --session-id
-            # (not --resume), giving phase 2 a clean turn budget.
-            if apps_dir is not None:
-                (apps_dir / slug / ".apply-state" / "session-id").unlink(
-                    missing_ok=True
-                )
-            session_id = (
-                _get_or_create_session_id(apps_dir / slug, resolved_cwd)
-                if apps_dir is not None
-                else headless.deterministic_session_id(slug)
-            )
 
             # Render per-phase summary panel before the confirm gate
             state_dir = _apply_state_dir(slug, resolved_cwd)
