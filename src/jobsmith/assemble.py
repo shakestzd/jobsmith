@@ -355,7 +355,7 @@ def _load_user_identity(
     2. <master_author_yml>          — master author.yml (config.master.author_yml)
     3. config.user                  — .apply-config.yaml user fields
 
-    Returns a dict with keys name, email, phone, location, github, linkedin.
+    Returns a dict with keys name, email, phone, location, github, linkedin, homepage.
     Empty strings for any field not found.
     """
     sources: list[Path] = []
@@ -372,6 +372,7 @@ def _load_user_identity(
         "location": config_user.get("location", "") or "",
         "github": config_user.get("github", "") or "",
         "linkedin": config_user.get("linkedin", "") or "",
+        "homepage": config_user.get("homepage", "") or "",
     }
 
     for src in sources:
@@ -417,8 +418,62 @@ def _load_user_identity(
             user["phone"] = author["phone"]
         if not user["location"] and isinstance(author.get("address"), str):
             user["location"] = author["address"]
+        # Slice C: homepage flows to the resume header from author.yml.
+        # Defined at examples/master-yaml/author.yml but previously unconsumed.
+        if not user["homepage"] and isinstance(author.get("homepage"), str):
+            user["homepage"] = author["homepage"].strip()
 
     return user
+
+
+def load_projects(
+    master_dir: Path,
+    resume_settings,
+    author_homepage: str | None,
+) -> list[dict]:
+    """Load and filter projects.yml from a master directory (Slice C).
+
+    Returns ``[]`` when ``master_dir/projects.yml`` is absent — fully
+    backward compatible with masters that haven't adopted the schema yet.
+
+    Filters out:
+      - entries with ``excluded_from_resume: true``
+      - entries with ``kind`` in ``resume_settings.excluded_project_kinds``
+      - entries with ``is_project: false``
+      - entries whose ``url`` exactly matches ``author_homepage`` (defense
+        in depth — a portfolio site URL slipping through other filters
+        still won't appear twice in the rendered resume)
+    """
+    projects_path = master_dir / "projects.yml"
+    if not projects_path.exists():
+        return []
+
+    try:
+        data = yaml.safe_load(projects_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return []
+
+    raw = data.get("projects", []) if isinstance(data, dict) else []
+    if not isinstance(raw, list):
+        return []
+
+    excluded_kinds = set(getattr(resume_settings, "excluded_project_kinds", []) or [])
+    homepage = (author_homepage or "").strip().rstrip("/")
+
+    out: list[dict] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("excluded_from_resume") is True:
+            continue
+        if entry.get("kind") in excluded_kinds:
+            continue
+        if entry.get("is_project") is False:
+            continue
+        if homepage and (entry.get("url") or "").strip().rstrip("/") == homepage:
+            continue
+        out.append(entry)
+    return out
 
 
 def _extract_letter_body(letter: str | None) -> str:

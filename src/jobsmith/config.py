@@ -161,6 +161,11 @@ class ResumeSettings(BaseModel):
     template: Path = Path("templates/resume/resume-template.typ")
     max_pages: int = 1
     layout_iteration_limit: int = 2
+    # Slice C: project entries with these kinds are filtered out at load time.
+    # Defaults cover the most common "not real work" portfolio entries.
+    excluded_project_kinds: list[str] = Field(
+        default_factory=lambda: ["portfolio-site", "resume-source", "dotfiles"]
+    )
 
 
 class FitScorerSettings(BaseModel):

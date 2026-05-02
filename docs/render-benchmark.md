@@ -322,3 +322,72 @@ a private dotfiles repo or share with a trusted collaborator.
 The sanitization happens in `feedback.export()` in `src/jobsmith/feedback.py`:
 records are grouped by kind, only `lesson` strings are carried forward, and all
 per-application metadata is dropped before the YAML is serialized.
+
+---
+
+## Projects schema (Slice C — feat-5f184890)
+
+`master/projects.yml` is an optional file that declares your portfolio
+entries. The bullet-selector includes work bullets first; projects fill any
+remaining page space. When the file is absent, the resume renders exactly as
+before — full backward compatibility.
+
+### Schema
+
+```yaml
+projects:
+  - title: nova_fde
+    description: "Open-source data-pipeline framework used by 7 systems."
+    url: "https://github.com/patdoe/nova_fde"
+    highlights:
+      - "Cut pipeline boot time from 12s to 2s."
+    kind: open-source
+    is_project: true
+    excluded_from_resume: false
+    fillability: high
+    tags: [data, python, oss]
+```
+
+Field names align with [jsonresume](https://jsonresume.org)'s `projects` array
+where compatible (`title`, `description`, `url`, `highlights`) so future
+export paths stay open.
+
+### Filters (applied at load time)
+
+A project entry is suppressed if **any** of:
+
+- `excluded_from_resume: true`
+- `kind` is in `resume.excluded_project_kinds` (default:
+  `[portfolio-site, resume-source, dotfiles]`)
+- `is_project: false`
+- `url` exactly matches `author.yml.homepage` (defense in depth — keeps
+  your portfolio site URL out of the projects list even if other filters miss)
+
+### Suggested kinds
+
+Free-form. Pick what makes sense for you:
+
+| kind                | meaning                                      |
+| ------------------- | -------------------------------------------- |
+| `open-source`       | Public repo with documented impact           |
+| `commercial`        | Production system you built or led           |
+| `paper-deliverable` | Code/dashboard accompanying a publication    |
+| `client-engagement` | Independent or contractor work               |
+| `portfolio-site`    | Your own site (excluded by default)          |
+| `resume-source`     | This repo (excluded by default)              |
+| `dotfiles`          | Personal config (excluded by default)        |
+
+### Page-fit ordering
+
+The bullet-selector follows this rule (Slice C; tightened in Slice C.1):
+
+1. All kept work bullets
+2. JD-keyword-aligned project entries (`fillability: high` first)
+3. If only one slot remains, prefer ONE more work bullet over ANY project
+   — unless `resume.bullet_type_ordering` is set to `[project, work]`
+
+### Author homepage
+
+`author.yml.homepage` flows into the rendered resume header. Don't
+duplicate your portfolio URL as a project entry — the loader auto-suppresses
+URL matches as a defense-in-depth measure.
