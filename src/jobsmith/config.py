@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 CONFIG_FILENAME = ".apply-config.yaml"
 
@@ -24,6 +24,10 @@ class MasterPaths(BaseModel):
     author_yml: Path = Path("assets/content/author.yml")
     publication_yml: Path | None = None
     award_yml: Path | None = None
+    # Slice C: optional projects schema. None = no projects.yml configured.
+    # When set, jobsmith.assemble.load_projects() reads + filters this file
+    # and the path is injected into the Paths block as master.projects_yml.
+    projects_yml: Path | None = None
 
 
 class OutputPaths(BaseModel):
@@ -45,18 +49,57 @@ class UserIdentity(BaseModel):
 
 
 class VoiceSettings(BaseModel):
-    """Controls for prose-writer + cover-letter-writer phrasing."""
+    """Controls for prose-writer + cover-letter-writer phrasing.
+
+    Voice precedence chain (high to low):
+      1. result_verbs / action_verbs — user overrides; empty list = use seeds
+      2. benchmark-derived — extracted from benchmarks.resume_qmd by voice.py
+      3. GENERIC seed defaults — grounded in published authority (Harvard FAS,
+         MIT CAPD, Yale OCS, The Muse, Resume Worded, novoresume)
+
+    banned_adjectives: tier-1 puffery banned by default (Q6 option-c).
+      'innovative' and 'passionate' live here, NOT in banned_buzzwords.
+
+    Feedback (feedback.py) is a SEPARATE PARALLEL pathway — soft lessons read
+    by specialists, NOT structured verb lists. Do not merge into VoiceSettings.
+    """
 
     voice_guide_path: Path | None = None
     employment_gap_snippet: str | None = None
+
+    # Verb lists — empty means "use benchmark-derived or GENERIC seeds"
+    result_verbs: list[str] = Field(default_factory=list)
+    action_verbs: list[str] = Field(default_factory=list)
+
+    # Q6 option-c: tier-1 puffery defaults (hard-ban)
+    # NOTE: 'innovative' and 'passionate' live HERE, not in banned_buzzwords
+    banned_adjectives: list[str] = Field(
+        default_factory=lambda: [
+            "innovative",
+            "passionate",
+            "dynamic",
+            "results-driven",
+            "self-starter",
+        ]
+    )
+
+    # AI-tell banned action verbs (extended from original 6)
     banned_action_verbs: list[str] = Field(
         default_factory=lambda: [
+            # Original 6 — overly corporate / AI-generated tells
             "Architected",
             "Leveraged",
             "Orchestrated",
             "Spearheaded",
             "Delivered end-to-end",
             "Shipped end-to-end",
+            # AI-tell additions — passive or vague constructions
+            "Utilized",
+            "Responsible for",
+            "Worked on",
+            "Helped with",
+            "Participated in",
+            "Handled",
         ]
     )
     banned_buzzwords: list[str] = Field(
@@ -64,8 +107,7 @@ class VoiceSettings(BaseModel):
             "enterprise",
             "proprietary",
             "comprehensive",
-            "innovative",
-            "passionate",
+            # NOTE: 'innovative' and 'passionate' moved to banned_adjectives
         ]
     )
     banned_marketer_phrases: list[str] = Field(
@@ -75,6 +117,23 @@ class VoiceSettings(BaseModel):
             "proven track record",
         ]
     )
+
+    @model_validator(mode="after")
+    def _no_overlap_between_banned_lists(self):
+        """Enforce: no token appears in both banned_adjectives and banned_buzzwords.
+
+        Uses model_validator(mode="after") so both lists are fully resolved
+        regardless of declaration order. The previous field_validator on
+        banned_adjectives ran before banned_buzzwords was set in the
+        validation context — overlap on defaults silently slipped through.
+        """
+        overlap = set(self.banned_adjectives or []) & set(self.banned_buzzwords or [])
+        if overlap:
+            raise ValueError(
+                f"Tokens in both banned_adjectives and banned_buzzwords: {sorted(overlap)}. "
+                "Move them to one list only."
+            )
+        return self
 
 
 class AnchorThresholds(BaseModel):
@@ -110,6 +169,18 @@ class ResumeSettings(BaseModel):
     template: Path = Path("templates/resume/resume-template.typ")
     max_pages: int = 1
     layout_iteration_limit: int = 2
+    # Slice C: project entries with these kinds are filtered out at load time.
+    # Defaults cover the most common "not real work" portfolio entries.
+    excluded_project_kinds: list[str] = Field(
+        default_factory=lambda: ["portfolio-site", "resume-source", "dotfiles"]
+    )
+    # Slice C.1 (Q7 option-a): one-slot tiebreaker order between work bullets
+    # and project entries. Default is work-first (matches traditional resumes).
+    # Portfolio-heavy careers (designers, contractors with no traditional
+    # employment) override to ['project', 'work'].
+    bullet_type_ordering: list[str] = Field(
+        default_factory=lambda: ["work", "project"]
+    )
 
 
 class FitScorerSettings(BaseModel):

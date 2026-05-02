@@ -40,6 +40,9 @@ dependencies = [
     "pyyaml>=6.0",
     "typer>=0.12",
     "rich>=13.7",
+    # Slice A.1 — comment-preserving YAML round-trip for `jobsmith mark-anchors`.
+    # PyYAML cannot preserve comments or key order; ruamel.yaml can.
+    "ruamel.yaml>=0.18",
 ]
 
 [project.optional-dependencies]

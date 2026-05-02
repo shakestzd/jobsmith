@@ -10,6 +10,18 @@ personal = resume_data['personal']
 experience = resume_data['experience']
 education = resume_data['education']
 skills = resume_data['skills']
+
+
+def _strip_url_scheme(url: str) -> str:
+    s = (url or "").strip()
+    for prefix in ("https://", "http://"):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+            break
+    return s.rstrip("/")
+
+
+homepage_display = _strip_url_scheme(personal.get('homepage', ''))
 ```
 
 #set text(font: "New Computer Modern", size: 11pt)
@@ -25,7 +37,7 @@ skills = resume_data['skills']
   #text(size: 10pt)[
     `{python} personal['email']` | `{python} personal['phone']` | `{python} personal['address']`
 
-    LinkedIn: linkedin.com/in/`{python} personal['linkedin']` | GitHub: github.com/`{python} personal['github']`
+    LinkedIn: linkedin.com/in/`{python} personal['linkedin']` | GitHub: github.com/`{python} personal['github']``{python} f" | Web: {homepage_display}" if homepage_display else ""`
   ]
 ]
 

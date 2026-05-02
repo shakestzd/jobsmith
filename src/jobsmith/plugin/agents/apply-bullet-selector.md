@@ -21,14 +21,26 @@ Read `.apply-state/spec.json`:
 - `inputs.master_skill_yml` = `assets/content/skill.yml` (READ-ONLY)
 - `inputs.gap_resolutions` = `.apply-state/gap-resolutions.md` (may not exist on first call)
 
+From the Paths block (Slice C wiring):
+- `master.projects_yml` — raw projects.yml (READ-ONLY) when configured. Absent key means the user has no projects.yml.
+- `projects_filtered_json` — `.apply-state/projects-filtered.json`. Pre-filtered list of project entries that already passed the `excluded_from_resume`, `excluded_project_kinds`, `is_project: false`, and author-homepage filters. Read THIS for selection — never re-filter from the raw projects.yml. Absent key means no projects are eligible.
+
 ## Anchor rule (NON-NEGOTIABLE)
 
-A master bullet is an **anchor** if its text contains ANY of:
-- A dollar amount ≥ $10M (regex `_MONEY_RE` from the `jobsmith.anchors` package)
-- A percentage ≥ 50% (regex `_PERCENT_RE` from same file)
-- An asset count ≥ 100K (e.g. "200K solar assets")
+A master bullet is an **anchor** if EITHER condition holds:
+- It is declared explicitly via the dict form (Slice A): `{bullet, anchor: true, anchor_reason: ...}` — the user's mark wins regardless of regex.
+- (Fallback) Its text contains ANY of:
+    - A dollar amount ≥ $10M (regex `_MONEY_RE` from the `jobsmith.anchors` package)
+    - A percentage ≥ 50% (regex `_PERCENT_RE` from same file)
+    - An asset count ≥ 100K (e.g. "200K solar assets")
+
+A bullet declared `anchor: false` in the dict form is **droppable** even if its text matches a regex anchor — the explicit non-anchor mark wins.
 
 **Anchors are preserved unless dropped with a logged reason in `bullet-decisions.json`.** Reasons must be specific: "JD is finance-lite, $250M ITC unlock framing reads enterprise-IT" is acceptable; "didn't fit" is not. If you cannot articulate a real reason, halt — do not silently drop.
+
+**Anchor-reason propagation (Slice A contract):** When dropping a bullet whose master entry has `anchor_reason` set, the `bullet-decisions.json` `reason` value MUST be prefixed with `anchor_reason: <user's reason>; <your drop reason>`. This preserves provenance for downstream auditing — the reader sees both the user's original rationale for marking it an anchor AND why it was dropped despite that.
+
+You receive each bullet's `anchor_reason` (when present) in the inputs payload alongside `master_bullet_id` and `text`.
 
 When in doubt, KEEP the anchor. Re-rank it lower if the JD doesn't reward it, but keep it.
 
@@ -51,7 +63,29 @@ When in doubt, KEEP the anchor. Re-rank it lower if the JD doesn't reward it, bu
    - `ai-engineer` → "AI Engineering & Data Science | ML Systems & Automation | Renewable Energy Analytics"
    - `finance` → "Asset Management & Structured Finance | Waterfall Modeling | Renewable Energy"
    - `renewable-energy` → "Renewable Energy Analytics | Solar Asset Management | Data Infrastructure"
-9. Run the anchor guard before finalizing:
+9. **Selected Projects ordering (Slice C.1).** When the master ships `projects.yml`, integrate projects only AFTER work bullets have filled the page:
+   a. Include all kept work-position bullets first; projects fill remaining space only.
+   b. NEVER include a project flagged `excluded_from_resume: true` or whose `kind` matches `resume.excluded_project_kinds` (default: portfolio-site, resume-source, dotfiles).
+   c. When projects ARE included, prioritize: `is_project: true` with a public link → JD-keyword match in title/description → `fillability: high`.
+   d. **One-slot tiebreaker.** If only one slot is available, prefer adding ONE MORE work bullet from a kept position over adding ANY project — UNLESS `resume.bullet_type_ordering` is set to `[project, work]` (escape hatch for portfolio-heavy careers; default is `[work, project]`).
+
+10. **Restoration queue (Slice C.1, BREAKING SCHEMA CHANGE — coordinated with specialist-contracts.yaml).** Emit a `restoration_queue` object in `.apply-state/bullet-selection.json` with this shape:
+    ```json
+    {
+      "bullets": ["<bullet_id_1>", "<bullet_id_2>", ...],
+      "context_hash": "<sha256-hex>"
+    }
+    ```
+    Where:
+    - `bullets` lists the bullet_ids you DROPPED but would happily restore if page space opens up. Order by:
+      1. Anchor status (anchor-flagged bullets first)
+      2. Position recency (most recent positions first within anchor tier)
+      3. JD-keyword overlap
+    - `context_hash` is `sha256(jd-parsed.json bytes + your bullet-selection.json bytes)` computed at queue-creation time. The reviewer recomputes the same hash and halts with `reason=RESTORATION_STALE` on mismatch (prevents reflow loops on stale queue data).
+
+    The `apply-visual-layout-reviewer` agent reads `restoration_queue.bullets` to restore content WITHOUT re-invoking you (avoids extra LLM round-trips during page-fit retries).
+
+11. Run the anchor guard before finalizing:
    ```bash
    jobsmith anchor-check \
      --selection .apply-state/bullet-selection.json \
@@ -65,7 +99,7 @@ When in doubt, KEEP the anchor. Re-rank it lower if the JD doesn't reward it, bu
 
 ## Outputs
 
-Write `.apply-state/bullet-selection.json` per the contract schema (positions, anchor lists, kept/dropped/rewritten per bullet).
+Write `.apply-state/bullet-selection.json` per the contract schema (positions, anchor lists, kept/dropped/rewritten per bullet, **restoration_queue**).
 Write `.apply-state/bullet-diff.md` (anchor guard does this; you ensure it's complete).
 Write `.apply-state/bullet-decisions.json` — `{bullet_id: reason}` for every dropped anchor.
 Write `private/applications/{slug}/documents/work.yml`, `skill.yml`, `education.yml`, `author.yml`.

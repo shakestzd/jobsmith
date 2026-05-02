@@ -322,3 +322,179 @@ a private dotfiles repo or share with a trusted collaborator.
 The sanitization happens in `feedback.export()` in `src/jobsmith/feedback.py`:
 records are grouped by kind, only `lesson` strings are carried forward, and all
 per-application metadata is dropped before the YAML is serialized.
+
+---
+
+## Projects schema (Slice C — feat-5f184890)
+
+`master/projects.yml` is an optional file that declares your portfolio
+entries. The bullet-selector includes work bullets first; projects fill any
+remaining page space. When the file is absent, the resume renders exactly as
+before — full backward compatibility.
+
+### Schema
+
+```yaml
+projects:
+  - title: nova_fde
+    description: "Open-source data-pipeline framework used by 7 systems."
+    url: "https://github.com/patdoe/nova_fde"
+    highlights:
+      - "Cut pipeline boot time from 12s to 2s."
+    kind: open-source
+    is_project: true
+    excluded_from_resume: false
+    fillability: high
+    tags: [data, python, oss]
+```
+
+Field names align with [jsonresume](https://jsonresume.org)'s `projects` array
+where compatible (`title`, `description`, `url`, `highlights`) so future
+export paths stay open.
+
+### Filters (applied at load time)
+
+A project entry is suppressed if **any** of:
+
+- `excluded_from_resume: true`
+- `kind` is in `resume.excluded_project_kinds` (default:
+  `[portfolio-site, resume-source, dotfiles]`)
+- `is_project: false`
+- `url` exactly matches `author.yml.homepage` (defense in depth — keeps
+  your portfolio site URL out of the projects list even if other filters miss)
+
+### Suggested kinds
+
+Free-form. Pick what makes sense for you:
+
+| kind                | meaning                                      |
+| ------------------- | -------------------------------------------- |
+| `open-source`       | Public repo with documented impact           |
+| `commercial`        | Production system you built or led           |
+| `paper-deliverable` | Code/dashboard accompanying a publication    |
+| `client-engagement` | Independent or contractor work               |
+| `portfolio-site`    | Your own site (excluded by default)          |
+| `resume-source`     | This repo (excluded by default)              |
+| `dotfiles`          | Personal config (excluded by default)        |
+
+### Page-fit ordering
+
+The bullet-selector follows this rule (Slice C; tightened in Slice C.1):
+
+1. All kept work bullets
+2. JD-keyword-aligned project entries (`fillability: high` first)
+3. If only one slot remains, prefer ONE more work bullet over ANY project
+   — unless `resume.bullet_type_ordering` is set to `[project, work]`
+
+### Author homepage
+
+`author.yml.homepage` flows into the rendered resume header. Don't
+duplicate your portfolio URL as a project entry — the loader auto-suppresses
+URL matches as a defense-in-depth measure.
+
+---
+
+## Voice rubric (Slice B.1 — feat-2740cc2f)
+
+The voice rubric controls verb choice, adjective bans, and marketer-phrase
+filters across the resume and cover-letter specialists. As of Slice B.1 the
+rubric lives in `.apply-state/voice-profile.json`, written by
+`jobsmith.voice.load_voice_profile()` and read by:
+
+- `apply-resume-tell-fixer` (banned verbs / adjectives / marketer phrases)
+- `apply-prose-writer` (banned verbs + result_verbs preferred openers)
+- `apply-cover-letter-writer` (banned marketer phrases for the opening)
+
+### Precedence chain
+
+```
+(highest priority)
+  3. user config — .apply-config.yaml `voice` section
+                   (result_verbs, action_verbs, banned_adjectives, ...)
+  2. benchmark-derived — first-word frequency from benchmarks.resume_qmd,
+                          classified by metric proximity
+  1. GENERIC seeds — 12 result verbs + 12 action verbs + 5 banned adjectives,
+                     grounded in published authority
+(lowest priority)
+```
+
+`load_voice_profile()` resolves these layers and writes a single resolved
+profile. Specialists never re-derive the rubric.
+
+### Where feedback fits
+
+`feedback.py` (live since feat-cb20674f) is a **separate parallel pathway**.
+Feedback records are free-text "soft lessons" that prose-writer and
+cover-letter-writer read alongside (but separately from) the voice profile.
+Feedback is NEVER merged into the structured `banned_verbs` /
+`banned_adjectives` lists — it stays semantically distinct so:
+
+- Voice rules answer "what tokens are off-limits across the whole user".
+- Feedback records answer "in similar past contexts, what did the user
+  rewrite that the agent missed?"
+
+The two layers compose at specialist read-time, not at config-merge time.
+
+### Cache invalidation
+
+Cache key = `(benchmark_qmd_mtime, content_hash(qmd_text))`. Either change
+triggers recompute. The on-disk `voice-profile.json` is also Pydantic-validated
+on load — schema mismatch falls back to live recompute with a warning.
+This keeps the cache robust to:
+
+- Filesystem clock skew (mtime-only would be unsafe)
+- Hand-edits to the cache file (validation catches malformed JSON)
+- Schema migrations (older caches recompute cleanly)
+
+---
+
+## Marking anchors (Slice A.1 — feat-beb6becf)
+
+`jobsmith mark-anchors` is the migration helper for moving from
+plain-string bullets to the Slice A object form with explicit `anchor:`
+declarations.
+
+### Interactive walk (default)
+
+```bash
+jobsmith mark-anchors --master master/work.yml
+```
+
+Walks every bullet in the master file. For each one:
+
+- `a` → mark as anchor; you'll be asked for a one-line `anchor_reason`.
+- `n` → mark as non-anchor (overrides regex).
+- `s` → skip (leave as plain string; regex fallback applies).
+- `q` → quit-and-save (commits choices made so far).
+
+Bullets already in object form with explicit `anchor:` are skipped
+unless you pass `--force`.
+
+### Dry-run
+
+```bash
+jobsmith mark-anchors --master master/work.yml --dry-run
+```
+
+Prints a unified diff of proposed edits without touching the file.
+Useful for previewing changes before committing.
+
+### Batch mode (power users)
+
+```bash
+jobsmith mark-anchors --master master/work.yml --batch
+```
+
+Generates `master/bullet-anchor-todo.md` listing every bullet with a
+`[ ]` checkbox. You edit the file in your text editor, replacing each
+`[ ]` with `[a]`, `[n]`, or `[s]` and filling in `reason:` lines for
+anchors. Re-run with `--batch` to apply (apply mode is on the roadmap;
+the current `--batch` only writes the template).
+
+### Round-trip safety
+
+Comments, key order, and indentation are preserved via
+[`ruamel.yaml`](https://yaml.readthedocs.io). The original file's
+header comments and per-position descriptions survive every annotation
+pass. Idempotent: re-running over an already-annotated file is a no-op
+unless `--force` is set.

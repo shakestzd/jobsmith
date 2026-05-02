@@ -82,7 +82,28 @@ For each issue, propose a CONCRETE fix:
 Example fix proposal:
 > Bullet 2 of Company Finance role wraps "reliability" to a near-empty trailing line. Suggest: "Built 7 ETL pipelines (Python, DLT, DuckDB) delivering portfolio KPIs for 500K assets at 99.9% reliability" → "Built 7 ETL pipelines (Python, DLT, DuckDB) for 500K assets with 99.9% uptime" (saves 12 chars, drops "reliability" for "uptime").
 
-### Step 4 — Apply or escalate
+### Step 4 — Restoration check (Slice C.1, BEFORE proposing word swaps)
+
+`bullet-selection.json.restoration_queue` is an object:
+```json
+{"bullets": ["<bullet_id_1>", ...], "context_hash": "<sha256-hex>"}
+```
+
+When the rendered PDF has whitespace ≥ 20% of a column AND `restoration_queue.bullets` is non-empty:
+
+1. **Staleness check FIRST.** Recompute `sha256(jd-parsed.json bytes + bullet-selection.json bytes)`. If it does not match `restoration_queue.context_hash`, halt with `reason=RESTORATION_STALE` — request a fresh bullet-selector run rather than risk reflow loops on stale queue data.
+2. Pop the next K ids from `restoration_queue.bullets` (typically K=1 or 2; pick based on whitespace size).
+3. Restore them to `private/applications/{slug}/documents/work.yml` in their original position-and-rank order.
+4. Set `decision = re-render` and emit a directive: `restore: [bullet_id, ...]`. The orchestrator re-dispatches the renderer with the updated work.yml.
+5. **Do NOT re-invoke the bullet-selector** — the queue was pre-computed. This avoids extra LLM round-trips during page-fit retries.
+
+Only after the queue is empty (or whitespace < 20%) should you proceed to the word-swap fixes below.
+
+**Hard cap: 2 restoration retries per render.** On the third retry, halt with `reason=RESTORATION_LIMIT`.
+
+### Step 5 — Apply or escalate (word-swap fallback)
+
+If restoration_queue is empty (or already exhausted) and issues remain:
 
 If `iteration < 2`:
 - Apply the proposed fixes via Edit.

@@ -9,10 +9,12 @@ from jobsmith.anchors import (
     DEFAULT_MONEY_THRESHOLD_USD,
     DEFAULT_PERCENT_THRESHOLD,
     extract_anchors,
+    is_anchor,
     parse_asset_count,
     parse_money_to_usd,
     parse_percent,
 )
+from jobsmith.guard import Bullet
 
 
 # ---------- parse_money_to_usd ----------
@@ -144,3 +146,57 @@ def test_default_thresholds() -> None:
     assert DEFAULT_MONEY_THRESHOLD_USD == 10_000_000
     assert DEFAULT_PERCENT_THRESHOLD == 50.0
     assert DEFAULT_ASSET_COUNT_THRESHOLD == 100_000
+
+
+# ---------- is_anchor ----------
+
+
+def _make_bullet(text: str, anchor_explicit: bool | None = None) -> Bullet:
+    """Helper: create a minimal Bullet for is_anchor tests."""
+    return Bullet(
+        bullet_id="test000000",
+        text=text,
+        company="TestCo",
+        position_title="Test Title",
+        position_index=0,
+        bullet_index=0,
+        anchor_explicit=anchor_explicit,
+    )
+
+
+def test_is_anchor_explicit_true_overrides_no_metric() -> None:
+    """anchor_explicit=True wins even when text has no regex-detectable metric."""
+    bullet = _make_bullet("Improved team dynamics and communication", anchor_explicit=True)
+    assert is_anchor(bullet) is True
+
+
+def test_is_anchor_explicit_false_overrides_regex_match() -> None:
+    """anchor_explicit=False wins even when text would match the regex."""
+    bullet = _make_bullet("Cut waste by $50M", anchor_explicit=False)
+    assert is_anchor(bullet) is False
+
+
+def test_is_anchor_string_form_falls_through_to_regex() -> None:
+    """anchor_explicit=None (string-form bullet) falls through to regex detection."""
+    bullet = _make_bullet("Cut by 75%", anchor_explicit=None)
+    assert is_anchor(bullet) is True
+
+
+# Roborev fix (job 918): Bullet.is_anchor PROPERTY must also honor anchor_explicit
+# (the standalone is_anchor function did, but the property was still bool(self.anchors))
+
+
+def test_bullet_is_anchor_property_explicit_true_overrides_no_metric() -> None:
+    """Bullet.is_anchor property: anchor_explicit=True wins even with no metric."""
+    bullet = _make_bullet("Improved team dynamics", anchor_explicit=True)
+    assert bullet.is_anchor is True
+
+
+def test_bullet_is_anchor_property_explicit_false_overrides_regex_match() -> None:
+    """Bullet.is_anchor property: anchor_explicit=False wins even when text matches regex."""
+    from jobsmith.anchors import Anchor
+    bullet = _make_bullet("Cut waste by $50M", anchor_explicit=False)
+    bullet.anchors = [Anchor(kind="money", raw="$50M", value=50_000_000.0)]
+    assert bullet.is_anchor is False, (
+        "Property must honor anchor_explicit=False even when bullet.anchors is non-empty"
+    )

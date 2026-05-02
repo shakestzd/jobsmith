@@ -9,6 +9,11 @@ personal:
   github: "your-github"
   linkedin: "your-linkedin"
   address: "City, ST, USA"
+  # Slice C: optional homepage URL. Loaded from author.yml.homepage by
+  # _load_user_identity. Empty string = omitted from header. Schemes
+  # (https://) are stripped at render time so 'patdoe.dev' and
+  # 'https://patdoe.dev' display the same.
+  homepage: ""
   positions:
     - "Senior Data Analyst"
     - "Data Engineer"

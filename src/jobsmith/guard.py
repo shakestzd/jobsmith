@@ -32,6 +32,7 @@ from .anchors import (
     _ASSET_COUNT_RE,
     _MONEY_RE,
     _PERCENT_RE,
+    is_anchor,
 )
 
 # ---------- types ----------
@@ -48,9 +49,26 @@ class Bullet:
     position_index: int
     bullet_index: int
     anchors: list[Anchor] = field(default_factory=list)
+    # Object-form fields — populated when details entry is a dict, not a string.
+    anchor_explicit: bool | None = None   # user-declared anchor flag (overrides regex)
+    anchor_reason: str | None = None      # human rationale for the anchor designation
+    tags: list[str] = field(default_factory=list)
+    drop_when: str | None = None
 
     @property
     def is_anchor(self) -> bool:
+        """Explicit-aware anchor view (Slice A).
+
+        Precedence matches ``jobsmith.anchors.is_anchor()``:
+          1. ``anchor_explicit is not None`` → that value wins (user mark).
+          2. otherwise → regex fallback (``bool(self.anchors)``).
+
+        This keeps public callers consistent with check_anchors() so a
+        bullet marked ``anchor: true`` without a regex metric is still
+        load-bearing, and ``anchor: false`` with a metric is droppable.
+        """
+        if self.anchor_explicit is not None:
+            return self.anchor_explicit
         return bool(self.anchors)
 
 
@@ -147,7 +165,21 @@ def parse_master_bullets(
     for pi, pos in enumerate(data):
         company = pos.get("location", "")
         title = pos.get("title", "")
-        for bi, text in enumerate(pos.get("details", []) or []):
+        for bi, entry in enumerate(pos.get("details", []) or []):
+            # Support both string form ("text") and dict form ({bullet, anchor, ...}).
+            if isinstance(entry, dict):
+                text = entry.get("bullet", "")
+                anchor_explicit: bool | None = entry.get("anchor", None)
+                anchor_reason: str | None = entry.get("anchor_reason", None)
+                tags: list[str] = entry.get("tags", []) or []
+                drop_when: str | None = entry.get("drop_when", None)
+            else:
+                text = entry
+                anchor_explicit = None
+                anchor_reason = None
+                tags = []
+                drop_when = None
+
             anchors = find_anchors_in_text(
                 text, money_threshold, percent_threshold, asset_count_threshold
             )
@@ -160,6 +192,10 @@ def parse_master_bullets(
                     position_index=pi,
                     bullet_index=bi,
                     anchors=anchors,
+                    anchor_explicit=anchor_explicit,
+                    anchor_reason=anchor_reason,
+                    tags=tags,
+                    drop_when=drop_when,
                 )
             )
     return out
@@ -211,7 +247,8 @@ def check_anchors(
     bullets = parse_master_bullets(
         master_path, money_threshold, percent_threshold, asset_count_threshold
     )
-    anchors = [b for b in bullets if b.is_anchor]
+    thresholds = (money_threshold, percent_threshold, asset_count_threshold)
+    anchors = [b for b in bullets if is_anchor(b, *thresholds)]
     selection = load_selection(selection_path)
     decisions = load_decisions(decisions_path) if decisions_path else {}
 

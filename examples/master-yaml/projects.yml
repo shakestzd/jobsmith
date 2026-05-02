@@ -1,0 +1,50 @@
+# Sample master projects schema for jobsmith (Slice C).
+#
+# The bullet-selector includes work bullets first; projects fill any
+# remaining page space. Entries are filtered at load time:
+#   - excluded_from_resume: true        — never included
+#   - kind in excluded_project_kinds    — never included (default kinds:
+#                                          portfolio-site, resume-source, dotfiles)
+#   - is_project: false                 — never included (meta entries)
+#   - url == author.yml.homepage        — never included (defense in depth)
+#
+# Field names align with jsonresume's `projects` array where compatible
+# (title, description, url, highlights), so future export paths stay open.
+#
+# Suggested kinds (free-form; users invent their own):
+#   open-source | commercial | paper-deliverable | portfolio-site |
+#   resume-source | dotfiles | client-engagement
+#
+# fillability: low | medium | high — hints to the bullet-selector about
+# which projects should be preferred when filling remaining space.
+
+projects:
+  - title: nova_fde
+    description: "Open-source data-pipeline framework used across 7 production systems."
+    url: "https://github.com/patdoe/nova_fde"
+    highlights:
+      - "Cut pipeline boot time from 12s to 2s via lazy-import refactor."
+      - "Adopted by 3 external teams in Q3 2025."
+    kind: open-source
+    is_project: true
+    excluded_from_resume: false
+    fillability: high
+    tags: [data, python, oss]
+
+  - title: "Personal Portfolio Site"
+    description: "Static site listing CV, projects, blog. Sourced from this repo."
+    url: "https://patdoe.dev"   # matches author.yml.homepage → auto-suppressed
+    kind: portfolio-site         # also in default excluded_project_kinds
+    is_project: false
+    excluded_from_resume: true
+    fillability: low
+    tags: [meta]
+
+  - title: "Climate-Impact Dashboard (paper deliverable)"
+    description: "D3 dashboard accompanying the 2024 J. Climate Modeling paper."
+    url: "https://patdoe.dev/papers/climate-2024"
+    kind: paper-deliverable
+    is_project: true
+    excluded_from_resume: false
+    fillability: medium
+    tags: [d3, climate, viz]

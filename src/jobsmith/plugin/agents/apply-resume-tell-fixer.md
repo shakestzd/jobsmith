@@ -23,13 +23,12 @@ Read `.apply-state/spec.json`:
 
 ## Detection categories
 
+> **Voice rules are user-configurable (Slice B.1).** Read banned verbs and adjectives from the path injected as `voice_profile_json` in the Paths block — typically `.apply-state/voice-profile.json`. The JSON has fields `banned_verbs` (full list including AI-tells), `banned_adjectives` (puffery), and `banned_marketer_phrases`. Treat the JSON as the source of truth; the lists below are the FALLBACK defaults when no voice profile is available (e.g. user hasn't run any `/apply` yet).
+
 ### Action-verb tells (BLOCKING)
-- Architected
-- Leveraged / Leveraging
-- Orchestrated
-- Spearheaded
-- Delivered end-to-end
-- Shipped end-to-end
+Read `voice_profile_json.banned_verbs`. Default fallback list (when no voice profile exists):
+- Architected, Leveraged / Leveraging, Orchestrated, Spearheaded, Delivered end-to-end, Shipped end-to-end
+- AI-tell additions: Utilized, "Responsible for", "Worked on", "Helped with", "Participated in", Handled
 
 Replace with: Built, Wrote, Designed, Set up, Ran, Owned, Shipped (alone, not "end-to-end"). Choose the verb that fits the actual activity — Built for net-new, Owned for ongoing.
 
@@ -42,10 +41,14 @@ Replace with: Built, Wrote, Designed, Set up, Ran, Owned, Shipped (alone, not "e
 - Replace with substantive content. Credentials live in the Education section, not as sentence-ending labels.
 
 ### Buzzword bloat (BLOCKING)
-- enterprise, proprietary, comprehensive, innovative, passionate
+Read `voice_profile_json.banned_adjectives` and `voice_profile_json.banned_buzzwords`.
+Default fallback (when no voice profile exists):
+- banned_adjectives (tier-1 puffery): innovative, passionate, dynamic, results-driven, self-starter
+- banned_buzzwords: enterprise, proprietary, comprehensive
 - Each gets a category-specific replacement. "Innovative" → cut entirely or replace with the specific innovation. "Comprehensive" → cut entirely or use a number.
 
 ### Marketer voice (BLOCKING)
+Read `voice_profile_json.banned_marketer_phrases`. Default fallback:
 - "perfect fit", "passionate about", "proven track record"
 - Replace with substantive specifics or cut.
 

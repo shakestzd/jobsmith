@@ -230,6 +230,15 @@ def _build_paths(slug: str, cwd: Path, plugin_directory: Path) -> dict[str, str]
             )
         if config.master.award_yml is not None:
             result["master.award_yml"] = str(resolve(config.master.award_yml, repo_root))
+        # Slice C: projects schema. Inject the raw path AND a filtered JSON
+        # so the bullet-selector can include the projects already pre-filtered
+        # (excluded_from_resume / excluded_kinds / is_project / homepage URL).
+        # The pre-filter happens here rather than in the agent so the agent
+        # never sees suppressed entries.
+        if config.master.projects_yml is not None:
+            projects_path = resolve(config.master.projects_yml, repo_root)
+            if projects_path.exists():
+                result["master.projects_yml"] = str(projects_path)
 
         # apply_state_dir — absolute path for the current slug
         apps_dir = resolve(config.output.applications_dir, repo_root)
@@ -258,6 +267,71 @@ def _build_paths(slug: str, cwd: Path, plugin_directory: Path) -> dict[str, str]
         feedback_dir = repo_root / "private" / "feedback"
         if feedback_dir.exists():
             result["feedback.dir"] = str(feedback_dir.resolve())
+
+        # Voice profile (Slice B.1) — derived from benchmarks.resume_qmd by
+        # voice.load_voice_profile() and cached at .apply-state/voice-profile.json.
+        # tell-fixer / prose-writer / cover-letter-writer read banned_verbs /
+        # banned_adjectives / result_verbs from this JSON instead of inlining
+        # them. We compute the profile here so the cache is written before any
+        # specialist runs; load_voice_profile() handles cache hit/miss internally.
+        # Pass the already-resolved benchmark path so voice.py never has to
+        # re-resolve relative to CWD (would silently miss the file when
+        # `jobsmith apply` is invoked from a subdirectory).
+        from .voice import load_voice_profile  # local import — avoid circular at module load
+        voice_cache_dir = apps_dir / slug / ".apply-state"
+        resolved_benchmark = result.get("benchmark.resume_qmd")
+        try:
+            load_voice_profile(
+                config,
+                cache_dir=voice_cache_dir,
+                benchmark_path_override=Path(resolved_benchmark) if resolved_benchmark else None,
+            )
+        except Exception:
+            # Voice profile is non-blocking: if computation fails (corrupt
+            # benchmark, etc.), specialists fall back to seed defaults.
+            pass
+        result["voice_profile_json"] = str(voice_cache_dir / "voice-profile.json")
+
+        # Slice C: pre-filter projects.yml and emit projects-filtered.json so
+        # bullet-selector consumes only entries that pass the kind / homepage /
+        # excluded_from_resume / is_project filters. The agent never sees
+        # suppressed entries — this prevents the Clay bug where the user's
+        # portfolio site was wrongly listed as a project deliverable.
+        if config.master.projects_yml is not None:
+            projects_path = resolve(config.master.projects_yml, repo_root)
+            if projects_path.exists():
+                from .assemble import load_projects
+                # author.homepage may not be loaded yet; we resolve it best-effort
+                # from author.yml so the URL-matches filter works.
+                author_yml_path = resolve(config.master.author_yml, repo_root)
+                author_homepage: str | None = None
+                if author_yml_path.exists():
+                    try:
+                        import yaml as _yaml  # local — only here for one-shot read
+                        ay = _yaml.safe_load(author_yml_path.read_text())
+                        author = (ay or {}).get("author")
+                        if isinstance(author, list) and author:
+                            author = author[0]
+                        if isinstance(author, dict):
+                            author_homepage = (author.get("homepage") or "").strip() or None
+                    except Exception:
+                        author_homepage = None
+                try:
+                    # Pass the EXACT projects file path — load_projects accepts
+                    # a file or directory. Earlier we passed parent which only
+                    # worked for files literally named "projects.yml".
+                    filtered = load_projects(
+                        projects_path, config.resume, author_homepage
+                    )
+                    voice_cache_dir.mkdir(parents=True, exist_ok=True)
+                    filtered_path = voice_cache_dir / "projects-filtered.json"
+                    import json as _json
+                    filtered_path.write_text(_json.dumps(filtered, indent=2))
+                    result["projects_filtered_json"] = str(filtered_path)
+                except Exception:
+                    # Pre-filter is non-blocking; bullet-selector falls back
+                    # to "no projects" when the key is absent.
+                    pass
 
     return result
 

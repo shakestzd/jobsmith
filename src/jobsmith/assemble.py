@@ -355,7 +355,7 @@ def _load_user_identity(
     2. <master_author_yml>          — master author.yml (config.master.author_yml)
     3. config.user                  — .apply-config.yaml user fields
 
-    Returns a dict with keys name, email, phone, location, github, linkedin.
+    Returns a dict with keys name, email, phone, location, github, linkedin, homepage.
     Empty strings for any field not found.
     """
     sources: list[Path] = []
@@ -372,6 +372,7 @@ def _load_user_identity(
         "location": config_user.get("location", "") or "",
         "github": config_user.get("github", "") or "",
         "linkedin": config_user.get("linkedin", "") or "",
+        "homepage": config_user.get("homepage", "") or "",
     }
 
     for src in sources:
@@ -417,8 +418,90 @@ def _load_user_identity(
             user["phone"] = author["phone"]
         if not user["location"] and isinstance(author.get("address"), str):
             user["location"] = author["address"]
+        # Slice C: homepage flows to the resume header from author.yml.
+        # Defined at examples/master-yaml/author.yml but previously unconsumed.
+        if not user["homepage"] and isinstance(author.get("homepage"), str):
+            user["homepage"] = author["homepage"].strip()
 
     return user
+
+
+def _normalize_url(url: str | None) -> str:
+    """Normalize a URL for cross-format equality.
+
+    Strips scheme (`http://`, `https://`), leading `www.`, trailing slash,
+    and surrounding whitespace. Lowercased. So `https://patdoe.dev/`,
+    `www.patdoe.dev`, and `patdoe.dev` all collapse to `patdoe.dev`.
+    """
+    if not url:
+        return ""
+    s = url.strip().lower()
+    for prefix in ("https://", "http://"):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+            break
+    if s.startswith("www."):
+        s = s[4:]
+    return s.rstrip("/")
+
+
+def load_projects(
+    projects_path_or_master_dir: Path,
+    resume_settings,
+    author_homepage: str | None,
+) -> list[dict]:
+    """Load and filter a projects.yml file (Slice C).
+
+    Accepts either:
+      - the exact projects.yml path (preferred — supports
+        ``master.projects_yml: data/portfolio-projects.yml`` configs)
+      - a master directory (legacy — looks for ``<dir>/projects.yml``)
+
+    Returns ``[]`` when the resolved file is absent — fully backward
+    compatible with masters that haven't adopted the schema yet.
+
+    Filters out:
+      - entries with ``excluded_from_resume: true``
+      - entries with ``kind`` in ``resume_settings.excluded_project_kinds``
+      - entries with ``is_project: false``
+      - entries whose ``url`` matches ``author_homepage`` after URL
+        normalization (scheme, www, trailing slash) — defense in depth
+        against the portfolio site appearing twice in the rendered resume
+    """
+    p = Path(projects_path_or_master_dir)
+    if p.is_dir():
+        projects_path = p / "projects.yml"
+    else:
+        projects_path = p
+    if not projects_path.exists():
+        return []
+
+    try:
+        data = yaml.safe_load(projects_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return []
+
+    raw = data.get("projects", []) if isinstance(data, dict) else []
+    if not isinstance(raw, list):
+        return []
+
+    excluded_kinds = set(getattr(resume_settings, "excluded_project_kinds", []) or [])
+    homepage_norm = _normalize_url(author_homepage)
+
+    out: list[dict] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("excluded_from_resume") is True:
+            continue
+        if entry.get("kind") in excluded_kinds:
+            continue
+        if entry.get("is_project") is False:
+            continue
+        if homepage_norm and _normalize_url(entry.get("url")) == homepage_norm:
+            continue
+        out.append(entry)
+    return out
 
 
 def _extract_letter_body(letter: str | None) -> str:

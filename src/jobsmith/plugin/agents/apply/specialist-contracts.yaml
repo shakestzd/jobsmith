@@ -278,17 +278,40 @@ specialists:
         - master_work_yml: "assets/content/work.yml  (READ-ONLY)"
         - master_skill_yml: "assets/content/skill.yml  (READ-ONLY)"
         - gap_resolutions: ".apply-state/gap-resolutions.md  (may not exist on first call)"
+      # Slice A: each bullet payload carries optional anchor metadata from
+      # object-form entries in master/work.yml. When anchor_reason is set,
+      # the selector MUST propagate it into bullet-decisions.json via the
+      # 'anchor_reason: <reason>; <drop_reason>' prefix (see writes below).
+      bullet_payload_shape: |
+        {master_bullet_id, text,
+         anchor_explicit: bool|null,
+         anchor_reason: string|null,
+         tags: list[string],
+         drop_when: string|null}
     outputs:
       writes:
         - .apply-state/bullet-selection.json:
             positions: "list[{company, title, bullets: [{master_bullet_id, included: bool, rephrased: string|null, reason_if_dropped: string|null}]}]"
-            anchor_bullets_master: "list[bullet_id]  (computed by selector via _MONEY_RE / _PERCENT_RE)"
+            anchor_bullets_master: "list[bullet_id]  (anchor_explicit OR regex via _MONEY_RE / _PERCENT_RE / _ASSET_COUNT_RE)"
             anchor_bullets_kept: "list[bullet_id]"
             anchor_bullets_dropped: "list[{bullet_id, reason, JD_keyword_replacing_it}]"
+            # Slice C.1 (BREAKING) — pre-computed queue of dropped-but-restorable
+            # bullets for visual-layout-reviewer to consume without re-invoking
+            # the bullet-selector. The bullets list is ordered by anchor status
+            # → position recency → JD-keyword overlap. context_hash is sha256
+            # of (jd-parsed.json + bullet-selection.json) computed at queue
+            # creation; the reviewer compares it to the current value and
+            # halts with reason=RESTORATION_STALE on mismatch (avoids reflow
+            # loops on out-of-date queue data).
+            restoration_queue: "{bullets: list[bullet_id], context_hash: string}  (Slice C.1)"
         - .apply-state/bullet-diff.md:
             content: "side-by-side master vs tailored, anchor bullets highlighted"
         - .apply-state/bullet-decisions.json:
             updates: "{bullet_id: reason}  for every dropped anchor"
+            anchor_reason_propagation: |
+              When the master bullet has anchor_reason set, the reason value MUST
+              be prefixed with 'anchor_reason: <user reason>; <drop reason>'.
+              Example: 'anchor_reason: Largest cost-out program; JD finance-lite.'
         - applications/{slug}/documents/work.yml:
             content: "tailored work.yml — selection + ordering + JD-keyword phrasing only"
         - applications/{slug}/documents/skill.yml:
@@ -491,14 +514,27 @@ specialists:
       Detect and propose fixes for AI tells in RESUME prose. NOT a
       wrapper on tzd-labs:ai-tell-fixer (its word list is academic).
       Calibrated against the 2026-04-23 Google + OpenAI failures.
+    voice_profile_source: |
+      Slice B.1: read banned_verbs / banned_adjectives / banned_marketer_phrases
+      from voice_profile_json (Paths block; .apply-state/voice-profile.json).
+      The lists below are FALLBACK defaults when no voice profile exists.
     detection_categories:
-      action_verb_tells:
+      action_verb_tells_fallback:
+        # Authoritative source: voice_profile_json.banned_verbs.
+        # Listed here only as the back-compat default for runs without a profile.
         - Architected
         - Leveraged
         - Orchestrated
         - Spearheaded
         - "Delivered end-to-end"
         - "Shipped end-to-end"
+        # AI-tell additions (Slice B):
+        - Utilized
+        - "Responsible for"
+        - "Worked on"
+        - "Helped with"
+        - "Participated in"
+        - Handled
       em_dash_density:
         rule: "more than 2 em-dashes per paragraph flagged"
       parallel_sentence_rhythm:

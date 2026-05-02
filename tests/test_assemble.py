@@ -13,6 +13,7 @@ from jobsmith.assemble import (
     _hm_dossier_md,
     _keyword_inline,
     _load_ai_tell_report,
+    _load_user_identity,
     _must_have_table,
     _outreach_snippets_block,
     _render_humanizer_audit_block,
@@ -945,3 +946,42 @@ def test_all_theme_scss_files_have_quarto_layer_markers() -> None:
         "The following SCSS files are missing a Quarto layer boundary marker "
         f"(/*-- scss:defaults --*/ etc.):\n" + "\n".join(f"  {p}" for p in missing)
     )
+
+
+# ---------- _load_user_identity homepage wiring (Slice C — feat-5f184890) ----------
+
+
+def test_load_user_identity_includes_homepage(tmp_path: Path) -> None:
+    """Homepage from author.yml should flow into the identity dict."""
+    master_author = tmp_path / "author.yml"
+    master_author.write_text(yaml.safe_dump({
+        "author": [{
+            "name": {"first": "Pat", "last": "Doe"},
+            "email": "pat@example.com",
+            "homepage": "patdoe.dev",
+        }],
+    }))
+    user = _load_user_identity(
+        app_dir=tmp_path / "nonexistent_app",
+        master_author_yml=master_author,
+        config_user={},
+    )
+    assert user["homepage"] == "patdoe.dev"
+    assert user["name"] == "Pat Doe"
+
+
+def test_load_user_identity_no_homepage_field(tmp_path: Path) -> None:
+    """Backward compat: author.yml without homepage returns empty string."""
+    master_author = tmp_path / "author.yml"
+    master_author.write_text(yaml.safe_dump({
+        "author": [{
+            "name": {"first": "Pat", "last": "Doe"},
+            "email": "pat@example.com",
+        }],
+    }))
+    user = _load_user_identity(
+        app_dir=tmp_path / "nonexistent_app",
+        master_author_yml=master_author,
+        config_user={},
+    )
+    assert user["homepage"] == ""
