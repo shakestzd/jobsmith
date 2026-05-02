@@ -59,7 +59,20 @@ When in doubt, KEEP the anchor. Re-rank it lower if the JD doesn't reward it, bu
    - `ai-engineer` → "AI Engineering & Data Science | ML Systems & Automation | Renewable Energy Analytics"
    - `finance` → "Asset Management & Structured Finance | Waterfall Modeling | Renewable Energy"
    - `renewable-energy` → "Renewable Energy Analytics | Solar Asset Management | Data Infrastructure"
-9. Run the anchor guard before finalizing:
+9. **Selected Projects ordering (Slice C.1).** When the master ships `projects.yml`, integrate projects only AFTER work bullets have filled the page:
+   a. Include all kept work-position bullets first; projects fill remaining space only.
+   b. NEVER include a project flagged `excluded_from_resume: true` or whose `kind` matches `resume.excluded_project_kinds` (default: portfolio-site, resume-source, dotfiles).
+   c. When projects ARE included, prioritize: `is_project: true` with a public link → JD-keyword match in title/description → `fillability: high`.
+   d. **One-slot tiebreaker.** If only one slot is available, prefer adding ONE MORE work bullet from a kept position over adding ANY project — UNLESS `resume.bullet_type_ordering` is set to `[project, work]` (escape hatch for portfolio-heavy careers; default is `[work, project]`).
+
+10. **Restoration queue (Slice C.1, BREAKING SCHEMA CHANGE — coordinated with specialist-contracts.yaml).** Emit a `restoration_queue` field in `.apply-state/bullet-selection.json` listing the bullet_ids you DROPPED but would happily restore if page space opens up. Order by:
+    1. Anchor status (anchor-flagged bullets first)
+    2. Position recency (most recent positions first within anchor tier)
+    3. JD-keyword overlap
+
+    The `apply-visual-layout-reviewer` agent reads this queue to restore bullets WITHOUT re-invoking you (avoids extra LLM round-trips during page-fit retries).
+
+11. Run the anchor guard before finalizing:
    ```bash
    jobsmith anchor-check \
      --selection .apply-state/bullet-selection.json \
@@ -73,7 +86,7 @@ When in doubt, KEEP the anchor. Re-rank it lower if the JD doesn't reward it, bu
 
 ## Outputs
 
-Write `.apply-state/bullet-selection.json` per the contract schema (positions, anchor lists, kept/dropped/rewritten per bullet).
+Write `.apply-state/bullet-selection.json` per the contract schema (positions, anchor lists, kept/dropped/rewritten per bullet, **restoration_queue**).
 Write `.apply-state/bullet-diff.md` (anchor guard does this; you ensure it's complete).
 Write `.apply-state/bullet-decisions.json` — `{bullet_id: reason}` for every dropped anchor.
 Write `private/applications/{slug}/documents/work.yml`, `skill.yml`, `education.yml`, `author.yml`.

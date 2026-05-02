@@ -295,6 +295,11 @@ specialists:
             anchor_bullets_master: "list[bullet_id]  (anchor_explicit OR regex via _MONEY_RE / _PERCENT_RE / _ASSET_COUNT_RE)"
             anchor_bullets_kept: "list[bullet_id]"
             anchor_bullets_dropped: "list[{bullet_id, reason, JD_keyword_replacing_it}]"
+            # Slice C.1 (BREAKING) — pre-computed queue of dropped-but-restorable
+            # bullet_ids for visual-layout-reviewer to consume without re-invoking
+            # the bullet-selector. Ordered: anchor status → position recency →
+            # JD-keyword overlap.
+            restoration_queue: "list[bullet_id]  (Slice C.1 — for layout reviewer's whitespace restoration)"
         - .apply-state/bullet-diff.md:
             content: "side-by-side master vs tailored, anchor bullets highlighted"
         - .apply-state/bullet-decisions.json:

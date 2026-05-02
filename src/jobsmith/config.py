@@ -166,6 +166,13 @@ class ResumeSettings(BaseModel):
     excluded_project_kinds: list[str] = Field(
         default_factory=lambda: ["portfolio-site", "resume-source", "dotfiles"]
     )
+    # Slice C.1 (Q7 option-a): one-slot tiebreaker order between work bullets
+    # and project entries. Default is work-first (matches traditional resumes).
+    # Portfolio-heavy careers (designers, contractors with no traditional
+    # employment) override to ['project', 'work'].
+    bullet_type_ordering: list[str] = Field(
+        default_factory=lambda: ["work", "project"]
+    )
 
 
 class FitScorerSettings(BaseModel):

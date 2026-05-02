@@ -199,3 +199,65 @@ def test_projects_loader_returns_empty_when_file_absent(tmp_path: Path) -> None:
 def test_resume_settings_excluded_project_kinds_default() -> None:
     settings = ResumeSettings()
     assert settings.excluded_project_kinds == ["portfolio-site", "resume-source", "dotfiles"]
+
+
+# ---------- Slice C.1 — bullet_type_ordering ----------
+
+
+def test_resume_settings_bullet_type_ordering_default_work_first() -> None:
+    """Default ordering is [work, project] — traditional resume bias."""
+    settings = ResumeSettings()
+    assert settings.bullet_type_ordering == ["work", "project"]
+
+
+def test_resume_settings_bullet_type_ordering_overrideable_to_project_first() -> None:
+    """Portfolio-heavy careers override to [project, work] (Q7 option-a escape hatch)."""
+    settings = ResumeSettings(bullet_type_ordering=["project", "work"])
+    assert settings.bullet_type_ordering == ["project", "work"]
+    # work-first tiebreaker is now reversed
+    assert settings.bullet_type_ordering[0] == "project"
+
+
+# ---------- Slice C.1 — agent contract: restoration_queue in selector schema ----------
+
+
+def test_specialist_contracts_declares_restoration_queue() -> None:
+    """The bullet-selector outputs schema must declare restoration_queue (Slice C.1 BREAKING change)."""
+    import yaml as _yaml
+    from pathlib import Path as _Path
+
+    contracts = _yaml.safe_load(
+        (_Path(__file__).parent.parent / "src/jobsmith/plugin/agents/apply/specialist-contracts.yaml").read_text()
+    )
+    selector = next(s for s in contracts["specialists"] if s["name"] == "apply-bullet-selector")
+    selection_writes = next(
+        w for w in selector["outputs"]["writes"] if ".apply-state/bullet-selection.json" in w
+    )
+    schema = selection_writes[".apply-state/bullet-selection.json"]
+    assert "restoration_queue" in schema, (
+        "bullet-selection.json schema must declare restoration_queue field "
+        "(Slice C.1 BREAKING contract change — must be coordinated with "
+        "apply-bullet-selector.md and apply-visual-layout-reviewer.md)"
+    )
+
+
+def test_apply_bullet_selector_md_documents_ordering_rule() -> None:
+    """apply-bullet-selector.md must contain rule 9 (work-first ordering) and rule 10 (restoration_queue)."""
+    from pathlib import Path as _Path
+
+    md = (_Path(__file__).parent.parent / "src/jobsmith/plugin/agents/apply-bullet-selector.md").read_text()
+    # Rule 9 — Selected Projects ordering
+    assert "Selected Projects ordering" in md
+    assert "bullet_type_ordering" in md
+    # Rule 10 — restoration_queue
+    assert "restoration_queue" in md.lower() or "Restoration queue" in md
+
+
+def test_apply_visual_layout_reviewer_md_documents_restoration() -> None:
+    """apply-visual-layout-reviewer.md must contain restoration logic + RESTORATION_STALE halt."""
+    from pathlib import Path as _Path
+
+    md = (_Path(__file__).parent.parent / "src/jobsmith/plugin/agents/apply-visual-layout-reviewer.md").read_text()
+    assert "restoration_queue" in md, "Reviewer must consume restoration_queue"
+    assert "RESTORATION_STALE" in md, "Staleness halt reason must be documented"
+    assert "RESTORATION_LIMIT" in md, "Hard cap halt reason must be documented"
