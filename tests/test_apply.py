@@ -865,11 +865,107 @@ def test_build_paths_injects_voice_profile_json(tmp_path: Path) -> None:
     # Cache file should now exist on disk (load_voice_profile writes it).
     assert expected.exists(), "load_voice_profile() should have written the cache file"
 
-    # Cache content is Pydantic-valid JSON
+    # Cache content is Pydantic-valid JSON with all the fields specialists read
     data = json.loads(expected.read_text())
     assert "result_verbs" in data
     assert "banned_adjectives" in data
+    assert "banned_buzzwords" in data, "Roborev fix #1 — specialists read this"
+    assert "banned_marketer_phrases" in data, "Roborev fix #1 — specialists read this"
     assert "source" in data
+
+
+# ---------------------------------------------------------------------------
+# 13b. Slice C wiring — projects.yml flows through Paths block
+# (Roborev fix #3)
+# ---------------------------------------------------------------------------
+
+
+def test_build_paths_injects_projects_paths_when_configured(tmp_path: Path) -> None:
+    """When master.projects_yml is configured AND the file exists, both
+    master.projects_yml and projects_filtered_json keys are injected, and the
+    filtered JSON contains only entries that passed all filters."""
+    import json
+    import yaml
+
+    from jobsmith.apply import _build_paths
+
+    # Author yml with homepage — used for URL-match filter
+    author_yml = tmp_path / "author.yml"
+    author_yml.write_text(yaml.safe_dump({
+        "author": [{"name": {"first": "Pat", "last": "Doe"}, "homepage": "patdoe.dev"}],
+    }))
+
+    # Projects with one keep, one excluded by kind, one homepage match
+    projects_yml = tmp_path / "projects.yml"
+    projects_yml.write_text(yaml.safe_dump({
+        "projects": [
+            {"title": "Real OSS", "url": "https://github.com/p/real",
+             "kind": "open-source", "is_project": True, "excluded_from_resume": False},
+            {"title": "Dotfiles", "url": "https://github.com/p/dot",
+             "kind": "dotfiles", "is_project": True, "excluded_from_resume": False},
+            {"title": "Portfolio", "url": "patdoe.dev",
+             "kind": "open-source", "is_project": True, "excluded_from_resume": False},
+        ],
+    }))
+
+    # Touch other master files so MasterPaths defaults don't crash
+    for n in ("work.yml", "skill.yml", "education.yml"):
+        (tmp_path / n).write_text("[]")
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(yaml.safe_dump({
+        "master": {
+            "work_yml": "work.yml",
+            "skill_yml": "skill.yml",
+            "education_yml": "education.yml",
+            "author_yml": "author.yml",
+            "projects_yml": "projects.yml",
+        },
+        "output": {"applications_dir": "private/applications"},
+    }))
+
+    plugin_fake = tmp_path / "plugin"
+    plugin_fake.mkdir()
+
+    paths = _build_paths("test-slug", tmp_path, plugin_fake)
+
+    # Raw projects path injected
+    assert "master.projects_yml" in paths
+    assert paths["master.projects_yml"] == str((tmp_path / "projects.yml").resolve())
+
+    # Filtered JSON injected and contains only the kept entry
+    assert "projects_filtered_json" in paths
+    filtered = json.loads(Path(paths["projects_filtered_json"]).read_text())
+    titles = [p["title"] for p in filtered]
+    assert "Real OSS" in titles
+    assert "Dotfiles" not in titles, "Dotfiles kind must be filtered out"
+    assert "Portfolio" not in titles, "URL matching author.homepage must be filtered out"
+
+
+def test_build_paths_omits_projects_keys_when_not_configured(tmp_path: Path) -> None:
+    """No master.projects_yml in config → both keys absent from Paths block."""
+    import yaml
+
+    from jobsmith.apply import _build_paths
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(yaml.safe_dump({
+        "master": {
+            "work_yml": "assets/content/work.yml",
+            "skill_yml": "assets/content/skill.yml",
+            "education_yml": "assets/content/education.yml",
+            "author_yml": "assets/content/author.yml",
+        },
+        "output": {"applications_dir": "private/applications"},
+    }))
+
+    plugin_fake = tmp_path / "plugin"
+    plugin_fake.mkdir()
+
+    paths = _build_paths("test-slug", tmp_path, plugin_fake)
+
+    assert "master.projects_yml" not in paths
+    assert "projects_filtered_json" not in paths
 
 
 # ---------------------------------------------------------------------------

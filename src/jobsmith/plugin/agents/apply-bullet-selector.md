@@ -21,6 +21,10 @@ Read `.apply-state/spec.json`:
 - `inputs.master_skill_yml` = `assets/content/skill.yml` (READ-ONLY)
 - `inputs.gap_resolutions` = `.apply-state/gap-resolutions.md` (may not exist on first call)
 
+From the Paths block (Slice C wiring):
+- `master.projects_yml` — raw projects.yml (READ-ONLY) when configured. Absent key means the user has no projects.yml.
+- `projects_filtered_json` — `.apply-state/projects-filtered.json`. Pre-filtered list of project entries that already passed the `excluded_from_resume`, `excluded_project_kinds`, `is_project: false`, and author-homepage filters. Read THIS for selection — never re-filter from the raw projects.yml. Absent key means no projects are eligible.
+
 ## Anchor rule (NON-NEGOTIABLE)
 
 A master bullet is an **anchor** if EITHER condition holds:

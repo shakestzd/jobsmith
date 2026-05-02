@@ -106,9 +106,18 @@ class VoiceProfile:
     avg_bullet_words: float
     bullets_per_position_avg: float
     source: str  # "generic" | "benchmark" | "config-override"
+    # Slice B.1 specialists treat both as authoritative — must be cached
+    # alongside the verb lists so the on-disk JSON is self-contained.
+    # Defaulted to empty so the existing 7-positional-arg call sites keep working.
+    banned_buzzwords: tuple[str, ...] = ()
+    banned_marketer_phrases: tuple[str, ...] = ()
     benchmark_path: str | None = None
     benchmark_mtime: float | None = None
     benchmark_hash: str | None = None
+    # Roborev fix: hash of the relevant config.voice fields. When the user
+    # edits .apply-config.yaml without touching the benchmark, the cache
+    # mtime/hash check still passes — config_hash invalidates that case.
+    config_hash: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -126,9 +135,15 @@ class _CachedProfile(BaseModel):
     avg_bullet_words: float
     bullets_per_position_avg: float
     source: str
+    # Defaulted so cache files written before these fields existed still parse;
+    # missing config_hash will fail the freshness check below and trigger
+    # recompute, which writes the full new schema.
+    banned_buzzwords: list[str] = []
+    banned_marketer_phrases: list[str] = []
     benchmark_path: str | None = None
     benchmark_mtime: float | None = None
     benchmark_hash: str | None = None
+    config_hash: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -168,12 +183,15 @@ def _from_cached(cached: _CachedProfile) -> VoiceProfile:
         action_verbs=frozenset(cached.action_verbs),
         banned_verbs=frozenset(cached.banned_verbs),
         banned_adjectives=tuple(cached.banned_adjectives),
+        banned_buzzwords=tuple(cached.banned_buzzwords),
+        banned_marketer_phrases=tuple(cached.banned_marketer_phrases),
         avg_bullet_words=cached.avg_bullet_words,
         bullets_per_position_avg=cached.bullets_per_position_avg,
         source=cached.source,
         benchmark_path=cached.benchmark_path,
         benchmark_mtime=cached.benchmark_mtime,
         benchmark_hash=cached.benchmark_hash,
+        config_hash=cached.config_hash,
     )
 
 
@@ -183,14 +201,40 @@ def _write_cache(profile: VoiceProfile, cache_path: Path) -> None:
         "action_verbs": sorted(profile.action_verbs),
         "banned_verbs": sorted(profile.banned_verbs),
         "banned_adjectives": list(profile.banned_adjectives),
+        "banned_buzzwords": list(profile.banned_buzzwords),
+        "banned_marketer_phrases": list(profile.banned_marketer_phrases),
         "avg_bullet_words": profile.avg_bullet_words,
         "bullets_per_position_avg": profile.bullets_per_position_avg,
         "source": profile.source,
         "benchmark_path": profile.benchmark_path,
         "benchmark_mtime": profile.benchmark_mtime,
         "benchmark_hash": profile.benchmark_hash,
+        "config_hash": profile.config_hash,
     }
     cache_path.write_text(json.dumps(data, indent=2))
+
+
+def _config_hash(config) -> str:
+    """Stable hash of the config.voice fields that affect VoiceProfile.
+
+    Used to invalidate the cache when the user edits .apply-config.yaml
+    `voice.*` settings without touching the benchmark file. Without this,
+    mtime/content_hash on the benchmark would still match and the stale
+    cache would win indefinitely.
+    """
+    voice_cfg = getattr(config, "voice", None)
+    payload = {
+        "result_verbs": sorted(getattr(voice_cfg, "result_verbs", None) or []),
+        "action_verbs": sorted(getattr(voice_cfg, "action_verbs", None) or []),
+        "banned_action_verbs": sorted(getattr(voice_cfg, "banned_action_verbs", None) or []),
+        "banned_adjectives": sorted(getattr(voice_cfg, "banned_adjectives", None) or []),
+        "banned_buzzwords": sorted(getattr(voice_cfg, "banned_buzzwords", None) or []),
+        "banned_marketer_phrases": sorted(
+            getattr(voice_cfg, "banned_marketer_phrases", None) or []
+        ),
+    }
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
 
 
 def _compute_profile(config, benchmark_path: Path | None) -> VoiceProfile:
@@ -207,6 +251,13 @@ def _compute_profile(config, benchmark_path: Path | None) -> VoiceProfile:
     config_banned_verbs = list(getattr(voice_cfg, "banned_action_verbs", None) or [])
     config_banned_adj = tuple(
         getattr(voice_cfg, "banned_adjectives", None) or GENERIC_BANNED_ADJECTIVES
+    )
+    # Roborev fix: surface buzzwords and marketer_phrases through the cache
+    # so specialists' references to voice_profile_json.banned_buzzwords and
+    # .banned_marketer_phrases resolve.
+    config_banned_buzzwords = tuple(getattr(voice_cfg, "banned_buzzwords", None) or [])
+    config_banned_marketer_phrases = tuple(
+        getattr(voice_cfg, "banned_marketer_phrases", None) or []
     )
 
     avg_words = 12.0
@@ -276,12 +327,15 @@ def _compute_profile(config, benchmark_path: Path | None) -> VoiceProfile:
         action_verbs=action_verbs,
         banned_verbs=frozenset(config_banned_verbs),
         banned_adjectives=config_banned_adj,
+        banned_buzzwords=config_banned_buzzwords,
+        banned_marketer_phrases=config_banned_marketer_phrases,
         avg_bullet_words=avg_words,
         bullets_per_position_avg=bullets_per_pos,
         source=source,
         benchmark_path=str(benchmark_path) if benchmark_path else None,
         benchmark_mtime=benchmark_mtime,
         benchmark_hash=benchmark_hash_val,
+        config_hash=_config_hash(config),
     )
 
 
@@ -315,15 +369,27 @@ def load_voice_profile(config, cache_dir: Path | None = None) -> VoiceProfile:
     raw_bm_path = getattr(bm_cfg, "resume_qmd", None)
     benchmark_path: Path | None = Path(raw_bm_path) if raw_bm_path else None
 
-    # Cache hit check: mtime + content_hash both match
-    if benchmark_path and benchmark_path.exists() and cache_path.exists():
+    current_config_hash = _config_hash(config)
+
+    # Cache hit check: benchmark mtime/hash AND config_hash all match.
+    # Includes the no-benchmark case so config-only changes still invalidate.
+    if cache_path.exists():
         try:
             cached = _CachedProfile.model_validate_json(cache_path.read_text())
-            mtime = benchmark_path.stat().st_mtime
-            file_text = benchmark_path.read_text(encoding="utf-8")
-            if (cached.benchmark_mtime == mtime
-                    and cached.benchmark_hash == _content_hash(file_text)):
-                return _from_cached(cached)
+            config_match = cached.config_hash == current_config_hash
+            if benchmark_path and benchmark_path.exists():
+                mtime = benchmark_path.stat().st_mtime
+                file_text = benchmark_path.read_text(encoding="utf-8")
+                bm_match = (
+                    cached.benchmark_mtime == mtime
+                    and cached.benchmark_hash == _content_hash(file_text)
+                )
+                if bm_match and config_match:
+                    return _from_cached(cached)
+            elif benchmark_path is None:
+                # No benchmark configured — config_hash is the only invalidation key.
+                if cached.benchmark_path is None and config_match:
+                    return _from_cached(cached)
         except (ValidationError, Exception):
             warnings.warn(
                 f"voice-profile.json cache invalid; recomputing from {cache_path}",

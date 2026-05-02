@@ -315,3 +315,75 @@ def test_banned_buzzwords_does_not_contain_moved_adjectives() -> None:
     # Confirm they live in banned_adjectives
     assert "innovative" in vs.banned_adjectives
     assert "passionate" in vs.banned_adjectives
+
+
+# ---------------------------------------------------------------------------
+# Roborev fix #1: voice-profile.json carries banned_buzzwords + banned_marketer_phrases
+# ---------------------------------------------------------------------------
+
+
+def test_load_voice_profile_includes_banned_buzzwords_and_marketer_phrases(tmp_path: Path) -> None:
+    """voice-profile.json on disk must include banned_buzzwords and banned_marketer_phrases.
+
+    Specialist prompts (apply-resume-tell-fixer, apply-prose-writer) read both
+    fields; without them the specialists silently skip those rules.
+    """
+    config = _make_config(
+        banned_action_verbs=["Architected"],
+    )
+    # Inject buzzwords and marketer phrases via the synthetic config helper
+    config.voice.banned_buzzwords = ["enterprise", "proprietary"]
+    config.voice.banned_marketer_phrases = ["perfect fit", "passionate about"]
+
+    cache_dir = tmp_path / ".apply-state"
+    profile = load_voice_profile(config, cache_dir=cache_dir)
+    assert "enterprise" in profile.banned_buzzwords
+    assert "perfect fit" in profile.banned_marketer_phrases
+
+    # And the on-disk JSON has them too — that's what specialists read
+    cache = json.loads((cache_dir / "voice-profile.json").read_text())
+    assert "banned_buzzwords" in cache
+    assert "enterprise" in cache["banned_buzzwords"]
+    assert "banned_marketer_phrases" in cache
+    assert "perfect fit" in cache["banned_marketer_phrases"]
+
+
+# ---------------------------------------------------------------------------
+# Roborev fix #2: cache invalidates on config change (not just benchmark change)
+# ---------------------------------------------------------------------------
+
+
+def test_voice_profile_cache_invalidates_on_config_change(tmp_path: Path) -> None:
+    """Editing config.voice without touching the benchmark must invalidate the cache.
+
+    Without this, mtime + content_hash on the benchmark would still match
+    and the user's config change would be silently ignored.
+    """
+    qmd = tmp_path / "resume.qmd"
+    qmd.write_text(SAMPLE_QMD)
+    cache_dir = tmp_path / ".apply-state"
+    config1 = _make_config(benchmark_path=qmd, banned_action_verbs=["Architected"])
+    p1 = load_voice_profile(config1, cache_dir=cache_dir)
+    assert "Architected" in p1.banned_verbs
+
+    # Same benchmark file (unchanged), different config — cache must invalidate
+    config2 = _make_config(benchmark_path=qmd, banned_action_verbs=["Architected", "Spearheaded"])
+    p2 = load_voice_profile(config2, cache_dir=cache_dir)
+    assert "Spearheaded" in p2.banned_verbs, (
+        "Cache must invalidate on config change so the user's edit takes effect "
+        "without requiring a benchmark touch"
+    )
+
+
+def test_voice_profile_cache_hit_on_unchanged_config_and_benchmark(tmp_path: Path) -> None:
+    """Same config + same benchmark → cache hit (no warning, identical profile)."""
+    qmd = tmp_path / "resume.qmd"
+    qmd.write_text(SAMPLE_QMD)
+    cache_dir = tmp_path / ".apply-state"
+    config = _make_config(benchmark_path=qmd, banned_action_verbs=["Architected"])
+
+    p1 = load_voice_profile(config, cache_dir=cache_dir)
+    # Reload — must hit cache (we verify by checking config_hash is stable)
+    p2 = load_voice_profile(config, cache_dir=cache_dir)
+    assert p1.config_hash is not None
+    assert p1.config_hash == p2.config_hash

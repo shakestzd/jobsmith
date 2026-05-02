@@ -230,6 +230,15 @@ def _build_paths(slug: str, cwd: Path, plugin_directory: Path) -> dict[str, str]
             )
         if config.master.award_yml is not None:
             result["master.award_yml"] = str(resolve(config.master.award_yml, repo_root))
+        # Slice C: projects schema. Inject the raw path AND a filtered JSON
+        # so the bullet-selector can include the projects already pre-filtered
+        # (excluded_from_resume / excluded_kinds / is_project / homepage URL).
+        # The pre-filter happens here rather than in the agent so the agent
+        # never sees suppressed entries.
+        if config.master.projects_yml is not None:
+            projects_path = resolve(config.master.projects_yml, repo_root)
+            if projects_path.exists():
+                result["master.projects_yml"] = str(projects_path)
 
         # apply_state_dir — absolute path for the current slug
         apps_dir = resolve(config.output.applications_dir, repo_root)
@@ -274,6 +283,44 @@ def _build_paths(slug: str, cwd: Path, plugin_directory: Path) -> dict[str, str]
             # benchmark, etc.), specialists fall back to seed defaults.
             pass
         result["voice_profile_json"] = str(voice_cache_dir / "voice-profile.json")
+
+        # Slice C: pre-filter projects.yml and emit projects-filtered.json so
+        # bullet-selector consumes only entries that pass the kind / homepage /
+        # excluded_from_resume / is_project filters. The agent never sees
+        # suppressed entries — this prevents the Clay bug where the user's
+        # portfolio site was wrongly listed as a project deliverable.
+        if config.master.projects_yml is not None:
+            projects_path = resolve(config.master.projects_yml, repo_root)
+            if projects_path.exists():
+                from .assemble import load_projects
+                # author.homepage may not be loaded yet; we resolve it best-effort
+                # from author.yml so the URL-matches filter works.
+                author_yml_path = resolve(config.master.author_yml, repo_root)
+                author_homepage: str | None = None
+                if author_yml_path.exists():
+                    try:
+                        import yaml as _yaml  # local — only here for one-shot read
+                        ay = _yaml.safe_load(author_yml_path.read_text())
+                        author = (ay or {}).get("author")
+                        if isinstance(author, list) and author:
+                            author = author[0]
+                        if isinstance(author, dict):
+                            author_homepage = (author.get("homepage") or "").strip() or None
+                    except Exception:
+                        author_homepage = None
+                try:
+                    filtered = load_projects(
+                        projects_path.parent, config.resume, author_homepage
+                    )
+                    voice_cache_dir.mkdir(parents=True, exist_ok=True)
+                    filtered_path = voice_cache_dir / "projects-filtered.json"
+                    import json as _json
+                    filtered_path.write_text(_json.dumps(filtered, indent=2))
+                    result["projects_filtered_json"] = str(filtered_path)
+                except Exception:
+                    # Pre-filter is non-blocking; bullet-selector falls back
+                    # to "no projects" when the key is absent.
+                    pass
 
     return result
 

@@ -24,6 +24,10 @@ class MasterPaths(BaseModel):
     author_yml: Path = Path("assets/content/author.yml")
     publication_yml: Path | None = None
     award_yml: Path | None = None
+    # Slice C: optional projects schema. None = no projects.yml configured.
+    # When set, jobsmith.assemble.load_projects() reads + filters this file
+    # and the path is injected into the Paths block as master.projects_yml.
+    projects_yml: Path | None = None
 
 
 class OutputPaths(BaseModel):
