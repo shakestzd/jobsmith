@@ -12,13 +12,10 @@ Slice 6 — AMEND directive parser + SQLite staging + per-section dropdowns.
 
 import marimo
 
-__generated_with = "0.22.4"
+__generated_with = "0.23.4"
 app = marimo.App(width="medium")
 
 
-# ---------------------------------------------------------------------------
-# Cell A — imports
-# ---------------------------------------------------------------------------
 @app.cell
 def _imports():
     import os
@@ -30,17 +27,22 @@ def _imports():
     from jobsmith.config import load_config
     from jobsmith.marimo.loader import ApplicationNotFound, load_sections
 
-    return ApplicationNotFound, Path, load_config, load_sections, mo, os, sqlite3
+    return (
+        ApplicationNotFound,
+        Path,
+        load_config,
+        load_sections,
+        mo,
+        os,
+        sqlite3,
+    )
 
 
-# ---------------------------------------------------------------------------
-# Cell B — locate DB and read available slugs
-# ---------------------------------------------------------------------------
 @app.cell
 def _db_setup(Path, load_config, os, sqlite3):
-    cfg = load_config()
+    _cfg = load_config()
     repo_root = Path(os.environ.get("JOBSMITH_REPO_ROOT", ".")).resolve()
-    db_path = repo_root / cfg.output.jobsmith_db
+    db_path = repo_root / _cfg.output.jobsmith_db
 
     _conn = sqlite3.connect(str(db_path))
     _rows = _conn.execute(
@@ -48,13 +50,10 @@ def _db_setup(Path, load_config, os, sqlite3):
     ).fetchall()
     _conn.close()
 
-    slugs = [row[0] for row in _rows] if _rows else []
+    slugs = [_row[0] for _row in _rows] if _rows else []
     return db_path, repo_root, slugs
 
 
-# ---------------------------------------------------------------------------
-# Cell C — slug picker dropdown
-# ---------------------------------------------------------------------------
 @app.cell
 def _slug_picker(mo, slugs):
     slug_picker = mo.ui.dropdown(
@@ -65,17 +64,12 @@ def _slug_picker(mo, slugs):
     return (slug_picker,)
 
 
-# ---------------------------------------------------------------------------
-# Cell D — show slug picker
-# ---------------------------------------------------------------------------
 @app.cell
 def _show_picker(mo, slug_picker):
-    mo.vstack([slug_picker])  # noqa: B018
+    mo.vstack([slug_picker])
+    return
 
 
-# ---------------------------------------------------------------------------
-# Cell D2 — run-mode: URL input + Run/Stop buttons (slice 4)
-# ---------------------------------------------------------------------------
 @app.cell
 def _run_controls(mo):
     url_input = mo.ui.text(
@@ -87,9 +81,6 @@ def _run_controls(mo):
     return run_button, stop_button, url_input
 
 
-# ---------------------------------------------------------------------------
-# Cell D3 — runner state + dispatch (slice 4)
-# ---------------------------------------------------------------------------
 @app.cell
 def _run_dispatch(
     Path,
@@ -102,9 +93,9 @@ def _run_dispatch(
     # Use the module-level singleton so the in-flight thread/queue/cancel_event
     # survive reactive recomputation. Constructing a new NotebookRunner per
     # cell re-run would orphan the running pipeline (roborev #920 HIGH).
-    from jobsmith.marimo.runner import get_runner
+    from jobsmith.marimo.runner import get_runner as _get_runner_d
 
-    runner_state = get_runner(
+    runner_state = _get_runner_d(
         db_path=db_path,
         applications_dir=Path(repo_root) / "private" / "applications",
     )
@@ -114,13 +105,9 @@ def _run_dispatch(
 
     if stop_button.value and runner_state.is_running():
         runner_state.cancel()
-
     return (runner_state,)
 
 
-# ---------------------------------------------------------------------------
-# Cell D4 — show controls + live phase progress (slice 4)
-# ---------------------------------------------------------------------------
 @app.cell
 def _show_run_panel(mo, run_button, runner_state, stop_button, url_input):
     # Phase progress is drained from the runner queue. This cell re-runs
@@ -148,12 +135,10 @@ def _show_run_panel(mo, run_button, runner_state, stop_button, url_input):
             kind="info",
         ),
     ])
-    panel  # noqa: B018
+    panel  # noqa: B018 — marimo renders the last expression of a cell
+    return
 
 
-# ---------------------------------------------------------------------------
-# Cell E0 — chat sidebar backend (slice 5)
-# ---------------------------------------------------------------------------
 @app.cell
 def _chat_backend(Path, repo_root, slug_picker):
     from jobsmith.marimo.claude_chat import ClaudeChatBackend
@@ -169,9 +154,6 @@ def _chat_backend(Path, repo_root, slug_picker):
     return (chat_backend,)
 
 
-# ---------------------------------------------------------------------------
-# Cell E1 — chat model adapter for mo.ui.chat (slice 5)
-# ---------------------------------------------------------------------------
 @app.cell
 def _chat_model(chat_backend, mo):
     def _model(messages, config):  # noqa: ARG001 — config required by mo.ui.chat
@@ -186,9 +168,6 @@ def _chat_model(chat_backend, mo):
     return (chat_widget,)
 
 
-# ---------------------------------------------------------------------------
-# Cell E2 — chat history accordion + sidebar mount (slice 5)
-# ---------------------------------------------------------------------------
 @app.cell
 def _chat_sidebar(chat_widget, mo, slug_picker):
     from jobsmith.marimo.chat_ui import render_chat_history_bubbles
@@ -199,12 +178,9 @@ def _chat_sidebar(chat_widget, mo, slug_picker):
     )
     if slug_picker.value:
         mo.sidebar([history_accordion, chat_widget], width="480px")
-    return (history_accordion,)
+    return
 
 
-# ---------------------------------------------------------------------------
-# Cell E3 — parse AMEND directives from chat history → persist to review DB (slice 6)
-# ---------------------------------------------------------------------------
 @app.cell
 def _parse_amendments(Path, chat_widget, repo_root, slug_picker):
     from jobsmith.marimo.directive_parser import parse_amendments
@@ -214,89 +190,86 @@ def _parse_amendments(Path, chat_widget, repo_root, slug_picker):
     amendments_by_section: dict[str, list[tuple[str, object]]] = {}
 
     if slug_picker.value and chat_widget.value:
-        review_db_dir = Path(repo_root) / "private" / ".review"
-        slug = slug_picker.value
+        _review_dir_p = Path(repo_root) / "private" / ".review"
+        _slug_p = slug_picker.value
 
         # Scan all assistant messages in the current chat session
-        for msg in chat_widget.value:
-            role = getattr(msg, "role", None) or (
-                msg.get("role", "") if isinstance(msg, dict) else ""
+        for _msg in chat_widget.value:
+            _role = getattr(_msg, "role", None) or (
+                _msg.get("role", "") if isinstance(_msg, dict) else ""
             )
-            if role != "assistant":
+            if _role != "assistant":
                 continue
-            content = getattr(msg, "content", None) or (
-                msg.get("content", "") if isinstance(msg, dict) else ""
+            _content = getattr(_msg, "content", None) or (
+                _msg.get("content", "") if isinstance(_msg, dict) else ""
             )
-            if not content:
+            if not _content:
                 continue
 
-            for amendment in parse_amendments(content):
-                stored_id = persist_amendment(slug, amendment, review_db_dir)
-                section = amendment.section
-                if section not in amendments_by_section:
-                    amendments_by_section[section] = []
+            for _parsed in parse_amendments(_content):
+                _stored_id = persist_amendment(_slug_p, _parsed, _review_dir_p)
+                _section = _parsed.section
+                if _section not in amendments_by_section:
+                    amendments_by_section[_section] = []
                 # Avoid duplicates in the in-memory list
-                existing_ids = {aid for aid, _ in amendments_by_section[section]}
-                if stored_id not in existing_ids:
+                _existing = {aid for aid, _ in amendments_by_section[_section]}
+                if _stored_id not in _existing:
                     # Rebuild amendment with the stored ID (may differ if deduped)
                     from copy import copy
-                    stored_amendment = copy(amendment)
-                    stored_amendment.id = stored_id
-                    amendments_by_section[section].append((stored_id, stored_amendment))
-
+                    _stored_amend = copy(_parsed)
+                    _stored_amend.id = _stored_id
+                    amendments_by_section[_section].append((_stored_id, _stored_amend))
     return (amendments_by_section,)
 
 
-# ---------------------------------------------------------------------------
-# Cell E4 — build per-amendment dropdowns (slice 6)
-# ---------------------------------------------------------------------------
 @app.cell
-def _build_amendment_dropdowns(amendments_by_section, mo):
+def _build_amendment_dropdowns(
+    amendments_by_section: dict[str, list[tuple[str, object]]],
+    mo,
+):
     # amendment_dropdowns: amendment_id → mo.ui.dropdown instance
     amendment_dropdowns: dict[str, object] = {}
 
     for section_entries in amendments_by_section.values():
-        for amendment_id, _amendment in section_entries:
-            amendment_dropdowns[amendment_id] = mo.ui.dropdown(
+        for _aid, _amendment in section_entries:
+            amendment_dropdowns[_aid] = mo.ui.dropdown(
                 options=["Pending", "Accept", "Reject"],
                 value="Pending",
                 label=None,
             )
-
     return (amendment_dropdowns,)
 
 
-# ---------------------------------------------------------------------------
-# Cell E5 — sync dropdown changes back to the review DB (slice 6)
-# ---------------------------------------------------------------------------
 @app.cell
 def _sync_amendment_status(
-    Path, amendment_dropdowns, amendments_by_section, repo_root, slug_picker
+    Path,
+    amendment_dropdowns: dict[str, object],
+    amendments_by_section: dict[str, list[tuple[str, object]]],
+    repo_root,
+    slug_picker,
 ):
     from jobsmith.marimo.review_store import set_status
 
     if slug_picker.value and amendment_dropdowns:
-        review_db_dir = Path(repo_root) / "private" / ".review"
-        slug = slug_picker.value
+        _review_dir_s = Path(repo_root) / "private" / ".review"
+        _slug_s = slug_picker.value
 
         # Flatten amendment_id → amendment mapping for lookup
-        _id_to_amendment: dict[str, object] = {}
-        for entries in amendments_by_section.values():
-            for aid, amendment in entries:
-                _id_to_amendment[aid] = amendment
+        _id_to_amend: dict[str, object] = {}
+        for _entries in amendments_by_section.values():
+            for _aid_s, _amend_s in _entries:
+                _id_to_amend[_aid_s] = _amend_s
 
-        for amendment_id, dropdown in amendment_dropdowns.items():
-            chosen = dropdown.value
-            if chosen == "Accept":
-                set_status(slug, amendment_id, "accepted", review_db_dir)
-            elif chosen == "Reject":
-                set_status(slug, amendment_id, "rejected", review_db_dir)
+        for _aid, _dropdown in amendment_dropdowns.items():
+            _chosen = _dropdown.value
+            if _chosen == "Accept":
+                set_status(_slug_s, _aid, "accepted", _review_dir_s)
+            elif _chosen == "Reject":
+                set_status(_slug_s, _aid, "rejected", _review_dir_s)
             # "Pending" is the default — no DB write needed unless transitioning back
+    return
 
 
-# ---------------------------------------------------------------------------
-# Cell E — load sections for selected slug
-# ---------------------------------------------------------------------------
 @app.cell
 def _load(ApplicationNotFound, db_path, load_sections, slug_picker):
     sections = None
@@ -309,17 +282,13 @@ def _load(ApplicationNotFound, db_path, load_sections, slug_picker):
             load_error = str(exc)
         except Exception as exc:  # noqa: BLE001
             load_error = f"Unexpected error: {exc}"
-
     return load_error, sections
 
 
-# ---------------------------------------------------------------------------
-# Cell F — render section cards (with amendment dropdowns, slice 6)
-# ---------------------------------------------------------------------------
 @app.cell
 def _render(
-    amendment_dropdowns,
-    amendments_by_section,
+    amendment_dropdowns: dict[str, object],
+    amendments_by_section: dict[str, list[tuple[str, object]]],
     load_error,
     mo,
     sections,
@@ -400,17 +369,17 @@ def _render(
         if not entries:
             return mo.vstack([])
         rows = []
-        for aid, amendment in entries:
-            dropdown = amendment_dropdowns.get(aid)
-            if dropdown is None:
+        for _aid_p, _amend_p in entries:
+            _dropdown_p = amendment_dropdowns.get(_aid_p)
+            if _dropdown_p is None:
                 continue
-            op_label = f"[{amendment.op}]"
-            field_label = amendment.field or "(section)"
+            _op_label = f"[{_amend_p.op}]"
+            _field_label = _amend_p.field or "(section)"
             rows.append(
                 mo.hstack(
                     [
-                        mo.md(f"`{op_label}` **{field_label}**: {amendment.value}"),
-                        dropdown,
+                        mo.md(f"`{_op_label}` **{_field_label}**: {_amend_p.value}"),
+                        _dropdown_p,
                     ],
                     gap="1rem",
                     align="center",
@@ -453,17 +422,12 @@ def _render(
     return (accordion,)
 
 
-# ---------------------------------------------------------------------------
-# Cell G — show accordion
-# ---------------------------------------------------------------------------
 @app.cell
 def _show_accordion(accordion, mo):
     mo.vstack([accordion])
+    return
 
 
-# ---------------------------------------------------------------------------
-# Cell H0 — per-specialist re-run buttons (slice 8)
-# ---------------------------------------------------------------------------
 @app.cell
 def _rerun_buttons(mo):
     # Order matches gather → draft phases (render specialists write to
@@ -478,15 +442,12 @@ def _rerun_buttons(mo):
         "apply-prose-qa",
     )
     rerun_buttons = {
-        name: mo.ui.run_button(label=f"Re-run {name}")
-        for name in rerun_specialists
+        _spec: mo.ui.run_button(label=f"Re-run {_spec}")
+        for _spec in rerun_specialists
     }
     return rerun_buttons, rerun_specialists
 
 
-# ---------------------------------------------------------------------------
-# Cell H1 — dispatch a re-run when a button is clicked (slice 8)
-# ---------------------------------------------------------------------------
 @app.cell
 def _rerun_dispatch(
     Path,
@@ -496,10 +457,10 @@ def _rerun_dispatch(
     slug_picker,
     url_input,
 ):
-    from jobsmith.marimo.runner import get_runner
+    from jobsmith.marimo.runner import get_runner as _get_runner_r
 
     rerun_status = None
-    runner = get_runner(
+    _rerun_runner = _get_runner_r(
         db_path=db_path,
         applications_dir=Path(repo_root) / "private" / "applications",
     )
@@ -508,50 +469,40 @@ def _rerun_dispatch(
     # click; we surface ONE re-run at a time to keep the runner singleton's
     # re-entry guard happy.
     if slug_picker.value and url_input.value:
-        for name, btn in rerun_buttons.items():
-            if btn.value and not runner.is_running():
-                runner.run_specialist(
+        for _spec_name, _btn in rerun_buttons.items():
+            if _btn.value and not _rerun_runner.is_running():
+                _rerun_runner.run_specialist(
                     url=url_input.value,
-                    specialist_name=name,
+                    specialist_name=_spec_name,
                     cwd=repo_root,
                 )
-                rerun_status = f"Re-running {name}…"
+                rerun_status = f"Re-running {_spec_name}…"
                 break
-
     return (rerun_status,)
 
 
-# ---------------------------------------------------------------------------
-# Cell H2 — render re-run controls (slice 8)
-# ---------------------------------------------------------------------------
 @app.cell
 def _rerun_panel(mo, rerun_buttons, rerun_specialists, rerun_status):
-    button_row = mo.hstack([rerun_buttons[name] for name in rerun_specialists])
-    blocks = [mo.md("**Re-run a single specialist** _(requires a URL above)_"), button_row]
+    button_row = mo.hstack([rerun_buttons[_n] for _n in rerun_specialists])
+    _rerun_blocks = [mo.md("**Re-run a single specialist** _(requires a URL above)_"), button_row]
     if rerun_status:
-        blocks.append(mo.callout(mo.md(rerun_status), kind="info"))
-    mo.vstack(blocks)
+        _rerun_blocks.append(mo.callout(mo.md(rerun_status), kind="info"))
+    mo.vstack(_rerun_blocks)
+    return
 
 
-# ---------------------------------------------------------------------------
-# Cell F0 — Finalize button (slice 7)
-# ---------------------------------------------------------------------------
 @app.cell
 def _finalize_button(mo):
     finalize_button = mo.ui.run_button(label="Finalize accepted edits")
     return (finalize_button,)
 
 
-# ---------------------------------------------------------------------------
-# Cell F1 — Finalize execution (slice 7)
-# ---------------------------------------------------------------------------
 @app.cell
 def _finalize_run(
     Path,
     chat_backend,
     finalize_button,
     load_config,
-    mo,
     repo_root,
     slug_picker,
 ):
@@ -562,97 +513,94 @@ def _finalize_run(
     finalize_error = None
 
     if finalize_button.value and slug_picker.value:
-        cfg = load_config()
-        review_db_dir = Path(repo_root) / "private" / ".review"
-        applications_dir = Path(repo_root) / cfg.output.applications_dir
+        _cfg_f = load_config()
+        _review_dir_f = Path(repo_root) / "private" / ".review"
+        _apps_dir_f = Path(repo_root) / _cfg_f.output.applications_dir
 
         # Load accepted amendments from the review DB
         from jobsmith.db import open_review_db
         from jobsmith.marimo.directive_parser import Amendment
-        conn = open_review_db(slug_picker.value, review_db_dir)
+        _conn_f = open_review_db(slug_picker.value, _review_dir_f)
         try:
-            rows = conn.execute(
+            _rows_f = _conn_f.execute(
                 "SELECT amendment_id, section, op, value, status, "
                 "target_index, target_field "
                 "FROM amendments WHERE slug=? AND status='accepted'",
                 (slug_picker.value,),
             ).fetchall()
         finally:
-            conn.close()
+            _conn_f.close()
 
-        accepted = [
+        _accepted_f = [
             Amendment(
-                id=row["amendment_id"],
-                section=row["section"],
+                id=_r["amendment_id"],
+                section=_r["section"],
                 # target_index / target_field carry the parsed AMEND
                 # work[0].bullet[2] target so finalize's YAML appliers
                 # know where to write (roborev #921 HIGH).
-                index=row["target_index"],
-                field=row["target_field"],
-                op=row["op"],
-                value=row["value"],
+                index=_r["target_index"],
+                field=_r["target_field"],
+                op=_r["op"],
+                value=_r["value"],
                 status="accepted",
             )
-            for row in rows
+            for _r in _rows_f
         ]
 
         try:
             finalize_result = _finalize_run_impl(
                 slug=slug_picker.value,
-                accepted_amendments=accepted,
-                masters=cfg.master,
-                applications_dir=applications_dir,
-                review_db_dir=review_db_dir,
+                accepted_amendments=_accepted_f,
+                masters=_cfg_f.master,
+                applications_dir=_apps_dir_f,
+                review_db_dir=_review_dir_f,
                 repo_root=Path(repo_root),
             )
-            for amendment_id in finalize_result.finalized_amendment_ids:
-                _set_status(slug_picker.value, amendment_id, "finalized", review_db_dir)
+            for _fid in finalize_result.finalized_amendment_ids:
+                _set_status(slug_picker.value, _fid, "finalized", _review_dir_f)
             if chat_backend is not None and finalize_result.finalized_amendment_ids:
                 chat_backend.start_new_session()
         except Exception as exc:  # noqa: BLE001 — surface to UI; do not crash notebook
             finalize_error = str(exc)
-
     return finalize_error, finalize_result
 
 
-# ---------------------------------------------------------------------------
-# Cell F2 — Render Finalize panel + PDF embed (slice 7)
-# ---------------------------------------------------------------------------
 @app.cell
 def _finalize_panel(finalize_button, finalize_error, finalize_result, mo):
-    blocks = [finalize_button]
+    _final_blocks = [finalize_button]
 
     if finalize_error:
-        blocks.append(
+        _final_blocks.append(
             mo.callout(mo.md(f"**Finalize failed:** {finalize_error}"), kind="danger")
         )
     elif finalize_result is not None:
-        modified = finalize_result.modified_files or []
-        unsupported = finalize_result.unsupported_sections or []
-        lines = [
+        _modified = finalize_result.modified_files or []
+        _unsupported = finalize_result.unsupported_sections or []
+        _lines = [
             f"**Backup:** `{finalize_result.backup_path}`",
-            f"**Files written:** {len(modified)}",
+            f"**Files written:** {len(_modified)}",
         ]
-        for f in modified:
-            lines.append(f"- `{f}`")
-        if unsupported:
-            lines.append(
-                f"**Skipped (read-only sections):** {', '.join(unsupported)}"
+        for _f in _modified:
+            _lines.append(f"- `{_f}`")
+        if _unsupported:
+            _lines.append(
+                f"**Skipped (read-only sections):** {', '.join(_unsupported)}"
             )
         if finalize_result.finalized_amendment_ids:
-            lines.append(
+            _lines.append(
                 f"**Amendments finalized:** {len(finalize_result.finalized_amendment_ids)}"
             )
         if finalize_result.quarto_returncode != 0:
-            lines.append(
+            _lines.append(
                 f"**Quarto exit code:** {finalize_result.quarto_returncode} (PDF may be stale)"
             )
-        blocks.append(mo.callout(mo.md("\n\n".join(lines)), kind="success"))
+        _final_blocks.append(mo.callout(mo.md("\n\n".join(_lines)), kind="success"))
 
         if finalize_result.pdf_path is not None and finalize_result.pdf_path.exists():
-            blocks.append(mo.pdf(src=finalize_result.pdf_path))
+            _final_blocks.append(mo.pdf(src=finalize_result.pdf_path))
 
-    mo.vstack(blocks)
+    mo.vstack(_final_blocks)
+    return
 
 
 if __name__ == "__main__":
