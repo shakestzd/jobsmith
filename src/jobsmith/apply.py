@@ -15,6 +15,7 @@ Public API
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
@@ -327,16 +328,14 @@ def _build_paths(slug: str, cwd: Path, plugin_directory: Path) -> dict[str, str]
         from .voice import load_voice_profile  # local import — avoid circular at module load
         voice_cache_dir = apps_dir / slug / ".apply-state"
         resolved_benchmark = result.get("benchmark.resume_qmd")
-        try:
+        # Voice profile is non-blocking: if computation fails (corrupt
+        # benchmark, etc.), specialists fall back to seed defaults.
+        with contextlib.suppress(Exception):
             load_voice_profile(
                 config,
                 cache_dir=voice_cache_dir,
                 benchmark_path_override=Path(resolved_benchmark) if resolved_benchmark else None,
             )
-        except Exception:
-            # Voice profile is non-blocking: if computation fails (corrupt
-            # benchmark, etc.), specialists fall back to seed defaults.
-            pass
         result["voice_profile_json"] = str(voice_cache_dir / "voice-profile.json")
 
         # Slice C: pre-filter projects.yml and emit projects-filtered.json so
@@ -724,6 +723,31 @@ _PHASE_REQUIRED_SPECIALISTS: dict[str, tuple[str, ...]] = {
         "apply-index-writer",
     ),
 }
+
+
+def phase_for_specialist(specialist_name: str) -> str:
+    """Return the phase name that contains *specialist_name*.
+
+    Parameters
+    ----------
+    specialist_name:
+        A specialist slug such as ``"apply-fit-scorer"`` or
+        ``"apply-prose-writer"``.
+
+    Returns
+    -------
+    str
+        One of ``"gather"``, ``"draft"``, or ``"render"``.
+
+    Raises
+    ------
+    ValueError
+        When *specialist_name* is not found in any phase.
+    """
+    for phase, specialists in _PHASE_REQUIRED_SPECIALISTS.items():
+        if specialist_name in specialists:
+            return phase
+    raise ValueError(f"unknown specialist: {specialist_name!r}")
 
 
 def _applications_dir(cwd: Path) -> Path | None:
