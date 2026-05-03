@@ -334,6 +334,23 @@ def test_init_adds_benchmarks_to_gitignore(tmp_path: Path) -> None:
     assert "private/benchmarks/" in gitignore
 
 
+def test_init_ignores_pipeline_db_and_review_state(tmp_path: Path) -> None:
+    """Roborev #922 MEDIUM: bootstrap must ignore the new private DBs.
+
+    private/jobsmith.db carries specialist outputs (slice 1) and
+    private/.review/ carries amendments + chat history (slice 1) —
+    both are personal review state that should never land in version
+    control. Earlier the bootstrap only listed private/job_search.db.
+    """
+    result = _run_init(tmp_path)
+    assert result.exit_code == 0, result.output
+    gitignore = (tmp_path / ".gitignore").read_text()
+    assert "private/jobsmith.db" in gitignore
+    assert "private/jobsmith.db-*" in gitignore  # WAL/SHM sidecars
+    assert "private/.review/" in gitignore
+    assert "private/.review-backups/" in gitignore
+
+
 def test_init_does_not_duplicate_gitignore_rules(tmp_path: Path) -> None:
     """Running init twice should not duplicate .gitignore entries."""
     _run_init(tmp_path)

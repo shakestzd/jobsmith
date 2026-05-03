@@ -5,17 +5,25 @@ Public API
 - :func:`derive_slug` — sanitize a JD URL into a filesystem-safe slug
 - :func:`ensure_bootstrap` — auto-bootstrap `.apply-config.yaml` if missing
 - :func:`build_phase_prompt` — construct the user prompt for each phase
+- :func:`run_phase_iter` — generator yielding :class:`PipelineEvent` objects
+  per phase completion (gather→draft→render). Consumers observe phase-granular
+  events; per-specialist granularity is deferred to slice 8.
 - :func:`run_apply` — orchestrate all three phases with confirm gates and
-  per-phase resume from completed work (via ``manifest.json`` + URL index)
+  per-phase resume from completed work (via ``manifest.json`` + URL index).
+  Internally drives ``run_phase_iter()`` and discards events for the CLI path.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
 import shutil
+import threading
 import uuid
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -45,6 +53,39 @@ _PHASE_MAX_TURNS: dict[str, int] = {
     "draft": 30,
     "render": 60,
 }
+
+
+# ---------------------------------------------------------------------------
+# PipelineEvent — phase-granular events from run_phase_iter()
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PipelineEvent:
+    """A phase-granular event emitted by :func:`run_phase_iter`.
+
+    Attributes
+    ----------
+    kind:
+        Event kind. One of:
+        - ``"phase_started"``  — phase loop entered.
+        - ``"phase_complete"`` — phase emitted ``<<PHASE_COMPLETE>>``.
+        - ``"phase_failed"``   — phase emitted ``<<PHASE_FAILED>>``.
+        - ``"slug_changed"``   — canonical slug differs from starting slug
+          after gather reconciliation.
+        - ``"guard_failed"``   — ``_run_step45_orchestration`` returned non-zero.
+        - ``"cancelled"``      — generator stopped because ``cancel_event`` was set.
+    phase:
+        Phase name at time of event (``"gather"``, ``"draft"``, ``"render"``).
+    payload:
+        Kind-specific data dict. ``"slug_changed"`` carries
+        ``{"old_slug": ..., "new_slug": ...}``; ``"guard_failed"`` carries
+        ``{"rc": ...}``; others are ``{}``.
+    """
+
+    kind: str
+    phase: str
+    payload: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -288,16 +329,14 @@ def _build_paths(slug: str, cwd: Path, plugin_directory: Path) -> dict[str, str]
         from .voice import load_voice_profile  # local import — avoid circular at module load
         voice_cache_dir = apps_dir / slug / ".apply-state"
         resolved_benchmark = result.get("benchmark.resume_qmd")
-        try:
+        # Voice profile is non-blocking: if computation fails (corrupt
+        # benchmark, etc.), specialists fall back to seed defaults.
+        with contextlib.suppress(Exception):
             load_voice_profile(
                 config,
                 cache_dir=voice_cache_dir,
                 benchmark_path_override=Path(resolved_benchmark) if resolved_benchmark else None,
             )
-        except Exception:
-            # Voice profile is non-blocking: if computation fails (corrupt
-            # benchmark, etc.), specialists fall back to seed defaults.
-            pass
         result["voice_profile_json"] = str(voice_cache_dir / "voice-profile.json")
 
         # Slice C: pre-filter projects.yml and emit projects-filtered.json so
@@ -752,6 +791,42 @@ _PHASE_REQUIRED_SPECIALISTS: dict[str, tuple[str, ...]] = {
 }
 
 
+def required_specialists_for_phase(phase: str) -> tuple[str, ...]:
+    """Return the tuple of specialist slugs required to mark *phase* complete.
+
+    Public accessor on top of the private ``_PHASE_REQUIRED_SPECIALISTS``
+    map so other modules (db_ingest backfill, slice-8 re-runs) can ask
+    "did this phase finish?" without depending on apply.py internals.
+    Returns an empty tuple for unknown phases.
+    """
+    return _PHASE_REQUIRED_SPECIALISTS.get(phase, ())
+
+
+def phase_for_specialist(specialist_name: str) -> str:
+    """Return the phase name that contains *specialist_name*.
+
+    Parameters
+    ----------
+    specialist_name:
+        A specialist slug such as ``"apply-fit-scorer"`` or
+        ``"apply-prose-writer"``.
+
+    Returns
+    -------
+    str
+        One of ``"gather"``, ``"draft"``, or ``"render"``.
+
+    Raises
+    ------
+    ValueError
+        When *specialist_name* is not found in any phase.
+    """
+    for phase, specialists in _PHASE_REQUIRED_SPECIALISTS.items():
+        if specialist_name in specialists:
+            return phase
+    raise ValueError(f"unknown specialist: {specialist_name!r}")
+
+
 def _applications_dir(cwd: Path) -> Path | None:
     """Resolve the absolute ``applications/`` directory, or None if config absent."""
     config_path = find_config(cwd)
@@ -835,6 +910,19 @@ def _resolve_starting_slug(url: str, cwd: Path) -> tuple[str, bool]:
         _save_url_index(cwd, index)
         return scanned, True
     return derive_slug(url), False
+
+
+def resolve_canonical_slug(url: str, cwd: Path) -> str:
+    """Public accessor on top of :func:`_resolve_starting_slug`.
+
+    External callers (slice-4 NotebookRunner, slice-8 single-specialist
+    re-runs) need the same canonical slug that ``run_phase_iter`` will use
+    so DB rows, manifest resets, and post-phase ingestion all target the
+    same application directory. Returns just the slug; the boolean
+    "from_index" flag is an internal concern.
+    """
+    slug, _from_index = _resolve_starting_slug(url, cwd)
+    return slug
 
 
 def _record_url_mapping(url: str, canonical_slug: str, cwd: Path) -> None:
@@ -973,6 +1061,221 @@ def _run_step45_orchestration(slug: str, cwd: Path) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Generator: run_phase_iter()
+# ---------------------------------------------------------------------------
+
+
+def run_phase_iter(
+    url: str,
+    *,
+    cwd: Path | None = None,
+    skip_confirm: bool = False,
+    force: bool = False,
+    cancel_event: threading.Event | None = None,
+    phases: list[str] | None = None,
+) -> Iterator[PipelineEvent]:
+    """Yield :class:`PipelineEvent` for each phase of the apply pipeline.
+
+    Phase-granular events ONLY (not per-specialist).  Per-specialist
+    granularity is deferred to slice 8 (manifest-polling ingestor).
+
+    Parameters
+    ----------
+    url:
+        Job description URL.
+    cwd:
+        Working directory (defaults to current directory).
+    skip_confirm:
+        Bypass phase-gate confirmations.
+    force:
+        Ignore existing manifest / URL index; re-run all phases.
+    cancel_event:
+        When set, the generator stops after the current phase completes and
+        does not start subsequent phases.  Consumers MUST also propagate the
+        event to ``headless.run_phase`` (via the ``cancel_event`` kwarg) so
+        a running subprocess is terminated.
+    phases:
+        When provided, restrict execution to the named phases (in their
+        canonical gather → draft → render order). ``None`` means "run all
+        not-yet-complete phases" (the default). Used by slice-8 single-
+        specialist re-runs to avoid re-running upstream phases (roborev #921).
+
+    Yields
+    ------
+    PipelineEvent
+        Events in order: ``phase_started`` → ``phase_complete`` (or
+        ``phase_failed`` / ``guard_failed``) per phase, with an optional
+        ``slug_changed`` event between gather and draft.  A ``cancelled``
+        event is the final event when ``cancel_event`` was set.
+    """
+    import time as _time
+
+    resolved_cwd = cwd or Path.cwd()
+
+    # Step 1: bootstrap
+    ensure_bootstrap(resolved_cwd)
+
+    # Step 2: resolve starting slug
+    started_at = _time.time()
+    plugin_directory = get_plugin_dir()
+
+    if force:
+        index = _load_url_index(resolved_cwd)
+        slug = index[url] if url in index else derive_slug(url)
+    else:
+        slug, _from_index = _resolve_starting_slug(url, resolved_cwd)
+
+    # Step 3: phase-completion gating
+    apps_dir = _applications_dir(resolved_cwd)
+    app_dir = apps_dir / slug if apps_dir is not None else None
+    manifest = None if force or app_dir is None else _load_manifest(app_dir)
+
+    session_id = headless.deterministic_session_id(slug)
+
+    phase_done: dict[str, bool] = {
+        name: _phase_completed(manifest, name) for name, _ in _PHASES
+    }
+
+    # All done → no events to yield
+    if all(phase_done.values()) and app_dir is not None:
+        return
+
+    # Filter to the requested phases (preserving canonical ordering).
+    # phases=None means "run every phase that's not yet complete" — the
+    # historical behavior. phases=[name] from slice-8 re-runs scopes work
+    # to a single phase so re-running apply-prose-writer (draft) does NOT
+    # re-fire the gather phase first (roborev #921 HIGH).
+    if phases is not None:
+        requested = set(phases)
+        active_phases = [(n, num) for n, num in _PHASES if n in requested]
+    else:
+        active_phases = list(_PHASES)
+
+    for phase_name, phase_num in active_phases:
+        # Check cancel before starting each phase
+        if cancel_event is not None and cancel_event.is_set():
+            yield PipelineEvent(kind="cancelled", phase=phase_name)
+            return
+
+        # Step 3pre: anchor guard before draft
+        if phase_name == "draft" and not phase_done["draft"]:
+            state_dir = _apply_state_dir(slug, resolved_cwd)
+            if state_dir is not None and not (state_dir / "bullet-decisions.json").exists():
+                rc = _run_step45_orchestration(slug, resolved_cwd)
+                if rc != 0:
+                    yield PipelineEvent(
+                        kind="guard_failed",
+                        phase=phase_name,
+                        payload={"rc": rc},
+                    )
+                    return
+
+        # Skip completed phases
+        if phase_done[phase_name]:
+            continue
+
+        yield PipelineEvent(kind="phase_started", phase=phase_name)
+
+        # Step 3a: session continuity
+        resume = (phase_name != "gather") and headless.session_exists(
+            session_id, cwd=resolved_cwd
+        )
+
+        # Step 3b: system prompt
+        system_prompt = (
+            plugin_directory / "system-prompts" / f"phase-{phase_num}-{phase_name}.md"
+        )
+        if not system_prompt.exists():
+            raise FileNotFoundError(
+                f"System prompt not found: {system_prompt}"
+            )
+
+        # Step 3c: paths + prompt
+        phase_paths = _build_paths(slug, resolved_cwd, plugin_directory)
+        prompt_text = build_phase_prompt(phase_name, slug, url, paths=phase_paths)
+
+        # Step 3f: stream events from headless
+        phase_succeeded = False
+        for event in headless.run_phase(
+            phase=phase_name,
+            session_id=session_id,
+            prompt=prompt_text,
+            plugin_dir=plugin_directory,
+            system_prompt=system_prompt,
+            resume=resume,
+            cwd=resolved_cwd,
+            max_turns=_PHASE_MAX_TURNS[phase_name],
+            cancel_event=cancel_event,
+        ):
+            if event.type == "phase_complete":
+                phase_succeeded = True
+                break
+            if event.type == "phase_failed":
+                yield PipelineEvent(
+                    kind="phase_failed",
+                    phase=phase_name,
+                    payload={"error": event.error},
+                )
+                return
+            if event.type == "error":
+                yield PipelineEvent(
+                    kind="phase_failed",
+                    phase=phase_name,
+                    payload={"error": event.error},
+                )
+                return
+
+            # Stop draining if cancelled mid-phase
+            if cancel_event is not None and cancel_event.is_set():
+                yield PipelineEvent(kind="cancelled", phase=phase_name)
+                return
+
+        if not phase_succeeded:
+            yield PipelineEvent(
+                kind="phase_failed",
+                phase=phase_name,
+                payload={"error": "no phase_complete signal emitted"},
+            )
+            return
+
+        # Step 3f-snap: snapshot agent drafts
+        _snapshot_phase_drafts(phase_name, slug, resolved_cwd)
+
+        # Step 3g: between-phase orchestration after gather
+        if phase_name == "gather":
+            new_slug, reconciled = _reconcile_canonical_slug(
+                slug, resolved_cwd, started_at
+            )
+            if new_slug != slug:
+                old_slug = slug
+                slug = new_slug
+                session_id = headless.deterministic_session_id(slug)
+                # Emit slug_changed and pause up to 1s for consumer ack.
+                # The consumer MUST rebind their slug variable; the runner
+                # does not hold any file handles to the app dir across the rename.
+                ev = PipelineEvent(
+                    kind="slug_changed",
+                    phase=phase_name,
+                    payload={"old_slug": old_slug, "new_slug": slug},
+                )
+                yield ev
+                # 1-second timeout: we cannot block indefinitely waiting for
+                # the consumer to ack. The event has already been yielded; if
+                # the consumer cares it reads the event synchronously. The
+                # timeout here is just a documentation-level signal.
+                _time.sleep(0)  # cooperative yield point
+            if reconciled:
+                _record_url_mapping(url, slug, resolved_cwd)
+
+        yield PipelineEvent(kind="phase_complete", phase=phase_name)
+
+        # Check cancel after phase completes (before starting next)
+        if cancel_event is not None and cancel_event.is_set():
+            yield PipelineEvent(kind="cancelled", phase=phase_name)
+            return
+
+
+# ---------------------------------------------------------------------------
 # Top-level pipeline
 # ---------------------------------------------------------------------------
 
@@ -1098,6 +1401,127 @@ def run_apply(
 
     total_phases = len(_PHASES)
 
+    # roborev #923 HIGH 2: persist apply_runs row + post-phase ingest from the
+    # CLI path too. Previously only the marimo runner wrote to the DB, so
+    # `jobsmith apply <url>` followed by `jobsmith review <slug>` would fail
+    # with "slug not found". Mirror the marimo runner's pattern: insert one
+    # apply_runs row per CLI run, ingest after each phase_complete, finalize
+    # the row's status in the wrapper finally-block. Wrapped in suppress so a
+    # missing/locked DB never aborts the apply pipeline itself — DB writes are
+    # canonical for review but secondary to the pipeline's primary work.
+    db_run_id = str(uuid.uuid4())
+    db_phase_label = "unknown"  # full pipeline; matches marimo runner convention
+    db_started_at_iso = _db_now_iso()
+    db_conn = _open_pipeline_db_for_run(resolved_cwd)
+    db_final_status = "failed"  # default; overridden on success/decline/etc.
+    db_slug_ref = [slug]
+    if db_conn is not None:
+        with contextlib.suppress(Exception):
+            from .db import insert_apply_run as _insert_apply_run
+
+            _insert_apply_run(
+                db_conn,
+                run_id=db_run_id,
+                slug=slug,
+                phase=db_phase_label,
+                started_at=db_started_at_iso,
+                finished_at=None,
+                status="running",
+            )
+
+    try:
+        rc = _run_apply_phases(
+            url=url,
+            resolved_cwd=resolved_cwd,
+            rdr=rdr,
+            plugin_directory=plugin_directory,
+            slug=slug,
+            apps_dir=apps_dir,
+            session_id=session_id,
+            phase_done=phase_done,
+            total_phases=total_phases,
+            skip_confirm=skip_confirm,
+            started_at=started_at,
+            db_conn=db_conn,
+            db_run_id=db_run_id,
+            db_slug_ref=db_slug_ref,
+        )
+        db_final_status = "done" if rc == 0 else "failed"
+        return rc
+    finally:
+        if db_conn is not None:
+            try:
+                # db_slug_ref[0] reflects the canonical slug after gather
+                # reconciliation (run_apply_phases mutates it in place); use
+                # that for the final UPDATE so the apply_runs row points at the
+                # actual application directory.
+                with contextlib.suppress(Exception):
+                    db_conn.execute(
+                        "UPDATE apply_runs "
+                        "SET status=?, finished_at=?, slug=? "
+                        "WHERE run_id=?",
+                        (
+                            db_final_status,
+                            _db_now_iso(),
+                            db_slug_ref[0],
+                            db_run_id,
+                        ),
+                    )
+                    db_conn.commit()
+            finally:
+                db_conn.close()
+
+
+def _db_now_iso() -> str:
+    """ISO-8601 UTC timestamp; matches marimo runner's apply_runs format."""
+    from datetime import datetime, timezone
+    return datetime.now(tz=timezone.utc).isoformat()
+
+
+def _open_pipeline_db_for_run(cwd: Path):
+    """Open the pipeline DB if config is present; otherwise return None.
+
+    Returns None silently when ``.apply-config.yaml`` is missing — the apply
+    pipeline must keep working in scratch directories without a config (the
+    bootstrap path will create one, but unit tests stub a minimal config that
+    still resolves a default ``private/jobsmith.db`` path beneath ``cwd``).
+    """
+    config_path = find_config(cwd)
+    if config_path is None:
+        return None
+    try:
+        from .db import open_pipeline_db as _open_pipeline_db
+        config = load_config(config_path)
+        db_path = resolve(config.output.jobsmith_db, config_path.parent)
+        return _open_pipeline_db(db_path)
+    except Exception:  # noqa: BLE001 — DB is secondary to the pipeline
+        return None
+
+
+def _run_apply_phases(
+    *,
+    url: str,
+    resolved_cwd: Path,
+    rdr: ApplyRenderer,
+    plugin_directory: Path,
+    slug: str,
+    apps_dir: Path | None,
+    session_id: str,
+    phase_done: dict[str, bool],
+    total_phases: int,
+    skip_confirm: bool,
+    started_at: float,
+    db_conn,
+    db_run_id: str,
+    db_slug_ref: list[str],
+) -> int:
+    """Phase-loop body extracted so the surrounding ``run_apply`` can wrap it
+    with the apply_runs DB lifecycle (insert before, UPDATE after, with the
+    canonical slug reflected via ``db_slug_ref[0]``).
+
+    All parameters are pre-resolved by ``run_apply``; this helper performs no
+    bootstrap or slug resolution of its own.
+    """
     for phase_name, phase_num in _PHASES:
         # Step 3pre: just-in-time wrapper-owned prerequisites that must run
         # regardless of whether the prior phase ran or was skipped.  Step 4/5
@@ -1245,11 +1669,33 @@ def run_apply(
                     carried_session_file.unlink(missing_ok=True)
             if reconciled:
                 _record_url_mapping(url, slug, resolved_cwd)
+            # Propagate the canonical slug to the outer apply_runs row so the
+            # final UPDATE in run_apply's finally-block records the correct
+            # application directory (roborev #923 HIGH 2).
+            db_slug_ref[0] = slug
 
             # Render per-phase summary panel before the confirm gate
             state_dir = _apply_state_dir(slug, resolved_cwd)
             if state_dir is not None:
                 rdr.render_phase_summary("gather", state_dir)
+
+        # Post-phase ingest into specialist_outputs. Mirrors the marimo
+        # runner's behavior so `jobsmith review <slug>` sees rows immediately
+        # after `jobsmith apply <url>` (roborev #923 HIGH 2). Wrapped in
+        # suppress: a single broken artifact must not abort the pipeline.
+        if db_conn is not None:
+            with contextlib.suppress(Exception):
+                from .db_ingest import ingest_phase_outputs as _ingest_phase_outputs
+
+                state_dir_for_ingest = _apply_state_dir(slug, resolved_cwd)
+                if state_dir_for_ingest is not None:
+                    _ingest_phase_outputs(
+                        db_conn,
+                        slug=slug,
+                        run_id=db_run_id,
+                        phase=phase_name,
+                        state_dir=state_dir_for_ingest,
+                    )
 
         # Step 3h: confirm gate (not after the last phase, and not after a
         # phase that was skipped — only fresh-run phases prompt).

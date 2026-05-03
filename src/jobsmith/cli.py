@@ -18,6 +18,7 @@ Exposes:
 from __future__ import annotations
 
 import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
@@ -29,11 +30,11 @@ from rich.table import Table
 
 from . import __version__
 from .assemble import PACKAGE_ROOT, assemble_all, assemble_application
-from .site import discover_applications, init_site, render_site
 from .config import CONFIG_FILENAME, find_config, load_config
 from .factcheck import check_draft
 from .guard import check_anchors, render_diff_md
 from .paths import all_master_paths, repo_root_for, resolve
+from .site import discover_applications, init_site, render_site
 from .voice import _extract_bullets_from_qmd
 
 app = typer.Typer(
@@ -132,6 +133,13 @@ GITIGNORE_ADDITIONS = dedent(
     private/applications/*/documents/*.pdf
     private/applications/*/documents/*.typ
     private/job_search.db
+    # Pipeline persistence (specialist outputs) — slice 1.
+    private/jobsmith.db
+    private/jobsmith.db-*
+    # Per-slug review state (amendments + chat history) — slice 1.
+    # Personal review notes; never check in.
+    private/.review/
+    private/.review-backups/
     private/benchmarks/
     private/feedback/
     """
@@ -733,10 +741,11 @@ def mark_anchors(
     Keys: a (anchor), n (non-anchor), s (skip), q (quit-and-save).
     On `a`, you'll be prompted for a one-line ``anchor_reason`` rationale.
     """
-    from ruamel.yaml import YAML
     import difflib
     import io
     import sys
+
+    from ruamel.yaml import YAML
 
     if not master.exists():
         console.print(f"[red]ERROR:[/red] master file not found: {master}")
@@ -1011,8 +1020,6 @@ def site_serve_cmd(
         )
         raise typer.Exit(code=2)
 
-    import subprocess
-
     console.print(f"[cyan]quarto preview[/cyan] at {root.resolve()}")
     result = subprocess.run([quarto, "preview", str(root.resolve())])
     raise typer.Exit(code=result.returncode)
@@ -1245,6 +1252,58 @@ def _copy_file(src: Path, dst: Path, force: bool) -> bool:
     shutil.copy(src, dst)
     console.print(f"  COPIED {dst}")
     return True
+
+
+@app.command(name="review")
+def review_cmd(
+    slug: str = typer.Argument(..., help="Application slug to open in the marimo notebook."),
+) -> None:
+    """Open the marimo review notebook for an existing application slug.
+
+    Slice 4 scaffold — slug-only mode. Slice 10 will add a URL form,
+    --no-browser flag, and a --port option.
+    """
+    from . import marimo as _marimo_pkg
+    from .db import get_apply_run_by_slug, open_pipeline_db
+
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        typer.echo(
+            f"No {CONFIG_FILENAME} found — run `jobsmith init` first.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    config = load_config(config_path)
+
+    repo_root = config_path.parent
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        typer.echo(f"slug not found: {slug} (no DB at {db_path})", err=True)
+        raise typer.Exit(code=2)
+
+    conn = open_pipeline_db(db_path)
+    try:
+        row = get_apply_run_by_slug(conn, slug)
+    finally:
+        conn.close()
+    if row is None:
+        typer.echo(f"slug not found: {slug}", err=True)
+        raise typer.Exit(code=2)
+
+    notebook = Path(_marimo_pkg.__file__).resolve().parent / "apply.py"
+    # Pass cwd=repo_root AND set JOBSMITH_REPO_ROOT in the subprocess env so
+    # the notebook (which reads .apply-config.yaml from "." and falls back
+    # to JOBSMITH_REPO_ROOT for repo-root resolution) finds the right DB
+    # even when `jobsmith review` is invoked from a subdirectory.
+    import os as _os
+    env = {**_os.environ, "JOBSMITH_REPO_ROOT": str(repo_root)}
+    result = subprocess.run(
+        ["marimo", "edit", str(notebook)],
+        cwd=str(repo_root),
+        env=env,
+        check=False,
+    )
+    raise typer.Exit(code=result.returncode)
 
 
 if __name__ == "__main__":

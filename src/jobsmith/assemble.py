@@ -36,7 +36,6 @@ The CLI surface is `jobsmith assemble` (per-app) and `jobsmith assemble --all`
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shutil
@@ -45,6 +44,24 @@ from typing import Any
 
 import yaml
 
+from ._state_readers import (
+    load_ai_tell_report as _load_ai_tell_report,
+)
+from ._state_readers import (
+    load_bullet_selection as _load_bullet_selection,
+)
+from ._state_readers import (
+    load_fit_score as _load_fit_score,
+)
+from ._state_readers import (
+    load_hm_snippet as _load_hm_snippet,
+)
+from ._state_readers import (
+    load_jd_parsed as _load_jd_parsed,
+)
+from ._state_readers import (
+    load_text_artifact as _load_text_artifact,
+)
 from .config import load_config
 from .paths import repo_root_for
 from .research import slugify
@@ -161,68 +178,9 @@ def _install_theme(resolved: Path, app_dir: Path) -> None:
 
 
 # ---------- per-source loaders ----------
-
-
-def _load_jd_parsed(state_dir: Path) -> dict[str, Any]:
-    path = state_dir / "jd-parsed.json"
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text())
-
-
-def _load_fit_score(state_dir: Path) -> dict[str, Any]:
-    path = state_dir / "fit-score.json"
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text())
-
-
-def _load_bullet_selection(state_dir: Path) -> dict[str, Any]:
-    path = state_dir / "bullet-selection.json"
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text())
-
-
-def _load_hm_snippet(state_dir: Path) -> dict[str, Any]:
-    """Parse the HM dossier sentinel/markdown into a dict.
-
-    The hm-snippet.md format is:
-
-        # HM dossier (or sentinel)
-
-        detected: yes | no
-        name: <string|null>
-        source: linkedin_post | jd_signature | shakes_arg | none
-        one_specific_signal: <string|null>
-        suggested_hook: <string|null>
-    """
-    path = state_dir / "hm-snippet.md"
-    if not path.exists():
-        return {}
-    out: dict[str, Any] = {}
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if ":" in line:
-            key, _, value = line.partition(":")
-            value = value.strip()
-            if value in ("null", "none", ""):
-                out[key.strip()] = None
-            elif value in ("yes", "no"):
-                out[key.strip()] = value == "yes"
-            else:
-                out[key.strip()] = value
-    return out
-
-
-def _load_text_artifact(state_dir: Path, filename: str) -> str | None:
-    """Load a markdown artifact's full text, or None if missing."""
-    path = state_dir / filename
-    if not path.exists():
-        return None
-    return path.read_text()
+# Logic lives in _state_readers (imported at module top).
+# These aliases keep existing call-sites unchanged.
+# Slice 9 will remove assemble.py entirely.
 
 
 def _load_application_md(app_dir: Path, filename: str) -> str | None:
@@ -231,26 +189,6 @@ def _load_application_md(app_dir: Path, filename: str) -> str | None:
     if not path.exists():
         return None
     return path.read_text()
-
-
-def _load_ai_tell_report(state_dir: Path) -> dict[str, Any] | None:
-    """Load .apply-state/ai-tell-report.json, returning None if missing or malformed.
-
-    Degrades gracefully — callers must not raise on None; use the fallback
-    callout block instead.
-    """
-    import logging
-
-    path = state_dir / "ai-tell-report.json"
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError) as exc:
-        logging.getLogger(__name__).warning(
-            "ai-tell-report.json could not be loaded (%s): %s", path, exc
-        )
-        return None
 
 
 _HUMANIZER_AUDIT_FALLBACK = (
