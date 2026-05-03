@@ -462,6 +462,78 @@ def _show_accordion(accordion, mo):
 
 
 # ---------------------------------------------------------------------------
+# Cell H0 — per-specialist re-run buttons (slice 8)
+# ---------------------------------------------------------------------------
+@app.cell
+def _rerun_buttons(mo):
+    # Order matches gather → draft phases (render specialists write to
+    # documents/, not .apply-state/, so they're not re-runnable here).
+    rerun_specialists = (
+        "apply-jd-parser",
+        "apply-fit-scorer",
+        "apply-hm-enricher",
+        "apply-bullet-selector",
+        "apply-company-research",
+        "apply-prose-writer",
+        "apply-prose-qa",
+    )
+    rerun_buttons = {
+        name: mo.ui.run_button(label=f"Re-run {name}")
+        for name in rerun_specialists
+    }
+    return rerun_buttons, rerun_specialists
+
+
+# ---------------------------------------------------------------------------
+# Cell H1 — dispatch a re-run when a button is clicked (slice 8)
+# ---------------------------------------------------------------------------
+@app.cell
+def _rerun_dispatch(
+    Path,
+    db_path,
+    repo_root,
+    rerun_buttons,
+    slug_picker,
+    url_input,
+):
+    from jobsmith.marimo.runner import get_runner
+
+    rerun_status = None
+    runner = get_runner(
+        db_path=db_path,
+        applications_dir=Path(repo_root) / "private" / "applications",
+    )
+
+    # Find the first button with .value=True. mo.ui.run_button latches per
+    # click; we surface ONE re-run at a time to keep the runner singleton's
+    # re-entry guard happy.
+    if slug_picker.value and url_input.value:
+        for name, btn in rerun_buttons.items():
+            if btn.value and not runner.is_running():
+                runner.run_specialist(
+                    url=url_input.value,
+                    specialist_name=name,
+                    cwd=repo_root,
+                )
+                rerun_status = f"Re-running {name}…"
+                break
+
+    return (rerun_status,)
+
+
+# ---------------------------------------------------------------------------
+# Cell H2 — render re-run controls (slice 8)
+# ---------------------------------------------------------------------------
+@app.cell
+def _rerun_panel(mo, rerun_buttons, rerun_specialists, rerun_status):
+    button_row = mo.hstack([rerun_buttons[name] for name in rerun_specialists])
+    blocks = [mo.md("**Re-run a single specialist** _(requires a URL above)_"), button_row]
+    if rerun_status:
+        blocks.append(mo.callout(mo.md(rerun_status), kind="info"))
+    mo.vstack(blocks)
+
+
+# ---------------------------------------------------------------------------
 # Cell F0 — Finalize button (slice 7)
 # ---------------------------------------------------------------------------
 @app.cell
