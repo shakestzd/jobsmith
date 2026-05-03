@@ -402,7 +402,16 @@ def test_load_sections_ignores_failed_rerun_keeps_last_done(pipeline_db):
 
 
 def test_load_sections_ignores_running_rerun_keeps_last_done(pipeline_db):
-    """A still-running re-run must not mask the last 'done' output either."""
+    """A still-running re-run with partial output must not mask the last 'done'.
+
+    Roborev #925 LOW: the prior version of this test inserted only the
+    apply_runs row for the running re-run with no specialist_outputs,
+    so the per-kind query had nothing newer to consider — meaning the
+    test passed even without the status filter and provided no real
+    coverage. This version inserts a newer fit-score row tied to the
+    running re-run; without the status='done' filter, that row would
+    win on (started_at, finished_at) and the test would fail.
+    """
     from jobsmith.marimo.loader import load_sections
 
     conn, db_path = pipeline_db
@@ -428,7 +437,9 @@ def test_load_sections_ignores_running_rerun_keeps_last_done(pipeline_db):
         "pitch": "v1",
     }, run_id="run-original")
 
-    # In-flight re-run: status='running', finished_at NULL.
+    # In-flight re-run: status='running', finished_at NULL, with a
+    # newer specialist_outputs row that would otherwise win the
+    # latest-per-kind query.
     insert_apply_run(
         conn,
         run_id="run-rerun-running",
@@ -438,10 +449,22 @@ def test_load_sections_ignores_running_rerun_keeps_last_done(pipeline_db):
         finished_at=None,
         status="running",
     )
+    _insert_output(conn, "fit-score", {
+        "score": 0.99,
+        "score_raw": 0.99,
+        "rationale": "Partial in-flight write",
+        "specialty": "backend",
+        "confidence": "low",
+        "must_have_table": [],
+        "matched_evidence": [],
+        "concerns": [],
+        "pitch": "should not surface",
+    }, run_id="run-rerun-running")
 
     sections = load_sections(_SLUG, db_path)
     assert sections.fit_score is not None
     assert sections.fit_score.score == pytest.approx(0.55)
+    assert sections.fit_score.rationale == "Stable result"
 
 
 def test_loader_prefers_finalized_over_draft(tmp_path: Path):
