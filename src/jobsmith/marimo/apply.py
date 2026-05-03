@@ -1,10 +1,13 @@
-"""Marimo notebook: read-only application review.
+"""Marimo notebook: application runner + review.
 
 Launch with:
     marimo edit src/jobsmith/marimo/apply.py
 
 Slice 3 — slug picker + read-only section cards.
-No chat, no pipeline-run, no finalize (those are slices 4-7).
+Slice 4 — URL input + Run apply + live phase-progress + flip to review.
+
+Subsequent slices (5–7) add chat sidebar, amendment dropdowns, and
+the Finalize/PDF render path.
 """
 # ruff: noqa: N803, N806, N818
 
@@ -47,7 +50,7 @@ def _db_setup(Path, load_config, os, sqlite3):
     _conn.close()
 
     slugs = [row[0] for row in _rows] if _rows else []
-    return db_path, slugs
+    return db_path, repo_root, slugs
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +72,83 @@ def _slug_picker(mo, slugs):
 @app.cell
 def _show_picker(mo, slug_picker):
     mo.vstack([slug_picker])  # noqa: B018
+
+
+# ---------------------------------------------------------------------------
+# Cell D2 — run-mode: URL input + Run/Stop buttons (slice 4)
+# ---------------------------------------------------------------------------
+@app.cell
+def _run_controls(Path, mo, repo_root):
+    from jobsmith.marimo.runner import NotebookRunner
+
+    url_input = mo.ui.text(
+        placeholder="https://example.com/careers/role-id",
+        label="Job URL (paste to run apply pipeline)",
+    )
+    run_button = mo.ui.run_button(label="Run apply")
+    stop_button = mo.ui.run_button(label="Stop")
+    return NotebookRunner, run_button, stop_button, url_input
+
+
+# ---------------------------------------------------------------------------
+# Cell D3 — runner state + dispatch (slice 4)
+# ---------------------------------------------------------------------------
+@app.cell
+def _run_dispatch(
+    NotebookRunner,
+    Path,
+    db_path,
+    repo_root,
+    run_button,
+    stop_button,
+    url_input,
+):
+    # One runner per notebook session
+    runner_state = NotebookRunner(
+        db_path=db_path,
+        applications_dir=Path(repo_root) / "private" / "applications",
+    )
+
+    if run_button.value and url_input.value and not runner_state.is_running():
+        runner_state.start(url_input.value, cwd=repo_root)
+
+    if stop_button.value and runner_state.is_running():
+        runner_state.cancel()
+
+    return (runner_state,)
+
+
+# ---------------------------------------------------------------------------
+# Cell D4 — show controls + live phase progress (slice 4)
+# ---------------------------------------------------------------------------
+@app.cell
+def _show_run_panel(mo, run_button, runner_state, stop_button, url_input):
+    # Phase progress is drained from the runner queue. This cell re-runs
+    # whenever runner_state changes or buttons are clicked.
+    last_phase = "—"
+    status = "idle"
+    while not runner_state.events_queue.empty():
+        ev = runner_state.events_queue.get_nowait()
+        # ev is a PipelineEvent or _Done sentinel
+        kind = getattr(ev, "kind", None) or getattr(ev, "status", None)
+        if kind in ("phase_started", "phase_complete"):
+            last_phase = ev.phase
+            status = kind
+        elif kind in ("done", "cancelled", "failed"):
+            status = kind
+
+    panel = mo.vstack([
+        url_input,
+        mo.hstack([run_button, stop_button]),
+        mo.callout(
+            mo.md(
+                f"**Phase:** `{last_phase}` · **Status:** `{status}`\n\n"
+                "_Live progress is per-phase; phases take 3–8 minutes._"
+            ),
+            kind="info",
+        ),
+    ])
+    panel  # noqa: B018
 
 
 # ---------------------------------------------------------------------------
