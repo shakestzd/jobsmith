@@ -366,6 +366,138 @@ def test_finalize_skills_append(app_tree):
 # ---------------------------------------------------------------------------
 
 
+SKILL_YAML_LIST = """\
+- title: "Programming"
+  description: "Python (Advanced), SQL (Advanced), Bash"
+  details:
+    - "Python (Advanced)"
+    - "SQL (Advanced)"
+    - "Bash"
+- title: "Data Engineering"
+  description: "ETL Pipelines, Dagster, DLT Hub"
+  details:
+    - "ETL Pipelines"
+    - "Dagster"
+    - "DLT Hub"
+"""
+
+
+def test_finalize_skills_append_list_schema(app_tree):
+    """Roborev #923 MEDIUM 3: list-of-sections schema supports append.
+
+    The bundled examples/master-yaml/skill.yml ships as a list of
+    ``{title, description, details}`` entries. AMEND skills should
+    append into the matching section's ``details`` list.
+    """
+    t = app_tree
+    slug = t["slug"]
+    t["skill_yml"].write_text(SKILL_YAML_LIST, encoding="utf-8")
+
+    amendments = [
+        _make_amendment(
+            section="skills",
+            index=None,
+            field="Programming",
+            op="append",
+            value="TypeScript",
+        ),
+    ]
+    _seed_db(slug, t["review_dir"], amendments)
+
+    with _mock_quarto_success():
+        result = finalize_run(
+            slug=slug,
+            accepted_amendments=amendments,
+            masters=t["masters"],
+            applications_dir=t["applications_dir"],
+            review_db_dir=t["review_dir"],
+            backup_dir=t["backup_dir"],
+        )
+
+    written = t["skill_yml"].read_text(encoding="utf-8")
+    assert "TypeScript" in written
+    # Confirm it landed in the Programming section, not elsewhere.
+    programming_block = written.split("Data Engineering")[0]
+    assert "TypeScript" in programming_block
+    assert amendments[0].id in result.finalized_amendment_ids
+
+
+def test_finalize_skills_replace_list_schema_indexed(app_tree):
+    """Roborev #923 MEDIUM 3: list-of-sections schema supports indexed replace.
+
+    ``AMEND skills.Programming[1]: replace ... value: PostgreSQL`` should
+    overwrite the second item in the Programming details list.
+    """
+    t = app_tree
+    slug = t["slug"]
+    t["skill_yml"].write_text(SKILL_YAML_LIST, encoding="utf-8")
+
+    amendments = [
+        _make_amendment(
+            section="skills",
+            index=None,
+            field="Programming[1]",
+            op="replace",
+            value="PostgreSQL",
+        ),
+    ]
+    _seed_db(slug, t["review_dir"], amendments)
+
+    with _mock_quarto_success():
+        result = finalize_run(
+            slug=slug,
+            accepted_amendments=amendments,
+            masters=t["masters"],
+            applications_dir=t["applications_dir"],
+            review_db_dir=t["review_dir"],
+            backup_dir=t["backup_dir"],
+        )
+
+    written = t["skill_yml"].read_text(encoding="utf-8")
+    # Check the details list specifically — the description summary is a
+    # user-authored field that may still mention 'SQL (Advanced)' as a
+    # category-level descriptor; only the bullet at index 1 should change.
+    import yaml as _yaml
+
+    parsed = _yaml.safe_load(written)
+    programming = next(s for s in parsed if s["title"] == "Programming")
+    assert programming["details"][1] == "PostgreSQL"
+    assert "SQL (Advanced)" not in programming["details"]
+    assert amendments[0].id in result.finalized_amendment_ids
+
+
+def test_finalize_skills_list_schema_case_insensitive_title(app_tree):
+    """Title lookup must tolerate user case differences ('programming')."""
+    t = app_tree
+    slug = t["slug"]
+    t["skill_yml"].write_text(SKILL_YAML_LIST, encoding="utf-8")
+
+    amendments = [
+        _make_amendment(
+            section="skills",
+            index=None,
+            field="programming",
+            op="append",
+            value="Rust",
+        ),
+    ]
+    _seed_db(slug, t["review_dir"], amendments)
+
+    with _mock_quarto_success():
+        result = finalize_run(
+            slug=slug,
+            accepted_amendments=amendments,
+            masters=t["masters"],
+            applications_dir=t["applications_dir"],
+            review_db_dir=t["review_dir"],
+            backup_dir=t["backup_dir"],
+        )
+
+    written = t["skill_yml"].read_text(encoding="utf-8")
+    assert "Rust" in written
+    assert amendments[0].id in result.finalized_amendment_ids
+
+
 def test_finalize_no_amendments_is_noop(app_tree):
     """Empty accepted_amendments list → no files written, quarto NOT called."""
     t = app_tree

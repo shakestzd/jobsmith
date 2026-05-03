@@ -1401,6 +1401,127 @@ def run_apply(
 
     total_phases = len(_PHASES)
 
+    # roborev #923 HIGH 2: persist apply_runs row + post-phase ingest from the
+    # CLI path too. Previously only the marimo runner wrote to the DB, so
+    # `jobsmith apply <url>` followed by `jobsmith review <slug>` would fail
+    # with "slug not found". Mirror the marimo runner's pattern: insert one
+    # apply_runs row per CLI run, ingest after each phase_complete, finalize
+    # the row's status in the wrapper finally-block. Wrapped in suppress so a
+    # missing/locked DB never aborts the apply pipeline itself — DB writes are
+    # canonical for review but secondary to the pipeline's primary work.
+    db_run_id = str(uuid.uuid4())
+    db_phase_label = "unknown"  # full pipeline; matches marimo runner convention
+    db_started_at_iso = _db_now_iso()
+    db_conn = _open_pipeline_db_for_run(resolved_cwd)
+    db_final_status = "failed"  # default; overridden on success/decline/etc.
+    db_slug_ref = [slug]
+    if db_conn is not None:
+        with contextlib.suppress(Exception):
+            from .db import insert_apply_run as _insert_apply_run
+
+            _insert_apply_run(
+                db_conn,
+                run_id=db_run_id,
+                slug=slug,
+                phase=db_phase_label,
+                started_at=db_started_at_iso,
+                finished_at=None,
+                status="running",
+            )
+
+    try:
+        rc = _run_apply_phases(
+            url=url,
+            resolved_cwd=resolved_cwd,
+            rdr=rdr,
+            plugin_directory=plugin_directory,
+            slug=slug,
+            apps_dir=apps_dir,
+            session_id=session_id,
+            phase_done=phase_done,
+            total_phases=total_phases,
+            skip_confirm=skip_confirm,
+            started_at=started_at,
+            db_conn=db_conn,
+            db_run_id=db_run_id,
+            db_slug_ref=db_slug_ref,
+        )
+        db_final_status = "done" if rc == 0 else "failed"
+        return rc
+    finally:
+        if db_conn is not None:
+            try:
+                # db_slug_ref[0] reflects the canonical slug after gather
+                # reconciliation (run_apply_phases mutates it in place); use
+                # that for the final UPDATE so the apply_runs row points at the
+                # actual application directory.
+                with contextlib.suppress(Exception):
+                    db_conn.execute(
+                        "UPDATE apply_runs "
+                        "SET status=?, finished_at=?, slug=? "
+                        "WHERE run_id=?",
+                        (
+                            db_final_status,
+                            _db_now_iso(),
+                            db_slug_ref[0],
+                            db_run_id,
+                        ),
+                    )
+                    db_conn.commit()
+            finally:
+                db_conn.close()
+
+
+def _db_now_iso() -> str:
+    """ISO-8601 UTC timestamp; matches marimo runner's apply_runs format."""
+    from datetime import datetime, timezone
+    return datetime.now(tz=timezone.utc).isoformat()
+
+
+def _open_pipeline_db_for_run(cwd: Path):
+    """Open the pipeline DB if config is present; otherwise return None.
+
+    Returns None silently when ``.apply-config.yaml`` is missing — the apply
+    pipeline must keep working in scratch directories without a config (the
+    bootstrap path will create one, but unit tests stub a minimal config that
+    still resolves a default ``private/jobsmith.db`` path beneath ``cwd``).
+    """
+    config_path = find_config(cwd)
+    if config_path is None:
+        return None
+    try:
+        from .db import open_pipeline_db as _open_pipeline_db
+        config = load_config(config_path)
+        db_path = resolve(config.output.jobsmith_db, config_path.parent)
+        return _open_pipeline_db(db_path)
+    except Exception:  # noqa: BLE001 — DB is secondary to the pipeline
+        return None
+
+
+def _run_apply_phases(
+    *,
+    url: str,
+    resolved_cwd: Path,
+    rdr: ApplyRenderer,
+    plugin_directory: Path,
+    slug: str,
+    apps_dir: Path | None,
+    session_id: str,
+    phase_done: dict[str, bool],
+    total_phases: int,
+    skip_confirm: bool,
+    started_at: float,
+    db_conn,
+    db_run_id: str,
+    db_slug_ref: list[str],
+) -> int:
+    """Phase-loop body extracted so the surrounding ``run_apply`` can wrap it
+    with the apply_runs DB lifecycle (insert before, UPDATE after, with the
+    canonical slug reflected via ``db_slug_ref[0]``).
+
+    All parameters are pre-resolved by ``run_apply``; this helper performs no
+    bootstrap or slug resolution of its own.
+    """
     for phase_name, phase_num in _PHASES:
         # Step 3pre: just-in-time wrapper-owned prerequisites that must run
         # regardless of whether the prior phase ran or was skipped.  Step 4/5
@@ -1548,11 +1669,33 @@ def run_apply(
                     carried_session_file.unlink(missing_ok=True)
             if reconciled:
                 _record_url_mapping(url, slug, resolved_cwd)
+            # Propagate the canonical slug to the outer apply_runs row so the
+            # final UPDATE in run_apply's finally-block records the correct
+            # application directory (roborev #923 HIGH 2).
+            db_slug_ref[0] = slug
 
             # Render per-phase summary panel before the confirm gate
             state_dir = _apply_state_dir(slug, resolved_cwd)
             if state_dir is not None:
                 rdr.render_phase_summary("gather", state_dir)
+
+        # Post-phase ingest into specialist_outputs. Mirrors the marimo
+        # runner's behavior so `jobsmith review <slug>` sees rows immediately
+        # after `jobsmith apply <url>` (roborev #923 HIGH 2). Wrapped in
+        # suppress: a single broken artifact must not abort the pipeline.
+        if db_conn is not None:
+            with contextlib.suppress(Exception):
+                from .db_ingest import ingest_phase_outputs as _ingest_phase_outputs
+
+                state_dir_for_ingest = _apply_state_dir(slug, resolved_cwd)
+                if state_dir_for_ingest is not None:
+                    _ingest_phase_outputs(
+                        db_conn,
+                        slug=slug,
+                        run_id=db_run_id,
+                        phase=phase_name,
+                        state_dir=state_dir_for_ingest,
+                    )
 
         # Step 3h: confirm gate (not after the last phase, and not after a
         # phase that was skipped — only fresh-run phases prompt).

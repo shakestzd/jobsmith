@@ -164,10 +164,16 @@ def _dump_yaml_rt(data: object) -> str:
 
 
 def _parse_field(field_str: str) -> tuple[str, int | None]:
-    """Parse ``'bullet[2]'`` → ``('bullet', 2)``; ``'title'`` → ``('title', None)``."""
+    """Parse ``'bullet[2]'`` → ``('bullet', 2)``; ``'title'`` → ``('title', None)``.
+
+    Accepts any case in the name so that title-cased section identifiers
+    in the list-of-sections skills schema (e.g. ``'Programming[1]'``) parse
+    correctly alongside lowercase field names like ``'bullet'``. Roborev
+    #923 MEDIUM 3.
+    """
     import re
 
-    m = re.match(r"^([a-z][a-z_\-]*)(?:\[(\d+)\])?$", field_str)
+    m = re.match(r"^([A-Za-z][A-Za-z0-9_\-]*)(?:\[(\d+)\])?$", field_str)
     if not m:
         return field_str, None
     name = m.group(1)
@@ -269,13 +275,50 @@ def _apply_list_section(data: object, amendment: Amendment) -> bool:
 
 
 def _apply_skills(data: object, amendment: Amendment) -> bool:
-    """Apply to the skills YAML (dict of category → list).
+    """Apply to the skills YAML — supports both supported schemas.
 
-    amendment.field is the category key (e.g. ``technical``);
-    amendment.index selects the item within the category.
+    Two skill schemas exist in the wild:
+
+    1. Dict-of-categories (legacy / template default)::
+
+           technical:
+             - Python
+             - Go
+           languages:
+             - English
+
+       ``amendment.field`` is the category key (``technical``);
+       ``amendment.index`` (or ``field[N]``) selects the item.
+
+    2. List-of-sections (the bundled ``examples/master-yaml/skill.yml``
+       schema)::
+
+           - title: Programming
+             description: …
+             details:
+               - Python (Advanced)
+               - SQL (Advanced)
+
+       ``amendment.field`` matches a section by ``title`` (case-insensitive),
+       optionally subscripted (``"Programming[2]"`` selects details[2]).
+       ``amendment.index`` may also be supplied as the entry index when
+       no field name is provided.
+
+    Roborev #923 MEDIUM 3: prior implementation only handled the dict
+    schema, so AMENDs against the bundled list schema silently no-op'd.
     """
-    if not isinstance(data, dict):
+    if amendment.field is None and amendment.index is None:
         return False
+
+    if isinstance(data, dict):
+        return _apply_skills_dict(data, amendment)
+    if isinstance(data, list):
+        return _apply_skills_list(data, amendment)
+    return False
+
+
+def _apply_skills_dict(data: dict, amendment: Amendment) -> bool:
+    """Dict-of-categories schema (``technical: [...]``)."""
     if amendment.field is None:
         return False
 
@@ -295,6 +338,65 @@ def _apply_skills(data: object, amendment: Amendment) -> bool:
     if idx is None or not isinstance(category, list) or idx >= len(category):
         return False
     category[idx] = amendment.value
+    return True
+
+
+def _find_section_by_title(data: list, title: str) -> dict | None:
+    """Case-insensitive lookup of an entry whose ``title`` matches *title*."""
+    target = title.casefold()
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        entry_title = entry.get("title")
+        if isinstance(entry_title, str) and entry_title.casefold() == target:
+            return entry
+    return None
+
+
+def _apply_skills_list(data: list, amendment: Amendment) -> bool:
+    """List-of-sections schema (``[{title, description, details: [...]}, ...]``).
+
+    Resolution order for the target section:
+
+    1. ``amendment.field`` parsed as ``"<title>"`` or ``"<title>[N]"`` — title
+       lookup is case-insensitive (so ``"programming"`` matches ``"Programming"``).
+    2. ``amendment.index`` selects the entry by position when ``field`` is None.
+    """
+    section_entry: dict | None = None
+    field_idx: int | None = None
+
+    if amendment.field is not None:
+        field_name, field_idx = _parse_field(amendment.field)
+        section_entry = _find_section_by_title(data, field_name)
+    elif amendment.index is not None:
+        if 0 <= amendment.index < len(data) and isinstance(data[amendment.index], dict):
+            section_entry = data[amendment.index]
+
+    if section_entry is None:
+        return False
+
+    details = section_entry.get("details")
+    if not isinstance(details, list):
+        return False
+
+    if amendment.op == "append":
+        details.append(amendment.value)
+        return True
+
+    # Replace: prefer parsed field_idx (e.g. "Programming[2]"); fall back
+    # to amendment.index only when field_idx is absent AND we addressed
+    # the entry by title (otherwise amendment.index already selected the
+    # entry and re-using it as the bullet index would be ambiguous).
+    if field_idx is not None:
+        bullet_idx: int | None = field_idx
+    elif amendment.field is not None:
+        bullet_idx = amendment.index
+    else:
+        bullet_idx = None
+
+    if bullet_idx is None or bullet_idx >= len(details):
+        return False
+    details[bullet_idx] = amendment.value
     return True
 
 

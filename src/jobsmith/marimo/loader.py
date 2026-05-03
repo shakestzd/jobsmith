@@ -16,7 +16,7 @@ from typing import Any
 
 from jobsmith.db import (
     get_apply_run_by_slug,
-    get_specialist_outputs,
+    get_latest_outputs_by_kind,
     open_pipeline_db,
 )
 from jobsmith.db_models import (
@@ -72,10 +72,13 @@ def _read_cover_letter(applications_dir: Path, slug: str) -> str | None:
 
     Search order (first hit wins):
 
-    1. ``<app>/cover-letter-draft.md`` — the apply pipeline writes the
+    1. ``<app>/cover-letter-final.md`` — written by Finalize once the
+       user accepts amendments and clicks Finalize (slice 7). Wins over
+       the draft so post-finalize state (the canonical cover letter) is
+       what the review UI displays after accepted edits land.
+    2. ``<app>/cover-letter-draft.md`` — the apply pipeline writes the
        reviewable draft here at app root (apply-cover-letter-writer).
-    2. ``<app>/cover-letter-final.md`` — written by Finalize once the
-       user accepts amendments and clicks Finalize (slice 7).
+       Used until Finalize produces a -final.md.
     3. ``<app>/documents/cover-letter-final.md`` — legacy assemble.py
        output kept for back-compat with older slugs.
 
@@ -84,8 +87,8 @@ def _read_cover_letter(applications_dir: Path, slug: str) -> str | None:
     """
     app_dir = applications_dir / slug
     candidates = (
-        app_dir / "cover-letter-draft.md",
         app_dir / "cover-letter-final.md",
+        app_dir / "cover-letter-draft.md",
         app_dir / "documents" / "cover-letter-final.md",
     )
     for candidate in candidates:
@@ -130,8 +133,12 @@ def load_sections(
         if run_row is None:
             raise ApplicationNotFound(slug)
 
-        run_id: str = run_row["run_id"]
-        rows = get_specialist_outputs(conn, run_id)
+        # Aggregate the latest output per kind across ALL runs for this slug.
+        # A single-specialist re-run (slice 8) creates a new apply_runs row
+        # with one specialist_outputs entry; reading only that latest run
+        # would blank every other section card. Per-kind latest preserves
+        # unchanged sections while surfacing the freshly re-run output.
+        rows = get_latest_outputs_by_kind(conn, slug)
     finally:
         conn.close()
 

@@ -147,6 +147,46 @@ def get_specialist_outputs(
     ).fetchall()
 
 
+def get_latest_outputs_by_kind(
+    conn: sqlite3.Connection, slug: str
+) -> list[sqlite3.Row]:
+    """Return the most-recent ``specialist_outputs`` row per ``kind`` for *slug*.
+
+    Joins ``specialist_outputs`` to ``apply_runs`` so that for each distinct
+    output ``kind`` we keep only the row whose run finished most recently
+    (ties broken by ``apply_runs.started_at``).
+
+    Why
+    ---
+    A single-specialist re-run (slice 8) inserts a fresh ``apply_runs`` row
+    that contains exactly one ``specialist_outputs`` entry. If the loader
+    only reads outputs for the most-recent run, every other section card
+    in the review UI disappears until the user re-runs the full pipeline.
+    Aggregating "latest per kind" keeps unchanged sections visible while
+    surfacing the freshly re-run output.
+    """
+    return conn.execute(
+        """
+        SELECT so.*
+        FROM specialist_outputs so
+        JOIN apply_runs ar ON ar.run_id = so.run_id
+        WHERE ar.slug = ?
+          AND so.run_id = (
+              SELECT so2.run_id
+              FROM specialist_outputs so2
+              JOIN apply_runs ar2 ON ar2.run_id = so2.run_id
+              WHERE ar2.slug = ?
+                AND so2.kind = so.kind
+              ORDER BY
+                  COALESCE(ar2.finished_at, ar2.started_at) DESC,
+                  ar2.started_at DESC
+              LIMIT 1
+          )
+        """,
+        (slug, slug),
+    ).fetchall()
+
+
 def insert_specialist_output(
     conn: sqlite3.Connection,
     *,
@@ -236,6 +276,7 @@ __all__ = [
     "open_review_db",
     # Pipeline DB writers
     "get_apply_run_by_slug",
+    "get_latest_outputs_by_kind",
     "get_specialist_outputs",
     "insert_apply_run",
     "insert_specialist_output",

@@ -43,6 +43,10 @@ def _db_setup(Path, load_config, os, sqlite3):
     _cfg = load_config()
     repo_root = Path(os.environ.get("JOBSMITH_REPO_ROOT", ".")).resolve()
     db_path = repo_root / _cfg.output.jobsmith_db
+    # Resolve once from config so all cells (runner, re-run, loader) read
+    # from / write to the same directory. Hardcoding "private/applications"
+    # broke repos that override output.applications_dir (roborev #923 MED).
+    apps_dir = repo_root / _cfg.output.applications_dir
 
     _conn = sqlite3.connect(str(db_path))
     _rows = _conn.execute(
@@ -51,7 +55,7 @@ def _db_setup(Path, load_config, os, sqlite3):
     _conn.close()
 
     slugs = [_row[0] for _row in _rows] if _rows else []
-    return db_path, repo_root, slugs
+    return apps_dir, db_path, repo_root, slugs
 
 
 @app.cell
@@ -84,7 +88,7 @@ def _run_controls(mo):
 
 @app.cell
 def _run_dispatch(
-    Path,
+    apps_dir,
     db_path,
     repo_root,
     run_button,
@@ -98,7 +102,7 @@ def _run_dispatch(
 
     runner_state = _get_runner_d(
         db_path=db_path,
-        applications_dir=Path(repo_root) / "private" / "applications",
+        applications_dir=apps_dir,
     )
 
     if run_button.value and url_input.value and not runner_state.is_running():
@@ -278,13 +282,15 @@ def _sync_amendment_status(
 
 
 @app.cell
-def _load(ApplicationNotFound, db_path, load_sections, slug_picker):
+def _load(ApplicationNotFound, apps_dir, db_path, load_sections, slug_picker):
     sections = None
     load_error = None
 
     if slug_picker.value:
         try:
-            sections = load_sections(slug_picker.value, db_path)
+            sections = load_sections(
+                slug_picker.value, db_path, applications_dir=apps_dir
+            )
         except ApplicationNotFound as exc:
             load_error = str(exc)
         except Exception as exc:  # noqa: BLE001
@@ -461,7 +467,7 @@ def _rerun_buttons(mo):
 
 @app.cell
 def _rerun_dispatch(
-    Path,
+    apps_dir,
     db_path,
     repo_root,
     rerun_buttons,
@@ -473,7 +479,7 @@ def _rerun_dispatch(
     rerun_status = None
     _rerun_runner = _get_runner_r(
         db_path=db_path,
-        applications_dir=Path(repo_root) / "private" / "applications",
+        applications_dir=apps_dir,
     )
 
     # Find the first button with .value=True. mo.ui.run_button latches per

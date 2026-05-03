@@ -308,6 +308,60 @@ def test_run_apply_user_declines_after_phase1(tmp_path: Path, monkeypatch) -> No
 # ---------------------------------------------------------------------------
 
 
+def test_run_apply_persists_apply_runs_row(tmp_path: Path, monkeypatch) -> None:
+    """Roborev #923 HIGH 2: run_apply must write an apply_runs row.
+
+    Before this fix only the marimo runner persisted apply_runs, so users
+    going through the CLI then ``jobsmith review <slug>`` hit "slug not
+    found". This test calls run_apply with a stubbed pipeline and asserts
+    the row appears in private/jobsmith.db with status='done'.
+    """
+    import sqlite3
+
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text("# config\n")
+
+    plugin_fake = tmp_path / "plugin"
+    sp_dir = plugin_fake / "system-prompts"
+    sp_dir.mkdir(parents=True)
+    for n, name in [(1, "gather"), (2, "draft"), (3, "render")]:
+        (sp_dir / f"phase-{n}-{name}.md").write_text(f"# Phase {n}\n")
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    call_count = [0]
+    phase_sequence = ["gather", "draft", "render"]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        idx = call_count[0]
+        call_count[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: True)
+
+    rc = run_apply("https://example.com/jobs/ml-engineer", cwd=tmp_path)
+    assert rc == 0
+
+    db_path = tmp_path / "private" / "jobsmith.db"
+    assert db_path.exists(), "run_apply must create the pipeline DB"
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = conn.execute(
+            "SELECT slug, status, started_at, finished_at FROM apply_runs"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    assert len(rows) == 1, f"expected exactly one apply_runs row, got {len(rows)}"
+    slug, status, started_at, finished_at = rows[0]
+    assert status == "done", f"expected status='done', got {status!r}"
+    assert started_at is not None
+    assert finished_at is not None
+
+
 def test_run_apply_phase_fails(tmp_path: Path, monkeypatch) -> None:
     """When a phase yields an error event, returns non-zero and doesn't proceed."""
     config_file = tmp_path / ".apply-config.yaml"

@@ -235,11 +235,96 @@ def test_loader_reads_app_root_cover_letter_draft(tmp_path: Path):
     assert sections.cover_letter == "Dear hiring manager,"
 
 
-def test_loader_prefers_draft_over_finalized(tmp_path: Path):
-    """When both draft and final exist (post-Finalize), prefer draft.
+def test_load_sections_aggregates_latest_per_kind_across_runs(pipeline_db):
+    """Roborev #923 HIGH 1: a single-specialist re-run must not blank the UI.
 
-    Both are equally fresh in practice — Finalize copies through — but
-    the draft path is canonical for review.
+    Slice-8 re-runs append a NEW apply_runs row with exactly one
+    specialist_outputs entry (e.g. only fit-score). Reading specialist
+    outputs from solely the latest run would erase every other section
+    card. The loader instead aggregates the latest output per ``kind``
+    across all runs for the slug, so untouched sections remain visible.
+    """
+    from jobsmith.marimo.loader import load_sections
+
+    conn, db_path = pipeline_db
+
+    # First (full) run: populates fit-score, hm-snippet, bullet-selection.
+    insert_apply_run(
+        conn,
+        run_id="run-original",
+        slug=_SLUG,
+        phase="gather",
+        started_at="2024-01-01T10:00:00+00:00",
+        finished_at="2024-01-01T10:30:00+00:00",
+        status="done",
+    )
+    _insert_output(conn, "fit-score", {
+        "score": 0.7,
+        "score_raw": 0.7,
+        "rationale": "Old rationale",
+        "specialty": "backend",
+        "confidence": "medium",
+        "must_have_table": [],
+        "matched_evidence": [],
+        "concerns": [],
+        "pitch": "v1 pitch",
+    }, run_id="run-original")
+    _insert_output(conn, "hm-snippet", {
+        "detected": True,
+        "name": "Original HM",
+        "source": "linkedin",
+        "one_specific_signal": "shipped feature",
+        "suggested_hook": "noticed your shipping",
+    }, run_id="run-original")
+    _insert_output(conn, "bullet-selection", {
+        "positions": [],
+        "anchor_bullets_master": [],
+        "anchor_bullets_kept": ["original bullet"],
+        "anchor_bullets_dropped": [],
+    }, run_id="run-original")
+
+    # Slice-8 re-run: a new apply_runs row with only fit-score.
+    insert_apply_run(
+        conn,
+        run_id="run-rerun",
+        slug=_SLUG,
+        phase="gather",
+        started_at="2024-01-01T11:00:00+00:00",
+        finished_at="2024-01-01T11:05:00+00:00",
+        status="done",
+    )
+    _insert_output(conn, "fit-score", {
+        "score": 0.92,
+        "score_raw": 0.92,
+        "rationale": "Updated rationale",
+        "specialty": "backend",
+        "confidence": "high",
+        "must_have_table": [],
+        "matched_evidence": [],
+        "concerns": [],
+        "pitch": "v2 pitch",
+    }, run_id="run-rerun")
+
+    sections = load_sections(_SLUG, db_path)
+
+    # Re-run output wins for fit-score (latest finished_at).
+    assert sections.fit_score is not None
+    assert sections.fit_score.score == pytest.approx(0.92)
+    assert sections.fit_score.pitch == "v2 pitch"
+    # Unchanged sections from the prior run remain visible.
+    assert sections.hm_snippet is not None
+    assert sections.hm_snippet.name == "Original HM"
+    assert sections.work_bullets is not None
+    assert sections.work_bullets.anchor_bullets_kept == ["original bullet"]
+
+
+def test_loader_prefers_finalized_over_draft(tmp_path: Path):
+    """When both draft and final exist (post-Finalize), prefer the final.
+
+    Roborev #923 MEDIUM: Finalize writes accepted amendments to
+    ``cover-letter-final.md``; the draft is the pre-edit version. After
+    Finalize the review UI must surface the post-edit state, so the
+    final-suffix file wins precedence over the draft.
     """
     from jobsmith.db import insert_apply_run, open_pipeline_db
     from jobsmith.marimo.loader import load_sections
@@ -265,5 +350,5 @@ def test_loader_prefers_draft_over_finalized(tmp_path: Path):
     conn.close()
 
     sections = load_sections("both-slug", db_path, applications_dir=apps)
-    assert sections.cover_letter == "DRAFT version"
+    assert sections.cover_letter == "FINAL version"
 
