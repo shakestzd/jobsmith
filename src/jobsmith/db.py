@@ -164,6 +164,10 @@ def get_latest_outputs_by_kind(
     in the review UI disappears until the user re-runs the full pipeline.
     Aggregating "latest per kind" keeps unchanged sections visible while
     surfacing the freshly re-run output.
+
+    Both joins gate on ``status = 'done'`` so that a newer failed or
+    still-running re-run cannot mask the last successful output for that
+    kind (roborev #924 MEDIUM).
     """
     return conn.execute(
         """
@@ -171,11 +175,13 @@ def get_latest_outputs_by_kind(
         FROM specialist_outputs so
         JOIN apply_runs ar ON ar.run_id = so.run_id
         WHERE ar.slug = ?
+          AND ar.status = 'done'
           AND so.run_id = (
               SELECT so2.run_id
               FROM specialist_outputs so2
               JOIN apply_runs ar2 ON ar2.run_id = so2.run_id
               WHERE ar2.slug = ?
+                AND ar2.status = 'done'
                 AND so2.kind = so.kind
               ORDER BY
                   COALESCE(ar2.finished_at, ar2.started_at) DESC,

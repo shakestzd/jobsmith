@@ -25,15 +25,28 @@ _SLUG = "acme-swe-2024"
 _NOW = "2024-01-01T00:00:00+00:00"
 
 
-def _insert_run(conn: sqlite3.Connection, slug: str = _SLUG, run_id: str = _RUN_ID) -> None:
+def _insert_run(
+    conn: sqlite3.Connection,
+    slug: str = _SLUG,
+    run_id: str = _RUN_ID,
+    *,
+    status: str = "done",
+    started_at: str = _NOW,
+    finished_at: str | None = _NOW,
+) -> None:
+    """Default status='done' matches the marimo runner / CLI canonical value.
+
+    Roborev #924: the loader's latest-per-kind query gates on status='done',
+    so only successful runs are aggregated into the review UI.
+    """
     insert_apply_run(
         conn,
         run_id=run_id,
         slug=slug,
         phase="gather",
-        started_at=_NOW,
-        finished_at=_NOW,
-        status="complete",
+        started_at=started_at,
+        finished_at=finished_at,
+        status=status,
     )
 
 
@@ -316,6 +329,119 @@ def test_load_sections_aggregates_latest_per_kind_across_runs(pipeline_db):
     assert sections.hm_snippet.name == "Original HM"
     assert sections.work_bullets is not None
     assert sections.work_bullets.anchor_bullets_kept == ["original bullet"]
+
+
+def test_load_sections_ignores_failed_rerun_keeps_last_done(pipeline_db):
+    """Roborev #924 MEDIUM: failed/running re-runs must not mask the last 'done'.
+
+    Sequence:
+      1. run-original (status='done') writes fit-score with score=0.7.
+      2. run-rerun-failed (status='failed', newer finished_at) writes a
+         fit-score with score=0.99.
+
+    Without the status='done' filter, the per-kind latest query would
+    surface the failed re-run's output (because its finished_at is more
+    recent), hiding the last successful score. With the filter, the
+    successful 0.7 score remains visible until a successful re-run
+    replaces it.
+    """
+    from jobsmith.marimo.loader import load_sections
+
+    conn, db_path = pipeline_db
+
+    insert_apply_run(
+        conn,
+        run_id="run-original",
+        slug=_SLUG,
+        phase="gather",
+        started_at="2024-01-01T10:00:00+00:00",
+        finished_at="2024-01-01T10:30:00+00:00",
+        status="done",
+    )
+    _insert_output(conn, "fit-score", {
+        "score": 0.7,
+        "score_raw": 0.7,
+        "rationale": "Last successful run",
+        "specialty": "backend",
+        "confidence": "medium",
+        "must_have_table": [],
+        "matched_evidence": [],
+        "concerns": [],
+        "pitch": "v1 pitch",
+    }, run_id="run-original")
+
+    # Newer re-run that crashed mid-flight.
+    insert_apply_run(
+        conn,
+        run_id="run-rerun-failed",
+        slug=_SLUG,
+        phase="gather",
+        started_at="2024-01-01T11:00:00+00:00",
+        finished_at="2024-01-01T11:02:00+00:00",
+        status="failed",
+    )
+    _insert_output(conn, "fit-score", {
+        "score": 0.99,
+        "score_raw": 0.99,
+        "rationale": "Garbage from failed run",
+        "specialty": "backend",
+        "confidence": "low",
+        "must_have_table": [],
+        "matched_evidence": [],
+        "concerns": [],
+        "pitch": "should not surface",
+    }, run_id="run-rerun-failed")
+
+    sections = load_sections(_SLUG, db_path)
+
+    # The successful run's output must remain visible; the failed re-run
+    # must not override it.
+    assert sections.fit_score is not None
+    assert sections.fit_score.score == pytest.approx(0.7)
+    assert sections.fit_score.rationale == "Last successful run"
+
+
+def test_load_sections_ignores_running_rerun_keeps_last_done(pipeline_db):
+    """A still-running re-run must not mask the last 'done' output either."""
+    from jobsmith.marimo.loader import load_sections
+
+    conn, db_path = pipeline_db
+
+    insert_apply_run(
+        conn,
+        run_id="run-original",
+        slug=_SLUG,
+        phase="gather",
+        started_at="2024-01-01T10:00:00+00:00",
+        finished_at="2024-01-01T10:30:00+00:00",
+        status="done",
+    )
+    _insert_output(conn, "fit-score", {
+        "score": 0.55,
+        "score_raw": 0.55,
+        "rationale": "Stable result",
+        "specialty": "backend",
+        "confidence": "medium",
+        "must_have_table": [],
+        "matched_evidence": [],
+        "concerns": [],
+        "pitch": "v1",
+    }, run_id="run-original")
+
+    # In-flight re-run: status='running', finished_at NULL.
+    insert_apply_run(
+        conn,
+        run_id="run-rerun-running",
+        slug=_SLUG,
+        phase="gather",
+        started_at="2024-01-01T11:00:00+00:00",
+        finished_at=None,
+        status="running",
+    )
+
+    sections = load_sections(_SLUG, db_path)
+    assert sections.fit_score is not None
+    assert sections.fit_score.score == pytest.approx(0.55)
 
 
 def test_loader_prefers_finalized_over_draft(tmp_path: Path):
