@@ -56,10 +56,11 @@ def _db_setup(Path, load_config, os, sqlite3):
 
 @app.cell
 def _slug_picker(mo, slugs):
+    # Note: mo.ui.dropdown does not accept a `placeholder` kwarg in
+    # marimo>=0.22.4 — selecting nothing renders an empty value.
     slug_picker = mo.ui.dropdown(
         options=slugs,
         label="Application slug",
-        placeholder="Select an application…",
     )
     return (slug_picker,)
 
