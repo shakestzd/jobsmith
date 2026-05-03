@@ -31,7 +31,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from jobsmith.apply import derive_slug, phase_for_specialist, run_phase_iter
+from jobsmith.apply import (
+    phase_for_specialist,
+    resolve_canonical_slug,
+    run_phase_iter,
+)
 from jobsmith.db import (
     insert_apply_run,
     open_pipeline_db,
@@ -194,8 +198,13 @@ class NotebookRunner:
                 "Call cancel() and wait for _Done before starting again."
             )
 
-        # Reset manifest entry so the agent re-runs this specialist
-        slug = derive_slug(url)
+        # Reset manifest entry so the agent re-runs this specialist.
+        # resolve_canonical_slug consults the URL index so a re-run targets
+        # the same application directory the original gather phase ended up
+        # writing to (after _reconcile_canonical_slug's potential rename).
+        # Plain derive_slug(url) would point at the URL-derived slug and
+        # miss the rename — roborev #922 MEDIUM.
+        slug = resolve_canonical_slug(url, cwd)
         state_dir = self.applications_dir / slug / ".apply-state"
         _reset_specialist_in_manifest(state_dir, specialist_name)
 
@@ -249,7 +258,11 @@ class NotebookRunner:
         run_id = self._run_id
         assert run_id is not None  # set in start()/run_specialist() before thread creation
 
-        slug = derive_slug(url)
+        # Use the canonical slug from the URL index so the apply_runs row,
+        # the post-phase ingest path, and the slice-8 manifest reset all
+        # target the same application directory that run_phase_iter will
+        # ultimately use (roborev #922 MEDIUM).
+        slug = resolve_canonical_slug(url, cwd)
         started_at = _now_iso()
         final_status = "failed"
         phase_label = phases[0] if phases and len(phases) == 1 else "unknown"
@@ -322,6 +335,15 @@ class NotebookRunner:
                     # Cancelled event from the generator
                     if event.kind == "cancelled":
                         final_status = "cancelled"
+                        break
+
+                    # phase_failed / guard_failed are TERMINAL states from the
+                    # generator. Record them on the apply_runs row so a failed
+                    # pipeline does not silently land as status='done' (roborev
+                    # #922 MEDIUM). Continue draining the queue so the UI sees
+                    # the failure event, then break out of the for loop.
+                    if event.kind in ("phase_failed", "guard_failed"):
+                        final_status = "failed"
                         break
 
                 else:

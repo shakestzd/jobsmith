@@ -846,6 +846,19 @@ def _resolve_starting_slug(url: str, cwd: Path) -> tuple[str, bool]:
     return derive_slug(url), False
 
 
+def resolve_canonical_slug(url: str, cwd: Path) -> str:
+    """Public accessor on top of :func:`_resolve_starting_slug`.
+
+    External callers (slice-4 NotebookRunner, slice-8 single-specialist
+    re-runs) need the same canonical slug that ``run_phase_iter`` will use
+    so DB rows, manifest resets, and post-phase ingestion all target the
+    same application directory. Returns just the slug; the boolean
+    "from_index" flag is an internal concern.
+    """
+    slug, _from_index = _resolve_starting_slug(url, cwd)
+    return slug
+
+
 def _record_url_mapping(url: str, canonical_slug: str, cwd: Path) -> None:
     """Persist URL → canonical slug into the index, creating it if absent."""
     index = _load_url_index(cwd)

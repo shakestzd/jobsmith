@@ -15,6 +15,7 @@ Covers:
 from __future__ import annotations
 
 import queue
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -335,4 +336,139 @@ def test_get_runner_preserves_running_thread(pipeline_db, tmp_path: Path):
     finally:
         block.set()
         reset_runner()
+
+
+
+def test_run_records_failed_status_on_phase_failed_event(pipeline_db, tmp_path: Path):
+    """Roborev #922 MEDIUM: phase_failed must land as status=failed, not done."""
+    from unittest.mock import patch
+
+    from jobsmith.apply import PipelineEvent
+
+    conn, db_path = pipeline_db
+
+    def _fake_iter(url_, **kwargs):
+        yield PipelineEvent(kind="phase_started", phase="gather")
+        yield PipelineEvent(
+            kind="phase_failed",
+            phase="gather",
+            payload={"error": "no phase_complete signal emitted"},
+        )
+
+    with (
+        patch("jobsmith.marimo.runner.run_phase_iter", _fake_iter),
+        patch(
+            "jobsmith.marimo.runner.resolve_canonical_slug",
+            return_value="failure-slug",
+        ),
+    ):
+        runner = NotebookRunner(db_path=db_path, applications_dir=tmp_path)
+        runner.start(url="https://example.com/jobs/will-fail", cwd=tmp_path)
+
+        # Drain the queue until the _Done sentinel arrives
+        deadline = time.time() + 5.0
+        sentinel = None
+        while time.time() < deadline:
+            try:
+                ev = runner.events_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if isinstance(ev, _Done):
+                sentinel = ev
+                break
+
+    assert sentinel is not None, "runner thread did not emit _Done sentinel"
+    assert sentinel.status == "failed", (
+        f"phase_failed must record status=failed; got {sentinel.status!r}"
+    )
+
+    # Re-open the DB on the test thread to avoid SQLite cross-thread issues
+    final_conn = sqlite3.connect(str(db_path))
+    final_conn.row_factory = sqlite3.Row
+    row = final_conn.execute(
+        "SELECT status FROM apply_runs WHERE slug=?", ("failure-slug",)
+    ).fetchone()
+    final_conn.close()
+    assert row is not None
+    assert row["status"] == "failed"
+
+
+def test_run_records_failed_on_guard_failed_event(pipeline_db, tmp_path: Path):
+    """guard_failed (anchor-guard between gather/draft) → status=failed."""
+    from unittest.mock import patch
+
+    from jobsmith.apply import PipelineEvent
+
+    conn, db_path = pipeline_db
+
+    def _fake_iter(url_, **kwargs):
+        yield PipelineEvent(kind="phase_started", phase="gather")
+        yield PipelineEvent(kind="phase_complete", phase="gather")
+        yield PipelineEvent(kind="guard_failed", phase="draft", payload={"rc": 7})
+
+    with (
+        patch("jobsmith.marimo.runner.run_phase_iter", _fake_iter),
+        patch(
+            "jobsmith.marimo.runner.resolve_canonical_slug",
+            return_value="guard-slug",
+        ),
+        patch("jobsmith.marimo.runner.ingest_phase_outputs", return_value=0),
+    ):
+        runner = NotebookRunner(db_path=db_path, applications_dir=tmp_path)
+        runner.start(url="https://example.com/jobs/guard-fail", cwd=tmp_path)
+        deadline = time.time() + 5.0
+        while time.time() < deadline and runner.is_running():
+            time.sleep(0.05)
+
+    final_conn = sqlite3.connect(str(db_path))
+    final_conn.row_factory = sqlite3.Row
+    row = final_conn.execute(
+        "SELECT status FROM apply_runs WHERE slug=?", ("guard-slug",)
+    ).fetchone()
+    final_conn.close()
+    assert row is not None
+    assert row["status"] == "failed"
+
+
+def test_run_uses_canonical_slug_from_url_index(pipeline_db, tmp_path: Path):
+    """Roborev #922 MEDIUM: slug for apply_runs row must come from URL index.
+
+    A prior reconcile may have renamed the app dir; URL-derived slug
+    would point at the wrong dir on a re-run.
+    """
+    from unittest.mock import patch
+
+    from jobsmith.apply import PipelineEvent
+
+    _conn, db_path = pipeline_db
+
+    def _fake_iter(url_, **kwargs):
+        yield PipelineEvent(kind="phase_complete", phase="gather")
+
+    canonical = "post-reconcile-canonical-slug"
+    with (
+        patch("jobsmith.marimo.runner.run_phase_iter", _fake_iter),
+        patch(
+            "jobsmith.marimo.runner.resolve_canonical_slug",
+            return_value=canonical,
+        ) as mock_resolve,
+        patch("jobsmith.marimo.runner.ingest_phase_outputs", return_value=0),
+    ):
+        runner = NotebookRunner(db_path=db_path, applications_dir=tmp_path)
+        runner.start(url="https://example.com/jobs/raw-url", cwd=tmp_path)
+        deadline = time.time() + 5.0
+        while time.time() < deadline and runner.is_running():
+            time.sleep(0.05)
+
+    assert mock_resolve.called
+
+    final_conn = sqlite3.connect(str(db_path))
+    final_conn.row_factory = sqlite3.Row
+    row = final_conn.execute(
+        "SELECT slug FROM apply_runs ORDER BY started_at DESC LIMIT 1"
+    ).fetchone()
+    final_conn.close()
+    assert row["slug"] == canonical, (
+        f"apply_runs row must record canonical slug from URL index; got {row['slug']!r}"
+    )
 

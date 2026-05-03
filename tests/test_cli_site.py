@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from typer.testing import CliRunner
 
 from jobsmith.cli import app
@@ -254,8 +253,9 @@ def test_site_render_default_is_private(tmp_path: Path, monkeypatch) -> None:
 
 def _run_init(tmp_path: Path, extra_args: list[str] | None = None) -> object:
     """Run `jobsmith init <tmp_path>` with example copy patched out."""
-    import jobsmith.cli as cli_module
     from unittest.mock import patch
+
+    import jobsmith.cli as cli_module
 
     # Patch EXAMPLES_DIR so init doesn't try to copy real master YAML examples
     with patch.object(cli_module, "EXAMPLES_DIR", tmp_path / "_fake_examples"):
@@ -279,6 +279,23 @@ def test_init_adds_benchmarks_to_gitignore(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     gitignore = (tmp_path / ".gitignore").read_text()
     assert "private/benchmarks/" in gitignore
+
+
+def test_init_ignores_pipeline_db_and_review_state(tmp_path: Path) -> None:
+    """Roborev #922 MEDIUM: bootstrap must ignore the new private DBs.
+
+    private/jobsmith.db carries specialist outputs (slice 1) and
+    private/.review/ carries amendments + chat history (slice 1) —
+    both are personal review state that should never land in version
+    control. Earlier the bootstrap only listed private/job_search.db.
+    """
+    result = _run_init(tmp_path)
+    assert result.exit_code == 0, result.output
+    gitignore = (tmp_path / ".gitignore").read_text()
+    assert "private/jobsmith.db" in gitignore
+    assert "private/jobsmith.db-*" in gitignore  # WAL/SHM sidecars
+    assert "private/.review/" in gitignore
+    assert "private/.review-backups/" in gitignore
 
 
 def test_init_does_not_duplicate_gitignore_rules(tmp_path: Path) -> None:

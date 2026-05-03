@@ -133,6 +133,13 @@ GITIGNORE_ADDITIONS = dedent(
     private/applications/*/documents/*.pdf
     private/applications/*/documents/*.typ
     private/job_search.db
+    # Pipeline persistence (specialist outputs) — slice 1.
+    private/jobsmith.db
+    private/jobsmith.db-*
+    # Per-slug review state (amendments + chat history) — slice 1.
+    # Personal review notes; never check in.
+    private/.review/
+    private/.review-backups/
     private/benchmarks/
     private/feedback/
     """
