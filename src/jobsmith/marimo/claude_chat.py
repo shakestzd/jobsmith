@@ -66,6 +66,9 @@ class ClaudeChatBackend:
         self._session_id: str | None = session_id
         # When True, --append-system-prompt is not supported by the installed claude CLI
         self._append_prompt_unsupported: bool = False
+        # Set by start_new_session() so the notebook can surface a banner
+        # ("Resume updated — new chat session started.") and clear it after.
+        self._session_restarted_banner: bool = False
 
         if session_id is None:
             self._load_session_id()
@@ -77,6 +80,28 @@ class ClaudeChatBackend:
     @property
     def session_id(self) -> str | None:
         return self._session_id
+
+    def start_new_session(self) -> None:
+        """End the current chat session and start fresh.
+
+        Called by Finalize (slice 7) so the next chat turn sees the
+        post-Finalize work.yml / cover-letter state instead of resuming
+        a session that was reasoning about the pre-Finalize content.
+        Sets the banner flag so the notebook can render
+        "Resume updated — new chat session started."
+        """
+        self._session_id = None
+        self._session_restarted_banner = True
+
+    def consume_restart_banner(self) -> bool:
+        """Return + clear the session-restart banner flag.
+
+        Used by the notebook's sidebar cell to display the banner exactly
+        once after a Finalize.
+        """
+        flag = self._session_restarted_banner
+        self._session_restarted_banner = False
+        return flag
 
     @staticmethod
     def is_available() -> tuple[bool, str]:

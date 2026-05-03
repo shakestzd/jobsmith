@@ -461,5 +461,123 @@ def _show_accordion(accordion, mo):
     mo.vstack([accordion])
 
 
+# ---------------------------------------------------------------------------
+# Cell F0 — Finalize button (slice 7)
+# ---------------------------------------------------------------------------
+@app.cell
+def _finalize_button(mo):
+    finalize_button = mo.ui.run_button(label="Finalize accepted edits")
+    return (finalize_button,)
+
+
+# ---------------------------------------------------------------------------
+# Cell F1 — Finalize execution (slice 7)
+# ---------------------------------------------------------------------------
+@app.cell
+def _finalize_run(
+    Path,
+    chat_backend,
+    finalize_button,
+    load_config,
+    mo,
+    repo_root,
+    slug_picker,
+):
+    from jobsmith.marimo.finalize import finalize_run as _finalize_run_impl
+    from jobsmith.marimo.review_store import set_status as _set_status
+
+    finalize_result = None
+    finalize_error = None
+
+    if finalize_button.value and slug_picker.value:
+        cfg = load_config()
+        review_db_dir = Path(repo_root) / "private" / ".review"
+        applications_dir = Path(repo_root) / cfg.output.applications_dir
+
+        # Load accepted amendments from the review DB
+        from jobsmith.db import open_review_db
+        from jobsmith.marimo.directive_parser import Amendment
+        conn = open_review_db(slug_picker.value, review_db_dir)
+        try:
+            rows = conn.execute(
+                "SELECT amendment_id, section, op, value, status "
+                "FROM amendments WHERE slug=? AND status='accepted'",
+                (slug_picker.value,),
+            ).fetchall()
+        finally:
+            conn.close()
+
+        accepted = [
+            Amendment(
+                id=row["amendment_id"],
+                section=row["section"],
+                index=None,
+                field=None,
+                op=row["op"],
+                value=row["value"],
+                status="accepted",
+            )
+            for row in rows
+        ]
+
+        try:
+            finalize_result = _finalize_run_impl(
+                slug=slug_picker.value,
+                accepted_amendments=accepted,
+                masters=cfg.master,
+                applications_dir=applications_dir,
+                review_db_dir=review_db_dir,
+                repo_root=Path(repo_root),
+            )
+            for amendment_id in finalize_result.finalized_amendment_ids:
+                _set_status(slug_picker.value, amendment_id, "finalized", review_db_dir)
+            if chat_backend is not None and finalize_result.finalized_amendment_ids:
+                chat_backend.start_new_session()
+        except Exception as exc:  # noqa: BLE001 — surface to UI; do not crash notebook
+            finalize_error = str(exc)
+
+    return finalize_error, finalize_result
+
+
+# ---------------------------------------------------------------------------
+# Cell F2 — Render Finalize panel + PDF embed (slice 7)
+# ---------------------------------------------------------------------------
+@app.cell
+def _finalize_panel(finalize_button, finalize_error, finalize_result, mo):
+    blocks = [finalize_button]
+
+    if finalize_error:
+        blocks.append(
+            mo.callout(mo.md(f"**Finalize failed:** {finalize_error}"), kind="danger")
+        )
+    elif finalize_result is not None:
+        modified = finalize_result.modified_files or []
+        unsupported = finalize_result.unsupported_sections or []
+        lines = [
+            f"**Backup:** `{finalize_result.backup_path}`",
+            f"**Files written:** {len(modified)}",
+        ]
+        for f in modified:
+            lines.append(f"- `{f}`")
+        if unsupported:
+            lines.append(
+                f"**Skipped (read-only sections):** {', '.join(unsupported)}"
+            )
+        if finalize_result.finalized_amendment_ids:
+            lines.append(
+                f"**Amendments finalized:** {len(finalize_result.finalized_amendment_ids)}"
+            )
+        if finalize_result.quarto_returncode != 0:
+            lines.append(
+                f"**Quarto exit code:** {finalize_result.quarto_returncode} (PDF may be stale)"
+            )
+        blocks.append(mo.callout(mo.md("\n\n".join(lines)), kind="success"))
+
+        if finalize_result.pdf_path is not None and finalize_result.pdf_path.exists():
+            blocks.append(mo.pdf(src=finalize_result.pdf_path))
+
+    mo.vstack(blocks)
+
+
 if __name__ == "__main__":
     app.run()
