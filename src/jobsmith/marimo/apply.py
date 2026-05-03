@@ -152,6 +152,57 @@ def _show_run_panel(mo, run_button, runner_state, stop_button, url_input):
 
 
 # ---------------------------------------------------------------------------
+# Cell E0 — chat sidebar backend (slice 5)
+# ---------------------------------------------------------------------------
+@app.cell
+def _chat_backend(Path, repo_root, slug_picker):
+    from jobsmith.marimo.claude_chat import ClaudeChatBackend
+
+    chat_backend = None
+    if slug_picker.value:
+        chat_backend = ClaudeChatBackend(
+            slug=slug_picker.value,
+            project_root=Path(repo_root),
+            review_db_dir=Path(repo_root) / "private" / ".review",
+            system_prompt=None,  # populated by next cell once sections load
+        )
+    return (chat_backend,)
+
+
+# ---------------------------------------------------------------------------
+# Cell E1 — chat model adapter for mo.ui.chat (slice 5)
+# ---------------------------------------------------------------------------
+@app.cell
+def _chat_model(chat_backend, mo):
+    def _model(messages, config):  # noqa: ARG001 — config required by mo.ui.chat
+        if chat_backend is None or not messages:
+            return ""
+        last_user = messages[-1]
+        text = getattr(last_user, "content", None) or last_user.get("content", "")
+        # Drain the generator into the full reply; mo.ui.chat handles streaming
+        return "".join(chat_backend.send(text))
+
+    chat_widget = mo.ui.chat(_model)
+    return (chat_widget,)
+
+
+# ---------------------------------------------------------------------------
+# Cell E2 — chat history accordion + sidebar mount (slice 5)
+# ---------------------------------------------------------------------------
+@app.cell
+def _chat_sidebar(chat_widget, mo, slug_picker):
+    from jobsmith.marimo.chat_ui import render_chat_history_bubbles
+
+    history: list[dict] = []  # populated from chat_messages on slug change
+    history_accordion = mo.accordion(
+        {"Conversation history": mo.vstack(render_chat_history_bubbles(history, mo))}
+    )
+    if slug_picker.value:
+        mo.sidebar([history_accordion, chat_widget], width="480px")
+    return (history_accordion,)
+
+
+# ---------------------------------------------------------------------------
 # Cell E — load sections for selected slug
 # ---------------------------------------------------------------------------
 @app.cell
