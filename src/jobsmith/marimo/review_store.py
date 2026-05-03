@@ -54,16 +54,25 @@ def persist_amendment(
     """
     conn = open_review_db(slug, review_db_dir)
     try:
-        # Dedup by content (slug + section + op + value) regardless of status.
-        # Earlier code only matched status='pending', which let the same
-        # directive be re-inserted as a fresh pending row after the user
-        # accepted or rejected it (roborev #920 MEDIUM). Stale amendments
-        # are still re-inserted because they belong to a prior run cycle.
+        # Dedup by full target identity (section + op + value + index + field)
+        # so directives that target different bullets in the same section
+        # don't dedup against each other (roborev #921 HIGH — amendments
+        # without target metadata silently no-op'd in finalize). Match
+        # status pending|accepted|rejected; stale rows belong to a prior
+        # run cycle and a re-emitted directive should land as fresh pending.
         row = conn.execute(
             "SELECT amendment_id FROM amendments "
             "WHERE slug=? AND section=? AND op=? AND value=? "
+            "AND target_index IS ? AND target_field IS ? "
             "AND status IN ('pending','accepted','rejected')",
-            (slug, amendment.section, amendment.op, amendment.value),
+            (
+                slug,
+                amendment.section,
+                amendment.op,
+                amendment.value,
+                amendment.index,
+                amendment.field,
+            ),
         ).fetchone()
 
         if row is not None:
@@ -79,6 +88,8 @@ def persist_amendment(
             op=amendment.op,
             value=amendment.value,
             status="pending",
+            target_index=amendment.index,
+            target_field=amendment.field,
             created_at=_now_iso(),
         )
         return amendment.id

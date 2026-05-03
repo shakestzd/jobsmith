@@ -180,27 +180,58 @@ def _parse_field(field_str: str) -> tuple[str, int | None]:
 # ---------------------------------------------------------------------------
 
 
+# The AMEND grammar uses `bullet[N]` as the canonical pointer into a
+# work / education entry's bullet list, but the actual master YAML schema
+# uses `details` for both sections (see examples/master-yaml/work.yml and
+# the slice-A object-form bullet schema in feat-46f09a56). When the user
+# writes `AMEND work[0].bullet[2]` the applier must translate the
+# `bullet` reference to `details`. Roborev #921 MEDIUM.
+_SECTION_LIST_KEY: dict[str, str] = {
+    "work": "details",
+    "education": "details",
+}
+
+_BULLET_REFS: frozenset[str] = frozenset({"bullet", "bullets"})
+
+
 def _apply_yaml_amendment(data: object, amendment: Amendment) -> bool:
     """Dispatch to the correct applier based on ``amendment.section``."""
     section = amendment.section
-    if section == "work":
-        return _apply_list_section(data, amendment, bullet_list_key="bullets")
-    if section == "education":
-        return _apply_list_section(data, amendment, bullet_list_key="bullets")
+    if section in _SECTION_LIST_KEY:
+        return _apply_list_section(data, amendment)
     if section == "skills":
         return _apply_skills(data, amendment)
     return False
 
 
-def _apply_list_section(
-    data: object, amendment: Amendment, *, bullet_list_key: str = "bullets"
-) -> bool:
+def _set_list_entry(sub: list, field_idx: int, value: str) -> bool:
+    """Replace ``sub[field_idx]`` with ``value``.
+
+    Master `details` entries can be plain strings or dict-form
+    ``{bullet, anchor, anchor_reason}`` (slice-A object-form schema).
+    For dict-form entries we update the ``bullet`` key in place so
+    anchor metadata survives the edit; for plain strings we replace.
+    """
+    if field_idx >= len(sub):
+        return False
+    item = sub[field_idx]
+    if isinstance(item, dict):
+        item["bullet"] = value
+    else:
+        sub[field_idx] = value
+    return True
+
+
+def _apply_list_section(data: object, amendment: Amendment) -> bool:
     """Apply to a top-level YAML list (work, education).
 
     Expects:
     - data: list of entry dicts
     - amendment.index: selects the entry
     - amendment.field: field name, optionally with index (``bullet[2]``)
+
+    Translates the grammar's ``bullet`` reference to the section's actual
+    YAML list key (``details`` for work / education) via _SECTION_LIST_KEY.
     """
     if not isinstance(data, list):
         return False
@@ -212,18 +243,22 @@ def _apply_list_section(
         return False
 
     field_name, field_idx = _parse_field(amendment.field)
+    section_list_key = _SECTION_LIST_KEY.get(amendment.section)
 
     if field_idx is not None or amendment.op == "append":
-        # Access sub-list: prefer exact key, then plural form
-        sub = entry.get(field_name) or entry.get(field_name + "s")
-        if sub is None:
+        # Resolve sub-list: bullet → details for work/education, else
+        # try the field name verbatim then its plural form.
+        if field_name in _BULLET_REFS and section_list_key is not None:
+            sub = entry.get(section_list_key)
+        else:
+            sub = entry.get(field_name) or entry.get(field_name + "s")
+        if not isinstance(sub, list):
             return False
         if amendment.op == "append":
             sub.append(amendment.value)
             return True
-        if field_idx is not None and field_idx < len(sub):
-            sub[field_idx] = amendment.value
-            return True
+        if field_idx is not None:
+            return _set_list_entry(sub, field_idx, amendment.value)
         return False
 
     # Scalar field replace

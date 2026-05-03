@@ -200,3 +200,95 @@ def test_ingest_skips_failed_invocations(tmp_path: Path):
     )
     conn.close()
     assert inserted == 0
+
+
+def test_backfill_reads_invocations_format(tmp_path: Path):
+    """Roborev #921 MEDIUM: backfill must use real manifest.invocations.
+
+    The legacy manifest.phases shape never existed in production; with that
+    code path, backfill returned phase=unknown and inserted 0 rows.
+    """
+    from jobsmith.db import open_pipeline_db
+    from jobsmith.db_ingest import backfill_slug
+
+    apps = tmp_path / "applications"
+    state_dir = apps / "real-slug" / ".apply-state"
+    state_dir.mkdir(parents=True)
+
+    # Drop all gather artifacts the readers know about
+    state_dir.joinpath("jd-parsed.json").write_text(json.dumps({"company": "X"}))
+    state_dir.joinpath("fit-score.json").write_text(json.dumps({"score": 0.5}))
+    state_dir.joinpath("hm-snippet.md").write_text(
+        "# HM dossier\ndetected: no\n"
+    )
+    state_dir.joinpath("bullet-selection.json").write_text(json.dumps({}))
+    state_dir.joinpath("company-research.md").write_text("# Acme research")
+    state_dir.joinpath("manifest.json").write_text(json.dumps({
+        "run_id": "real-run",
+        "slug": "real-slug",
+        "invocations": [
+            {"specialist": "apply-jd-parser",       "status": "ok"},
+            {"specialist": "apply-fit-scorer",      "status": "ok"},
+            {"specialist": "apply-hm-enricher",     "status": "ok"},
+            {"specialist": "apply-bullet-selector", "status": "ok"},
+            {"specialist": "apply-company-research","status": "ok"},
+        ],
+    }))
+
+    conn = open_pipeline_db(tmp_path / "jobsmith.db")
+    inserted = backfill_slug(conn, "real-slug", apps)
+
+    # Every gather artifact should be ingested when the gather phase is
+    # complete in invocations[].
+    rows = conn.execute(
+        "SELECT specialist FROM specialist_outputs"
+    ).fetchall()
+    conn.close()
+
+    assert inserted >= 1, "backfill must ingest gather artifacts when invocations[] is complete"
+    specialists = {r[0] for r in rows}
+    assert "apply-jd-parser" in specialists
+    assert "apply-fit-scorer" in specialists
+
+
+def test_backfill_ingests_every_completed_phase(tmp_path: Path):
+    """Backfill must ingest gather AND draft when both phases finished."""
+    from jobsmith.db import open_pipeline_db
+    from jobsmith.db_ingest import backfill_slug
+
+    apps = tmp_path / "applications"
+    state_dir = apps / "multi-phase" / ".apply-state"
+    state_dir.mkdir(parents=True)
+
+    # Gather artifacts
+    state_dir.joinpath("jd-parsed.json").write_text(json.dumps({"company": "Y"}))
+    state_dir.joinpath("fit-score.json").write_text(json.dumps({"score": 0.7}))
+    state_dir.joinpath("hm-snippet.md").write_text("# HM\ndetected: no\n")
+    state_dir.joinpath("bullet-selection.json").write_text(json.dumps({}))
+    state_dir.joinpath("company-research.md").write_text("# research")
+    # Draft artifacts
+    state_dir.joinpath("prose-draft.md").write_text("Cover letter draft body")
+    state_dir.joinpath("ai-tell-report.json").write_text(json.dumps({"iterations": []}))
+
+    state_dir.joinpath("manifest.json").write_text(json.dumps({
+        "invocations": [
+            {"specialist": "apply-jd-parser",        "status": "ok"},
+            {"specialist": "apply-fit-scorer",       "status": "ok"},
+            {"specialist": "apply-hm-enricher",      "status": "ok"},
+            {"specialist": "apply-bullet-selector",  "status": "ok"},
+            {"specialist": "apply-company-research", "status": "ok"},
+            {"specialist": "apply-prose-writer",     "status": "ok"},
+            {"specialist": "apply-prose-qa",         "status": "ok"},
+        ],
+    }))
+
+    conn = open_pipeline_db(tmp_path / "jobsmith.db")
+    backfill_slug(conn, "multi-phase", apps)
+    rows = conn.execute("SELECT specialist FROM specialist_outputs").fetchall()
+    conn.close()
+    specialists = {r[0] for r in rows}
+    assert "apply-jd-parser" in specialists
+    assert "apply-prose-writer" in specialists, (
+        "draft artifacts must be backfilled when draft phase is complete"
+    )
+

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -199,3 +200,70 @@ def test_notebook_imports_cleanly():
     # Should succeed without launching a marimo server
     mod = importlib.import_module("jobsmith.marimo.apply")
     assert mod is not None
+
+
+def test_loader_reads_app_root_cover_letter_draft(tmp_path: Path):
+    """Roborev #921 LOW: loader prefers <app>/cover-letter-draft.md.
+
+    The apply pipeline writes the reviewable draft at app root, not under
+    documents/. Earlier loader only looked under documents/cover-letter-final.md
+    so the section was always blank for normal pipeline output.
+    """
+    from jobsmith.db import insert_apply_run, open_pipeline_db
+    from jobsmith.marimo.loader import load_sections
+
+    apps = tmp_path / "applications"
+    apps.mkdir()
+    app_dir = apps / "draft-slug"
+    app_dir.mkdir()
+    (app_dir / "cover-letter-draft.md").write_text("Dear hiring manager,")
+
+    db_path = tmp_path / "jobsmith.db"
+    conn = open_pipeline_db(db_path)
+    insert_apply_run(
+        conn,
+        run_id="r1",
+        slug="draft-slug",
+        phase="render",
+        started_at="2024-01-01T10:00:00",
+        finished_at="2024-01-01T11:00:00",
+        status="done",
+    )
+    conn.close()
+
+    sections = load_sections("draft-slug", db_path, applications_dir=apps)
+    assert sections.cover_letter == "Dear hiring manager,"
+
+
+def test_loader_prefers_draft_over_finalized(tmp_path: Path):
+    """When both draft and final exist (post-Finalize), prefer draft.
+
+    Both are equally fresh in practice — Finalize copies through — but
+    the draft path is canonical for review.
+    """
+    from jobsmith.db import insert_apply_run, open_pipeline_db
+    from jobsmith.marimo.loader import load_sections
+
+    apps = tmp_path / "applications"
+    apps.mkdir()
+    app_dir = apps / "both-slug"
+    app_dir.mkdir()
+    (app_dir / "cover-letter-draft.md").write_text("DRAFT version")
+    (app_dir / "cover-letter-final.md").write_text("FINAL version")
+
+    db_path = tmp_path / "jobsmith.db"
+    conn = open_pipeline_db(db_path)
+    insert_apply_run(
+        conn,
+        run_id="r2",
+        slug="both-slug",
+        phase="render",
+        started_at="2024-01-01T10:00:00",
+        finished_at="2024-01-01T11:00:00",
+        status="done",
+    )
+    conn.close()
+
+    sections = load_sections("both-slug", db_path, applications_dir=apps)
+    assert sections.cover_letter == "DRAFT version"
+

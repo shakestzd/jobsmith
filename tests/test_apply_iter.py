@@ -473,3 +473,66 @@ def test_guard_failed_event_or_exception(minimal_repo, mock_plugin_dir):
         "Guard failure must emit guard_failed event OR raise an exception — "
         "it must NOT be silently ignored"
     )
+
+
+def test_run_phase_iter_phases_filter(tmp_path: Path):
+    """Roborev #921 HIGH: phases= filter scopes execution to one phase.
+
+    Re-running apply-prose-writer (draft) must NOT re-fire gather first.
+    """
+    from unittest.mock import patch
+
+    from jobsmith.apply import _PHASES, run_phase_iter
+    from jobsmith.headless import Event
+
+    config = tmp_path / ".apply-config.yaml"
+    config.write_text(
+        "master:\n"
+        "  work_yml: assets/content/work.yml\n"
+        "  skill_yml: assets/content/skill.yml\n"
+        "  education_yml: assets/content/education.yml\n"
+        "  author_yml: assets/content/author.yml\n"
+        "output:\n"
+        "  applications_dir: private/applications\n"
+    )
+    content = tmp_path / "assets" / "content"
+    content.mkdir(parents=True)
+    for n in ("work.yml", "skill.yml", "education.yml", "author.yml"):
+        (content / n).write_text("# stub\n")
+    apps = tmp_path / "private" / "applications"
+    apps.mkdir(parents=True)
+
+    plugin_dir = tmp_path / "plugin"
+    sp_dir = plugin_dir / "system-prompts"
+    sp_dir.mkdir(parents=True)
+    for name, num in _PHASES:
+        (sp_dir / f"phase-{num}-{name}.md").write_text(f"# {name}\n")
+
+    invoked: list[str] = []
+
+    def _fake_run_phase(*args, **kwargs):
+        phase = kwargs.get("phase") or args[0]
+        invoked.append(phase)
+        yield Event(type="phase_complete", name=phase)
+
+    with (
+        patch("jobsmith.apply.headless.run_phase", _fake_run_phase),
+        patch("jobsmith.apply.get_plugin_dir", return_value=plugin_dir),
+        patch("jobsmith.apply._build_paths", return_value={}),
+        patch("jobsmith.apply._reconcile_canonical_slug",
+              return_value=("slug-x", False)),
+        patch("jobsmith.apply._run_step45_orchestration", return_value=0),
+        patch("jobsmith.apply.ensure_bootstrap"),
+    ):
+        list(run_phase_iter(
+            "https://example.com/jobs/x",
+            cwd=tmp_path,
+            skip_confirm=True,
+            force=True,
+            phases=["draft"],
+        ))
+
+    assert invoked == ["draft"], (
+        f"phases=[draft] must invoke ONLY draft; got {invoked}"
+    )
+

@@ -301,3 +301,79 @@ def test_persist_amendment_reinsert_after_stale(tmp_path: Path):
         "stale rows must not block re-insertion in a new run"
     )
 
+
+
+def test_persist_amendment_roundtrips_index_and_field(tmp_path: Path):
+    """Roborev #921 HIGH: target_index + target_field round-trip via the DB.
+
+    Without these columns, AMEND work[0].bullet[2] persists as
+    (section=work, op=replace, value=...) only — and Finalize reconstructs
+    Amendment(index=None, field=None) which the YAML applier rejects.
+    """
+    import sqlite3
+
+    from jobsmith.marimo.directive_parser import Amendment
+    from jobsmith.marimo.review_store import persist_amendment
+
+    review_dir = tmp_path / ".review"
+    review_dir.mkdir()
+
+    a = Amendment(
+        id="00000000-0000-4000-8000-000000000777",
+        section="work",
+        index=0,
+        field="bullet[2]",
+        op="replace",
+        value="quantify impact",
+    )
+    persist_amendment("slug-rt", a, review_dir)
+
+    # Open the DB directly and check the columns landed
+    conn = sqlite3.connect(str(review_dir / "slug-rt.db"))
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT target_index, target_field, section, op, value "
+        "FROM amendments WHERE slug=?",
+        ("slug-rt",),
+    ).fetchone()
+    conn.close()
+
+    assert row["target_index"] == 0
+    assert row["target_field"] == "bullet[2]"
+    assert row["section"] == "work"
+    assert row["op"] == "replace"
+    assert row["value"] == "quantify impact"
+
+
+def test_persist_amendment_dedup_distinguishes_targets(tmp_path: Path):
+    """Two AMENDs differing only by index must NOT dedup against each other.
+
+    Without target_index/target_field in the dedup query, edits to
+    different bullets in the same section would collapse to one row.
+    """
+    from jobsmith.marimo.directive_parser import Amendment
+    from jobsmith.marimo.review_store import persist_amendment
+
+    review_dir = tmp_path / ".review"
+    review_dir.mkdir()
+
+    a = Amendment(
+        id="00000000-0000-4000-8000-000000000801",
+        section="work",
+        index=0,
+        field="bullet[0]",
+        op="replace",
+        value="same value",
+    )
+    b = Amendment(
+        id="00000000-0000-4000-8000-000000000802",
+        section="work",
+        index=0,
+        field="bullet[1]",  # different bullet target
+        op="replace",
+        value="same value",
+    )
+    id_a = persist_amendment("slug-dedup", a, review_dir)
+    id_b = persist_amendment("slug-dedup", b, review_dir)
+    assert id_a != id_b, "amendments targeting different bullets must NOT dedup"
+

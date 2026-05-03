@@ -68,14 +68,38 @@ _KIND_TO_FIELD: dict[str, str] = {
 
 
 def _read_cover_letter(applications_dir: Path, slug: str) -> str | None:
-    """Read cover-letter-final.md for slug if present, else None."""
-    candidate = applications_dir / slug / "documents" / "cover-letter-final.md"
-    if candidate.exists():
-        return candidate.read_text(encoding="utf-8")
+    """Read the slug's cover-letter content for review display.
+
+    Search order (first hit wins):
+
+    1. ``<app>/cover-letter-draft.md`` — the apply pipeline writes the
+       reviewable draft here at app root (apply-cover-letter-writer).
+    2. ``<app>/cover-letter-final.md`` — written by Finalize once the
+       user accepts amendments and clicks Finalize (slice 7).
+    3. ``<app>/documents/cover-letter-final.md`` — legacy assemble.py
+       output kept for back-compat with older slugs.
+
+    Returns None when none of the candidates exist (the section card
+    then shows the "not yet generated" placeholder).
+    """
+    app_dir = applications_dir / slug
+    candidates = (
+        app_dir / "cover-letter-draft.md",
+        app_dir / "cover-letter-final.md",
+        app_dir / "documents" / "cover-letter-final.md",
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.read_text(encoding="utf-8")
     return None
 
 
-def load_sections(slug: str, db_path: Path) -> Sections:
+def load_sections(
+    slug: str,
+    db_path: Path,
+    *,
+    applications_dir: Path | None = None,
+) -> Sections:
     """Load all available specialist outputs for *slug* from *db_path*.
 
     Parameters
@@ -84,6 +108,11 @@ def load_sections(slug: str, db_path: Path) -> Sections:
         Application slug (e.g. ``"acme-swe-2024"``).
     db_path:
         Absolute path to ``private/jobsmith.db``.
+    applications_dir:
+        Override for the per-slug application directory used to read the
+        cover letter. Defaults to ``<db_path>.parent / "applications"``,
+        which matches the production layout (``private/jobsmith.db`` lives
+        beside ``private/applications/``).
 
     Returns
     -------
@@ -116,9 +145,15 @@ def load_sections(slug: str, db_path: Path) -> Sections:
         typed_model: Any = deserialize_output(row)
         setattr(sections, field_name, typed_model)
 
-    # Cover letter lives on disk (per design: cover-letter-final.md)
-    applications_dir = db_path.parent / "applications"
-    sections.cover_letter = _read_cover_letter(applications_dir, slug)
+    # Cover letter lives on disk; _read_cover_letter checks both
+    # cover-letter-draft.md (apply pipeline output) and -final.md
+    # (post-Finalize, slice 7).
+    apps_dir = (
+        applications_dir
+        if applications_dir is not None
+        else db_path.parent / "applications"
+    )
+    sections.cover_letter = _read_cover_letter(apps_dir, slug)
 
     return sections
 

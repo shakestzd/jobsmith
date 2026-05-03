@@ -18,8 +18,6 @@ Tests
 """
 from __future__ import annotations
 
-import os
-import tarfile
 import uuid
 from pathlib import Path
 from unittest import mock
@@ -41,12 +39,12 @@ WORK_YAML = """\
 # Top-of-file comment preserved by ruamel round-trip
 - company: Acme Corp
   title: Senior Engineer
-  bullets:
+  details:
     - Built distributed cache reducing latency 40%
     - Led migration to Kubernetes; cut costs $2M/year
 - company: Beta Inc
   title: Engineer
-  bullets:
+  details:
     - Designed API serving 10k req/s
 """
 

@@ -276,9 +276,13 @@ class NotebookRunner:
                     "cancel_event": self._cancel_event,
                 }
                 # For single-phase re-runs force=True so run_phase_iter does
-                # not skip the (already-completed) phase.
+                # not skip the (already-completed) phase, AND pass phases=
+                # so the generator only iterates the target phase (roborev
+                # #921 HIGH — without the phases= filter, re-running a
+                # draft-phase specialist re-fires gather first).
                 if phases is not None:
                     iter_kwargs["force"] = True
+                    iter_kwargs["phases"] = phases
 
                 stop_after_phases = set(phases) if phases is not None else None
 

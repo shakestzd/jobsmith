@@ -572,7 +572,8 @@ def _finalize_run(
         conn = open_review_db(slug_picker.value, review_db_dir)
         try:
             rows = conn.execute(
-                "SELECT amendment_id, section, op, value, status "
+                "SELECT amendment_id, section, op, value, status, "
+                "target_index, target_field "
                 "FROM amendments WHERE slug=? AND status='accepted'",
                 (slug_picker.value,),
             ).fetchall()
@@ -583,8 +584,11 @@ def _finalize_run(
             Amendment(
                 id=row["amendment_id"],
                 section=row["section"],
-                index=None,
-                field=None,
+                # target_index / target_field carry the parsed AMEND
+                # work[0].bullet[2] target so finalize's YAML appliers
+                # know where to write (roborev #921 HIGH).
+                index=row["target_index"],
+                field=row["target_field"],
                 op=row["op"],
                 value=row["value"],
                 status="accepted",

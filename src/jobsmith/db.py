@@ -48,7 +48,10 @@ from jobsmith.db_models import (
 
 _MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 _PIPELINE_MIGRATIONS = [("001_initial_schema", _MIGRATIONS_DIR / "001_initial_schema.sql")]
-_REVIEW_MIGRATIONS = [("001_review_schema", _MIGRATIONS_DIR / "001_review_schema.sql")]
+_REVIEW_MIGRATIONS = [
+    ("001_review_schema", _MIGRATIONS_DIR / "001_review_schema.sql"),
+    ("002_amendment_target", _MIGRATIONS_DIR / "002_amendment_target.sql"),
+]
 _BUSY_TIMEOUT_S = 30
 
 
@@ -174,14 +177,28 @@ def insert_amendment(
     op: str,
     value: str,
     status: str,
+    target_index: int | None = None,
+    target_field: str | None = None,
     created_at: str,
 ) -> None:
     """Insert into ``amendments``. Raises ``IntegrityError`` on duplicate PK."""
     conn.execute(
         "INSERT INTO amendments "
-        "(amendment_id, slug, run_id, section, op, value, status, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (amendment_id, slug, run_id, section, op, value, status, created_at),
+        "(amendment_id, slug, run_id, section, op, value, status, "
+        "target_index, target_field, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            amendment_id,
+            slug,
+            run_id,
+            section,
+            op,
+            value,
+            status,
+            target_index,
+            target_field,
+            created_at,
+        ),
     )
     conn.commit()
 

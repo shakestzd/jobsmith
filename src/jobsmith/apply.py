@@ -725,6 +725,17 @@ _PHASE_REQUIRED_SPECIALISTS: dict[str, tuple[str, ...]] = {
 }
 
 
+def required_specialists_for_phase(phase: str) -> tuple[str, ...]:
+    """Return the tuple of specialist slugs required to mark *phase* complete.
+
+    Public accessor on top of the private ``_PHASE_REQUIRED_SPECIALISTS``
+    map so other modules (db_ingest backfill, slice-8 re-runs) can ask
+    "did this phase finish?" without depending on apply.py internals.
+    Returns an empty tuple for unknown phases.
+    """
+    return _PHASE_REQUIRED_SPECIALISTS.get(phase, ())
+
+
 def phase_for_specialist(specialist_name: str) -> str:
     """Return the phase name that contains *specialist_name*.
 
@@ -982,6 +993,7 @@ def run_phase_iter(
     skip_confirm: bool = False,
     force: bool = False,
     cancel_event: threading.Event | None = None,
+    phases: list[str] | None = None,
 ) -> Iterator[PipelineEvent]:
     """Yield :class:`PipelineEvent` for each phase of the apply pipeline.
 
@@ -1003,6 +1015,11 @@ def run_phase_iter(
         does not start subsequent phases.  Consumers MUST also propagate the
         event to ``headless.run_phase`` (via the ``cancel_event`` kwarg) so
         a running subprocess is terminated.
+    phases:
+        When provided, restrict execution to the named phases (in their
+        canonical gather → draft → render order). ``None`` means "run all
+        not-yet-complete phases" (the default). Used by slice-8 single-
+        specialist re-runs to avoid re-running upstream phases (roborev #921).
 
     Yields
     ------
@@ -1044,7 +1061,18 @@ def run_phase_iter(
     if all(phase_done.values()) and app_dir is not None:
         return
 
-    for phase_name, phase_num in _PHASES:
+    # Filter to the requested phases (preserving canonical ordering).
+    # phases=None means "run every phase that's not yet complete" — the
+    # historical behavior. phases=[name] from slice-8 re-runs scopes work
+    # to a single phase so re-running apply-prose-writer (draft) does NOT
+    # re-fire the gather phase first (roborev #921 HIGH).
+    if phases is not None:
+        requested = set(phases)
+        active_phases = [(n, num) for n, num in _PHASES if n in requested]
+    else:
+        active_phases = list(_PHASES)
+
+    for phase_name, phase_num in active_phases:
         # Check cancel before starting each phase
         if cancel_event is not None and cancel_event.is_set():
             yield PipelineEvent(kind="cancelled", phase=phase_name)

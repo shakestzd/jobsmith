@@ -161,12 +161,39 @@ def _last_completed_phase(state_dir: Path) -> str:
             return "parse"
         return _UNKNOWN_PHASE
 
-    phases = manifest.get("phases") or {}
-    completed = [
-        name
-        for name, data in phases.items()
-        if isinstance(data, dict) and data.get("status") == "complete"
-    ]
+    return _last_completed_phase_from_invocations(manifest)
+
+
+def _completed_phases_from_invocations(manifest: dict) -> list[str]:
+    """Return phases (gather → draft → render order) whose every required
+    specialist has an ``ok`` row in ``manifest.invocations``.
+
+    Real apply-pipeline manifests are flat ``invocations[]`` lists; the
+    legacy ``manifest.phases`` shape never existed in production (roborev
+    #921 MEDIUM regression for backfill).
+    """
+    # Local import: apply.py imports nothing from db_ingest, so the
+    # boundary is one-way and no cycle exists.
+    from jobsmith.apply import required_specialists_for_phase
+
+    invocations = manifest.get("invocations")
+    if not isinstance(invocations, list):
+        return []
+    ok_specialists = {
+        inv.get("specialist")
+        for inv in invocations
+        if isinstance(inv, dict) and inv.get("status") == "ok"
+    }
+    completed: list[str] = []
+    for phase in ("gather", "draft", "render"):
+        required = required_specialists_for_phase(phase)
+        if required and all(s in ok_specialists for s in required):
+            completed.append(phase)
+    return completed
+
+
+def _last_completed_phase_from_invocations(manifest: dict) -> str:
+    completed = _completed_phases_from_invocations(manifest)
     return completed[-1] if completed else _UNKNOWN_PHASE
 
 
@@ -191,9 +218,12 @@ def backfill_slug(
 ) -> int:
     """Backfill one slug's .apply-state/ into the pipeline DB.
 
-    Returns the number of specialist_output rows inserted (0 if already
-    backfilled, since the deterministic run_id + INSERT OR IGNORE makes
-    re-runs no-ops).
+    Ingests EVERY completed phase (gather → draft → render) — earlier code
+    only ingested the single ``last_completed_phase``, dropping all earlier
+    phases' artifacts. Roborev #921 MEDIUM.
+
+    Returns the total number of specialist_output rows inserted across all
+    completed phases (0 if already backfilled).
     """
     state_dir = applications_dir / slug / ".apply-state"
     if not state_dir.is_dir():
@@ -201,13 +231,22 @@ def backfill_slug(
 
     run_id = _backfill_run_id(slug)
     started_at, finished_at = _state_timestamps(state_dir)
-    phase = _last_completed_phase(state_dir)
+
+    manifest = _load_manifest(state_dir)
+    if manifest is None:
+        completed_phases = []
+        last_phase = _last_completed_phase(state_dir)
+    else:
+        completed_phases = _completed_phases_from_invocations(manifest)
+        last_phase = (
+            completed_phases[-1] if completed_phases else _UNKNOWN_PHASE
+        )
 
     conn.execute(
         "INSERT OR IGNORE INTO apply_runs "
         "(run_id, slug, phase, started_at, finished_at, status) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        (run_id, slug, phase, started_at, finished_at, _BACKFILL_STATUS),
+        (run_id, slug, last_phase, started_at, finished_at, _BACKFILL_STATUS),
     )
     conn.commit()
 
@@ -217,13 +256,22 @@ def backfill_slug(
     if existing:
         return 0
 
-    return ingest_phase_outputs(
-        conn,
-        slug=slug,
-        run_id=run_id,
-        phase=phase,
-        state_dir=state_dir,
-    )
+    # Ingest every completed phase so earlier-phase artifacts also land.
+    # When manifest is missing/legacy, fall back to the single-phase
+    # heuristic so older app dirs still backfill something.
+    phases_to_ingest = completed_phases or [last_phase]
+    inserted = 0
+    for phase in phases_to_ingest:
+        if phase == _UNKNOWN_PHASE:
+            continue
+        inserted += ingest_phase_outputs(
+            conn,
+            slug=slug,
+            run_id=run_id,
+            phase=phase,
+            state_dir=state_dir,
+        )
+    return inserted
 
 
 def iter_backfillable_slugs(applications_dir: Path) -> list[str]:
