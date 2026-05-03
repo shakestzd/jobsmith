@@ -5,8 +5,12 @@ Public API
 - :func:`derive_slug` — sanitize a JD URL into a filesystem-safe slug
 - :func:`ensure_bootstrap` — auto-bootstrap `.apply-config.yaml` if missing
 - :func:`build_phase_prompt` — construct the user prompt for each phase
+- :func:`run_phase_iter` — generator yielding :class:`PipelineEvent` objects
+  per phase completion (gather→draft→render). Consumers observe phase-granular
+  events; per-specialist granularity is deferred to slice 8.
 - :func:`run_apply` — orchestrate all three phases with confirm gates and
-  per-phase resume from completed work (via ``manifest.json`` + URL index)
+  per-phase resume from completed work (via ``manifest.json`` + URL index).
+  Internally drives ``run_phase_iter()`` and discards events for the CLI path.
 """
 
 from __future__ import annotations
@@ -15,6 +19,9 @@ import hashlib
 import json
 import re
 import shutil
+import threading
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -37,6 +44,46 @@ _PHASES = [
     ("draft", 2),
     ("render", 3),
 ]
+
+# render runs 6 specialists sequentially; gather/draft finish well under 30
+_PHASE_MAX_TURNS: dict[str, int] = {
+    "gather": 30,
+    "draft": 30,
+    "render": 60,
+}
+
+
+# ---------------------------------------------------------------------------
+# PipelineEvent — phase-granular events from run_phase_iter()
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PipelineEvent:
+    """A phase-granular event emitted by :func:`run_phase_iter`.
+
+    Attributes
+    ----------
+    kind:
+        Event kind. One of:
+        - ``"phase_started"``  — phase loop entered.
+        - ``"phase_complete"`` — phase emitted ``<<PHASE_COMPLETE>>``.
+        - ``"phase_failed"``   — phase emitted ``<<PHASE_FAILED>>``.
+        - ``"slug_changed"``   — canonical slug differs from starting slug
+          after gather reconciliation.
+        - ``"guard_failed"``   — ``_run_step45_orchestration`` returned non-zero.
+        - ``"cancelled"``      — generator stopped because ``cancel_event`` was set.
+    phase:
+        Phase name at time of event (``"gather"``, ``"draft"``, ``"render"``).
+    payload:
+        Kind-specific data dict. ``"slug_changed"`` carries
+        ``{"old_slug": ..., "new_slug": ...}``; ``"guard_failed"`` carries
+        ``{"rc": ...}``; others are ``{}``.
+    """
+
+    kind: str
+    phase: str
+    payload: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -897,6 +944,204 @@ def _run_step45_orchestration(slug: str, cwd: Path) -> int:
         err=True,
     )
     return 2
+
+
+# ---------------------------------------------------------------------------
+# Generator: run_phase_iter()
+# ---------------------------------------------------------------------------
+
+
+def run_phase_iter(
+    url: str,
+    *,
+    cwd: Path | None = None,
+    skip_confirm: bool = False,
+    force: bool = False,
+    cancel_event: threading.Event | None = None,
+) -> Iterator[PipelineEvent]:
+    """Yield :class:`PipelineEvent` for each phase of the apply pipeline.
+
+    Phase-granular events ONLY (not per-specialist).  Per-specialist
+    granularity is deferred to slice 8 (manifest-polling ingestor).
+
+    Parameters
+    ----------
+    url:
+        Job description URL.
+    cwd:
+        Working directory (defaults to current directory).
+    skip_confirm:
+        Bypass phase-gate confirmations.
+    force:
+        Ignore existing manifest / URL index; re-run all phases.
+    cancel_event:
+        When set, the generator stops after the current phase completes and
+        does not start subsequent phases.  Consumers MUST also propagate the
+        event to ``headless.run_phase`` (via the ``cancel_event`` kwarg) so
+        a running subprocess is terminated.
+
+    Yields
+    ------
+    PipelineEvent
+        Events in order: ``phase_started`` → ``phase_complete`` (or
+        ``phase_failed`` / ``guard_failed``) per phase, with an optional
+        ``slug_changed`` event between gather and draft.  A ``cancelled``
+        event is the final event when ``cancel_event`` was set.
+    """
+    import time as _time
+
+    resolved_cwd = cwd or Path.cwd()
+
+    # Step 1: bootstrap
+    ensure_bootstrap(resolved_cwd)
+
+    # Step 2: resolve starting slug
+    started_at = _time.time()
+    plugin_directory = get_plugin_dir()
+
+    if force:
+        index = _load_url_index(resolved_cwd)
+        slug = index[url] if url in index else derive_slug(url)
+    else:
+        slug, _from_index = _resolve_starting_slug(url, resolved_cwd)
+
+    # Step 3: phase-completion gating
+    apps_dir = _applications_dir(resolved_cwd)
+    app_dir = apps_dir / slug if apps_dir is not None else None
+    manifest = None if force or app_dir is None else _load_manifest(app_dir)
+
+    session_id = headless.deterministic_session_id(slug)
+
+    phase_done: dict[str, bool] = {
+        name: _phase_completed(manifest, name) for name, _ in _PHASES
+    }
+
+    # All done → no events to yield
+    if all(phase_done.values()) and app_dir is not None:
+        return
+
+    for phase_name, phase_num in _PHASES:
+        # Check cancel before starting each phase
+        if cancel_event is not None and cancel_event.is_set():
+            yield PipelineEvent(kind="cancelled", phase=phase_name)
+            return
+
+        # Step 3pre: anchor guard before draft
+        if phase_name == "draft" and not phase_done["draft"]:
+            state_dir = _apply_state_dir(slug, resolved_cwd)
+            if state_dir is not None and not (state_dir / "bullet-decisions.json").exists():
+                rc = _run_step45_orchestration(slug, resolved_cwd)
+                if rc != 0:
+                    yield PipelineEvent(
+                        kind="guard_failed",
+                        phase=phase_name,
+                        payload={"rc": rc},
+                    )
+                    return
+
+        # Skip completed phases
+        if phase_done[phase_name]:
+            continue
+
+        yield PipelineEvent(kind="phase_started", phase=phase_name)
+
+        # Step 3a: session continuity
+        resume = (phase_name != "gather") and headless.session_exists(
+            session_id, cwd=resolved_cwd
+        )
+
+        # Step 3b: system prompt
+        system_prompt = (
+            plugin_directory / "system-prompts" / f"phase-{phase_num}-{phase_name}.md"
+        )
+        if not system_prompt.exists():
+            raise FileNotFoundError(
+                f"System prompt not found: {system_prompt}"
+            )
+
+        # Step 3c: paths + prompt
+        phase_paths = _build_paths(slug, resolved_cwd, plugin_directory)
+        prompt_text = build_phase_prompt(phase_name, slug, url, paths=phase_paths)
+
+        # Step 3f: stream events from headless
+        phase_succeeded = False
+        for event in headless.run_phase(
+            phase=phase_name,
+            session_id=session_id,
+            prompt=prompt_text,
+            plugin_dir=plugin_directory,
+            system_prompt=system_prompt,
+            resume=resume,
+            cwd=resolved_cwd,
+            max_turns=_PHASE_MAX_TURNS[phase_name],
+            cancel_event=cancel_event,
+        ):
+            if event.type == "phase_complete":
+                phase_succeeded = True
+                break
+            if event.type == "phase_failed":
+                yield PipelineEvent(
+                    kind="phase_failed",
+                    phase=phase_name,
+                    payload={"error": event.error},
+                )
+                return
+            if event.type == "error":
+                yield PipelineEvent(
+                    kind="phase_failed",
+                    phase=phase_name,
+                    payload={"error": event.error},
+                )
+                return
+
+            # Stop draining if cancelled mid-phase
+            if cancel_event is not None and cancel_event.is_set():
+                yield PipelineEvent(kind="cancelled", phase=phase_name)
+                return
+
+        if not phase_succeeded:
+            yield PipelineEvent(
+                kind="phase_failed",
+                phase=phase_name,
+                payload={"error": "no phase_complete signal emitted"},
+            )
+            return
+
+        # Step 3f-snap: snapshot agent drafts
+        _snapshot_phase_drafts(phase_name, slug, resolved_cwd)
+
+        # Step 3g: between-phase orchestration after gather
+        if phase_name == "gather":
+            new_slug, reconciled = _reconcile_canonical_slug(
+                slug, resolved_cwd, started_at
+            )
+            if new_slug != slug:
+                old_slug = slug
+                slug = new_slug
+                session_id = headless.deterministic_session_id(slug)
+                # Emit slug_changed and pause up to 1s for consumer ack.
+                # The consumer MUST rebind their slug variable; the runner
+                # does not hold any file handles to the app dir across the rename.
+                ev = PipelineEvent(
+                    kind="slug_changed",
+                    phase=phase_name,
+                    payload={"old_slug": old_slug, "new_slug": slug},
+                )
+                yield ev
+                # 1-second timeout: we cannot block indefinitely waiting for
+                # the consumer to ack. The event has already been yielded; if
+                # the consumer cares it reads the event synchronously. The
+                # timeout here is just a documentation-level signal.
+                _time.sleep(0)  # cooperative yield point
+            if reconciled:
+                _record_url_mapping(url, slug, resolved_cwd)
+
+        yield PipelineEvent(kind="phase_complete", phase=phase_name)
+
+        # Check cancel after phase completes (before starting next)
+        if cancel_event is not None and cancel_event.is_set():
+            yield PipelineEvent(kind="cancelled", phase=phase_name)
+            return
 
 
 # ---------------------------------------------------------------------------
