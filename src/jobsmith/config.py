@@ -35,6 +35,11 @@ class OutputPaths(BaseModel):
 
     applications_dir: Path = Path("private/applications")
     job_search_db: Path = Path("private/job_search.db")
+    # Pipeline state DB — separate from job_search_db (different schema/purpose).
+    jobsmith_db: Path = Path("private/jobsmith.db")
+    # Per-slug review DBs live here; outside applications_dir to prevent leaking
+    # personal review notes when the application directory is shared/exported.
+    review_db_dir: Path = Path("private/.review")
 
 
 class UserIdentity(BaseModel):
