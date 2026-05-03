@@ -109,7 +109,7 @@ def test_review_known_slug_invokes_marimo(tmp_path: Path):
     invocations = []
 
     def _fake_subprocess_run(cmd, **kwargs):
-        invocations.append(cmd)
+        invocations.append((cmd, kwargs))
         class _FakeResult:
             returncode = 0
         return _FakeResult()
@@ -121,7 +121,18 @@ def test_review_known_slug_invokes_marimo(tmp_path: Path):
         runner.invoke(app, ["review", "acme-swe"])
 
     assert len(invocations) == 1, f"Expected marimo to be invoked once; got {invocations}"
-    cmd = invocations[0]
+    cmd, kwargs = invocations[0]
     assert cmd[0] == "marimo", f"Expected marimo as first arg; got {cmd[0]!r}"
     assert cmd[1] == "edit", f"Expected 'edit' as second arg; got {cmd[1]!r}"
     assert "apply.py" in cmd[2], f"Expected apply.py in notebook path; got {cmd[2]!r}"
+
+    # Regression for roborev #920 MEDIUM: marimo must be invoked with the
+    # repo root as cwd AND JOBSMITH_REPO_ROOT in env so the notebook
+    # resolves the right DB when invoked from a subdirectory.
+    assert kwargs.get("cwd") == str(tmp_path), (
+        f"Expected cwd={tmp_path}; got cwd={kwargs.get('cwd')}"
+    )
+    env = kwargs.get("env") or {}
+    assert env.get("JOBSMITH_REPO_ROOT") == str(tmp_path), (
+        f"Expected JOBSMITH_REPO_ROOT={tmp_path}; got {env.get('JOBSMITH_REPO_ROOT')}"
+    )

@@ -208,3 +208,96 @@ def test_archive_null_run_id_becomes_stale(review_dir: Path):
     ).fetchone()
     conn.close()
     assert row["status"] == "stale"
+
+
+def test_persist_amendment_dedup_after_accept_reject(tmp_path: Path):
+    """Re-parsing the same directive after accept/reject must not re-insert.
+
+    Regression for roborev #920 MEDIUM: dedup previously matched only
+    status='pending', so once the user accepted or rejected an
+    amendment, re-parsing the same chat history would create a fresh
+    pending row, restoring the dropdown after the user dismissed it.
+    """
+    from jobsmith.marimo.directive_parser import Amendment
+    from jobsmith.marimo.review_store import persist_amendment, set_status
+
+    review_dir = tmp_path / ".review"
+    review_dir.mkdir()
+
+    a = Amendment(
+        id="00000000-0000-4000-8000-000000000001",
+        section="work",
+        index=0,
+        field="bullet[2]",
+        op="replace",
+        value="quantify impact",
+    )
+    first_id = persist_amendment("slug-x", a, review_dir)
+    set_status("slug-x", first_id, "accepted", review_dir)
+
+    # Re-parse same directive (fresh UUID4 from parser); persist must dedup
+    # against the accepted row instead of inserting a new pending one.
+    a2 = Amendment(
+        id="00000000-0000-4000-8000-000000000002",
+        section="work",
+        index=0,
+        field="bullet[2]",
+        op="replace",
+        value="quantify impact",
+    )
+    second_id = persist_amendment("slug-x", a2, review_dir)
+    assert second_id == first_id, (
+        "dedup must return the existing accepted amendment_id"
+    )
+
+    # And again after rejection
+    set_status("slug-x", first_id, "rejected", review_dir)
+    a3 = Amendment(
+        id="00000000-0000-4000-8000-000000000003",
+        section="work",
+        index=0,
+        field="bullet[2]",
+        op="replace",
+        value="quantify impact",
+    )
+    third_id = persist_amendment("slug-x", a3, review_dir)
+    assert third_id == first_id
+
+
+def test_persist_amendment_reinsert_after_stale(tmp_path: Path):
+    """Stale (archived from a prior run) amendments do NOT block re-insert.
+
+    A new apply run produces fresh content; if the user is still asking for
+    the same edit, that should land as a new pending row, not match the
+    archived stale row from the previous cycle.
+    """
+    from jobsmith.marimo.directive_parser import Amendment
+    from jobsmith.marimo.review_store import persist_amendment, set_status
+
+    review_dir = tmp_path / ".review"
+    review_dir.mkdir()
+
+    a = Amendment(
+        id="00000000-0000-4000-8000-000000000010",
+        section="cover-letter",
+        index=None,
+        field="opening",
+        op="replace",
+        value="emphasize cross-functional impact",
+    )
+    first_id = persist_amendment("slug-y", a, review_dir)
+    set_status("slug-y", first_id, "stale", review_dir)
+
+    a2 = Amendment(
+        id="00000000-0000-4000-8000-000000000011",
+        section="cover-letter",
+        index=None,
+        field="opening",
+        op="replace",
+        value="emphasize cross-functional impact",
+    )
+    second_id = persist_amendment("slug-y", a2, review_dir)
+    assert second_id != first_id, (
+        "stale rows must not block re-insertion in a new run"
+    )
+

@@ -1272,7 +1272,18 @@ def review_cmd(
         raise typer.Exit(code=2)
 
     notebook = Path(_marimo_pkg.__file__).resolve().parent / "apply.py"
-    result = subprocess.run(["marimo", "edit", str(notebook)], check=False)
+    # Pass cwd=repo_root AND set JOBSMITH_REPO_ROOT in the subprocess env so
+    # the notebook (which reads .apply-config.yaml from "." and falls back
+    # to JOBSMITH_REPO_ROOT for repo-root resolution) finds the right DB
+    # even when `jobsmith review` is invoked from a subdirectory.
+    import os as _os
+    env = {**_os.environ, "JOBSMITH_REPO_ROOT": str(repo_root)}
+    result = subprocess.run(
+        ["marimo", "edit", str(notebook)],
+        cwd=str(repo_root),
+        env=env,
+        check=False,
+    )
     raise typer.Exit(code=result.returncode)
 
 

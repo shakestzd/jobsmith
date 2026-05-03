@@ -54,10 +54,15 @@ def persist_amendment(
     """
     conn = open_review_db(slug, review_db_dir)
     try:
-        # Dedup check: same slug + section + op + value with status='pending'
+        # Dedup by content (slug + section + op + value) regardless of status.
+        # Earlier code only matched status='pending', which let the same
+        # directive be re-inserted as a fresh pending row after the user
+        # accepted or rejected it (roborev #920 MEDIUM). Stale amendments
+        # are still re-inserted because they belong to a prior run cycle.
         row = conn.execute(
             "SELECT amendment_id FROM amendments "
-            "WHERE slug=? AND section=? AND op=? AND value=? AND status='pending'",
+            "WHERE slug=? AND section=? AND op=? AND value=? "
+            "AND status IN ('pending','accepted','rejected')",
             (slug, amendment.section, amendment.op, amendment.value),
         ).fetchone()
 

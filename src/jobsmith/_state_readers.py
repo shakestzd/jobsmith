@@ -142,8 +142,51 @@ ARTIFACT_READERS: dict[str, tuple[str, Any]] = {
     ),
 }
 
+#: Maps a specialist name (as written into manifest.json.invocations[].specialist)
+#: to the artifact filename it produces under .apply-state/. Used by
+#: db_ingest.ingest_phase_outputs to dispatch the right reader for each
+#: invocation. Keep this in lockstep with apply._PHASE_REQUIRED_SPECIALISTS.
+SPECIALIST_TO_ARTIFACT: dict[str, str] = {
+    # gather
+    "apply-jd-parser": "jd-parsed.json",
+    "apply-fit-scorer": "fit-score.json",
+    "apply-hm-enricher": "hm-snippet.md",
+    "apply-bullet-selector": "bullet-selection.json",
+    "apply-company-research": "company-research.md",
+    # draft
+    "apply-prose-writer": "prose-draft.md",
+    "apply-prose-qa": "ai-tell-report.json",
+    # render — optional specialists that DO write to .apply-state/
+    "apply-portfolio-ats-checker": "ats-check.json",
+    # apply-resume-renderer / apply-cover-letter-writer / apply-index-writer
+    # write user-facing files under documents/ rather than .apply-state/, so
+    # they have no entry here. The DB row records the invocation status only.
+}
+
+#: Maps each phase to the specialists whose .apply-state/ artifacts the
+#: ingest hook should pull. Sourced from apply._PHASE_REQUIRED_SPECIALISTS
+#: but inlined here to avoid a cyclic import.
+PHASE_SPECIALISTS: dict[str, tuple[str, ...]] = {
+    "gather": (
+        "apply-jd-parser",
+        "apply-fit-scorer",
+        "apply-hm-enricher",
+        "apply-bullet-selector",
+        "apply-company-research",
+    ),
+    "draft": (
+        "apply-prose-writer",
+        "apply-prose-qa",
+    ),
+    "render": (
+        "apply-portfolio-ats-checker",
+    ),
+}
+
 __all__ = [
     "ARTIFACT_READERS",
+    "PHASE_SPECIALISTS",
+    "SPECIALIST_TO_ARTIFACT",
     "load_ai_tell_report",
     "load_bullet_selection",
     "load_fit_score",

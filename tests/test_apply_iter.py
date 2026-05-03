@@ -174,16 +174,20 @@ def test_iter_records_to_db(minimal_repo, mock_plugin_dir, pipeline_db, tmp_path
             "top_keywords": [],
         })
     )
+    # Real apply-pipeline manifest format: flat invocations[]
     (state_dir / "manifest.json").write_text(
         json.dumps({
-            "phases": {
-                "gather": {
-                    "status": "complete",
-                    "specialists": {
-                        "jd-parser": {"output": "jd-parsed.json", "status": "complete"},
-                    },
-                }
-            }
+            "run_id": "test-run",
+            "slug": slug,
+            "started_at": "2024-01-01T10:00:00",
+            "invocations": [
+                {
+                    "specialist": "apply-jd-parser",
+                    "status": "ok",
+                    "started_at": "2024-01-01T10:00:01",
+                    "finished_at": "2024-01-01T10:00:02",
+                },
+            ],
         })
     )
 

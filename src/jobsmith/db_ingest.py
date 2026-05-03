@@ -17,7 +17,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from jobsmith._state_readers import ARTIFACT_READERS
+from jobsmith._state_readers import (
+    ARTIFACT_READERS,
+    PHASE_SPECIALISTS,
+    SPECIALIST_TO_ARTIFACT,
+)
 
 _BACKFILL_STATUS = "backfilled"
 _UNKNOWN_PHASE = "unknown"
@@ -38,13 +42,36 @@ def _load_manifest(state_dir: Path) -> dict | None:
         return None
 
 
-def _phase_specialists(manifest: dict | None, phase: str) -> dict:
-    """Walk ``manifest['phases'][phase]['specialists']`` defensively."""
+def _phase_invocations(manifest: dict | None, phase: str) -> list[dict]:
+    """Return the OK invocations from manifest.invocations that belong to ``phase``.
+
+    The real apply-pipeline manifest format (written by the agent) is:
+
+        {"run_id": ..., "slug": ..., "started_at": ...,
+         "invocations": [
+             {"specialist": "apply-jd-parser", "status": "ok",
+              "started_at": "...", "finished_at": "...", ...},
+             ...
+         ]}
+
+    There is no "phases" key — invocations are flat at the top level. We
+    filter to the specialists that belong to ``phase`` via
+    ``PHASE_SPECIALISTS`` so each post-phase ingest only touches its own
+    artifacts.
+    """
     if not manifest:
-        return {}
-    phases = manifest.get("phases") or {}
-    phase_data = phases.get(phase) or {}
-    return phase_data.get("specialists") or {}
+        return []
+    invocations = manifest.get("invocations")
+    if not isinstance(invocations, list):
+        return []
+    phase_specialists = set(PHASE_SPECIALISTS.get(phase, ()))
+    return [
+        inv
+        for inv in invocations
+        if isinstance(inv, dict)
+        and inv.get("specialist") in phase_specialists
+        and inv.get("status") == "ok"
+    ]
 
 
 def _serialize_artifact(data: object) -> str:
@@ -64,25 +91,34 @@ def ingest_phase_outputs(
 ) -> int:
     """Read .apply-state/ artifacts for ``phase`` and insert specialist_outputs rows.
 
+    Reads ``manifest.json.invocations`` (the real format written by the
+    apply pipeline; see ``apply-agent.md``). Filters to specialists that
+    belong to ``phase`` via :data:`PHASE_SPECIALISTS`, maps each specialist
+    name to its expected artifact filename via :data:`SPECIALIST_TO_ARTIFACT`,
+    and dispatches the matching reader from :data:`ARTIFACT_READERS`.
+
     Idempotent via INSERT OR IGNORE on (run_id, specialist, kind). Missing
-    artifacts and unrecognised filenames are skipped silently. Reader errors
-    are also swallowed so a single broken artifact does not block the phase.
+    artifacts and reader errors are skipped silently so a single broken
+    artifact does not block the phase.
 
     Returns the number of *new* rows inserted (skipped duplicates excluded).
     """
-    specialists = _phase_specialists(_load_manifest(state_dir), phase)
-    if not specialists:
+    invocations = _phase_invocations(_load_manifest(state_dir), phase)
+    if not invocations:
         return 0
 
     inserted = 0
     finished_at = _now_iso()
 
     with conn:
-        for specialist_name, spec_info in specialists.items():
-            output_file = (
-                spec_info.get("output") if isinstance(spec_info, dict) else None
-            )
-            reader_entry = ARTIFACT_READERS.get(output_file) if output_file else None
+        for inv in invocations:
+            specialist_name = inv.get("specialist")
+            output_file = SPECIALIST_TO_ARTIFACT.get(specialist_name)
+            if output_file is None:
+                # Render specialists (resume-renderer, etc.) write to documents/
+                # rather than .apply-state/ — record nothing here.
+                continue
+            reader_entry = ARTIFACT_READERS.get(output_file)
             if reader_entry is None:
                 continue
             kind, reader_fn = reader_entry

@@ -78,18 +78,33 @@ def fixture_state_dir(tmp_path: Path) -> Path:
         })
     )
 
+    # Real apply-pipeline manifest format: flat invocations[] at top level,
+    # specialist names match SPECIALIST_TO_ARTIFACT in _state_readers.
     (state_dir / "manifest.json").write_text(
         json.dumps({
-            "phases": {
-                "gather": {
-                    "status": "complete",
-                    "specialists": {
-                        "jd-parser": {"output": "jd-parsed.json", "status": "complete"},
-                        "fit-scorer": {"output": "fit-score.json", "status": "complete"},
-                        "bullet-selector": {"output": "bullet-selection.json", "status": "complete"},
-                    },
-                }
-            }
+            "run_id": "test-run-id",
+            "slug": "test-slug",
+            "started_at": "2024-01-01T10:00:00",
+            "invocations": [
+                {
+                    "specialist": "apply-jd-parser",
+                    "status": "ok",
+                    "started_at": "2024-01-01T10:00:01",
+                    "finished_at": "2024-01-01T10:00:02",
+                },
+                {
+                    "specialist": "apply-fit-scorer",
+                    "status": "ok",
+                    "started_at": "2024-01-01T10:00:03",
+                    "finished_at": "2024-01-01T10:00:04",
+                },
+                {
+                    "specialist": "apply-bullet-selector",
+                    "status": "ok",
+                    "started_at": "2024-01-01T10:00:05",
+                    "finished_at": "2024-01-01T10:00:06",
+                },
+            ],
         })
     )
 

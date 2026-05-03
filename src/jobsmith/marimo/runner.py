@@ -221,7 +221,43 @@ class NotebookRunner:
         self.events_queue.put(_Done(status=final_status))
 
 
+_RUNNER_SINGLETON: NotebookRunner | None = None
+_SINGLETON_LOCK = threading.Lock()
+
+
+def get_runner(*, db_path: Path, applications_dir: Path) -> NotebookRunner:
+    """Return the process-wide :class:`NotebookRunner` singleton.
+
+    The marimo dispatch cell re-runs every time any of its inputs change
+    (button click, slug-picker change, etc.). Constructing a new
+    NotebookRunner per re-run loses the in-flight thread/queue/cancel_event
+    references, breaking Stop and live progress. This accessor returns a
+    single instance so the running thread survives reactive recomputation.
+
+    The first call constructs the runner. Subsequent calls ignore the
+    keyword arguments and return the existing instance — db_path and
+    applications_dir are stable for the notebook session.
+    """
+    global _RUNNER_SINGLETON
+    with _SINGLETON_LOCK:
+        if _RUNNER_SINGLETON is None:
+            _RUNNER_SINGLETON = NotebookRunner(
+                db_path=db_path,
+                applications_dir=applications_dir,
+            )
+        return _RUNNER_SINGLETON
+
+
+def reset_runner() -> None:
+    """Clear the singleton (testing helper / process-restart parity)."""
+    global _RUNNER_SINGLETON
+    with _SINGLETON_LOCK:
+        _RUNNER_SINGLETON = None
+
+
 __all__ = [
     "NotebookRunner",
     "_Done",
+    "get_runner",
+    "reset_runner",
 ]

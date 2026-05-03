@@ -77,16 +77,14 @@ def _show_picker(mo, slug_picker):
 # Cell D2 — run-mode: URL input + Run/Stop buttons (slice 4)
 # ---------------------------------------------------------------------------
 @app.cell
-def _run_controls(Path, mo, repo_root):
-    from jobsmith.marimo.runner import NotebookRunner
-
+def _run_controls(mo):
     url_input = mo.ui.text(
         placeholder="https://example.com/careers/role-id",
         label="Job URL (paste to run apply pipeline)",
     )
     run_button = mo.ui.run_button(label="Run apply")
     stop_button = mo.ui.run_button(label="Stop")
-    return NotebookRunner, run_button, stop_button, url_input
+    return run_button, stop_button, url_input
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +92,6 @@ def _run_controls(Path, mo, repo_root):
 # ---------------------------------------------------------------------------
 @app.cell
 def _run_dispatch(
-    NotebookRunner,
     Path,
     db_path,
     repo_root,
@@ -102,8 +99,12 @@ def _run_dispatch(
     stop_button,
     url_input,
 ):
-    # One runner per notebook session
-    runner_state = NotebookRunner(
+    # Use the module-level singleton so the in-flight thread/queue/cancel_event
+    # survive reactive recomputation. Constructing a new NotebookRunner per
+    # cell re-run would orphan the running pipeline (roborev #920 HIGH).
+    from jobsmith.marimo.runner import get_runner
+
+    runner_state = get_runner(
         db_path=db_path,
         applications_dir=Path(repo_root) / "private" / "applications",
     )

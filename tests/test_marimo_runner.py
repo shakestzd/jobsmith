@@ -285,3 +285,54 @@ def test_re_entry_guard_blocks_double_start(pipeline_db, tmp_path: Path):
             runner.start(url=url, cwd=tmp_path)
 
     block.set()  # unblock thread
+
+
+# ---------------------------------------------------------------------------
+# Regression — module-level singleton survives reactive recomputation
+# (roborev #920 HIGH: NotebookRunner reconstructed per cell re-run lost
+# the in-flight thread/queue/cancel_event references)
+# ---------------------------------------------------------------------------
+
+
+def test_get_runner_returns_singleton(pipeline_db, tmp_path: Path):
+    """Repeated calls to get_runner return the same NotebookRunner instance."""
+    from jobsmith.marimo.runner import get_runner, reset_runner
+
+    reset_runner()
+    _conn, db_path = pipeline_db
+    a = get_runner(db_path=db_path, applications_dir=tmp_path)
+    b = get_runner(db_path=db_path, applications_dir=tmp_path)
+    assert a is b
+
+
+def test_get_runner_preserves_running_thread(pipeline_db, tmp_path: Path):
+    """A running runner is NOT replaced by a second get_runner call.
+
+    Simulates the marimo dispatch cell re-running while a phase is in flight.
+    """
+    from jobsmith.marimo.runner import get_runner, reset_runner
+
+    reset_runner()
+    _conn, db_path = pipeline_db
+    block = threading.Event()
+
+    def _fake_run_phase_iter(url_, **kwargs):
+        yield PipelineEvent(kind="phase_started", phase="gather")
+        block.wait(timeout=5.0)
+        yield PipelineEvent(kind="phase_complete", phase="gather")
+
+    try:
+        with patch("jobsmith.marimo.runner.run_phase_iter", _fake_run_phase_iter):
+            r1 = get_runner(db_path=db_path, applications_dir=tmp_path)
+            r1.start(url="https://example.com/jobs/x", cwd=tmp_path)
+            time.sleep(0.05)
+            assert r1.is_running()
+
+            # Simulate a reactive re-run of the dispatch cell
+            r2 = get_runner(db_path=db_path, applications_dir=tmp_path)
+            assert r2 is r1, "singleton must not be replaced while running"
+            assert r2.is_running(), "running thread reference must survive"
+    finally:
+        block.set()
+        reset_runner()
+
