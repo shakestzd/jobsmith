@@ -21,6 +21,7 @@ import json
 import re
 import shutil
 import threading
+import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -656,6 +657,71 @@ def _apply_state_dir(slug: str, cwd: Path) -> Path | None:
     return resolve(config.output.applications_dir, repo_root) / slug / ".apply-state"
 
 
+def _claude_session_file_path(session_id: str, cwd: Path) -> Path:
+    """Return the Claude Code SDK session file path for *session_id*.
+
+    The SDK stores conversation history under::
+
+        ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
+
+    where ``<encoded-cwd>`` is the absolute cwd path with every ``/`` replaced
+    by ``-`` (yielding a leading ``-`` for absolute paths).
+    """
+    encoded = str(cwd).replace("/", "-")
+    return Path.home() / ".claude" / "projects" / encoded / f"{session_id}.jsonl"
+
+
+def _get_or_create_session_id(application_dir: Path, cwd: Path) -> str:
+    """Return a stable session UUID for *application_dir*, creating it if absent.
+
+    The UUID is persisted at ``<application_dir>/.apply-state/session-id`` so
+    that repeated invocations (phase 2/3 ``--resume``) always receive the same
+    session identifier that phase 1 (gather) originally registered with Claude.
+
+    A fresh :func:`uuid.uuid4` is generated on first call; subsequent calls
+    read and return the stored value.  Using uuid4 (random) rather than uuid5
+    (deterministic) means a failed-then-retried gather gets a new session ID
+    that the Claude Code SDK will accept without the "already in use" error.
+
+    **Stale-orphan detection:** if the persisted ID refers to a gather run that
+    never completed (gather is not marked complete in the manifest), AND the
+    corresponding SDK ``.jsonl`` session file still exists on disk (the orphan),
+    the stored ID is treated as stale.  A new uuid4 is generated and persisted
+    so the next gather invocation succeeds without a "Session ID … already in
+    use" error.  The regeneration is logged to stderr.
+    """
+    state_dir = application_dir / ".apply-state"
+    session_file = state_dir / "session-id"
+    if session_file.exists():
+        stored = session_file.read_text(encoding="utf-8").strip()
+        if stored:
+            manifest = _load_manifest(application_dir)
+            if _phase_completed(manifest, "gather"):
+                # Gather succeeded — the session ID is legitimately reusable
+                # for phase-2/3 --resume; return it unchanged.
+                return stored
+            # Gather was not completed. Check whether an orphan SDK session
+            # file exists for this ID.
+            orphan_path = _claude_session_file_path(stored, cwd)
+            if orphan_path.exists():
+                # Stale orphan: regenerate so Claude Code SDK won't reject it.
+                import sys
+                print(
+                    f"jobsmith: regenerated session ID; previous orphan at {orphan_path}",
+                    file=sys.stderr,
+                )
+                state_dir.mkdir(parents=True, exist_ok=True)
+                new_id = str(uuid.uuid4())
+                session_file.write_text(new_id, encoding="utf-8")
+                return new_id
+            # No orphan file — the persisted ID is safe to reuse.
+            return stored
+    state_dir.mkdir(parents=True, exist_ok=True)
+    new_id = str(uuid.uuid4())
+    session_file.write_text(new_id, encoding="utf-8")
+    return new_id
+
+
 def _snapshot_phase_drafts(phase: str, slug: str, cwd: Path) -> None:
     """Persist immutable agent-draft snapshots after a phase completes.
 
@@ -1286,16 +1352,34 @@ def run_apply(
     else:
         slug, from_index = _resolve_starting_slug(url, resolved_cwd)
 
-    session_id = headless.deterministic_session_id(slug)
-
-    rdr.print_info(f"jobsmith apply: slug={slug!r}  session={session_id}")
-
     # Step 3: phase-completion gating. Read manifest at the resolved app dir
     # (when not --force) and decide which phases to skip. Manifest absence,
     # malformed JSON, or missing invocations all fall through to "rerun".
     apps_dir = _applications_dir(resolved_cwd)
     app_dir = apps_dir / slug if apps_dir is not None else None
     manifest = None if force or app_dir is None else _load_manifest(app_dir)
+
+    # Compute (or create) the session ID from the persisted per-application
+    # file.  This replaces the old uuid5-based deterministic_session_id so
+    # that a retry after a failed gather gets a fresh ID the Claude Code SDK
+    # will accept.  When there is no config (app_dir is None) fall back to
+    # the deterministic ID so the no-config path is unchanged.
+    #
+    # Finding 2 fix: when --force is set, the entire pipeline reruns from
+    # gather.  The persisted session-id may point to a previous successful
+    # run whose JSONL still exists in ~/.claude/projects/ — the SDK would
+    # reject it with "Session ID already in use".  Unlink it here so
+    # _get_or_create_session_id always mints a fresh uuid4 on a forced run.
+    if force and app_dir is not None:
+        _session_id_file = app_dir / ".apply-state" / "session-id"
+        _session_id_file.unlink(missing_ok=True)
+    session_id = (
+        _get_or_create_session_id(app_dir, resolved_cwd)
+        if app_dir is not None
+        else headless.deterministic_session_id(slug)
+    )
+
+    rdr.print_info(f"jobsmith apply: slug={slug!r}  session={session_id}")
 
     phase_done: dict[str, bool] = {
         name: _phase_completed(manifest, name) for name, _ in _PHASES
@@ -1336,7 +1420,27 @@ def run_apply(
             rdr.print_phase_skipped(phase_num, phase_name)
             continue
 
+        # Finding 1 fix (Option A): each non-gather phase gets its own fresh
+        # session at the phase boundary.  Deleting the persisted session-id
+        # forces _get_or_create_session_id to mint a new uuid4.  Because the
+        # new JSONL does not yet exist in ~/.claude/projects/, session_exists()
+        # returns False → resume stays False → run_phase uses --session-id
+        # (not --resume), giving every phase a clean turn budget.
+        # For draft this runs after Step 3g has already reconciled the slug,
+        # so the new ID is minted under the correct (canonical) app_dir.
+        if phase_name != "gather" and apps_dir is not None:
+            (apps_dir / slug / ".apply-state" / "session-id").unlink(
+                missing_ok=True
+            )
+            session_id = _get_or_create_session_id(apps_dir / slug, resolved_cwd)
+
         # Step 3a: determine resume flag (Claude session continuity).
+        # Invariant: session_id was freshly minted just above for phase 2/3,
+        # so its JSONL does not yet exist in ~/.claude/projects/…
+        # session_exists() therefore returns False, resume stays False, and
+        # _build_command uses --session-id (claim a new session) rather than
+        # --resume.  This gives each phase a clean turn budget and avoids
+        # inheriting any prior phase's spent turns.
         resume = (phase_name != "gather") and headless.session_exists(
             session_id, cwd=resolved_cwd
         )
@@ -1375,6 +1479,7 @@ def run_apply(
                 system_prompt=system_prompt,
                 resume=resume,
                 cwd=resolved_cwd,
+                max_turns=_PHASE_MAX_TURNS[phase_name],
             ):
                 rdr.render_event(event)
 
@@ -1431,9 +1536,19 @@ def run_apply(
             )
             if new_slug != slug:
                 slug = new_slug
-                session_id = headless.deterministic_session_id(slug)
+                # When reconcile renames the directory the session-id file
+                # is copied verbatim into the new location.  Remove it now so
+                # the per-phase fresh-session block at the top of each
+                # non-gather iteration (Finding 1 fix) generates a clean
+                # uuid4 rather than re-using the carried-over value.
+                if apps_dir is not None:
+                    carried_session_file = (
+                        apps_dir / slug / ".apply-state" / "session-id"
+                    )
+                    carried_session_file.unlink(missing_ok=True)
             if reconciled:
                 _record_url_mapping(url, slug, resolved_cwd)
+
             # Render per-phase summary panel before the confirm gate
             state_dir = _apply_state_dir(slug, resolved_cwd)
             if state_dir is not None:

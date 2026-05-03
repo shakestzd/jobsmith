@@ -53,7 +53,7 @@ JOBSMITH_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "jobsmith.headless")
 
 # Regex that signals the end of a phase inside a text block.
 _PHASE_COMPLETE_RE = re.compile(r"<<PHASE_COMPLETE:\s*(\w+)\s*>>+")
-_PHASE_FAILED_RE = re.compile(r"<<PHASE_FAILED:\s*(\w+)\s*(?::\s*([^>]+?)\s*)?>>+")
+_PHASE_FAILED_RE = re.compile(r"<<PHASE_FAILED:\s*(\w+)\s*(?::\s*(.+?)\s*)?>>+", re.DOTALL)
 
 # Marker text fragment scanned for tool results.
 _TOOL_RESULT_TYPE = "tool_result"
@@ -109,6 +109,11 @@ class Event:
 
 def deterministic_session_id(slug: str) -> str:
     """Return a stable UUID5 string derived from *slug*.
+
+    Retained for backward compatibility with in-flight runs and tests.
+    New code in ``apply.py`` uses ``_get_or_create_session_id`` instead,
+    which persists a uuid4 per application directory so that failed-then-
+    retried gather phases receive a fresh ID the Claude Code SDK accepts.
 
     Uses :data:`JOBSMITH_NAMESPACE` so that the same slug always produces the
     same UUID regardless of platform or runtime state.

@@ -150,6 +150,96 @@ def test_render_site_resolves_private_output_dir(tmp_path: Path, monkeypatch) ->
     assert str(root / "_site") in captured["cmd"]
 
 
+def test_render_site_default_profile_private_in_cmd(tmp_path: Path, monkeypatch) -> None:
+    """render_site passes --profile private to quarto by default (bug-08a3ad82).
+
+    The private Quarto profile activates _quarto-private.yml which includes
+    private/applications/**/*.qmd — without it per-application HTML pages
+    are never produced.
+    """
+    from jobsmith import site as site_mod
+
+    root = _site_root(tmp_path)
+    monkeypatch.setattr(site_mod.shutil, "which", lambda name: "/fake/quarto")
+
+    captured: dict = {}
+
+    class _StubResult:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, capture_output=True, text=True, timeout=None):
+        captured["cmd"] = cmd
+        return _StubResult()
+
+    import subprocess as subprocess_mod
+
+    monkeypatch.setattr(subprocess_mod, "run", fake_run)
+
+    site_mod.render_site(root, mode="private")
+
+    assert "--profile" in captured["cmd"], "expected --profile in quarto cmd"
+    profile_idx = captured["cmd"].index("--profile")
+    assert captured["cmd"][profile_idx + 1] == "private"
+
+
+def test_render_site_custom_profile_in_cmd(tmp_path: Path, monkeypatch) -> None:
+    """render_site forwards a custom profile value to the quarto subprocess."""
+    from jobsmith import site as site_mod
+
+    root = _site_root(tmp_path)
+    monkeypatch.setattr(site_mod.shutil, "which", lambda name: "/fake/quarto")
+
+    captured: dict = {}
+
+    class _StubResult:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, capture_output=True, text=True, timeout=None):
+        captured["cmd"] = cmd
+        return _StubResult()
+
+    import subprocess as subprocess_mod
+
+    monkeypatch.setattr(subprocess_mod, "run", fake_run)
+
+    site_mod.render_site(root, mode="private", profile="staging")
+
+    assert "--profile" in captured["cmd"]
+    profile_idx = captured["cmd"].index("--profile")
+    assert captured["cmd"][profile_idx + 1] == "staging"
+
+
+def test_render_site_empty_profile_omits_flag(tmp_path: Path, monkeypatch) -> None:
+    """When profile='' is passed, --profile must NOT appear in the quarto cmd."""
+    from jobsmith import site as site_mod
+
+    root = _site_root(tmp_path)
+    monkeypatch.setattr(site_mod.shutil, "which", lambda name: "/fake/quarto")
+
+    captured: dict = {}
+
+    class _StubResult:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, capture_output=True, text=True, timeout=None):
+        captured["cmd"] = cmd
+        return _StubResult()
+
+    import subprocess as subprocess_mod
+
+    monkeypatch.setattr(subprocess_mod, "run", fake_run)
+
+    site_mod.render_site(root, mode="private", profile="")
+
+    assert "--profile" not in captured["cmd"]
+
+
 def test_render_site_resolves_public_output_dir(tmp_path: Path, monkeypatch) -> None:
     """Public mode resolves to <root>/_site-public/."""
     from jobsmith import site as site_mod

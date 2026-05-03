@@ -37,7 +37,12 @@ config.yaml
 
 # Logs and traces
 *.log
-.htmlgraph/
+# htmlgraph per-user state — generally untracked, with explicit exceptions for load-bearing plans
+.htmlgraph/*
+!.htmlgraph/plans/
+.htmlgraph/plans/*
+!.htmlgraph/plans/plan-807d44a7.yaml
+!.htmlgraph/plans/plan-807d44a7.html
 
 # OS / editor
 *.bak
