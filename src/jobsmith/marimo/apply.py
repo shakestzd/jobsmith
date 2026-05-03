@@ -177,9 +177,15 @@ def _chat_sidebar(chat_widget, mo, slug_picker):
     history_accordion = mo.accordion(
         {"Conversation history": mo.vstack(render_chat_history_bubbles(history, mo))}
     )
-    if slug_picker.value:
+    # mo.sidebar must be the cell's last expression to actually mount —
+    # the previous version discarded the return value via a bare statement
+    # wrapped in `if`, so the sidebar never showed up in the DOM.
+    _sidebar_render = (
         mo.sidebar([history_accordion, chat_widget], width="480px")
-    return
+        if slug_picker.value
+        else None
+    )
+    _sidebar_render  # noqa: B018 — marimo renders the cell's last expression
 
 
 @app.cell
@@ -442,8 +448,12 @@ def _rerun_buttons(mo):
         "apply-prose-writer",
         "apply-prose-qa",
     )
+    # Labels are the specialist suffix only (apply-jd-parser → jd-parser);
+    # the "Re-run" verb lives in the section header above the row so the
+    # buttons stay narrow enough not to wrap their hyphens at the
+    # equally-distributed mo.hstack width.
     rerun_buttons = {
-        _spec: mo.ui.run_button(label=f"Re-run {_spec}")
+        _spec: mo.ui.run_button(label=_spec.removeprefix("apply-"))
         for _spec in rerun_specialists
     }
     return rerun_buttons, rerun_specialists
@@ -484,8 +494,19 @@ def _rerun_dispatch(
 
 @app.cell
 def _rerun_panel(mo, rerun_buttons, rerun_specialists, rerun_status):
-    button_row = mo.hstack([rerun_buttons[_n] for _n in rerun_specialists])
-    _rerun_blocks = [mo.md("**Re-run a single specialist** _(requires a URL above)_"), button_row]
+    # justify="start" stops marimo from spreading 7 buttons across the full
+    # page width — keeps each button at its natural label size and lets the
+    # row wrap onto a second line on narrow viewports instead of squeezing.
+    button_row = mo.hstack(
+        [rerun_buttons[_n] for _n in rerun_specialists],
+        justify="start",
+        gap=0.5,
+        wrap=True,
+    )
+    _rerun_blocks = [
+        mo.md("**Re-run a single specialist** _(requires a URL above)_"),
+        button_row,
+    ]
     if rerun_status:
         _rerun_blocks.append(mo.callout(mo.md(rerun_status), kind="info"))
     mo.vstack(_rerun_blocks)
