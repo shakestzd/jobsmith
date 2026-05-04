@@ -1,34 +1,37 @@
-"""Read-only /api/master router for the jobsmith HTTP API.
+"""/api/master router for the jobsmith HTTP API.
 
 Endpoints
 ---------
-GET /master          → MasterPayload  (all four sections)
-GET /master/work     → list[WorkEntry]
-GET /master/skill    → list[SkillEntry]
-GET /master/education → list[EducationEntry]
-GET /master/author   → Author | None
+GET  /master                       → MasterPayload  (all four sections)
+GET  /master/{section}             → section content (work | skill | education | author)
+PUT  /master/{section}             → replace section content (validated against schema)
+POST /master/{section}/upload      → upload a raw YAML file replacing the section
 
 Behavior contract
 -----------------
-- 200 + parsed content when .apply-config.yaml + YAMLs are found.
-- 200 + empty list (or null for author) when a YAML file is missing.
-- 404 when find_config() cannot locate .apply-config.yaml up the cwd tree.
-
-Read-only. No PUT / POST / PATCH / DELETE endpoints in this module.
+- Reads return 200 + content; 404 when .apply-config.yaml is missing up the cwd tree.
+- Writes use atomic tmp-file + rename. Comments are NOT preserved on round-trip in
+  this MVP (yaml.safe_dump). The 0.8 DB-as-source-of-truth track will replace this
+  surface entirely; the comment-preservation work belongs there with ruamel.yaml.
 """
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException, UploadFile
+from pydantic import BaseModel, ValidationError
 
 from jobsmith.config import find_config, load_config
 from jobsmith.paths import resolve
 
 from .schemas.master import Author, EducationEntry, MasterPayload, SkillEntry, WorkEntry
+
+Section = Literal["work", "skill", "education", "author"]
+_SECTIONS: tuple[Section, ...] = ("work", "skill", "education", "author")
 
 router = APIRouter(tags=["master"])
 
@@ -174,6 +177,143 @@ def get_master_author() -> Author | None:
     """Return the author block from author.yml, or null if the file is missing."""
     config_path = _require_config_path()
     return _load_author(config_path)
+
+
+# ---------------------------------------------------------------------------
+# Write helpers
+# ---------------------------------------------------------------------------
+
+
+def _resolve_section_path(config_path: Path, section: Section) -> Path:
+    config = load_config(path=config_path)
+    repo_root = config_path.parent
+    if section == "work":
+        return resolve(config.master.work_yml, repo_root)
+    if section == "skill":
+        return resolve(config.master.skill_yml, repo_root)
+    if section == "education":
+        return resolve(config.master.education_yml, repo_root)
+    return resolve(config.master.author_yml, repo_root)
+
+
+def _atomic_write_yaml(path: Path, payload: Any) -> None:
+    """Write *payload* as YAML to *path* atomically (tmp file + rename)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with open(fd, "w", encoding="utf-8") as f:
+            yaml.safe_dump(payload, f, sort_keys=False, allow_unicode=True)
+        tmp_path.replace(path)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def _validate_section_payload(section: Section, raw: Any) -> Any:
+    """Validate *raw* (already-parsed YAML/JSON) against the section's schema.
+
+    Returns the JSON-serializable payload to write back to disk on success.
+    Raises HTTPException(400) on schema or shape errors.
+    """
+    try:
+        if section == "work":
+            if not isinstance(raw, list):
+                raise HTTPException(400, "work payload must be a list")
+            return [WorkEntry.model_validate(item).model_dump(exclude_none=False) for item in raw]
+        if section == "skill":
+            if not isinstance(raw, list):
+                raise HTTPException(400, "skill payload must be a list")
+            return [SkillEntry.model_validate(item).model_dump(exclude_none=False) for item in raw]
+        if section == "education":
+            if not isinstance(raw, list):
+                raise HTTPException(400, "education payload must be a list")
+            return [EducationEntry.model_validate(item).model_dump(exclude_none=False) for item in raw]
+        # author — accept either {author: [...]} (canonical), {author: {...}} (single),
+        # or a bare author dict (frontend convenience).
+        if isinstance(raw, dict) and "author" in raw:
+            inner = raw["author"]
+            if isinstance(inner, list):
+                if not inner:
+                    raise HTTPException(400, "author list cannot be empty")
+                Author.model_validate(inner[0])
+                return raw
+            if isinstance(inner, dict):
+                Author.model_validate(inner)
+                return {"author": [inner]}
+            raise HTTPException(400, "author must wrap a list or dict")
+        if isinstance(raw, dict):
+            Author.model_validate(raw)
+            return {"author": [raw]}
+        raise HTTPException(400, "author payload must be a dict")
+    except ValidationError as exc:
+        raise HTTPException(400, f"schema validation failed: {exc.errors()[:3]}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Write routes (MVP — comment loss accepted; ruamel.yaml round-trip is 0.8)
+# ---------------------------------------------------------------------------
+
+
+class WriteResponse(BaseModel):
+    section: Section
+    path: str
+    bytes_written: int
+
+
+@router.put("/master/{section}", response_model=WriteResponse)
+def put_master_section(
+    section: Section, body: Any = Body(...)  # noqa: B008
+) -> WriteResponse:
+    """Replace the YAML for *section* with the validated *body* contents.
+
+    The body shape mirrors the corresponding GET response. Comments and key
+    order in the existing YAML file are NOT preserved (yaml.safe_dump). For
+    comment-preserving edits, see the 0.8 track plan.
+    """
+    if section not in _SECTIONS:
+        raise HTTPException(400, f"invalid section: {section!r}")
+    payload = _validate_section_payload(section, body)
+    config_path = _require_config_path()
+    target = _resolve_section_path(config_path, section)
+    _atomic_write_yaml(target, payload)
+    return WriteResponse(
+        section=section,
+        path=str(target),
+        bytes_written=target.stat().st_size,
+    )
+
+
+@router.post("/master/{section}/upload", response_model=WriteResponse)
+async def upload_master_section(section: Section, file: UploadFile) -> WriteResponse:
+    """Upload a raw YAML file replacing *section*.
+
+    The upload is parsed, validated against the section schema, and atomically
+    written to the configured path. Comments in the uploaded file are NOT
+    preserved across the parse/dump round-trip (MVP limitation).
+    """
+    if section not in _SECTIONS:
+        raise HTTPException(400, f"invalid section: {section!r}")
+    raw_bytes = await file.read()
+    try:
+        text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(400, f"file must be UTF-8: {exc}") from exc
+    try:
+        parsed = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise HTTPException(400, f"YAML parse failed: {exc}") from exc
+    payload = _validate_section_payload(section, parsed)
+    config_path = _require_config_path()
+    target = _resolve_section_path(config_path, section)
+    _atomic_write_yaml(target, payload)
+    return WriteResponse(
+        section=section,
+        path=str(target),
+        bytes_written=target.stat().st_size,
+    )
 
 
 __all__ = ["router"]

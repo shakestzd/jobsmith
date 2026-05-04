@@ -106,6 +106,69 @@ export async function apiPost<TReq, TRes>(
   return (await resp.json()) as TRes;
 }
 
+/** PUT JSON to the API. Same error semantics as apiPost. */
+export async function apiPut<TReq, TRes>(
+  path: string,
+  body: TReq,
+  signal?: AbortSignal,
+): Promise<TRes> {
+  const url = apiUrl(path);
+  const init: RequestInit = {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(body),
+  };
+  if (signal) init.signal = signal;
+  const resp = await fetch(url, init);
+  if (!resp.ok) {
+    let respBody = '';
+    try {
+      respBody = await resp.text();
+    } catch {
+      // best effort
+    }
+    throw new ApiError(
+      `PUT ${url} → ${resp.status} ${resp.statusText}`,
+      resp.status,
+      url,
+      respBody,
+    );
+  }
+  return (await resp.json()) as TRes;
+}
+
+/** POST a multipart file upload. Used by /api/master/{section}/upload. */
+export async function apiUploadFile<TRes>(
+  path: string,
+  file: File,
+  signal?: AbortSignal,
+): Promise<TRes> {
+  const url = apiUrl(path);
+  const form = new FormData();
+  form.append('file', file);
+  const init: RequestInit = { method: 'POST', body: form };
+  if (signal) init.signal = signal;
+  const resp = await fetch(url, init);
+  if (!resp.ok) {
+    let respBody = '';
+    try {
+      respBody = await resp.text();
+    } catch {
+      // best effort
+    }
+    throw new ApiError(
+      `POST ${url} → ${resp.status} ${resp.statusText}`,
+      resp.status,
+      url,
+      respBody,
+    );
+  }
+  return (await resp.json()) as TRes;
+}
+
 /** Fetch raw text from the API (for /raw/{filename} endpoints). */
 export async function apiGetText(
   path: string,

@@ -10,16 +10,44 @@ import {
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query';
-import { apiGet, apiGetText, apiPost, ApiError } from './client';
+import {
+  apiGet,
+  apiGetText,
+  apiPost,
+  apiPut,
+  apiUploadFile,
+  ApiError,
+} from './client';
 import type {
   Application,
   ApplicationDetail,
+  Author,
   CreateApplicationRequest,
   CreateApplicationResponse,
+  EducationEntry,
   MasterPayload,
   RerunRequest,
   RerunResponse,
+  SkillEntry,
+  WorkEntry,
 } from './types';
+
+// ── Master section types ─────────────────────────────────────────────────
+
+export type MasterSection = 'work' | 'skill' | 'education' | 'author';
+
+export type MasterSectionPayload<S extends MasterSection> =
+  S extends 'work' ? WorkEntry[]
+    : S extends 'skill' ? SkillEntry[]
+    : S extends 'education' ? EducationEntry[]
+    : S extends 'author' ? Author | { author: Author[] }
+    : never;
+
+export interface MasterWriteResponse {
+  section: MasterSection;
+  path: string;
+  bytes_written: number;
+}
 
 // ── Query keys (export so consumers can invalidate from elsewhere) ───────
 
@@ -104,6 +132,47 @@ export function useRerunApplication(
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.application(slug) });
       queryClient.invalidateQueries({ queryKey: queryKeys.applications() });
+    },
+  });
+}
+
+// ── Master content mutations (MVP — feat-fbc2297e) ───────────────────────
+//
+// PUT  /api/master/{section}              replace section with validated body
+// POST /api/master/{section}/upload       upload a raw .yml file
+//
+// Comments are NOT preserved across the parse/dump round-trip. The 0.8
+// DB-as-source-of-truth track replaces this surface with ruamel.yaml-backed
+// editing or DB-canonical state — see plan-{TBD}.
+
+export function useUpdateMaster<S extends MasterSection>(
+  section: S,
+): UseMutationResult<MasterWriteResponse, ApiError, MasterSectionPayload<S>> {
+  const queryClient = useQueryClient();
+  return useMutation<MasterWriteResponse, ApiError, MasterSectionPayload<S>>({
+    mutationFn: (body) =>
+      apiPut<MasterSectionPayload<S>, MasterWriteResponse>(
+        `/api/master/${section}`,
+        body,
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.master() });
+    },
+  });
+}
+
+export function useUploadMaster(
+  section: MasterSection,
+): UseMutationResult<MasterWriteResponse, ApiError, File> {
+  const queryClient = useQueryClient();
+  return useMutation<MasterWriteResponse, ApiError, File>({
+    mutationFn: (file) =>
+      apiUploadFile<MasterWriteResponse>(
+        `/api/master/${section}/upload`,
+        file,
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.master() });
     },
   });
 }

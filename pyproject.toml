@@ -64,6 +64,8 @@ api = [
     "httpx>=0.27",
     # Slice 8 (feat-440324f1) — Server-Sent Events for live pipeline streaming.
     "sse-starlette>=2.0",
+    # Master-content YAML upload (POST /api/master/{section}/upload).
+    "python-multipart>=0.0.9",
 ]
 test = [
     "pytest>=7.4",

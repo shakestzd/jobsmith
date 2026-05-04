@@ -13,9 +13,15 @@
 // TODO: when a future slice lands a write API for master content, swap the
 // in-memory toggle in BulletEditor for a mutation hook + persistence flow.
 
-import { type KeyboardEvent, useMemo, useState } from 'react';
-import { useMaster } from '../api/hooks';
-import type { WorkDetail, WorkEntry } from '../api/types';
+import { type KeyboardEvent, useMemo, useRef, useState } from 'react';
+import {
+  useMaster,
+  useUpdateMaster,
+  useUploadMaster,
+  type MasterSection,
+} from '../api/hooks';
+import { ApiError } from '../api/client';
+import type { Author, EducationEntry, SkillEntry, WorkDetail, WorkEntry } from '../api/types';
 import { Icon, Badge } from './shared';
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -266,14 +272,165 @@ export function MasterContent() {
       )}
 
       {query.isSuccess && tab === 'work' && <WorkEditor work={data?.work ?? []} />}
-      {query.isSuccess && tab !== 'work' && (
+      {query.isSuccess && tab === 'skill' && (
+        <SectionEditor section="skill" initial={data?.skill ?? []} />
+      )}
+      {query.isSuccess && tab === 'education' && (
+        <SectionEditor section="education" initial={data?.education ?? []} />
+      )}
+      {query.isSuccess && tab === 'author' && (
+        <SectionEditor section="author" initial={data?.author ?? null} />
+      )}
+      {query.isSuccess && tab === 'benchmark' && (
         <div className="card" style={{ padding: 60, textAlign: 'center', color: 'var(--fg-subtle)' }}>
-          <div className="mono-sm">editor for {tab}.yml</div>
-          <div style={{ fontSize: 12, marginTop: 6 }}>(same shape as work — collapsed for this view)</div>
+          <div className="mono-sm">benchmark.md is markdown, not YAML</div>
+          <div style={{ fontSize: 12, marginTop: 6 }}>
+            edit it with your editor of choice, or use “open in editor” above; a
+            web-based markdown editor is part of the 0.8 track.
+          </div>
         </div>
       )}
     </div>
   );
+}
+
+// ── Generic section editor (MVP — feat-fbc2297e) ────────────────────────────
+//
+// Edits skill/education/author tabs as a JSON textarea. Why JSON not YAML?
+// The API accepts JSON bodies (Pydantic), and adding js-yaml just for human
+// editing would be 30+ KB of bundle for a stopgap surface that the 0.8 track
+// will replace. Users who prefer YAML can use the Upload .yml button instead.
+
+type SectionInitial =
+  | SkillEntry[]
+  | EducationEntry[]
+  | Author
+  | null;
+
+interface SectionEditorProps {
+  section: Exclude<MasterSection, 'work'>;
+  initial: SectionInitial;
+}
+
+function SectionEditor({ section, initial }: SectionEditorProps) {
+  const [text, setText] = useState<string>(() => JSON.stringify(initial, null, 2));
+  const [parseError, setParseError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const updateMut = useUpdateMaster(section);
+  const uploadMut = useUploadMaster(section);
+
+  function onSave() {
+    setParseError(null);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      setParseError(`invalid JSON: ${e instanceof Error ? e.message : 'parse failed'}`);
+      return;
+    }
+    updateMut.reset();
+    updateMut.mutate(parsed as never);
+  }
+
+  function onUploadClick() {
+    fileInputRef.current?.click();
+  }
+
+  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    uploadMut.reset();
+    uploadMut.mutate(file, {
+      onSuccess: () => {
+        // Re-seed textarea from server-validated value on next refetch — the
+        // useMaster query is invalidated by the mutation hook automatically.
+      },
+    });
+    // Reset the input so the same file can be re-uploaded.
+    e.target.value = '';
+  }
+
+  const apiError = updateMut.error ?? uploadMut.error;
+  const apiErrorDetail = formatApiError(apiError);
+  const succeeded = updateMut.isSuccess || uploadMut.isSuccess;
+
+  return (
+    <div className="card" style={{ padding: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div className="mono-sm">editor for {section}.yml (json on the wire)</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn" type="button" onClick={onUploadClick}
+            disabled={uploadMut.isPending}>
+            {uploadMut.isPending ? 'uploading…' : 'upload .yml'}
+          </button>
+          <button className="btn" type="button" onClick={onSave}
+            disabled={updateMut.isPending}>
+            {updateMut.isPending ? 'saving…' : 'save'}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".yml,.yaml,application/x-yaml,text/yaml,text/plain"
+            onChange={onFileChange}
+            style={{ display: 'none' }}
+          />
+        </div>
+      </div>
+
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        spellCheck={false}
+        style={{
+          width: '100%',
+          minHeight: 360,
+          fontFamily: 'var(--mono, monospace)',
+          fontSize: 12,
+          padding: 10,
+          border: '1px solid var(--border)',
+          borderRadius: 4,
+          background: 'var(--bg)',
+          color: 'var(--fg)',
+        }}
+      />
+
+      {parseError && (
+        <div style={{ marginTop: 8, color: 'var(--danger)' }} className="mono-sm">
+          {parseError}
+        </div>
+      )}
+      {apiErrorDetail && (
+        <div style={{ marginTop: 8, color: 'var(--danger)' }} className="mono-sm">
+          {apiErrorDetail}
+        </div>
+      )}
+      {succeeded && !apiErrorDetail && !parseError && (
+        <div style={{ marginTop: 8, color: 'var(--success)' }} className="mono-sm">
+          saved · master.yml refreshed
+        </div>
+      )}
+      <div style={{ marginTop: 8, fontSize: 11, color: 'var(--fg-subtle)' }}>
+        comments and key order are not preserved across save (yaml.safe_dump).
+        the 0.8 track replaces this with ruamel.yaml round-trip or db-canonical
+        state.
+      </div>
+    </div>
+  );
+}
+
+function formatApiError(err: unknown): string | null {
+  if (!err) return null;
+  if (err instanceof ApiError) {
+    try {
+      const parsed = JSON.parse(err.body) as { detail?: unknown };
+      if (typeof parsed.detail === 'string') return parsed.detail;
+      if (parsed.detail !== undefined) return JSON.stringify(parsed.detail);
+    } catch {
+      // body wasn't JSON
+    }
+    return err.message;
+  }
+  return err instanceof Error ? err.message : String(err);
 }
 
 // ── MarkAnchorsView ──────────────────────────────────────────────────────
