@@ -464,6 +464,12 @@ def test_runner_logs_traceback_and_emits_runner_error_on_thread_crash(
     assert "specialist-contracts.yaml is not frozen" in stderr
     assert "Traceback" in stderr
 
+    # 3. last_error persisted on the runner instance so the marimo cell can
+    # keep showing the message after the queue is drained (roborev #927).
+    assert runner.last_error is not None
+    assert "_BoomError" in runner.last_error
+    assert "specialist-contracts.yaml is not frozen" in runner.last_error
+
 
 def test_run_records_failed_on_guard_failed_event(pipeline_db, tmp_path: Path):
     """guard_failed (anchor-guard between gather/draft) → status=failed."""

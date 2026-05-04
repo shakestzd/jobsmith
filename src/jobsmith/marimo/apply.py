@@ -119,6 +119,7 @@ def _show_run_panel(mo, run_button, runner_state, stop_button, url_input):
     # whenever runner_state changes or buttons are clicked.
     last_phase = "—"
     status = "idle"
+    error_message: str | None = None
     while not runner_state.events_queue.empty():
         ev = runner_state.events_queue.get_nowait()
         # ev is a PipelineEvent or _Done sentinel
@@ -128,10 +129,24 @@ def _show_run_panel(mo, run_button, runner_state, stop_button, url_input):
             status = kind
         elif kind in ("done", "cancelled", "failed"):
             status = kind
+        elif kind == "runner_error":
+            # Pull the human-readable message off the payload so it can be
+            # rendered alongside the status badge (roborev #927).
+            payload = getattr(ev, "payload", {}) or {}
+            error_message = (
+                f"{payload.get('exc_type', 'Error')}: "
+                f"{payload.get('message', 'unknown error')}"
+            )
 
-    panel = mo.vstack([
-        url_input,
-        mo.hstack([run_button, stop_button]),
+    # The queue is drained on every cell re-run, so a fresh consumer would
+    # otherwise lose the error message after the first render. The runner
+    # also stores the last error on the instance — fall back to it so the
+    # callout stays visible across re-runs until the next start() resets
+    # last_error to None.
+    if error_message is None and runner_state.last_error:
+        error_message = runner_state.last_error
+
+    callouts: list[object] = [
         mo.callout(
             mo.md(
                 f"**Phase:** `{last_phase}` · **Status:** `{status}`\n\n"
@@ -139,6 +154,23 @@ def _show_run_panel(mo, run_button, runner_state, stop_button, url_input):
             ),
             kind="info",
         ),
+    ]
+    if error_message:
+        callouts.append(
+            mo.callout(
+                mo.md(
+                    "**Runner error**\n\n"
+                    f"```\n{error_message}\n```\n\n"
+                    "_Check the marimo terminal log for the full traceback._"
+                ),
+                kind="danger",
+            )
+        )
+
+    panel = mo.vstack([
+        url_input,
+        mo.hstack([run_button, stop_button]),
+        *callouts,
     ])
     panel  # noqa: B018 — marimo renders the last expression of a cell
     return

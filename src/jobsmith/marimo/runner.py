@@ -126,6 +126,10 @@ class NotebookRunner:
         self._thread: threading.Thread | None = None
         self._cancel_event = threading.Event()
         self._run_id: str | None = None
+        # Last error message captured from a runner-thread crash. Persisted
+        # on the instance (not just the queue) so the UI can keep showing it
+        # across cell re-runs after the queue is drained (roborev #927).
+        self.last_error: str | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -148,8 +152,10 @@ class NotebookRunner:
                 "NotebookRunner is already running. "
                 "Call cancel() and wait for _Done before starting again."
             )
-        # Reset cancel event and drain stale queue items from prior run
+        # Reset cancel event, clear the last error, and drain stale queue
+        # items from prior run.
         self._cancel_event.clear()
+        self.last_error = None
         while not self.events_queue.empty():
             try:
                 self.events_queue.get_nowait()
@@ -212,6 +218,7 @@ class NotebookRunner:
 
         # Reset cancel event and drain stale queue items
         self._cancel_event.clear()
+        self.last_error = None
         while not self.events_queue.empty():
             try:
                 self.events_queue.get_nowait()
@@ -361,9 +368,12 @@ class NotebookRunner:
                 # to diagnose what went wrong (roborev #926).
                 import traceback
                 traceback.print_exc(file=sys.stderr)
-                # Also push an error event so consumers (UI cells, tests)
-                # can surface a human-readable message instead of a bare
-                # 'failed' badge.
+                # Capture the error message in two places so the UI can
+                # surface it both immediately (queue event) and after the
+                # queue has been drained (instance attribute persists across
+                # cell re-runs — roborev #927).
+                error_message = f"{type(exc).__name__}: {exc}"
+                self.last_error = error_message
                 self.events_queue.put(
                     PipelineEvent(
                         kind="runner_error",
