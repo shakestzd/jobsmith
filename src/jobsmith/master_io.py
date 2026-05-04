@@ -20,6 +20,7 @@ Design notes
 
 from __future__ import annotations
 
+import hashlib
 import io
 import tempfile
 from enum import Enum
@@ -315,6 +316,222 @@ def save_master(section: MasterSection, payload: Any, path: Path) -> None:
     _atomic_write(path, content)
 
 
+def etag_for_section(path: Path) -> str:
+    """Return a SHA-256 hex digest of *path* file content.
+
+    Returns the empty string when *path* does not exist.  Callers use this
+    to populate ``ETag`` response headers and validate ``If-Match`` request
+    headers for concurrent-write safety.
+
+    Parameters
+    ----------
+    path:
+        Absolute path to a master YAML (or any) file.
+
+    Returns
+    -------
+    str
+        Full SHA-256 hex digest, or ``""`` when the file is absent.
+    """
+    if not path.exists():
+        return ""
+    content = path.read_bytes()
+    return hashlib.sha256(content).hexdigest()
+
+
+def mark_anchor(
+    path: Path,
+    role_index: int,
+    bullet_index: int,
+    *,
+    drop_reason: str | None = None,
+    anchor_reason: str | None = None,
+) -> None:
+    """Mark a single bullet in a work YAML as an anchor (or drop it with a reason).
+
+    Converts the bullet at ``data[role_index]['details'][bullet_index]`` to
+    object form (if it is currently a plain string), then sets::
+
+        anchor = True    # when drop_reason is None
+        anchor = False   # when drop_reason is provided
+        drop_when = <drop_reason>   # only when drop_reason is provided
+
+    All surrounding comments are preserved via ruamel.yaml round-trip.
+
+    Parameters
+    ----------
+    path:
+        Path to the work YAML file (modified in-place, atomically).
+    role_index:
+        Zero-based index into the top-level list of roles/positions.
+    bullet_index:
+        Zero-based index into the role's ``details`` list.
+    drop_reason:
+        When provided, marks the bullet as a non-anchor and records the
+        reason in ``drop_when``.  When ``None``, marks the bullet as an
+        anchor (``anchor=True``).
+
+    Raises
+    ------
+    FileNotFoundError
+        When *path* does not exist.
+    IndexError
+        When *role_index* or *bullet_index* is out of range.
+    """
+    y = _make_yaml()
+    text = path.read_text(encoding="utf-8")
+    data = y.load(text)
+
+    if role_index >= len(data) or role_index < 0:
+        raise IndexError(f"role_index {role_index} out of range (len={len(data)})")
+
+    role = data[role_index]
+    details = role.get("details") or []
+    if bullet_index >= len(details) or bullet_index < 0:
+        raise IndexError(f"bullet_index {bullet_index} out of range (len={len(details)})")
+
+    entry = details[bullet_index]
+
+    # Build a CommentedMap to preserve ordering and comment attachment
+    if isinstance(entry, str):
+        bullet_text = entry
+        new_entry = CommentedMap()
+        new_entry["bullet"] = bullet_text
+    elif isinstance(entry, CommentedMap):
+        new_entry = entry
+    else:
+        # Unexpected type — convert safely
+        new_entry = CommentedMap(entry)
+
+    if drop_reason is not None:
+        new_entry["anchor"] = False
+        new_entry["drop_when"] = drop_reason
+        if "anchor_reason" in new_entry:
+            del new_entry["anchor_reason"]
+    else:
+        new_entry["anchor"] = True
+        if "drop_when" in new_entry:
+            del new_entry["drop_when"]
+        if anchor_reason is not None:
+            new_entry["anchor_reason"] = anchor_reason
+
+    details[bullet_index] = new_entry
+
+    buf = io.StringIO()
+    y.dump(data, buf)
+    _atomic_write(path, buf.getvalue())
+
+
+def add_bullet(
+    path: Path,
+    role_index: int,
+    text: str,
+    *,
+    position: int | None = None,
+) -> None:
+    """Add a new plain-string bullet to ``data[role_index]['details']``.
+
+    Parameters
+    ----------
+    path:
+        Path to the work YAML file (modified in-place, atomically).
+    role_index:
+        Zero-based index into the top-level list of roles/positions.
+    text:
+        Bullet prose.
+    position:
+        Zero-based insertion index.  ``None`` (default) appends to the end.
+
+    Raises
+    ------
+    FileNotFoundError
+        When *path* does not exist.
+    IndexError
+        When *role_index* is out of range.
+    """
+    y = _make_yaml()
+    raw_text = path.read_text(encoding="utf-8")
+    data = y.load(raw_text)
+
+    if role_index >= len(data) or role_index < 0:
+        raise IndexError(f"role_index {role_index} out of range (len={len(data)})")
+
+    role = data[role_index]
+    details = role.get("details")
+    if details is None:
+        details = CommentedSeq()
+        role["details"] = details
+
+    if position is None:
+        details.append(text)
+    else:
+        details.insert(position, text)
+
+    buf = io.StringIO()
+    y.dump(data, buf)
+    _atomic_write(path, buf.getvalue())
+
+
+def remove_bullet(
+    path: Path,
+    role_index: int,
+    bullet_index: int,
+    *,
+    reason: str,
+) -> None:
+    """Remove a bullet from ``data[role_index]['details'][bullet_index]``.
+
+    Deletion strategy:
+    - **Plain string** or object without ``anchor=True``: hard-delete (remove
+      the entry from the list entirely).
+    - **Object with ``anchor=True``**: soft-drop — set ``drop_when=reason``
+      rather than deleting, so the anchor record is preserved for later
+      verification.
+
+    Parameters
+    ----------
+    path:
+        Path to the work YAML file (modified in-place, atomically).
+    role_index:
+        Zero-based index into the top-level list of roles/positions.
+    bullet_index:
+        Zero-based index into the role's ``details`` list.
+    reason:
+        Human-readable reason string, stored in ``drop_when`` for soft drops.
+
+    Raises
+    ------
+    FileNotFoundError
+        When *path* does not exist.
+    IndexError
+        When *role_index* or *bullet_index* is out of range.
+    """
+    y = _make_yaml()
+    raw_text = path.read_text(encoding="utf-8")
+    data = y.load(raw_text)
+
+    if role_index >= len(data) or role_index < 0:
+        raise IndexError(f"role_index {role_index} out of range (len={len(data)})")
+
+    role = data[role_index]
+    details = role.get("details") or []
+    if bullet_index >= len(details) or bullet_index < 0:
+        raise IndexError(f"bullet_index {bullet_index} out of range (len={len(details)})")
+
+    entry = details[bullet_index]
+    is_anchor_bullet = isinstance(entry, (dict, CommentedMap)) and entry.get("anchor") is True
+
+    if is_anchor_bullet:
+        # Soft drop: preserve the entry but mark it for dropping
+        entry["drop_when"] = reason
+    else:
+        del details[bullet_index]
+
+    buf = io.StringIO()
+    y.dump(data, buf)
+    _atomic_write(path, buf.getvalue())
+
+
 def save_benchmark(text: str, path: Path) -> None:
     """Atomically write *text* to *path* (benchmark.md or similar).
 
@@ -337,7 +554,11 @@ def save_benchmark(text: str, path: Path) -> None:
 
 __all__ = [
     "MasterSection",
+    "add_bullet",
+    "etag_for_section",
     "load_master",
+    "mark_anchor",
+    "remove_bullet",
     "save_benchmark",
     "save_master",
 ]
