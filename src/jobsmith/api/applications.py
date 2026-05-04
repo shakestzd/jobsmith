@@ -24,7 +24,6 @@ import json
 import re
 import secrets
 import shutil
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -61,10 +60,44 @@ def _verbosity_to_cli_flag(verbosity: str) -> str:
     """Translate the wire token into the CLI flag the orchestrator forwards."""
     return _VERBOSITY_FLAG.get(verbosity, "-v")
 
-# Per-slug locks make supervisor.get_active_for_slug + supervisor.start atomic
-# inside this process. Two concurrent re-run requests for the same slug now
-# serialise; the second one sees the first's row when it acquires the lock.
-_slug_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+# Per-slug locks serialise concurrent create/rerun for the same slug.
+# Reaped opportunistically by _release_slug_lock so the dict doesn't grow
+# unbounded (one Lock per slug ever touched).
+_SLUG_LOCKS_LOCK = asyncio.Lock()
+_slug_locks: dict[str, asyncio.Lock] = {}
+
+
+async def _acquire_slug_lock(slug: str) -> asyncio.Lock:
+    """Return the asyncio.Lock for *slug*, creating one if needed."""
+    async with _SLUG_LOCKS_LOCK:
+        lock = _slug_locks.get(slug)
+        if lock is None:
+            lock = asyncio.Lock()
+            _slug_locks[slug] = lock
+        return lock
+
+
+def _release_slug_lock(slug: str) -> None:
+    """Drop the lock for *slug* if no waiter is currently holding/queued.
+
+    Called in a finally-block after the critical section. Conservative —
+    we keep the lock alive whenever the runtime has a queued waiter so
+    a request that's about to acquire can still see it.
+    """
+    lock = _slug_locks.get(slug)
+    if lock is None:
+        return
+    if lock.locked():
+        return
+    waiters = getattr(lock, "_waiters", None)
+    if waiters:
+        return
+    _slug_locks.pop(slug, None)
+
+
+# Sentinel positional URL the apply CLI accepts for text/file submissions.
+# Both create and rerun use this so the CLI parser sees a single shape.
+_JD_URL_PLACEHOLDER = "file://placeholder"
 
 
 # ---------------------------------------------------------------------------
@@ -268,48 +301,54 @@ async def create_application(
             detail=f"Derived slug is not safe for filesystem use: {slug!r}",
         )
 
-    # 409 if slug directory already exists
     slug_dir = apps_dir / slug
-    if slug_dir.exists():
-        raise HTTPException(
-            status_code=409,
-            detail=f"Application slug already exists: {slug!r}",
-        )
 
-    # Create slug directory
-    slug_dir.mkdir(parents=True, exist_ok=False)
-
-    # Write jd.txt if content came from text/file
-    jd_file: Path | None = None
-    if jd_content is not None:
-        jd_file = slug_dir / "jd.txt"
-        jd_file.write_text(jd_content, encoding="utf-8")
-
-    # Build argv for apply pipeline
-    argv: list[str] = ["jobsmith", "apply"]
-    if body.jd_url is not None:
-        argv.append(body.jd_url)
-    else:
-        # CLI requires a positional URL; "pasted" is a sentinel, with real
-        # content supplied via --jd-text-file.
-        argv.append("pasted")
-        argv += ["--jd-text-file", str(jd_file)]
-
-    if body.skip_confirmations:
-        argv.append("--yes")
-    if body.force:
-        argv.append("--force")
-    argv.append(_verbosity_to_cli_flag(body.verbosity))
-
-    # Dispatch via supervisor. If the dispatch fails, clean up the slug
-    # directory we just created — otherwise the next retry sees a 409
-    # forever and the user has no UI affordance to clear it.
-    supervisor = _resolve_supervisor(request)
+    # Hold a per-slug lock around the existence check + mkdir + supervisor
+    # dispatch so two concurrent POSTs deriving the same slug serialise
+    # cleanly (the second one sees the first's directory and 409s instead
+    # of crashing with FileExistsError → 500).
+    lock = await _acquire_slug_lock(slug)
     try:
-        run_id = await supervisor.start(slug, argv, cwd=apps_dir.parent)
-    except Exception:
-        shutil.rmtree(slug_dir, ignore_errors=True)
-        raise
+        async with lock:
+            if slug_dir.exists():
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Application slug already exists: {slug!r}",
+                )
+            slug_dir.mkdir(parents=True, exist_ok=False)
+
+            # Write jd.txt if content came from text/file
+            jd_file: Path | None = None
+            if jd_content is not None:
+                jd_file = slug_dir / "jd.txt"
+                jd_file.write_text(jd_content, encoding="utf-8")
+
+            # Build argv for apply pipeline
+            argv: list[str] = ["jobsmith", "apply"]
+            if body.jd_url is not None:
+                argv.append(body.jd_url)
+            else:
+                # CLI requires a positional URL; the same _JD_URL_PLACEHOLDER
+                # sentinel is used by re-run so the parser sees a single shape.
+                argv.append(_JD_URL_PLACEHOLDER)
+                argv += ["--jd-text-file", str(jd_file)]
+
+            if body.skip_confirmations:
+                argv.append("--yes")
+            if body.force:
+                argv.append("--force")
+            argv.append(_verbosity_to_cli_flag(body.verbosity))
+
+            # Dispatch via supervisor. If the dispatch fails, clean up the
+            # slug directory so the next retry doesn't 409 forever.
+            supervisor = _resolve_supervisor(request)
+            try:
+                run_id = await supervisor.start(slug, argv, cwd=apps_dir.parent)
+            except Exception:
+                shutil.rmtree(slug_dir, ignore_errors=True)
+                raise
+    finally:
+        _release_slug_lock(slug)
 
     events_url = f"/api/applications/{slug}/events"
     return CreateApplicationResponse(slug=slug, run_id=run_id, events_url=events_url)
@@ -318,10 +357,6 @@ async def create_application(
 # ---------------------------------------------------------------------------
 # POST /api/applications/{slug}/run — re-run (feat-3c354917)
 # ---------------------------------------------------------------------------
-
-# Sentinel URL for text-based re-runs (CLI requires a positional URL arg).
-_JD_URL_PLACEHOLDER = "file://placeholder"
-
 
 def _read_apply_url(slug_dir: Path) -> str | None:
     """Extract the original JD URL from .apply-state/jd-parsed.json.
@@ -396,36 +431,41 @@ async def rerun_application(
 
     # Step 3: 409 if a run is already in flight. Hold a per-slug asyncio lock
     # across the get_active_for_slug → supervisor.start window so two concurrent
-    # re-run requests can't both pass the check (TOCTOU fix).
-    async with _slug_locks[slug]:
-        existing_run_id = supervisor.get_active_for_slug(slug)
-        if existing_run_id is not None:
-            events_url = f"/api/applications/{slug}/events"
-            raise HTTPException(
-                status_code=409,
-                detail=RerunConflictResponse(
-                    slug=slug,
-                    run_id=existing_run_id,
-                    status="running",
-                    events_url=events_url,
-                ).model_dump(),
-            )
+    # re-run requests can't both pass the check (TOCTOU fix). The lock is
+    # opportunistically reaped in finally to avoid unbounded growth.
+    lock = await _acquire_slug_lock(slug)
+    try:
+        async with lock:
+            existing_run_id = supervisor.get_active_for_slug(slug)
+            if existing_run_id is not None:
+                events_url = f"/api/applications/{slug}/events"
+                raise HTTPException(
+                    status_code=409,
+                    detail=RerunConflictResponse(
+                        slug=slug,
+                        run_id=existing_run_id,
+                        status="running",
+                        events_url=events_url,
+                    ).model_dump(),
+                )
 
-        # Step 4: build argv
-        argv: list[str] = ["jobsmith", "apply"]
-        if text_based:
-            argv += [_JD_URL_PLACEHOLDER, "--jd-text-file", str(jd_txt_path)]
-        else:
-            argv.append(jd_url)  # type: ignore[arg-type]
+            # Step 4: build argv
+            argv: list[str] = ["jobsmith", "apply"]
+            if text_based:
+                argv += [_JD_URL_PLACEHOLDER, "--jd-text-file", str(jd_txt_path)]
+            else:
+                argv.append(jd_url)  # type: ignore[arg-type]
 
-        if body.skip_confirmations:
-            argv.append("--yes")
-        if body.force:
-            argv.append("--force")
-        argv.append(_verbosity_to_cli_flag(body.verbosity))
+            if body.skip_confirmations:
+                argv.append("--yes")
+            if body.force:
+                argv.append("--force")
+            argv.append(_verbosity_to_cli_flag(body.verbosity))
 
-        # Step 5: dispatch and return 202
-        run_id = await supervisor.start(slug, argv, cwd=apps_dir.parent)
+            # Step 5: dispatch and return 202
+            run_id = await supervisor.start(slug, argv, cwd=apps_dir.parent)
+    finally:
+        _release_slug_lock(slug)
     events_url = f"/api/applications/{slug}/events"
     return RerunResponse(slug=slug, run_id=run_id, events_url=events_url)
 

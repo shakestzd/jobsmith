@@ -72,10 +72,19 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
     ['private/jobsmith.db', 'open · 7 prior runs'],
   ];
 
+  // Mirror the argv the backend builds:
+  //   - fetch:  jobsmith apply <url>
+  //   - paste / file:  jobsmith apply file://placeholder --jd-text-file <path>
+  // (file mode also writes a jd.txt in the slug dir; we show that path so
+  // the preview matches the actual CLI invocation.)
+  const previewUrl = jdMode === 'fetch' ? url : 'file://placeholder';
+  const previewTextFile =
+    jdMode === 'paste' ? `/tmp/jd-${slug}.txt`
+    : jdMode === 'file' && jdFile ? `<${slug}>/jd.txt`
+    : null;
   const commandPreview = [
-    `$ jobsmith apply '${url}'`,
-    jdMode === 'paste' ? `    --jd-text-file /tmp/jd-${slug}.txt` : null,
-    jdMode === 'file' && jdFile ? `    --jd-file '${jdFile.name}'` : null,
+    `$ jobsmith apply '${previewUrl}'`,
+    previewTextFile ? `    --jd-text-file ${previewTextFile}` : null,
     verbose ? `    ${verbose}` : null,
     skipConfirm ? `    --yes` : null,
   ]

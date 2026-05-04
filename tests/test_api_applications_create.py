@@ -246,6 +246,16 @@ class TestCreateApplicationMultipleSources:
 
 
 class TestCreateApplicationSlugConflict:
+    def test_derive_slug_is_deterministic_for_same_url(self) -> None:
+        """Precondition for the conflict test below — derive_slug MUST return
+        the same value when called twice with the same URL. If this contract
+        is ever broken (e.g. someone adds a timestamp/hash suffix), the
+        conflict test would silently pass for the wrong reason."""
+        from jobsmith.apply import derive_slug
+
+        url = "https://example.com/jobs/frontend"
+        assert derive_slug(url) == derive_slug(url)
+
     def test_existing_slug_returns_409(self, apps_dir: Path) -> None:
         sup = _fake_supervisor("run-first")
         client = _make_client(apps_dir, sup)
@@ -256,6 +266,7 @@ class TestCreateApplicationSlugConflict:
             json={"jd_url": "https://example.com/jobs/frontend"},
         )
         assert resp1.status_code == 201
+        first_slug = resp1.json()["slug"]
 
         # The slug dir was already created by the first call,
         # so the second call with same URL should 409
@@ -264,6 +275,10 @@ class TestCreateApplicationSlugConflict:
             json={"jd_url": "https://example.com/jobs/frontend"},
         )
         assert resp2.status_code == 409
+        # Confirm the 409 actually came from the slug-already-exists branch
+        # (not from some other 409 path) — the second call resolved to the
+        # same slug as the first.
+        assert first_slug in resp2.json().get("detail", "")
 
     def test_conflict_detail_mentions_slug(self, apps_dir: Path) -> None:
         sup = _fake_supervisor()
@@ -387,3 +402,55 @@ class TestVerbosityVocab:
             json={"jd_url": "https://example.com/jobs/q", "verbosity": "-v"},
         )
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# JD-URL sentinel + slug-lock reaping (review job 939 findings #1, #2)
+# ---------------------------------------------------------------------------
+
+
+class TestJdUrlSentinel:
+    def test_create_text_path_uses_url_shaped_sentinel(self, apps_dir: Path) -> None:
+        """Both create and rerun feed the apply CLI the same positional URL
+        sentinel; pick one and reuse so a urlparse() check in the CLI doesn't
+        accept one and reject the other."""
+        sup = _fake_supervisor()
+        client = _make_client(apps_dir, sup)
+
+        resp = client.post(
+            "/api/applications",
+            json={"jd_text": "Some pasted JD body."},
+        )
+        assert resp.status_code == 201
+        argv = sup.start.await_args.args[1]  # type: ignore[union-attr]
+        # First positional arg after `jobsmith apply` is the placeholder
+        assert argv[:2] == ["jobsmith", "apply"]
+        assert argv[2] == "file://placeholder"
+        # ... and --jd-text-file is the carrier
+        assert "--jd-text-file" in argv
+
+
+class TestSlugLockReaping:
+    def test_lock_dropped_after_successful_create(self, apps_dir: Path) -> None:
+        """The per-slug lock must NOT survive a successful create — otherwise
+        the dict grows unbounded one Lock per slug ever touched (review #2)."""
+        from jobsmith.api import applications as apps_mod
+
+        # Snapshot any pre-existing locks (other tests may run before us).
+        baseline = set(apps_mod._slug_locks.keys())
+
+        sup = _fake_supervisor()
+        client = _make_client(apps_dir, sup)
+
+        resp = client.post(
+            "/api/applications",
+            json={"jd_url": "https://example.com/jobs/reap-test"},
+        )
+        assert resp.status_code == 201
+        slug = resp.json()["slug"]
+
+        # The lock for that slug should have been popped in the finally-block.
+        assert slug not in apps_mod._slug_locks, (
+            f"slug lock leaked after successful create: "
+            f"{set(apps_mod._slug_locks.keys()) - baseline}"
+        )

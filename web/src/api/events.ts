@@ -88,7 +88,17 @@ export function openEventStream(
   const maxBackoff = opts.maxBackoffMs ?? 30_000;
   let backoff = initialBackoff;
   let aborted = false;
+  let onCloseFired = false;
   let controller: AbortController | null = null;
+
+  // Single-shot onClose — both the explicit closer and scheduleReconnect's
+  // aborted branch route through here, but external consumers (counters,
+  // ref-counted resources) must see it exactly once.
+  const fireOnClose = () => {
+    if (onCloseFired) return;
+    onCloseFired = true;
+    opts.onClose?.();
+  };
 
   const url = `${API_BASE_URL}/api/applications/${encodeURIComponent(slug)}/events?verbosity=${verbosity}`;
 
@@ -172,7 +182,7 @@ export function openEventStream(
 
   const scheduleReconnect = () => {
     if (aborted || !reconnect) {
-      opts.onClose?.();
+      fireOnClose();
       return;
     }
     const delay = backoff;
@@ -187,6 +197,6 @@ export function openEventStream(
   return () => {
     aborted = true;
     controller?.abort();
-    opts.onClose?.();
+    fireOnClose();
   };
 }
