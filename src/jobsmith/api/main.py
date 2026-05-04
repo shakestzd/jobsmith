@@ -24,11 +24,8 @@ API routers are mounted with ``dependencies=[Depends(verify_token)]``.
     # feat-401be81e  /api/master  (this slice — trk-9bb48a61)
     # feat-2c034b07  bearer-token auth (this slice)
 
-    # Future slices mount their own routers here:
-    # from jobsmith.api.applications import router as applications_router
-    # app.include_router(applications_router, prefix="/api", dependencies=[Depends(verify_token)])
-    # from jobsmith.api.events import router as events_router
-    # app.include_router(events_router, prefix="/api", dependencies=[Depends(verify_token)])
+    # feat-1e066d57  /api/applications/{slug}/events  SSE stream
+    # feat-e592bd70  /api/applications/{slug}/snapshots  snapshots
 """
 
 from __future__ import annotations
@@ -41,6 +38,7 @@ from jobsmith.api.applications import router as applications_router
 from jobsmith.api.artifacts import router as artifacts_router
 from jobsmith.api.auth import verify_token
 from jobsmith.api.master import router as master_router
+from jobsmith.api.snapshots import router as snapshots_router
 
 
 def create_app() -> FastAPI:
@@ -79,6 +77,11 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         applications_router,
+        prefix="/api",
+        dependencies=[Depends(verify_token)],
+    )
+    app.include_router(
+        snapshots_router,
         prefix="/api",
         dependencies=[Depends(verify_token)],
     )
