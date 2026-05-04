@@ -16,6 +16,7 @@ class ArtifactEnvelope(BaseModel):
     output: dict[str, Any]
     finished_at: str | None
     transcript_ref: str | None
+    version: int = 1
 
 
 __all__ = ["ArtifactEnvelope"]

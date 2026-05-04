@@ -1,4 +1,4 @@
-"""JobsmithClient — httpx-based read-only SDK for the jobsmith HTTP API.
+"""JobsmithClient — httpx-based SDK for the jobsmith HTTP API.
 
 Auth resolution
 ---------------
@@ -19,6 +19,12 @@ Usage example::
     health = client.health()
     work = client.get_master_work()
     artifacts = client.list_artifacts("acme-swe", "run-abc123")
+    # Write an artifact (first write — no If-Match needed)
+    envelope = client.put_jd_parsed("acme-swe", "run-abc123", {"company": "Acme"})
+    # Overwrite with version check
+    envelope2 = client.put_jd_parsed(
+        "acme-swe", "run-abc123", {"company": "Acme Corp"}, if_match=1
+    )
 """
 
 from __future__ import annotations
@@ -55,6 +61,10 @@ class AuthError(Exception):
 
 class NotFoundError(Exception):
     """Raised when the server returns 404."""
+
+
+class ConflictError(Exception):
+    """Raised when the server returns 409 (version mismatch on concurrent write)."""
 
 
 # ---------------------------------------------------------------------------
@@ -105,11 +115,13 @@ def _resolve_base_url(base_url: str | None) -> str:
 
 
 def _check_response(resp: httpx.Response) -> None:
-    """Raise SDK-level errors for 401 and 404; re-raise others as httpx errors."""
+    """Raise SDK-level errors for 401, 404, and 409; re-raise others as httpx errors."""
     if resp.status_code == 401:
         raise AuthError(f"Authentication failed: {resp.text}")
     if resp.status_code == 404:
         raise NotFoundError(f"Not found: {resp.text}")
+    if resp.status_code == 409:
+        raise ConflictError(f"Conflict: {resp.text}")
     resp.raise_for_status()
 
 
@@ -208,6 +220,157 @@ class JobsmithClient:
         _check_response(resp)
         return ArtifactEnvelope.model_validate(resp.json())
 
+    def put_artifact(
+        self,
+        slug: str,
+        run_id: str,
+        kind: str,
+        output: dict[str, Any],
+        *,
+        specialist: str = "api",
+        transcript_ref: str | None = None,
+        finished_at: str | None = None,
+        if_match: int | None = None,
+    ) -> ArtifactEnvelope:
+        """Write a specialist output for *(slug, run_id, kind)*.
+
+        Parameters
+        ----------
+        slug:
+            Application slug (e.g. ``"acme-swe"``).
+        run_id:
+            Pipeline run identifier.
+        kind:
+            Artifact kind (must be in ``KIND_MODELS``).
+        output:
+            Typed payload dict, validated server-side against the kind's Pydantic model.
+        specialist:
+            Name of the writing agent. Defaults to ``"api"``.
+        transcript_ref:
+            Optional path to the specialist's transcript file.
+        finished_at:
+            Optional ISO-8601 completion timestamp.
+        if_match:
+            Current version for optimistic-concurrency check.  Required when
+            a row for *(run_id, kind)* already exists; omit on first write.
+            Raises :exc:`ConflictError` on mismatch.
+        """
+        headers: dict[str, str] = {}
+        if if_match is not None:
+            headers["If-Match"] = str(if_match)
+        body = {
+            "output": output,
+            "specialist": specialist,
+            "transcript_ref": transcript_ref,
+            "finished_at": finished_at,
+        }
+        resp = self._http.put(
+            f"/api/applications/{slug}/runs/{run_id}/artifacts/{kind}",
+            json=body,
+            headers=headers,
+        )
+        _check_response(resp)
+        return ArtifactEnvelope.model_validate(resp.json())
+
+    # ------------------------------------------------------------------
+    # Artifact convenience wrappers
+    # ------------------------------------------------------------------
+
+    def _put_kind(
+        self,
+        slug: str,
+        run_id: str,
+        kind: str,
+        output: dict[str, Any],
+        **kwargs: Any,
+    ) -> ArtifactEnvelope:
+        """Internal helper used by all per-kind wrappers."""
+        return self.put_artifact(slug, run_id, kind, output, **kwargs)
+
+    def put_jd_parsed(
+        self, slug: str, run_id: str, output: dict[str, Any], **kwargs: Any
+    ) -> ArtifactEnvelope:
+        """PUT artifact for kind ``jd-parsed``."""
+        return self._put_kind(slug, run_id, "jd-parsed", output, **kwargs)
+
+    def put_fit_score(
+        self, slug: str, run_id: str, output: dict[str, Any], **kwargs: Any
+    ) -> ArtifactEnvelope:
+        """PUT artifact for kind ``fit-score``."""
+        return self._put_kind(slug, run_id, "fit-score", output, **kwargs)
+
+    def put_bullet_selection(
+        self, slug: str, run_id: str, output: dict[str, Any], **kwargs: Any
+    ) -> ArtifactEnvelope:
+        """PUT artifact for kind ``bullet-selection``."""
+        return self._put_kind(slug, run_id, "bullet-selection", output, **kwargs)
+
+    def put_hm_snippet(
+        self, slug: str, run_id: str, output: dict[str, Any], **kwargs: Any
+    ) -> ArtifactEnvelope:
+        """PUT artifact for kind ``hm-snippet``."""
+        return self._put_kind(slug, run_id, "hm-snippet", output, **kwargs)
+
+    def put_prose_draft(
+        self, slug: str, run_id: str, output: dict[str, Any], **kwargs: Any
+    ) -> ArtifactEnvelope:
+        """PUT artifact for kind ``prose-draft``."""
+        return self._put_kind(slug, run_id, "prose-draft", output, **kwargs)
+
+    def put_ai_tell_report(
+        self, slug: str, run_id: str, output: dict[str, Any], **kwargs: Any
+    ) -> ArtifactEnvelope:
+        """PUT artifact for kind ``ai-tell-report``."""
+        return self._put_kind(slug, run_id, "ai-tell-report", output, **kwargs)
+
+    def put_ats_check(
+        self, slug: str, run_id: str, output: dict[str, Any], **kwargs: Any
+    ) -> ArtifactEnvelope:
+        """PUT artifact for kind ``ats-check``."""
+        return self._put_kind(slug, run_id, "ats-check", output, **kwargs)
+
+    def put_company_research(
+        self, slug: str, run_id: str, output: dict[str, Any], **kwargs: Any
+    ) -> ArtifactEnvelope:
+        """PUT artifact for kind ``company-research``."""
+        return self._put_kind(slug, run_id, "company-research", output, **kwargs)
+
+    def put_anchor_check(
+        self, slug: str, run_id: str, output: dict[str, Any], **kwargs: Any
+    ) -> ArtifactEnvelope:
+        """PUT artifact for kind ``anchor-check``."""
+        return self._put_kind(slug, run_id, "anchor-check", output, **kwargs)
+
+    def put_fact_check(
+        self, slug: str, run_id: str, output: dict[str, Any], **kwargs: Any
+    ) -> ArtifactEnvelope:
+        """PUT artifact for kind ``fact-check``."""
+        return self._put_kind(slug, run_id, "fact-check", output, **kwargs)
+
+    def put_cover_letter_draft(
+        self, slug: str, run_id: str, output: dict[str, Any], **kwargs: Any
+    ) -> ArtifactEnvelope:
+        """PUT artifact for kind ``cover-letter-draft``."""
+        return self._put_kind(slug, run_id, "cover-letter-draft", output, **kwargs)
+
+    def put_variables(
+        self, slug: str, run_id: str, output: dict[str, Any], **kwargs: Any
+    ) -> ArtifactEnvelope:
+        """PUT artifact for kind ``variables``."""
+        return self._put_kind(slug, run_id, "variables", output, **kwargs)
+
+    def put_quarto_config(
+        self, slug: str, run_id: str, output: dict[str, Any], **kwargs: Any
+    ) -> ArtifactEnvelope:
+        """PUT artifact for kind ``quarto-config``."""
+        return self._put_kind(slug, run_id, "quarto-config", output, **kwargs)
+
+    def put_manifest(
+        self, slug: str, run_id: str, output: dict[str, Any], **kwargs: Any
+    ) -> ArtifactEnvelope:
+        """PUT artifact for kind ``manifest``."""
+        return self._put_kind(slug, run_id, "manifest", output, **kwargs)
+
     # ------------------------------------------------------------------
     # Applications
     # ------------------------------------------------------------------
@@ -246,6 +409,7 @@ __all__ = [
     "Application",
     "ApplicationDetail",
     "AuthError",
+    "ConflictError",
     "HealthResponse",
     "JobsmithClient",
     "NotFoundError",

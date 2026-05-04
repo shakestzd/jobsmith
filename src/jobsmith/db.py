@@ -47,7 +47,10 @@ from jobsmith.db_models import (
 )
 
 _MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
-_PIPELINE_MIGRATIONS = [("001_initial_schema", _MIGRATIONS_DIR / "001_initial_schema.sql")]
+_PIPELINE_MIGRATIONS = [
+    ("001_initial_schema", _MIGRATIONS_DIR / "001_initial_schema.sql"),
+    ("003_artifact_versioning", _MIGRATIONS_DIR / "003_artifact_versioning.sql"),
+]
 _REVIEW_MIGRATIONS = [
     ("001_review_schema", _MIGRATIONS_DIR / "001_review_schema.sql"),
     ("002_amendment_target", _MIGRATIONS_DIR / "002_amendment_target.sql"),
