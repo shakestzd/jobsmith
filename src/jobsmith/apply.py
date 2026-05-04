@@ -1878,6 +1878,19 @@ def _run_apply_phases(
                 except Exception as exc:  # noqa: BLE001 — never fail phase
                     logger.warning("dual-write hook failed: %s", exc)
 
+        # Step 3f-snapshot (feat-60be8c3a): before the render phase invokes
+        # quarto, materialise DB-only artifacts back to FS so quarto can read
+        # _quarto.yml / _variables.yml / prose-draft.md / cover-letter-draft.md.
+        # Once specialists drop FS writes (follow-up), this is the only path
+        # that puts those files on disk for the render step.
+        if phase_name == "render" and client is not None:
+            try:
+                client.snapshot_run(slug, db_run_id)
+            except Exception as exc:  # noqa: BLE001 — never fail render
+                logger.warning(
+                    "render-phase snapshot failed (FS may be stale): %s", exc
+                )
+
         # Step 3g: between-phase orchestration. After gather we reconcile the
         # canonical slug (phase 1 may have written artifacts under a different
         # directory than the URL-derived slug), and recompute session_id

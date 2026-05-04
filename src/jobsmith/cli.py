@@ -1072,6 +1072,76 @@ def api_serve(
     _serve(host=host, port=port, reload=reload)
 
 
+# ---------- artifact subcommand group (feat-60be8c3a) ----------
+
+
+artifact_app = typer.Typer(
+    name="artifact",
+    help="Submit a pipeline artifact to the DB via the jobsmith HTTP API.",
+    no_args_is_help=True,
+)
+app.add_typer(artifact_app, name="artifact")
+
+
+@artifact_app.command("put")
+def artifact_put(
+    slug: str = typer.Option(..., "--slug", help="Application slug"),
+    run_id: str = typer.Option(..., "--run", help="Apply run id"),
+    kind: str = typer.Option(..., "--kind", help="Artifact kind (see KIND_MODELS)"),
+    json_payload: str = typer.Option(
+        ..., "--json", help="JSON-encoded artifact payload (per the kind's Pydantic schema)"
+    ),
+) -> None:
+    """Submit a pipeline artifact via the jobsmith API.
+
+    Wraps :meth:`JobsmithClient.put_artifact` so specialist subprocesses can
+    write to the DB without importing the SDK directly. Auth + base-URL are
+    resolved from environment (``JOBSMITH_API_TOKEN``, ``JOBSMITH_API_BASE_URL``).
+
+    Exits non-zero on auth, conflict, or not-found errors. Prints the new
+    rowid + version on success.
+    """
+    import json as _json
+
+    from jobsmith.api.client import (
+        AuthError,
+        ConflictError,
+        JobsmithClient,
+        NotFoundError,
+    )
+
+    try:
+        payload = _json.loads(json_payload)
+    except _json.JSONDecodeError as exc:
+        console.print(f"[red]error[/red] invalid --json: {exc}")
+        raise typer.Exit(code=2) from exc
+    if not isinstance(payload, dict):
+        console.print("[red]error[/red] --json must decode to an object")
+        raise typer.Exit(code=2)
+
+    try:
+        client = JobsmithClient()
+    except AuthError as exc:
+        console.print(f"[red]auth error[/red] {exc}")
+        raise typer.Exit(code=3) from exc
+
+    try:
+        envelope = client.put_artifact(slug, run_id, kind, payload)
+    except AuthError as exc:
+        console.print(f"[red]auth error[/red] {exc}")
+        raise typer.Exit(code=3) from exc
+    except NotFoundError as exc:
+        console.print(f"[red]not found[/red] {exc}")
+        raise typer.Exit(code=4) from exc
+    except ConflictError as exc:
+        console.print(f"[red]conflict[/red] {exc}")
+        raise typer.Exit(code=5) from exc
+
+    console.print(
+        f"[green]wrote[/green] kind={envelope.kind} version={envelope.version}"
+    )
+
+
 # ---------- site subcommand group ----------
 
 
