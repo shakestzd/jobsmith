@@ -188,22 +188,35 @@ class RunSupervisor:
             finished_at=None,
         )
         record = _RunRecord(handle=handle)
+
+        # Spawn the subprocess BEFORE registering the run as active. Otherwise
+        # a spawn failure (binary missing, permission denied, OOM, etc.)
+        # leaves the slug permanently in `_active_by_slug` and every future
+        # re-run returns 409 Conflict.
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *argv,
+                cwd=str(cwd),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.DEVNULL,
+                # Put the subprocess in its own process group so SIGTERM hits
+                # the whole tree (e.g. shells that fork children). POSIX-only;
+                # on Windows we let the platform handle it.
+                preexec_fn=os.setsid if os.name == "posix" else None,
+            )
+        except (OSError, FileNotFoundError, PermissionError):
+            # Re-raise after recording the failure on the handle so callers
+            # see a consistent "failed run" record. Do NOT register the run
+            # as active.
+            handle.status = "failed"
+            handle.finished_at = _now_iso()
+            raise
+
+        record.process = process
+        # Now that spawn succeeded, register the run.
         self._runs[run_id] = record
         self._active_by_slug[slug] = run_id
-
-        # Spawn the subprocess. We pipe stdout/stderr; stdin is closed.
-        process = await asyncio.create_subprocess_exec(
-            *argv,
-            cwd=str(cwd),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            stdin=asyncio.subprocess.DEVNULL,
-            # Put the subprocess in its own process group so SIGTERM hits
-            # the whole tree (e.g. shells that fork children).  This only
-            # works on POSIX; on Windows we let the platform handle it.
-            preexec_fn=os.setsid if os.name == "posix" else None,
-        )
-        record.process = process
 
         # Kick off drain tasks.  They run until the streams hit EOF, then
         # the wait task observes the process exit and finalises the handle.

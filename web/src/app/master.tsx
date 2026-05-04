@@ -13,7 +13,7 @@
 // TODO: when a future slice lands a write API for master content, swap the
 // in-memory toggle in BulletEditor for a mutation hook + persistence flow.
 
-import { type KeyboardEvent, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   useMaster,
   useUpdateMaster,
@@ -72,20 +72,58 @@ function workEntryId(w: WorkEntry, idx: number): string {
 interface BulletEditorProps {
   entry: WorkEntry;
   entryId: string;
+  onSave: (details: WorkDetail[]) => void;
+  saving: boolean;
+  saved: boolean;
+  error: string | null;
 }
 
-function BulletEditor({ entry, entryId }: BulletEditorProps) {
+function BulletEditor({ entry, entryId, onSave, saving, saved, error }: BulletEditorProps) {
   const initial = useMemo(
     () => detailsToBullets(entry.details ?? [], entryId),
     [entry, entryId],
   );
   const [bullets, setBullets] = useState<UiBullet[]>(initial);
+  // Reset local state when the parent swaps to a different entry.
+  useEffect(() => {
+    setBullets(initial);
+  }, [initial, entryId]);
 
   const anchorCount = bullets.filter(b => b.anchor).length;
 
   const toggle = (id: string) => {
     setBullets(bs => bs.map(b => b.id === id ? { ...b, anchor: !b.anchor } : b));
   };
+
+  function handleSave() {
+    // Serialise bullets back to the schema's `details` shape:
+    //   - anchor=false  → bare string (matches the most common existing form)
+    //   - anchor=true   → { bullet, anchor: true } (object form)
+    // Original dict entries with extra metadata (tags, anchor_reason, ...)
+    // are preserved by re-using the source detail when only the anchor flag
+    // changed.
+    const sourceDetails = entry.details ?? [];
+    const next: WorkDetail[] = bullets.map((b, i) => {
+      const src = sourceDetails[i];
+      const srcIsDict = src && typeof src === 'object' && !Array.isArray(src);
+      if (b.anchor) {
+        if (srcIsDict) {
+          // Preserve metadata, just update bullet text + anchor flag.
+          return { ...(src as Record<string, unknown>), bullet: b.text, anchor: true };
+        }
+        return { bullet: b.text, anchor: true };
+      }
+      if (srcIsDict) {
+        // Coming from object form to anchor-false: keep object shape so we
+        // don't drop sibling keys (tags, anchor_reason, etc.).
+        const copy = { ...(src as Record<string, unknown>), bullet: b.text };
+        delete (copy as Record<string, unknown>).anchor;
+        return copy as WorkDetail;
+      }
+      return b.text;
+    });
+    onSave(next);
+  }
 
   return (
     <div className="card">
@@ -95,9 +133,23 @@ function BulletEditor({ entry, entryId }: BulletEditorProps) {
         <div className="right">
           <Badge kind="accent">{anchorCount} anchors</Badge>
           <button className="btn ghost sm">add bullet</button>
-          <button className="btn ghost sm">save</button>
+          <button className="btn ghost sm" onClick={handleSave} disabled={saving}>
+            {saving ? 'saving…' : 'save'}
+          </button>
         </div>
       </div>
+      {(saved || error) && (
+        <div
+          style={{
+            padding: '6px 14px',
+            fontSize: 12,
+            color: error ? 'var(--danger)' : 'var(--success)',
+          }}
+          className="mono-sm"
+        >
+          {error ?? 'saved · master/work.yml refreshed'}
+        </div>
+      )}
       <div style={{ padding: '10px 14px 8px', fontSize: 12, color: 'var(--fg-muted)', borderBottom: '1px solid var(--border)' }}>
         <Icon name="flag" size={11} style={{ verticalAlign: 'middle', color: 'var(--accent)' }} />{' '}
         anchors are bullets <b style={{ color: 'var(--fg)' }}>jobsmith</b> must preserve in every draft (or document a drop-reason).
@@ -142,6 +194,21 @@ function WorkEditor({ work }: WorkEditorProps) {
   const safeIdx = openIdx >= 0 ? openIdx : 0;
   const openEntry = work[safeIdx];
 
+  const updateMut = useUpdateMaster('work');
+
+  function handleSave(updatedDetails: WorkDetail[]) {
+    if (!openEntry) return;
+    const next = work.map((entry, i) =>
+      i === safeIdx ? { ...entry, details: updatedDetails } : entry,
+    );
+    updateMut.reset();
+    updateMut.mutate(next as WorkEntry[]);
+  }
+
+  const errorDetail = updateMut.error
+    ? formatApiError(updateMut.error) ?? 'save failed'
+    : null;
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16 }}>
       <div className="card" style={{ padding: 8 }}>
@@ -175,7 +242,15 @@ function WorkEditor({ work }: WorkEditorProps) {
       </div>
 
       {openEntry ? (
-        <BulletEditor key={ids[safeIdx]} entry={openEntry} entryId={ids[safeIdx] ?? 'role-0'} />
+        <BulletEditor
+          key={ids[safeIdx]}
+          entry={openEntry}
+          entryId={ids[safeIdx] ?? 'role-0'}
+          onSave={handleSave}
+          saving={updateMut.isPending}
+          saved={updateMut.isSuccess}
+          error={errorDetail}
+        />
       ) : (
         <div className="card" style={{ padding: 60, textAlign: 'center', color: 'var(--fg-subtle)' }}>
           <div className="mono-sm">no work entries in master/work.yml</div>

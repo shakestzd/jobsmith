@@ -239,10 +239,15 @@ def _validate_section_payload(section: Section, raw: Any) -> Any:
                 if not inner:
                     raise HTTPException(400, "author list cannot be empty")
                 Author.model_validate(inner[0])
-                return raw
+                # Keep ALL top-level keys the caller sent (taglines, etc.)
+                return dict(raw)
             if isinstance(inner, dict):
                 Author.model_validate(inner)
-                return {"author": [inner]}
+                # Wrap single-dict author but preserve every other top-level
+                # key sent by the caller.
+                merged = dict(raw)
+                merged["author"] = [inner]
+                return merged
             raise HTTPException(400, "author must wrap a list or dict")
         if isinstance(raw, dict):
             Author.model_validate(raw)
@@ -263,6 +268,30 @@ class WriteResponse(BaseModel):
     bytes_written: int
 
 
+def _merge_with_existing_author(target: Path, payload: Any) -> Any:
+    """Preserve unknown top-level keys (e.g. ``taglines``) when saving author.
+
+    The author YAML file may contain sibling keys beyond ``author:`` (taglines
+    is the documented one in schemas/master.py). The MVP write path replaces
+    the whole file, which silently drops them. Read the existing file, merge
+    its top-level keys with the caller's payload (caller wins on conflict),
+    and return the merged dict.
+    """
+    if not isinstance(payload, dict):
+        return payload  # author canonical shape is always a dict
+    if not target.exists():
+        return payload
+    try:
+        existing = yaml.safe_load(target.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return payload
+    if not isinstance(existing, dict):
+        return payload
+    merged = dict(existing)
+    merged.update(payload)
+    return merged
+
+
 @router.put("/master/{section}", response_model=WriteResponse)
 def put_master_section(
     section: Section, body: Any = Body(...)  # noqa: B008
@@ -272,12 +301,17 @@ def put_master_section(
     The body shape mirrors the corresponding GET response. Comments and key
     order in the existing YAML file are NOT preserved (yaml.safe_dump). For
     comment-preserving edits, see the 0.8 track plan.
+
+    For ``author``, top-level sibling keys (taglines, etc.) on the existing
+    file are merged into the written payload so they're not silently dropped.
     """
     if section not in _SECTIONS:
         raise HTTPException(400, f"invalid section: {section!r}")
     payload = _validate_section_payload(section, body)
     config_path = _require_config_path()
     target = _resolve_section_path(config_path, section)
+    if section == "author":
+        payload = _merge_with_existing_author(target, payload)
     _atomic_write_yaml(target, payload)
     return WriteResponse(
         section=section,
@@ -308,6 +342,8 @@ async def upload_master_section(section: Section, file: UploadFile) -> WriteResp
     payload = _validate_section_payload(section, parsed)
     config_path = _require_config_path()
     target = _resolve_section_path(config_path, section)
+    if section == "author":
+        payload = _merge_with_existing_author(target, payload)
     _atomic_write_yaml(target, payload)
     return WriteResponse(
         section=section,

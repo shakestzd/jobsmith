@@ -17,7 +17,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useApplication, useRerunApplication } from '../api/hooks';
-import { ApiError } from '../api/client';
+import { ApiError, apiUrl } from '../api/client';
 import {
   useEventStream,
   type PipelineEvent,
@@ -538,7 +538,9 @@ function ArtifactsTab({ detail }: ArtifactsTabProps) {
             {current?.truncated && (
               <a
                 className="btn ghost sm"
-                href={`/api/applications/${detail.slug}/raw/${current.name}`}
+                href={apiUrl(
+                  `/api/applications/${detail.slug}/raw/${current.name}`,
+                )}
                 target="_blank"
                 rel="noreferrer"
                 title="draft truncated; open the full file"

@@ -415,20 +415,24 @@ def get_application_raw(slug: str, filename: str, request: Request) -> Response:
     else:
         candidate = slug_dir / filename
 
-    # Guard 3: path traversal check
+    # Guard 3: path traversal check via resolved-path containment.
+    # str.startswith() is fooled by a sibling whose name shares a prefix with
+    # the slug dir (e.g. ``.../slug-foo`` vs ``.../slug``). Path.is_relative_to
+    # uses path component matching and is the right primitive.
     try:
         resolved = candidate.resolve()
         slug_resolved = slug_dir.resolve()
-        if not str(resolved).startswith(str(slug_resolved)):
-            raise HTTPException(status_code=400, detail="Path traversal detected")
-    except OSError:
-        raise HTTPException(status_code=400, detail="Cannot resolve path")
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail="Cannot resolve path") from exc
+    if not resolved.is_relative_to(slug_resolved):
+        raise HTTPException(status_code=400, detail="Path traversal detected")
 
-    # Guard 4: file existence
-    if not candidate.exists() or not candidate.is_file():
+    # Guard 4: file existence (use resolved path so symlinks read the actual
+    # target, which we just verified is inside slug_dir).
+    if not resolved.exists() or not resolved.is_file():
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
 
-    suffix = candidate.suffix.lower()
+    suffix = resolved.suffix.lower()
     content_type = _CONTENT_TYPE_MAP.get(suffix, "text/plain; charset=utf-8")
-    content = candidate.read_bytes()
+    content = resolved.read_bytes()
     return Response(content=content, media_type=content_type)
