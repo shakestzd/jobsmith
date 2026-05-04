@@ -252,14 +252,18 @@ _JD_URL_PLACEHOLDER = "file://placeholder"
 
 
 def _read_jd_url(slug_dir: Path) -> str | None:
-    """Extract jd_url from .apply-state/jd-parsed.json if present."""
+    """Extract the original JD URL from .apply-state/jd-parsed.json.
+
+    apply-jd-parser writes the URL under ``apply_url``. Try ``jd_url`` and
+    ``source_url`` too for older runs.
+    """
     jd_parsed = slug_dir / ".apply-state" / "jd-parsed.json"
     if jd_parsed.is_file():
         try:
             import json
 
             data = json.loads(jd_parsed.read_text(encoding="utf-8"))
-            return data.get("jd_url")  # may be None if key missing
+            return data.get("apply_url") or data.get("jd_url") or data.get("source_url")
         except Exception:
             return None
     return None
