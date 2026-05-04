@@ -938,6 +938,107 @@ def mark_anchors(
     console.print(f"[green]wrote[/green] {master}")
 
 
+# ---------- snapshot subcommand ----------
+
+
+@app.command()
+def snapshot(
+    slug: str = typer.Argument(..., help="Application slug (e.g. acme-swe)"),
+    run_id: str | None = typer.Option(
+        None,
+        "--run",
+        help=(
+            "Run ID to snapshot. Defaults to the most-recent run for the slug "
+            "when omitted."
+        ),
+    ),
+    kinds: list[str] | None = typer.Option(
+        None,
+        "--kind",
+        help=(
+            "Artifact kind to include. May be repeated. "
+            "When omitted, all artifacts are written."
+        ),
+    ),
+    target: str = typer.Option(
+        "both",
+        "--target",
+        help=(
+            "Which FS tree to write: 'apply-state', 'slug-root', or 'both' (default)."
+        ),
+    ),
+    api_url: str | None = typer.Option(
+        None,
+        "--api-url",
+        help="API base URL (default: JOBSMITH_API_BASE_URL env or http://127.0.0.1:8000).",
+    ),
+) -> None:
+    """Materialise DB artifacts to canonical FS paths (DB→FS snapshot).
+
+    Writes pipeline artifacts for a slug/run from the DB back to disk so that
+    ``quarto render`` and ``git diff`` work after Phase 3 drops FS writes.
+
+    Master YAMLs are never touched.
+
+    Examples::
+
+        jobsmith snapshot acme-swe
+        jobsmith snapshot acme-swe --run run-abc123
+        jobsmith snapshot acme-swe --kind jd-parsed --kind fit-score
+        jobsmith snapshot acme-swe --target apply-state
+    """
+    from .api.client import JobsmithClient, NotFoundError
+    from .db import get_apply_run_by_slug, open_pipeline_db
+
+    # Resolve run_id from DB when not provided
+    resolved_run_id = run_id
+    if resolved_run_id is None:
+        config_path = find_config(Path.cwd())
+        if config_path is None:
+            console.print(f"[red]ERROR:[/red] No {CONFIG_FILENAME} found — run `jobsmith init` first.")
+            raise typer.Exit(code=2)
+        config = load_config(config_path)
+        repo_root = config_path.parent
+        db_path = (repo_root / config.output.jobsmith_db).resolve()
+        if not db_path.exists():
+            console.print(f"[red]ERROR:[/red] Pipeline DB not found at {db_path}.")
+            raise typer.Exit(code=2)
+        conn = open_pipeline_db(db_path)
+        try:
+            row = get_apply_run_by_slug(conn, slug)
+        finally:
+            conn.close()
+        if row is None:
+            console.print(f"[red]ERROR:[/red] No run found for slug {slug!r}.")
+            raise typer.Exit(code=2)
+        resolved_run_id = row["run_id"]
+
+    try:
+        client = JobsmithClient(base_url=api_url)
+        result = client.snapshot_run(
+            slug,
+            resolved_run_id,
+            kinds=kinds or None,
+            target=target,
+        )
+    except NotFoundError as exc:
+        console.print(f"[red]ERROR:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+    except Exception as exc:
+        console.print(f"[red]ERROR:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    finally:
+        if "client" in locals():
+            client.close()
+
+    console.print(
+        f"[green]Snapshotted {len(result.files)} file(s) "
+        f"({result.total_bytes} bytes):[/green]"
+    )
+    for f in result.files:
+        console.print(f"  WROTE [{f.kind}] {f.path}")
+
+
 # ---------- api subcommand group ----------
 
 

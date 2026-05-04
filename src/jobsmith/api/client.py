@@ -39,6 +39,7 @@ from pydantic import BaseModel
 from jobsmith.api.schemas.applications import Application, ApplicationDetail
 from jobsmith.api.schemas.artifacts import ArtifactEnvelope
 from jobsmith.api.schemas.master import Author, EducationEntry, SkillEntry, WorkEntry
+from jobsmith.api.schemas.snapshots import SnapshotResult
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -388,6 +389,48 @@ class JobsmithClient:
         return ApplicationDetail.model_validate(resp.json())
 
     # ------------------------------------------------------------------
+    # Snapshot
+    # ------------------------------------------------------------------
+
+    def snapshot_run(
+        self,
+        slug: str,
+        run_id: str,
+        *,
+        kinds: list[str] | None = None,
+        target: str = "both",
+    ) -> SnapshotResult:
+        """Materialise DB artifacts for *run_id* to canonical FS paths.
+
+        Parameters
+        ----------
+        slug:
+            Application slug (e.g. ``"acme-swe"``).
+        run_id:
+            Pipeline run identifier.
+        kinds:
+            Optional list of artifact kinds to snapshot. When None, all
+            artifacts in the run are written.
+        target:
+            Which directory tree(s) to write to.  One of ``'apply-state'``,
+            ``'slug-root'``, or ``'both'`` (default).
+
+        Returns
+        -------
+        SnapshotResult
+            Files written with absolute paths and byte counts.
+        """
+        body: dict[str, Any] = {"target": target}
+        if kinds is not None:
+            body["kinds"] = kinds
+        resp = self._http.post(
+            f"/api/applications/{slug}/runs/{run_id}/snapshot",
+            json=body,
+        )
+        _check_response(resp)
+        return SnapshotResult.model_validate(resp.json())
+
+    # ------------------------------------------------------------------
     # Context manager support
     # ------------------------------------------------------------------
 
@@ -413,4 +456,5 @@ __all__ = [
     "HealthResponse",
     "JobsmithClient",
     "NotFoundError",
+    "SnapshotResult",
 ]
