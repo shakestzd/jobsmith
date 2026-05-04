@@ -41,6 +41,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from jobsmith.api.health import router as health_router
+from jobsmith.api.master import router as master_router
 
 
 def create_app(config=None) -> FastAPI:  # noqa: ANN001
@@ -79,6 +80,8 @@ def create_app(config=None) -> FastAPI:  # noqa: ANN001
     app.include_router(health_router)
 
     # feat-401be81e: mount master router here
+    app.include_router(master_router, prefix="/api")
+
     # feat-d08c5002: mount applications listing router here
     # feat-e3b75a8a: mount application detail router here (part of applications_router)
     # feat-440324f1: mount SSE events router here
