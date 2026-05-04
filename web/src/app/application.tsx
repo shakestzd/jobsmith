@@ -121,7 +121,7 @@ function pipelineEventToLog(evt: PipelineEvent): LogEvent {
   if (evt.kind === 'log') {
     return {
       ts: formatTs(evt.data.timestamp ?? evt.receivedAt),
-      lvl: evt.data.stream === 'stderr' ? 'err' : 'tool',
+      lvl: 'log',
       msg: escapeHtml(evt.data.line),
     };
   }
