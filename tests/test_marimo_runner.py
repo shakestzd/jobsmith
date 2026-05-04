@@ -393,6 +393,84 @@ def test_run_records_failed_status_on_phase_failed_event(pipeline_db, tmp_path: 
     assert row["status"] == "failed"
 
 
+def test_runner_logs_traceback_and_emits_runner_error_on_thread_crash(
+    pipeline_db, tmp_path: Path, capfd
+):
+    """Roborev #926: an exception inside the runner thread must be visible.
+
+    Prior to this fix, a bare ``except Exception: final_status = 'failed'``
+    swallowed every error from ``run_phase_iter`` (and its callees) — the
+    user saw a 'failed' badge with no clue what went wrong. The fix:
+
+    1. ``traceback.print_exc(file=sys.stderr)`` — landing in marimo's
+       captured stderr / log so the user can ``tail`` the marimo log.
+    2. A ``runner_error`` PipelineEvent on the queue carrying
+       ``{exc_type, message}`` so the UI cell can surface a human
+       message instead of a bare 'failed' badge.
+
+    This test simulates a crash by stubbing ``run_phase_iter`` to raise.
+    """
+    from unittest.mock import patch
+
+    conn, db_path = pipeline_db
+
+    class _BoomError(Exception):
+        pass
+
+    def _crashing_iter(url_, **kwargs):
+        raise _BoomError("specialist-contracts.yaml is not frozen")
+        yield  # pragma: no cover — generator marker; never reached
+
+    with (
+        patch("jobsmith.marimo.runner.run_phase_iter", _crashing_iter),
+        patch(
+            "jobsmith.marimo.runner.resolve_canonical_slug",
+            return_value="boom-slug",
+        ),
+    ):
+        runner = NotebookRunner(db_path=db_path, applications_dir=tmp_path)
+        runner.start(url="https://example.com/jobs/boom", cwd=tmp_path)
+
+        deadline = time.time() + 5.0
+        sentinel = None
+        runner_error_event = None
+        while time.time() < deadline:
+            try:
+                ev = runner.events_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if isinstance(ev, _Done):
+                sentinel = ev
+                break
+            if getattr(ev, "kind", None) == "runner_error":
+                runner_error_event = ev
+
+    assert sentinel is not None
+    assert sentinel.status == "failed"
+
+    # 1. runner_error event was pushed to the queue.
+    assert runner_error_event is not None, (
+        "runner thread crash must emit a runner_error PipelineEvent"
+    )
+    assert runner_error_event.payload["exc_type"] == "_BoomError"
+    assert "specialist-contracts.yaml is not frozen" in (
+        runner_error_event.payload["message"]
+    )
+
+    # 2. Traceback was printed to stderr (captured by capfd) — exact match
+    # is brittle, just check the key substrings appear.
+    stderr = capfd.readouterr().err
+    assert "_BoomError" in stderr
+    assert "specialist-contracts.yaml is not frozen" in stderr
+    assert "Traceback" in stderr
+
+    # 3. last_error persisted on the runner instance so the marimo cell can
+    # keep showing the message after the queue is drained (roborev #927).
+    assert runner.last_error is not None
+    assert "_BoomError" in runner.last_error
+    assert "specialist-contracts.yaml is not frozen" in runner.last_error
+
+
 def test_run_records_failed_on_guard_failed_event(pipeline_db, tmp_path: Path):
     """guard_failed (anchor-guard between gather/draft) → status=failed."""
     from unittest.mock import patch

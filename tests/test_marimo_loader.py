@@ -467,6 +467,134 @@ def test_load_sections_ignores_running_rerun_keeps_last_done(pipeline_db):
     assert sections.fit_score.rationale == "Stable result"
 
 
+def test_load_sections_partial_failure_run_surfaces_completed_outputs(pipeline_db):
+    """Roborev #926: a run that fails late must still surface its early outputs.
+
+    A common failure mode: gather + draft phases complete and write
+    specialist_outputs rows, then render fails (e.g. quarto subprocess
+    crashes, or an agent doesn't emit the phase_complete marker). The
+    apply_runs row's final status is 'failed', but the gather/draft
+    outputs are valid and the user expects to see them in the review UI.
+
+    Prior to this fix, ``get_latest_outputs_by_kind`` filtered strictly
+    on ``status='done'`` (roborev #924), so a partial-failure run with
+    no successful predecessor would render the entire review accordion
+    empty — even though seven valid outputs sat in the DB.
+
+    With the relaxed filter (status IN ('done', 'failed')), the partial
+    outputs are surfaced. A subsequent successful run will then take
+    precedence per the done>failed ranking.
+    """
+    from jobsmith.marimo.loader import load_sections
+
+    conn, db_path = pipeline_db
+
+    # The only run for this slug failed late — but gather + draft did
+    # produce valid specialist_outputs before the failure.
+    insert_apply_run(
+        conn,
+        run_id="run-partial-failure",
+        slug=_SLUG,
+        phase="render",
+        started_at="2024-01-01T10:00:00+00:00",
+        finished_at="2024-01-01T10:25:00+00:00",
+        status="failed",
+    )
+    _insert_output(conn, "fit-score", {
+        "score": 0.81,
+        "score_raw": 0.81,
+        "rationale": "Solid match",
+        "specialty": "backend",
+        "confidence": "high",
+        "must_have_table": [],
+        "matched_evidence": ["Python 5y"],
+        "concerns": [],
+        "pitch": "Strong engineer",
+    }, run_id="run-partial-failure")
+    _insert_output(conn, "hm-snippet", {
+        "detected": True,
+        "name": "Pat Reviewer",
+        "source": "linkedin",
+        "one_specific_signal": "shipped feature",
+        "suggested_hook": "noticed your shipping cadence",
+    }, run_id="run-partial-failure")
+
+    sections = load_sections(_SLUG, db_path)
+
+    # Both completed-phase outputs must be visible despite status='failed'.
+    assert sections.fit_score is not None
+    assert sections.fit_score.score == pytest.approx(0.81)
+    assert sections.fit_score.rationale == "Solid match"
+    assert sections.hm_snippet is not None
+    assert sections.hm_snippet.name == "Pat Reviewer"
+
+
+def test_load_sections_done_beats_failed_for_same_kind(pipeline_db):
+    """Roborev #926: when both 'done' and 'failed' runs exist for a slug,
+    the 'done' producer wins for any kind it covered, even if the 'failed'
+    run is newer.
+
+    This preserves the roborev #924 invariant (newer failed re-run does
+    not mask older successful output) while allowing partial-failure
+    outputs to surface (roborev #926). The done>failed ranking does the
+    work — the failed run's output for the same kind is filtered by the
+    LIMIT 1 inner subquery.
+    """
+    from jobsmith.marimo.loader import load_sections
+
+    conn, db_path = pipeline_db
+
+    insert_apply_run(
+        conn,
+        run_id="run-success",
+        slug=_SLUG,
+        phase="render",
+        started_at="2024-01-01T10:00:00+00:00",
+        finished_at="2024-01-01T10:30:00+00:00",
+        status="done",
+    )
+    _insert_output(conn, "fit-score", {
+        "score": 0.65,
+        "score_raw": 0.65,
+        "rationale": "Successful run output",
+        "specialty": "backend",
+        "confidence": "medium",
+        "must_have_table": [],
+        "matched_evidence": [],
+        "concerns": [],
+        "pitch": "v1",
+    }, run_id="run-success")
+
+    # Newer failed re-run with a different (worse) score for the same kind.
+    insert_apply_run(
+        conn,
+        run_id="run-failed-newer",
+        slug=_SLUG,
+        phase="render",
+        started_at="2024-01-01T11:00:00+00:00",
+        finished_at="2024-01-01T11:10:00+00:00",
+        status="failed",
+    )
+    _insert_output(conn, "fit-score", {
+        "score": 0.99,
+        "score_raw": 0.99,
+        "rationale": "Failed-run garbage",
+        "specialty": "backend",
+        "confidence": "low",
+        "must_have_table": [],
+        "matched_evidence": [],
+        "concerns": [],
+        "pitch": "should not surface",
+    }, run_id="run-failed-newer")
+
+    sections = load_sections(_SLUG, db_path)
+
+    # 'done' producer wins despite being older.
+    assert sections.fit_score is not None
+    assert sections.fit_score.score == pytest.approx(0.65)
+    assert sections.fit_score.rationale == "Successful run output"
+
+
 def test_loader_prefers_finalized_over_draft(tmp_path: Path):
     """When both draft and final exist (post-Finalize), prefer the final.
 
