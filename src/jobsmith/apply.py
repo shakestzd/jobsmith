@@ -403,6 +403,7 @@ def build_phase_prompt(
     url: str,
     *,
     paths: dict[str, str] | None = None,
+    jd_text_file: Path | None = None,
 ) -> str:
     """Return the user prompt text for a given phase.
 
@@ -423,6 +424,14 @@ def build_phase_prompt(
         prompt so the agent does not need to search the filesystem.
         Defaults to ``{}`` — omits the block (useful for unit tests that
         do not need path injection).
+    jd_text_file:
+        Gather phase only. When provided, the user has supplied the JD
+        body text out-of-band (e.g. pasted from a JS-rendered portal that
+        ``WebFetch`` cannot scrape). The prompt directs the gather agent
+        to read the file's contents and write them into the spec.json
+        ``inputs.jd_text`` field, so ``apply-jd-parser`` skips its
+        WebFetch and uses the text directly. Ignored for non-gather
+        phases.
 
     Returns
     -------
@@ -443,11 +452,21 @@ def build_phase_prompt(
         return text
 
     if phase == "gather":
-        return _with_paths(
+        prompt = (
             f"Process this JD: {url}. Application slug: {slug}. "
             "Begin Phase 1 (gather): jd-parse, fit, HM enrichment, company research, "
             "bullet selection. Pause at the analysis gate as instructed."
         )
+        if jd_text_file is not None:
+            prompt += (
+                "\n\nThe user has provided the JD body text out-of-band "
+                f"(useful for JS-rendered portals like Netflix careers). "
+                f"Read it from this absolute path and copy the full contents "
+                f"into the spec.json `inputs.jd_text` field that you write for "
+                f"apply-jd-parser, so the parser skips its WebFetch and uses "
+                f"the supplied text directly: {jd_text_file}"
+            )
+        return _with_paths(prompt)
     if phase == "draft":
         return _with_paths(
             f"Resume Phase 2 (draft) for slug {slug}. "
@@ -1073,6 +1092,7 @@ def run_phase_iter(
     force: bool = False,
     cancel_event: threading.Event | None = None,
     phases: list[str] | None = None,
+    jd_text: str | None = None,
 ) -> Iterator[PipelineEvent]:
     """Yield :class:`PipelineEvent` for each phase of the apply pipeline.
 
@@ -1099,6 +1119,14 @@ def run_phase_iter(
         canonical gather → draft → render order). ``None`` means "run all
         not-yet-complete phases" (the default). Used by slice-8 single-
         specialist re-runs to avoid re-running upstream phases (roborev #921).
+    jd_text:
+        Optional JD body text supplied out-of-band, for cases where
+        ``WebFetch`` cannot scrape the URL (JS-rendered career portals
+        like Netflix, some Workday tenants, etc.). When provided, the
+        text is written to a temp file and the gather-phase user prompt
+        instructs the orchestrator to copy its contents into spec.json's
+        ``inputs.jd_text`` field, so ``apply-jd-parser`` skips its
+        ``WebFetch`` step.
 
     Yields
     ------
@@ -1108,9 +1136,56 @@ def run_phase_iter(
         ``slug_changed`` event between gather and draft.  A ``cancelled``
         event is the final event when ``cancel_event`` was set.
     """
-    import time as _time
-
     resolved_cwd = cwd or Path.cwd()
+
+    # Materialize jd_text into a temp file once (only for gather phase).
+    # The orchestrator agent reads the file and inlines its contents into
+    # spec.json. Always unlinked in the finally block at the end of the
+    # generator — even if the consumer breaks out of the loop early or
+    # garbage-collects the generator (roborev #928 LOW). The user-supplied
+    # JD body is potentially sensitive (compensation, named hiring
+    # managers from private channels).
+    jd_text_file: Path | None = None
+    if jd_text is not None and jd_text.strip():
+        import tempfile as _tempfile
+        _fd, _tmp_path = _tempfile.mkstemp(
+            prefix=f"jobsmith-jdtext-{derive_slug(url)}-",
+            suffix=".txt",
+        )
+        import os as _os
+        with _os.fdopen(_fd, "w", encoding="utf-8") as _f:
+            _f.write(jd_text)
+        jd_text_file = Path(_tmp_path)
+
+    try:
+        yield from _run_phase_iter_body(
+            url=url,
+            resolved_cwd=resolved_cwd,
+            force=force,
+            cancel_event=cancel_event,
+            phases=phases,
+            jd_text_file=jd_text_file,
+        )
+    finally:
+        if jd_text_file is not None:
+            with contextlib.suppress(OSError):
+                jd_text_file.unlink()
+
+
+def _run_phase_iter_body(
+    *,
+    url: str,
+    resolved_cwd: Path,
+    force: bool,
+    cancel_event: threading.Event | None,
+    phases: list[str] | None,
+    jd_text_file: Path | None,
+) -> Iterator[PipelineEvent]:
+    """Generator body for :func:`run_phase_iter`, extracted so the wrapper
+    can ``try/finally``-clean the temp file even when the consumer stops
+    iterating early (roborev #928 LOW).
+    """
+    import time as _time
 
     # Step 1: bootstrap
     ensure_bootstrap(resolved_cwd)
@@ -1192,7 +1267,16 @@ def run_phase_iter(
 
         # Step 3c: paths + prompt
         phase_paths = _build_paths(slug, resolved_cwd, plugin_directory)
-        prompt_text = build_phase_prompt(phase_name, slug, url, paths=phase_paths)
+        # jd_text_file is only meaningful for the gather phase; build_phase_prompt
+        # ignores it for draft / render. We still pass it so the kwarg flows
+        # cleanly through the iteration loop.
+        prompt_text = build_phase_prompt(
+            phase_name,
+            slug,
+            url,
+            paths=phase_paths,
+            jd_text_file=jd_text_file if phase_name == "gather" else None,
+        )
 
         # Step 3f: stream events from headless
         phase_succeeded = False
@@ -1288,6 +1372,7 @@ def run_apply(
     force: bool = False,
     verbosity: int = 0,
     renderer: ApplyRenderer | None = None,
+    jd_text: str | None = None,
 ) -> int:
     """Run the three-phase apply pipeline.
 
@@ -1309,6 +1394,14 @@ def run_apply(
         Optional :class:`~jobsmith.render.ApplyRenderer` instance.  When None,
         one is constructed automatically (TTY-aware, using *skip_confirm* for
         the ``yes`` flag).
+    jd_text:
+        Optional JD body text supplied out-of-band, for cases where
+        ``WebFetch`` cannot scrape the URL (JS-rendered career portals like
+        Netflix careers, some Workday tenants). Maps to the
+        ``--jd-text`` / ``--jd-text-file`` CLI flags. Written to a temp
+        file so the gather orchestrator agent can read its contents and
+        copy them into spec.json's ``inputs.jd_text`` field, letting
+        ``apply-jd-parser`` skip its WebFetch.
 
     Returns
     -------
@@ -1317,6 +1410,21 @@ def run_apply(
     """
     resolved_cwd = cwd or Path.cwd()
     rdr = renderer or ApplyRenderer(yes=skip_confirm, verbosity=verbosity)
+
+    # Materialize jd_text into a temp file once. The orchestrator agent
+    # reads the file inside the gather phase and inlines its contents
+    # into spec.json. Cleanup is best-effort (temp dir is OS-managed).
+    jd_text_file: Path | None = None
+    if jd_text is not None and jd_text.strip():
+        import tempfile as _tempfile
+        _fd, _tmp_path = _tempfile.mkstemp(
+            prefix="jobsmith-jdtext-",
+            suffix=".txt",
+        )
+        import os as _os
+        with _os.fdopen(_fd, "w", encoding="utf-8") as _f:
+            _f.write(jd_text)
+        jd_text_file = Path(_tmp_path)
 
     # Step 1: ensure bootstrap
     try:
@@ -1445,10 +1553,18 @@ def run_apply(
             db_conn=db_conn,
             db_run_id=db_run_id,
             db_slug_ref=db_slug_ref,
+            jd_text_file=jd_text_file,
         )
         db_final_status = "done" if rc == 0 else "failed"
         return rc
     finally:
+        # Best-effort cleanup of the jd_text temp file. The user-supplied
+        # JD body may include sensitive content (compensation expectations,
+        # named hiring managers from private channels) so unlink it as
+        # soon as the pipeline no longer needs it (roborev #928 LOW).
+        if jd_text_file is not None:
+            with contextlib.suppress(OSError):
+                jd_text_file.unlink()
         if db_conn is not None:
             try:
                 # db_slug_ref[0] reflects the canonical slug after gather
@@ -1514,6 +1630,7 @@ def _run_apply_phases(
     db_conn,
     db_run_id: str,
     db_slug_ref: list[str],
+    jd_text_file: Path | None = None,
 ) -> int:
     """Phase-loop body extracted so the surrounding ``run_apply`` can wrap it
     with the apply_runs DB lifecycle (insert before, UPDATE after, with the
@@ -1576,8 +1693,15 @@ def _run_apply_phases(
         # for draft/render, slug may have changed from the URL-derived value).
         phase_paths = _build_paths(slug, resolved_cwd, plugin_directory)
 
-        # Step 3d: build prompt text
-        prompt_text = build_phase_prompt(phase_name, slug, url, paths=phase_paths)
+        # Step 3d: build prompt text. jd_text_file is gather-only; pass
+        # None for other phases so the kwarg propagates cleanly.
+        prompt_text = build_phase_prompt(
+            phase_name,
+            slug,
+            url,
+            paths=phase_paths,
+            jd_text_file=jd_text_file if phase_name == "gather" else None,
+        )
 
         # Step 3e: render phase header and start spinner
         rdr.print_header(phase_num, total_phases, phase_name)

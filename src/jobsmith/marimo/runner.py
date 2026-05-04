@@ -139,8 +139,20 @@ class NotebookRunner:
         """Return True while the background thread is alive."""
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self, url: str, cwd: Path) -> str:
+    def start(self, url: str, cwd: Path, *, jd_text: str | None = None) -> str:
         """Spawn the background thread and return the run_id.
+
+        Parameters
+        ----------
+        url:
+            Job-description URL.
+        cwd:
+            Working directory for the apply pipeline.
+        jd_text:
+            Optional pasted JD body text for cases where ``WebFetch``
+            cannot scrape the URL (JS-rendered portals). When provided,
+            it propagates through to ``run_phase_iter`` and the gather
+            orchestrator copies it into spec.json's ``inputs.jd_text``.
 
         Raises
         ------
@@ -166,6 +178,7 @@ class NotebookRunner:
         self._thread = threading.Thread(
             target=self._run,
             args=(url, cwd),
+            kwargs={"jd_text": jd_text},
             daemon=True,
         )
         self._thread.start()
@@ -249,6 +262,7 @@ class NotebookRunner:
         cwd: Path,
         *,
         phases: list[str] | None = None,
+        jd_text: str | None = None,
     ) -> None:
         """Background thread target: drive run_phase_iter, write DB, ingest.
 
@@ -263,6 +277,10 @@ class NotebookRunner:
             When a list, only the listed phases are run; ``run_phase_iter`` is
             called with ``force=True`` so it does not skip completed phases.
             Used by :meth:`run_specialist` for single-phase re-runs.
+        jd_text:
+            Pasted JD body text for JS-rendered portals. Forwarded to
+            ``run_phase_iter`` which materializes a temp file the gather
+            orchestrator reads when writing spec.json.
         """
         run_id = self._run_id
         assert run_id is not None  # set in start()/run_specialist() before thread creation
@@ -297,6 +315,8 @@ class NotebookRunner:
                     "skip_confirm": True,
                     "cancel_event": self._cancel_event,
                 }
+                if jd_text is not None and jd_text.strip():
+                    iter_kwargs["jd_text"] = jd_text
                 # For single-phase re-runs force=True so run_phase_iter does
                 # not skip the (already-completed) phase, AND pass phases=
                 # so the generator only iterates the target phase (roborev

@@ -38,24 +38,146 @@ def _imports():
     )
 
 
+def _cli_flag_to_bool(value: object, *, default: bool) -> bool:
+    """Normalize marimo's ``mo.cli_args()`` value for boolean-style flags.
+
+    ``mo.cli_args()`` parses bare flags (e.g. ``--force``) as the empty
+    string ``""``, not as ``True``. ``bool("")`` is ``False``, so the
+    naive ``bool(value)`` check silently swallows the flag's intent
+    (roborev #928 MEDIUM 1).
+
+    Accepted truthy forms: any non-empty truthy string except an explicit
+    ``"false"``/``"0"``/``"no"``, plus presence of the key with an empty
+    string (bare ``--flag``).
+
+    Accepted falsy forms: ``--flag false`` / ``--flag 0`` / ``--flag no``.
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    s = str(value).strip().lower()
+    if s == "":
+        # Bare ``--flag`` with no value means "turn it on".
+        return True
+    return s not in {"false", "0", "no", "off"}
+
+
 @app.cell
-def _db_setup(Path, load_config, os, sqlite3):
-    _cfg = load_config()
+def _script_mode_args(Path, mo):
+    """Read CLI args when invoked as ``python apply.py --url ... --jd-text-file ...``.
+
+    In interactive mode (``marimo run apply.py`` or ``marimo edit apply.py``),
+    ``mo.cli_args()`` returns an empty dict and ``cli_url`` is None — every
+    consumer cell short-circuits, so the notebook behaves as a pure UI.
+
+    In script mode, ``cli_url`` and ``cli_jd_text`` are populated and the
+    ``_script_mode_runner`` cell below kicks off ``run_apply`` synchronously
+    and exits the process. This makes the notebook a dual-mode entry point:
+
+        marimo run apply.py                         # interactive UI
+        python apply.py --url <URL>                 # CLI script
+        python apply.py --url <URL> --jd-text-file <PATH>
+    """
+    _cli_args = mo.cli_args()
+    cli_url: str | None = _cli_args.get("url")
+    # Boolean flags must be normalized — bare ``--force`` parses to ""
+    # and ``bool("")`` is ``False``, silently swallowing the flag's
+    # intent (roborev #928 MEDIUM 1).
+    cli_force: bool = _cli_flag_to_bool(_cli_args.get("force"), default=False)
+    cli_yes: bool = _cli_flag_to_bool(_cli_args.get("yes"), default=True)
+    cli_verbose: int = int(_cli_args.get("verbose", 0) or 0)
+
+    cli_jd_text: str | None = None
+    _cli_jd_text_file = _cli_args.get("jd-text-file")
+    if _cli_jd_text_file:
+        cli_jd_text = Path(_cli_jd_text_file).read_text(encoding="utf-8")
+    elif _cli_args.get("jd-text"):
+        cli_jd_text = _cli_args["jd-text"]
+    return cli_force, cli_jd_text, cli_url, cli_verbose, cli_yes
+
+
+@app.cell
+def _repo_root_setup(Path, os):
+    """Resolve repo_root WITHOUT touching the DB.
+
+    The script-mode runner depends on ``repo_root`` (to pass to
+    ``run_apply``) but must NOT depend on ``_db_setup``, which queries
+    ``apply_runs`` and would crash on a fresh project where the DB has
+    not been bootstrapped yet (roborev #928 MEDIUM 2). Splitting the
+    resolution into its own cell keeps the script-mode entry independent
+    of any DB state.
+    """
     repo_root = Path(os.environ.get("JOBSMITH_REPO_ROOT", ".")).resolve()
+    return (repo_root,)
+
+
+def _read_distinct_slugs(db_path):
+    """Return distinct slugs from ``apply_runs``, or [] if the DB / table
+    is missing.
+
+    Extracted for testability: the marimo cell wraps this helper so the
+    fresh-project path (no ``private/jobsmith.db`` yet, or the table not
+    bootstrapped) returns an empty list instead of crashing the cell
+    graph (roborev #928 MEDIUM 2).
+    """
+    import sqlite3 as _sqlite3
+
+    if not db_path.exists():
+        return []
+    _conn = _sqlite3.connect(str(db_path))
+    try:
+        _rows = _conn.execute(
+            "SELECT DISTINCT slug FROM apply_runs ORDER BY slug"
+        ).fetchall()
+        return [_row[0] for _row in _rows] if _rows else []
+    except _sqlite3.OperationalError:
+        # apply_runs table not yet created — treat as no runs.
+        return []
+    finally:
+        _conn.close()
+
+
+@app.cell
+def _db_setup(load_config, repo_root):
+    _cfg = load_config()
     db_path = repo_root / _cfg.output.jobsmith_db
     # Resolve once from config so all cells (runner, re-run, loader) read
     # from / write to the same directory. Hardcoding "private/applications"
     # broke repos that override output.applications_dir (roborev #923 MED).
     apps_dir = repo_root / _cfg.output.applications_dir
+    slugs = _read_distinct_slugs(db_path)
+    return apps_dir, db_path, slugs
 
-    _conn = sqlite3.connect(str(db_path))
-    _rows = _conn.execute(
-        "SELECT DISTINCT slug FROM apply_runs ORDER BY slug"
-    ).fetchall()
-    _conn.close()
 
-    slugs = [_row[0] for _row in _rows] if _rows else []
-    return apps_dir, db_path, repo_root, slugs
+@app.cell
+def _script_mode_runner(cli_force, cli_jd_text, cli_url, cli_verbose, cli_yes, repo_root):
+    """Synchronous CLI entry point — fires only when ``--url`` is supplied.
+
+    Calls ``run_apply`` directly (the existing CLI orchestration) and exits
+    with its return code. Bypasses the threaded ``NotebookRunner`` because
+    in script mode the process exits when all cells return — a background
+    thread would be killed mid-pipeline.
+
+    In UI mode (``cli_url is None``), the body is skipped and the
+    interactive ``_run_dispatch`` cell takes over.
+    """
+    if cli_url is not None:
+        import sys
+
+        from jobsmith.apply import run_apply
+
+        rc = run_apply(
+            cli_url,
+            cwd=repo_root,
+            skip_confirm=cli_yes,
+            force=cli_force,
+            verbosity=cli_verbose,
+            jd_text=cli_jd_text,
+        )
+        sys.exit(rc)
 
 
 @app.cell
@@ -81,15 +203,28 @@ def _run_controls(mo):
         placeholder="https://example.com/careers/role-id",
         label="Job URL (paste to run apply pipeline)",
     )
+    # Optional JD text — for JS-rendered career portals (Netflix, some
+    # Workday tenants) that WebFetch cannot scrape. When non-empty, the
+    # gather orchestrator inlines this text into spec.json so
+    # apply-jd-parser skips its WebFetch.
+    jd_text_input = mo.ui.text_area(
+        placeholder=(
+            "Paste JD text here ONLY if the URL is JS-rendered "
+            "(Netflix careers, etc.). Leave blank to scrape from the URL."
+        ),
+        label="JD text (optional, for JS-rendered portals)",
+        rows=6,
+    )
     run_button = mo.ui.run_button(label="Run apply")
     stop_button = mo.ui.run_button(label="Stop")
-    return run_button, stop_button, url_input
+    return jd_text_input, run_button, stop_button, url_input
 
 
 @app.cell
 def _run_dispatch(
     apps_dir,
     db_path,
+    jd_text_input,
     repo_root,
     run_button,
     stop_button,
@@ -106,7 +241,11 @@ def _run_dispatch(
     )
 
     if run_button.value and url_input.value and not runner_state.is_running():
-        runner_state.start(url_input.value, cwd=repo_root)
+        # jd_text_input.value may be empty string when the user hasn't
+        # pasted anything — pass None in that case so the runner doesn't
+        # write a blank temp file.
+        _jd_text = jd_text_input.value or None
+        runner_state.start(url_input.value, cwd=repo_root, jd_text=_jd_text)
 
     if stop_button.value and runner_state.is_running():
         runner_state.cancel()
@@ -114,7 +253,14 @@ def _run_dispatch(
 
 
 @app.cell
-def _show_run_panel(mo, run_button, runner_state, stop_button, url_input):
+def _show_run_panel(
+    jd_text_input,
+    mo,
+    run_button,
+    runner_state,
+    stop_button,
+    url_input,
+):
     # Phase progress is drained from the runner queue. This cell re-runs
     # whenever runner_state changes or buttons are clicked.
     last_phase = "—"
@@ -142,7 +288,7 @@ def _show_run_panel(mo, run_button, runner_state, stop_button, url_input):
     # otherwise lose the error message after the first render. The runner
     # also stores the last error on the instance — fall back to it so the
     # callout stays visible across re-runs until the next start() resets
-    # last_error to None.
+    # last_error to None (roborev #927).
     if error_message is None and runner_state.last_error:
         error_message = runner_state.last_error
 
@@ -169,6 +315,7 @@ def _show_run_panel(mo, run_button, runner_state, stop_button, url_input):
 
     panel = mo.vstack([
         url_input,
+        jd_text_input,
         mo.hstack([run_button, stop_button]),
         *callouts,
     ])

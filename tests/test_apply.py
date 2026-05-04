@@ -143,9 +143,119 @@ def test_build_phase_prompt_render() -> None:
     assert "jobsmith assemble" in prompt
 
 
+def test_build_phase_prompt_gather_includes_jd_text_file_directive(tmp_path: Path) -> None:
+    """When jd_text_file is supplied, the gather prompt directs the orchestrator
+    to read the file and inline its contents into spec.json.
+
+    This is the hybrid-CLI ``--jd-text`` / ``--jd-text-file`` plumbing: the
+    Python wrapper materializes pasted text into a temp file, and the gather
+    orchestrator copies it into ``inputs.jd_text`` so apply-jd-parser skips
+    its WebFetch (needed for JS-rendered career portals like Netflix).
+    """
+    jd_file = tmp_path / "netflix-jd.txt"
+    jd_file.write_text("Senior Management Engineer at Netflix...\n")
+    prompt = build_phase_prompt(
+        "gather",
+        "netflix-management-engineer",
+        "https://example.com/jobs/123",
+        jd_text_file=jd_file,
+    )
+    assert "JD body text out-of-band" in prompt
+    assert str(jd_file) in prompt
+    assert "spec.json" in prompt
+    assert "inputs.jd_text" in prompt
+
+
+def test_build_phase_prompt_draft_ignores_jd_text_file(tmp_path: Path) -> None:
+    """jd_text_file is a gather-phase-only concept; draft prompt is unchanged."""
+    jd_file = tmp_path / "x.txt"
+    jd_file.write_text("ignored")
+    prompt_default = build_phase_prompt("draft", "slug", "https://example.com")
+    prompt_with_file = build_phase_prompt(
+        "draft", "slug", "https://example.com", jd_text_file=jd_file
+    )
+    assert prompt_default == prompt_with_file
+    assert "JD body text" not in prompt_with_file
+
+
 def test_build_phase_prompt_invalid_phase() -> None:
     with pytest.raises(ValueError, match="Unknown phase"):
         build_phase_prompt("unknown", "slug", "https://example.com")
+
+
+def test_run_apply_unlinks_jd_text_temp_file_on_success(tmp_path: Path, monkeypatch) -> None:
+    """Roborev #928 LOW: jd_text temp file must be unlinked after run_apply.
+
+    The user-supplied JD body may contain sensitive content (comp,
+    private hiring-manager names). Letting it linger in /tmp after the
+    pipeline completes is a leak. Verifies the unlink fires for both
+    success (rc=0) and failure (rc!=0) paths.
+    """
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text("# config\n")
+    plugin_fake = tmp_path / "plugin"
+    sp_dir = plugin_fake / "system-prompts"
+    sp_dir.mkdir(parents=True)
+    for n, name in [(1, "gather"), (2, "draft"), (3, "render")]:
+        (sp_dir / f"phase-{n}-{name}.md").write_text(f"# Phase {n}\n")
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    # Capture the temp-file path that run_apply creates by stubbing
+    # _run_apply_phases — it receives jd_text_file as a kwarg.
+    captured_paths: list[Path] = []
+
+    def fake_phases(**kw):
+        jd_file = kw.get("jd_text_file")
+        if jd_file is not None:
+            captured_paths.append(jd_file)
+        return 0  # success
+
+    monkeypatch.setattr("jobsmith.apply._run_apply_phases", fake_phases)
+
+    rc = run_apply(
+        "https://example.com/jobs/duke",
+        cwd=tmp_path,
+        skip_confirm=True,
+        jd_text="Sensitive comp + named HM details from a private email.",
+    )
+    assert rc == 0
+    assert len(captured_paths) == 1, "jd_text_file should be passed exactly once"
+    jd_path = captured_paths[0]
+    assert not jd_path.exists(), (
+        f"jd_text temp file {jd_path} should be unlinked after run_apply "
+        "(roborev #928 LOW). It still exists, leaking sensitive JD content."
+    )
+
+
+def test_run_apply_unlinks_jd_text_temp_file_on_failure(tmp_path: Path, monkeypatch) -> None:
+    """Same cleanup guarantee when the pipeline fails (rc != 0)."""
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text("# config\n")
+    plugin_fake = tmp_path / "plugin"
+    sp_dir = plugin_fake / "system-prompts"
+    sp_dir.mkdir(parents=True)
+    for n, name in [(1, "gather"), (2, "draft"), (3, "render")]:
+        (sp_dir / f"phase-{n}-{name}.md").write_text(f"# Phase {n}\n")
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    captured_paths: list[Path] = []
+
+    def fake_phases(**kw):
+        jd_file = kw.get("jd_text_file")
+        if jd_file is not None:
+            captured_paths.append(jd_file)
+        return 2  # failure
+
+    monkeypatch.setattr("jobsmith.apply._run_apply_phases", fake_phases)
+
+    rc = run_apply(
+        "https://example.com/jobs/duke",
+        cwd=tmp_path,
+        skip_confirm=True,
+        jd_text="Sensitive content.",
+    )
+    assert rc == 2
+    assert not captured_paths[0].exists()
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +513,7 @@ def test_cli_apply_yes_flag(tmp_path: Path, monkeypatch) -> None:
 
     captured: dict = {}
 
-    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0):
+    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None):
         captured["url"] = url
         captured["skip_confirm"] = skip_confirm
         captured["force"] = force
@@ -432,7 +542,7 @@ def test_cli_apply_force_flag(tmp_path: Path, monkeypatch) -> None:
     runner = CliRunner()
     captured: dict = {}
 
-    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0):
+    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None):
         captured["force"] = force
         return 0
 
@@ -446,13 +556,112 @@ def test_cli_apply_force_flag(tmp_path: Path, monkeypatch) -> None:
     assert captured.get("force") is True
 
 
+def test_cli_apply_jd_text_flag_passes_through(tmp_path: Path, monkeypatch) -> None:
+    """`jobsmith apply --jd-text 'pasted...' <url>` threads the text into run_apply.
+
+    Hybrid-CLI plumbing: the typer command reads --jd-text and forwards it
+    to run_apply so the gather orchestrator inlines it into spec.json. This
+    is the unblock for JS-rendered career portals where WebFetch can't
+    scrape the JD.
+    """
+    runner = CliRunner()
+    captured: dict = {}
+
+    def fake_run_apply(
+        url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None
+    ):
+        captured["jd_text"] = jd_text
+        return 0
+
+    import jobsmith.apply as apply_mod
+    monkeypatch.setattr(apply_mod, "run_apply", fake_run_apply)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(
+            app,
+            [
+                "apply",
+                "--jd-text", "Senior MLE at ACME — owns the recsys stack.",
+                "https://example.com/jobs/swe",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured["jd_text"] == "Senior MLE at ACME — owns the recsys stack."
+
+
+def test_cli_apply_jd_text_file_flag_reads_contents(tmp_path: Path, monkeypatch) -> None:
+    """`jobsmith apply --jd-text-file <path> <url>` reads the file before
+    forwarding the contents into run_apply as ``jd_text``.
+
+    Convenient for long JDs the user pastes from a JS-rendered portal —
+    they save to a file rather than wrestling with shell quoting.
+    """
+    runner = CliRunner()
+    jd_file = tmp_path / "netflix.txt"
+    jd_file.write_text("Netflix Management Engineer — Duke Raleigh.\n")
+
+    captured: dict = {}
+
+    def fake_run_apply(
+        url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None
+    ):
+        captured["jd_text"] = jd_text
+        return 0
+
+    import jobsmith.apply as apply_mod
+    monkeypatch.setattr(apply_mod, "run_apply", fake_run_apply)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(
+            app,
+            [
+                "apply",
+                "--jd-text-file", str(jd_file),
+                "https://example.com/jobs/swe",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured["jd_text"] == "Netflix Management Engineer — Duke Raleigh.\n"
+
+
+def test_cli_apply_jd_text_file_wins_over_jd_text(tmp_path: Path, monkeypatch) -> None:
+    """When both flags are given, --jd-text-file wins (file contents used)."""
+    runner = CliRunner()
+    jd_file = tmp_path / "winner.txt"
+    jd_file.write_text("from-the-file\n")
+
+    captured: dict = {}
+
+    def fake_run_apply(
+        url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None
+    ):
+        captured["jd_text"] = jd_text
+        return 0
+
+    import jobsmith.apply as apply_mod
+    monkeypatch.setattr(apply_mod, "run_apply", fake_run_apply)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(
+            app,
+            [
+                "apply",
+                "--jd-text", "from-the-flag",
+                "--jd-text-file", str(jd_file),
+                "https://example.com/jobs/swe",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured["jd_text"] == "from-the-file\n"
+
+
 def test_cli_apply_without_yes_default_confirm_false(tmp_path: Path, monkeypatch) -> None:
     """Without --yes, skip_confirm defaults to False."""
     runner = CliRunner()
 
     captured: dict = {}
 
-    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0):
+    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None):
         captured["skip_confirm"] = skip_confirm
         return 0
 

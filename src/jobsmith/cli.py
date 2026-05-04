@@ -424,10 +424,47 @@ def apply(
         count=True,
         help="Verbosity: -v shows filtered tool calls; -vv shows all tool calls.",
     ),
+    jd_text: str | None = typer.Option(
+        None,
+        "--jd-text",
+        help=(
+            "Pasted job-description text. Use when the URL points to a "
+            "JS-rendered portal (Netflix careers, some Workday tenants) "
+            "that WebFetch cannot scrape. Apply-jd-parser uses this text "
+            "instead of fetching the URL."
+        ),
+    ),
+    jd_text_file: Path | None = typer.Option(
+        None,
+        "--jd-text-file",
+        help=(
+            "Read pasted job-description text from a file. Convenient for "
+            "long JDs. Mutually exclusive with --jd-text — if both are "
+            "given, --jd-text-file wins."
+        ),
+        exists=True,
+        readable=True,
+        dir_okay=False,
+    ),
 ) -> None:
     """Run the three-phase apply pipeline against a JD URL."""
     from .apply import run_apply
-    raise typer.Exit(run_apply(url, skip_confirm=yes, force=force, verbosity=verbose))
+
+    resolved_jd_text: str | None = None
+    if jd_text_file is not None:
+        resolved_jd_text = jd_text_file.read_text(encoding="utf-8")
+    elif jd_text is not None:
+        resolved_jd_text = jd_text
+
+    raise typer.Exit(
+        run_apply(
+            url,
+            skip_confirm=yes,
+            force=force,
+            verbosity=verbose,
+            jd_text=resolved_jd_text,
+        )
+    )
 
 
 @app.command()
