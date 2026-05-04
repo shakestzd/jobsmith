@@ -37,14 +37,21 @@ Health router is mounted below. Sibling slices mount their own routers here:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from jobsmith.api.applications import router as applications_router
 from jobsmith.api.health import router as health_router
 from jobsmith.api.master import router as master_router
 
 
-def create_app(config=None) -> FastAPI:  # noqa: ANN001
+def create_app(  # noqa: ANN001
+    config=None,
+    *,
+    applications_dir: Path | None = None,
+) -> FastAPI:
     """Construct and return the configured FastAPI application.
 
     Parameters
@@ -54,6 +61,10 @@ def create_app(config=None) -> FastAPI:  # noqa: ANN001
         resolves config lazily (via ``find_config`` at request time). Future
         routers that need the config at startup should accept it here and
         store it in ``app.state``.
+    applications_dir:
+        Optional explicit override for the slug directory root. Tests pass a
+        ``tmp_path`` here so the ``/api/applications`` router can read from a
+        fixture filesystem without touching the real config.
     """
     app = FastAPI(
         title="jobsmith API",
@@ -73,6 +84,7 @@ def create_app(config=None) -> FastAPI:  # noqa: ANN001
 
     # Store config in app state for routers that need it.
     app.state.config = config
+    app.state.applications_dir = applications_dir
 
     # --- Mount routers ---
 
@@ -83,6 +95,8 @@ def create_app(config=None) -> FastAPI:  # noqa: ANN001
     app.include_router(master_router, prefix="/api")
 
     # feat-d08c5002: mount applications listing router here
+    app.include_router(applications_router, prefix="/api")
+
     # feat-e3b75a8a: mount application detail router here (part of applications_router)
     # feat-440324f1: mount SSE events router here
 
