@@ -6,6 +6,10 @@
 import { type KeyboardEvent, useState } from 'react';
 import type { SampleBullet } from '../types';
 import { Icon, Badge, SAMPLE_BULLETS } from './shared';
+import { SkillForm } from './master/SkillForm';
+import { EducationForm } from './master/EducationForm';
+import { AuthorForm } from './master/AuthorForm';
+import type { Skill, EducationEntry, Author } from './master/schemas';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -122,6 +126,16 @@ function WorkEditor() {
 
 export function MasterContent() {
   const [tab, setTab] = useState<MasterTab>('work');
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [education, setEducation] = useState<EducationEntry[]>([]);
+  const [author, setAuthor] = useState<Author>({
+    name: '',
+    email: '',
+    phone: '',
+    location: '',
+    headline: '',
+    links: [],
+  });
 
   return (
     <div className="content">
@@ -149,10 +163,13 @@ export function MasterContent() {
       </div>
 
       {tab === 'work' && <WorkEditor />}
-      {tab !== 'work' && (
+      {tab === 'skill' && <SkillForm skills={skills} onChange={setSkills} />}
+      {tab === 'education' && <EducationForm education={education} onChange={setEducation} />}
+      {tab === 'author' && <AuthorForm author={author} onChange={setAuthor} />}
+      {tab === 'benchmark' && (
         <div className="card" style={{ padding: 60, textAlign: 'center', color: 'var(--fg-subtle)' }}>
-          <div className="mono-sm">editor for {tab}.yml</div>
-          <div style={{ fontSize: 12, marginTop: 6 }}>(same shape as work — collapsed for this view)</div>
+          <div className="mono-sm">editor for benchmark.md</div>
+          <div style={{ fontSize: 12, marginTop: 6 }}>(BenchmarkEditor — coming next)</div>
         </div>
       )}
     </div>
