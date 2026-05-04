@@ -893,6 +893,39 @@ def mark_anchors(
     console.print(f"[green]wrote[/green] {master}")
 
 
+# ---------- api subcommand group ----------
+
+
+api_app = typer.Typer(
+    name="api",
+    help="Run the jobsmith HTTP API server.",
+    no_args_is_help=True,
+)
+app.add_typer(api_app, name="api")
+
+
+@api_app.command("serve")
+def api_serve(
+    bind_public: bool = typer.Option(
+        False,
+        "--bind-public",
+        help="Bind to 0.0.0.0 instead of 127.0.0.1 (required for non-local access).",
+    ),
+    port: int = typer.Option(8000, "--port", help="Bind port"),
+    reload: bool = typer.Option(False, "--reload", help="Enable auto-reload (development)"),
+) -> None:
+    """Start the jobsmith HTTP API with uvicorn.
+
+    By default binds to 127.0.0.1 (localhost only).  Pass --bind-public to
+    expose on all interfaces (0.0.0.0) — only do this on trusted networks.
+    """
+    from jobsmith.api.server import resolve_host
+    from jobsmith.api.server import serve as _serve
+
+    host = resolve_host(bind_public=bind_public)
+    _serve(host=host, port=port, reload=reload)
+
+
 # ---------- site subcommand group ----------
 
 
