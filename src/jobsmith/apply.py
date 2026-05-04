@@ -1136,14 +1136,15 @@ def run_phase_iter(
         ``slug_changed`` event between gather and draft.  A ``cancelled``
         event is the final event when ``cancel_event`` was set.
     """
-    import time as _time
-
     resolved_cwd = cwd or Path.cwd()
 
     # Materialize jd_text into a temp file once (only for gather phase).
     # The orchestrator agent reads the file and inlines its contents into
-    # spec.json. Cleared after the gather phase completes — gives the
-    # specialist a stable absolute path while keeping the prompt small.
+    # spec.json. Always unlinked in the finally block at the end of the
+    # generator — even if the consumer breaks out of the loop early or
+    # garbage-collects the generator (roborev #928 LOW). The user-supplied
+    # JD body is potentially sensitive (compensation, named hiring
+    # managers from private channels).
     jd_text_file: Path | None = None
     if jd_text is not None and jd_text.strip():
         import tempfile as _tempfile
@@ -1155,6 +1156,36 @@ def run_phase_iter(
         with _os.fdopen(_fd, "w", encoding="utf-8") as _f:
             _f.write(jd_text)
         jd_text_file = Path(_tmp_path)
+
+    try:
+        yield from _run_phase_iter_body(
+            url=url,
+            resolved_cwd=resolved_cwd,
+            force=force,
+            cancel_event=cancel_event,
+            phases=phases,
+            jd_text_file=jd_text_file,
+        )
+    finally:
+        if jd_text_file is not None:
+            with contextlib.suppress(OSError):
+                jd_text_file.unlink()
+
+
+def _run_phase_iter_body(
+    *,
+    url: str,
+    resolved_cwd: Path,
+    force: bool,
+    cancel_event: threading.Event | None,
+    phases: list[str] | None,
+    jd_text_file: Path | None,
+) -> Iterator[PipelineEvent]:
+    """Generator body for :func:`run_phase_iter`, extracted so the wrapper
+    can ``try/finally``-clean the temp file even when the consumer stops
+    iterating early (roborev #928 LOW).
+    """
+    import time as _time
 
     # Step 1: bootstrap
     ensure_bootstrap(resolved_cwd)
@@ -1527,6 +1558,13 @@ def run_apply(
         db_final_status = "done" if rc == 0 else "failed"
         return rc
     finally:
+        # Best-effort cleanup of the jd_text temp file. The user-supplied
+        # JD body may include sensitive content (compensation expectations,
+        # named hiring managers from private channels) so unlink it as
+        # soon as the pipeline no longer needs it (roborev #928 LOW).
+        if jd_text_file is not None:
+            with contextlib.suppress(OSError):
+                jd_text_file.unlink()
         if db_conn is not None:
             try:
                 # db_slug_ref[0] reflects the canonical slug after gather

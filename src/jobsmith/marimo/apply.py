@@ -38,6 +38,33 @@ def _imports():
     )
 
 
+def _cli_flag_to_bool(value: object, *, default: bool) -> bool:
+    """Normalize marimo's ``mo.cli_args()`` value for boolean-style flags.
+
+    ``mo.cli_args()`` parses bare flags (e.g. ``--force``) as the empty
+    string ``""``, not as ``True``. ``bool("")`` is ``False``, so the
+    naive ``bool(value)`` check silently swallows the flag's intent
+    (roborev #928 MEDIUM 1).
+
+    Accepted truthy forms: any non-empty truthy string except an explicit
+    ``"false"``/``"0"``/``"no"``, plus presence of the key with an empty
+    string (bare ``--flag``).
+
+    Accepted falsy forms: ``--flag false`` / ``--flag 0`` / ``--flag no``.
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    s = str(value).strip().lower()
+    if s == "":
+        # Bare ``--flag`` with no value means "turn it on".
+        return True
+    return s not in {"false", "0", "no", "off"}
+
+
 @app.cell
 def _script_mode_args(Path, mo):
     """Read CLI args when invoked as ``python apply.py --url ... --jd-text-file ...``.
@@ -56,8 +83,11 @@ def _script_mode_args(Path, mo):
     """
     _cli_args = mo.cli_args()
     cli_url: str | None = _cli_args.get("url")
-    cli_force: bool = bool(_cli_args.get("force", False))
-    cli_yes: bool = bool(_cli_args.get("yes", True))  # default True in script mode
+    # Boolean flags must be normalized — bare ``--force`` parses to ""
+    # and ``bool("")`` is ``False``, silently swallowing the flag's
+    # intent (roborev #928 MEDIUM 1).
+    cli_force: bool = _cli_flag_to_bool(_cli_args.get("force"), default=False)
+    cli_yes: bool = _cli_flag_to_bool(_cli_args.get("yes"), default=True)
     cli_verbose: int = int(_cli_args.get("verbose", 0) or 0)
 
     cli_jd_text: str | None = None
@@ -70,23 +100,56 @@ def _script_mode_args(Path, mo):
 
 
 @app.cell
-def _db_setup(Path, load_config, os, sqlite3):
-    _cfg = load_config()
+def _repo_root_setup(Path, os):
+    """Resolve repo_root WITHOUT touching the DB.
+
+    The script-mode runner depends on ``repo_root`` (to pass to
+    ``run_apply``) but must NOT depend on ``_db_setup``, which queries
+    ``apply_runs`` and would crash on a fresh project where the DB has
+    not been bootstrapped yet (roborev #928 MEDIUM 2). Splitting the
+    resolution into its own cell keeps the script-mode entry independent
+    of any DB state.
+    """
     repo_root = Path(os.environ.get("JOBSMITH_REPO_ROOT", ".")).resolve()
+    return (repo_root,)
+
+
+def _read_distinct_slugs(db_path):
+    """Return distinct slugs from ``apply_runs``, or [] if the DB / table
+    is missing.
+
+    Extracted for testability: the marimo cell wraps this helper so the
+    fresh-project path (no ``private/jobsmith.db`` yet, or the table not
+    bootstrapped) returns an empty list instead of crashing the cell
+    graph (roborev #928 MEDIUM 2).
+    """
+    import sqlite3 as _sqlite3
+
+    if not db_path.exists():
+        return []
+    _conn = _sqlite3.connect(str(db_path))
+    try:
+        _rows = _conn.execute(
+            "SELECT DISTINCT slug FROM apply_runs ORDER BY slug"
+        ).fetchall()
+        return [_row[0] for _row in _rows] if _rows else []
+    except _sqlite3.OperationalError:
+        # apply_runs table not yet created — treat as no runs.
+        return []
+    finally:
+        _conn.close()
+
+
+@app.cell
+def _db_setup(load_config, repo_root):
+    _cfg = load_config()
     db_path = repo_root / _cfg.output.jobsmith_db
     # Resolve once from config so all cells (runner, re-run, loader) read
     # from / write to the same directory. Hardcoding "private/applications"
     # broke repos that override output.applications_dir (roborev #923 MED).
     apps_dir = repo_root / _cfg.output.applications_dir
-
-    _conn = sqlite3.connect(str(db_path))
-    _rows = _conn.execute(
-        "SELECT DISTINCT slug FROM apply_runs ORDER BY slug"
-    ).fetchall()
-    _conn.close()
-
-    slugs = [_row[0] for _row in _rows] if _rows else []
-    return apps_dir, db_path, repo_root, slugs
+    slugs = _read_distinct_slugs(db_path)
+    return apps_dir, db_path, slugs
 
 
 @app.cell

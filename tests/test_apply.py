@@ -183,6 +183,81 @@ def test_build_phase_prompt_invalid_phase() -> None:
         build_phase_prompt("unknown", "slug", "https://example.com")
 
 
+def test_run_apply_unlinks_jd_text_temp_file_on_success(tmp_path: Path, monkeypatch) -> None:
+    """Roborev #928 LOW: jd_text temp file must be unlinked after run_apply.
+
+    The user-supplied JD body may contain sensitive content (comp,
+    private hiring-manager names). Letting it linger in /tmp after the
+    pipeline completes is a leak. Verifies the unlink fires for both
+    success (rc=0) and failure (rc!=0) paths.
+    """
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text("# config\n")
+    plugin_fake = tmp_path / "plugin"
+    sp_dir = plugin_fake / "system-prompts"
+    sp_dir.mkdir(parents=True)
+    for n, name in [(1, "gather"), (2, "draft"), (3, "render")]:
+        (sp_dir / f"phase-{n}-{name}.md").write_text(f"# Phase {n}\n")
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    # Capture the temp-file path that run_apply creates by stubbing
+    # _run_apply_phases — it receives jd_text_file as a kwarg.
+    captured_paths: list[Path] = []
+
+    def fake_phases(**kw):
+        jd_file = kw.get("jd_text_file")
+        if jd_file is not None:
+            captured_paths.append(jd_file)
+        return 0  # success
+
+    monkeypatch.setattr("jobsmith.apply._run_apply_phases", fake_phases)
+
+    rc = run_apply(
+        "https://example.com/jobs/duke",
+        cwd=tmp_path,
+        skip_confirm=True,
+        jd_text="Sensitive comp + named HM details from a private email.",
+    )
+    assert rc == 0
+    assert len(captured_paths) == 1, "jd_text_file should be passed exactly once"
+    jd_path = captured_paths[0]
+    assert not jd_path.exists(), (
+        f"jd_text temp file {jd_path} should be unlinked after run_apply "
+        "(roborev #928 LOW). It still exists, leaking sensitive JD content."
+    )
+
+
+def test_run_apply_unlinks_jd_text_temp_file_on_failure(tmp_path: Path, monkeypatch) -> None:
+    """Same cleanup guarantee when the pipeline fails (rc != 0)."""
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text("# config\n")
+    plugin_fake = tmp_path / "plugin"
+    sp_dir = plugin_fake / "system-prompts"
+    sp_dir.mkdir(parents=True)
+    for n, name in [(1, "gather"), (2, "draft"), (3, "render")]:
+        (sp_dir / f"phase-{n}-{name}.md").write_text(f"# Phase {n}\n")
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    captured_paths: list[Path] = []
+
+    def fake_phases(**kw):
+        jd_file = kw.get("jd_text_file")
+        if jd_file is not None:
+            captured_paths.append(jd_file)
+        return 2  # failure
+
+    monkeypatch.setattr("jobsmith.apply._run_apply_phases", fake_phases)
+
+    rc = run_apply(
+        "https://example.com/jobs/duke",
+        cwd=tmp_path,
+        skip_confirm=True,
+        jd_text="Sensitive content.",
+    )
+    assert rc == 2
+    assert not captured_paths[0].exists()
+
+
 # ---------------------------------------------------------------------------
 # Helpers for run_apply tests
 # ---------------------------------------------------------------------------
