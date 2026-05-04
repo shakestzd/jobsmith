@@ -152,22 +152,37 @@ def get_latest_outputs_by_kind(
 ) -> list[sqlite3.Row]:
     """Return the most-recent ``specialist_outputs`` row per ``kind`` for *slug*.
 
-    Joins ``specialist_outputs`` to ``apply_runs`` so that for each distinct
-    output ``kind`` we keep only the row whose run finished most recently
-    (ties broken by ``apply_runs.started_at``).
+    Joins ``specialist_outputs`` to ``apply_runs`` and returns the best row
+    per output ``kind``, where "best" is:
 
-    Why
-    ---
+    1. Status priority: ``done`` > ``failed`` (a 'done' producer always
+       beats a 'failed' producer for the same kind).
+    2. Within the same status, latest ``finished_at`` wins (ties broken
+       by ``started_at``).
+
+    Status filter
+    -------------
+    ``running`` and ``cancelled`` runs are excluded — their outputs may be
+    mid-write or partial. ``done`` and ``failed`` runs are both eligible,
+    so a pipeline that fails late (e.g. render fails after gather + draft
+    succeeded) still surfaces its valid early outputs in the review UI.
+
+    Why this shape
+    --------------
     A single-specialist re-run (slice 8) inserts a fresh ``apply_runs`` row
-    that contains exactly one ``specialist_outputs`` entry. If the loader
-    only reads outputs for the most-recent run, every other section card
-    in the review UI disappears until the user re-runs the full pipeline.
-    Aggregating "latest per kind" keeps unchanged sections visible while
-    surfacing the freshly re-run output.
+    with exactly one ``specialist_outputs`` entry. Reading outputs only
+    from the most-recent run would erase every other section card. The
+    per-kind aggregation keeps unchanged sections visible while surfacing
+    the freshly re-run output (roborev #923 HIGH 1).
 
-    Both joins gate on ``status = 'done'`` so that a newer failed or
-    still-running re-run cannot mask the last successful output for that
-    kind (roborev #924 MEDIUM).
+    The ``done`` > ``failed`` priority — instead of a hard ``status='done'``
+    filter — handles two cases:
+
+    * A newer failed re-run does not mask an older successful output for
+      that kind (roborev #924 MEDIUM).
+    * A run that fails partway through still shows the outputs of the
+      phases that completed before the failure point (roborev #926
+      partial-failure regression).
     """
     return conn.execute(
         """
@@ -175,15 +190,16 @@ def get_latest_outputs_by_kind(
         FROM specialist_outputs so
         JOIN apply_runs ar ON ar.run_id = so.run_id
         WHERE ar.slug = ?
-          AND ar.status = 'done'
+          AND ar.status IN ('done', 'failed')
           AND so.run_id = (
               SELECT so2.run_id
               FROM specialist_outputs so2
               JOIN apply_runs ar2 ON ar2.run_id = so2.run_id
               WHERE ar2.slug = ?
-                AND ar2.status = 'done'
+                AND ar2.status IN ('done', 'failed')
                 AND so2.kind = so.kind
               ORDER BY
+                  CASE ar2.status WHEN 'done' THEN 0 ELSE 1 END ASC,
                   COALESCE(ar2.finished_at, ar2.started_at) DESC,
                   ar2.started_at DESC
               LIMIT 1

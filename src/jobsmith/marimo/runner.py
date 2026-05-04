@@ -24,6 +24,7 @@ from __future__ import annotations
 import contextlib
 import json
 import queue
+import sys
 import threading
 import uuid
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from jobsmith.apply import (
+    PipelineEvent,
     phase_for_specialist,
     resolve_canonical_slug,
     run_phase_iter,
@@ -352,7 +354,26 @@ class NotebookRunner:
                             "cancelled" if self._cancel_event.is_set() else "done"
                         )
 
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                # Surface the traceback to stderr so it lands in the marimo
+                # log; otherwise a runner-thread crash leaves the user with
+                # only a silent ``status='failed'`` row in the DB and no way
+                # to diagnose what went wrong (roborev #926).
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+                # Also push an error event so consumers (UI cells, tests)
+                # can surface a human-readable message instead of a bare
+                # 'failed' badge.
+                self.events_queue.put(
+                    PipelineEvent(
+                        kind="runner_error",
+                        phase=phase_label,
+                        payload={
+                            "exc_type": type(exc).__name__,
+                            "message": str(exc),
+                        },
+                    )
+                )
                 final_status = "failed"
 
             # Update apply_runs row with final status
