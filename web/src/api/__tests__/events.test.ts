@@ -53,4 +53,13 @@ describe('parseSseChunk', () => {
     const chunk = 'event: phase\n\n';
     expect(parseSseChunk(chunk)).toEqual([]);
   });
+
+  it('treats `data: <json>\\n\\n` as a frame with null event (per SSE spec)', () => {
+    const chunk = 'data: {"a":1}\n\n';
+    const frames = parseSseChunk(chunk);
+    expect(frames).toEqual([{ event: null, data: '{"a":1}' }]);
+    // The frame is preserved by the parser; dispatch in events.ts surfaces
+    // unknown event types (including the spec-default "message") via
+    // onError rather than silently dropping the frame.
+  });
 });

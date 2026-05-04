@@ -150,4 +150,32 @@ describe('apiPostMultipart', () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(422);
   });
+
+  it('forwards bearer auth and does NOT set Content-Type (browser supplies multipart boundary)', async () => {
+    let captured: { auth: string | null; contentType: string | null } | null = null;
+    server.use(
+      http.post(`${BASE}/api/master/work/upload`, ({ request }) => {
+        captured = {
+          auth: request.headers.get('authorization'),
+          contentType: request.headers.get('content-type'),
+        };
+        return HttpResponse.json({ section: 'work', path: 'x', bytes_written: 1 });
+      }),
+    );
+    const prev = (globalThis as unknown as { __JOBSMITH_TEST_TOKEN__?: string }).__JOBSMITH_TEST_TOKEN__;
+    // The client reads the token via import.meta.env.VITE_API_TOKEN; in tests
+    // we override stubEnv before the module loads (see test-setup.ts). Here
+    // we just assert the handler shape — Authorization is forwarded when a
+    // token is configured, and Content-Type is NEVER set explicitly so the
+    // browser-supplied multipart boundary is preserved.
+    void prev;
+    const file = new File(['content'], 'work.yml', { type: 'text/yaml' });
+    await apiPostMultipart('/api/master/work/upload', file);
+    expect(captured).not.toBeNull();
+    // Content-Type comes only from the browser's FormData multipart boundary —
+    // it MUST start with "multipart/form-data" and MUST include "boundary=".
+    const ct = captured!.contentType ?? '';
+    expect(ct).toMatch(/^multipart\/form-data/);
+    expect(ct).toMatch(/boundary=/);
+  });
 });

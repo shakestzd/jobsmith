@@ -238,13 +238,23 @@ export function useSnapshotRun(): UseMutationResult<
 
 // ── Application mutations (create / re-run) ──────────────────────────────
 
+/**
+ * Human-readable verbosity, mapped server-side to a CLI flag:
+ *   normal  → -v   (phase milestones)
+ *   verbose → -vv  (tool calls + payloads)
+ *   debug   → -vvv (everything, including subprocess stderr)
+ *
+ * Must match src/jobsmith/api/schemas/applications.py:Verbosity.
+ */
+export type ApiVerbosity = 'normal' | 'verbose' | 'debug';
+
 export interface CreateApplicationBody {
   jd_url?: string;
   jd_text?: string;
   jd_file_b64?: string;
   skip_confirmations?: boolean;
   force?: boolean;
-  verbosity?: '--quiet' | '--normal' | '--verbose';
+  verbosity?: ApiVerbosity;
 }
 
 export interface CreateApplicationResponse {
@@ -274,7 +284,7 @@ export function useCreateApplication(): UseMutationResult<
 export interface RerunApplicationBody {
   skip_confirmations?: boolean;
   force?: boolean;
-  verbosity?: '--quiet' | '--normal' | '--verbose';
+  verbosity?: ApiVerbosity;
 }
 
 export interface RerunApplicationResponse {
@@ -324,16 +334,23 @@ export interface UseEventStreamResult {
  *
  * Auto-reconnects on close (with exponential backoff in events.ts). The hook
  * exposes the recent event tail and the live open/error state.
+ *
+ * The effect deps are stable primitives (slug + the three options), NOT the
+ * options object itself — passing an inline literal `{}` from a parent that
+ * re-renders would otherwise tear down the SSE connection on every render.
  */
 export function useEventStream(
   slug: string | null,
   opts: UseEventStreamOptions = {},
 ): UseEventStreamResult {
+  const verbosity: Verbosity = opts.verbosity ?? 'verbose';
+  const reconnect: boolean = opts.reconnect ?? true;
+  const maxEvents: number = opts.maxEvents ?? 200;
+
   const [events, setEvents] = useState<SseEvent[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState<unknown | null>(null);
   const closerRef = useRef<(() => void) | null>(null);
-  const maxEvents = opts.maxEvents ?? 200;
 
   useEffect(() => {
     if (!slug) {
@@ -346,8 +363,8 @@ export function useEventStream(
     setError(null);
 
     const close = openEventStream(slug, {
-      verbosity: opts.verbosity ?? 'verbose',
-      reconnect: opts.reconnect ?? true,
+      verbosity,
+      reconnect,
       onOpen: () => setIsOpen(true),
       onError: (err) => {
         setIsOpen(false);
@@ -366,7 +383,7 @@ export function useEventStream(
       close();
       closerRef.current = null;
     };
-  }, [slug, opts.verbosity, opts.reconnect, maxEvents]);
+  }, [slug, verbosity, reconnect, maxEvents]);
 
   return {
     events,

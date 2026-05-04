@@ -83,7 +83,10 @@ class TestCreateApplicationJdUrl:
         assert "/api/applications/" in body["events_url"]
         assert "events" in body["events_url"]
 
-    def test_events_url_contains_slug_and_run_id(self, apps_dir: Path) -> None:
+    def test_events_url_canonical_shape(self, apps_dir: Path) -> None:
+        """events_url is the canonical SSE path /api/applications/{slug}/events
+        — no run_id query string, since events.py:openEventStream uses
+        ?verbosity= and ignores run_id (review job 938)."""
         sup = _fake_supervisor("run-xyz")
         client = _make_client(apps_dir, sup)
 
@@ -93,8 +96,7 @@ class TestCreateApplicationJdUrl:
         )
         body = resp.json()
         slug = body["slug"]
-        assert slug in body["events_url"]
-        assert "run-xyz" in body["events_url"]
+        assert body["events_url"] == f"/api/applications/{slug}/events"
 
     def test_slug_directory_created(self, apps_dir: Path) -> None:
         sup = _fake_supervisor()
@@ -267,15 +269,20 @@ class TestCreateApplicationSlugConflict:
         sup = _fake_supervisor()
         client = _make_client(apps_dir, sup)
 
-        client.post(
+        first = client.post(
             "/api/applications",
             json={"jd_url": "https://example.com/jobs/ml-engineer"},
         )
+        first_slug = first.json()["slug"]
+
         resp = client.post(
             "/api/applications",
             json={"jd_url": "https://example.com/jobs/ml-engineer"},
         )
-        assert "slug" in str(resp.json().get("detail", "")).lower() or resp.status_code == 409
+        assert resp.status_code == 409
+        # The 409 detail must name the colliding slug so the UI can show it.
+        detail = str(resp.json().get("detail", "")).lower()
+        assert first_slug.lower() in detail, f"slug {first_slug!r} not in detail: {detail!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -293,3 +300,90 @@ class TestCreateApplicationInvalidB64:
             json={"jd_file_b64": "!!!not-valid-base64!!!"},
         )
         assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Slug-dir cleanup on supervisor failure (review job 938 finding #2)
+# ---------------------------------------------------------------------------
+
+
+class TestCreateApplicationSupervisorFailure:
+    def test_slug_dir_cleaned_up_when_supervisor_raises(self, apps_dir: Path) -> None:
+        """If supervisor.start() raises after slug_dir.mkdir(), the slug
+        directory MUST be removed so the next retry doesn't 409 forever."""
+        sup = RunSupervisor(max_buffered_lines=10)
+        sup.start = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
+
+        app = FastAPI()
+        app.include_router(router, prefix="/api")
+        app.state.applications_dir = apps_dir
+        app.state.run_supervisor = sup
+        # raise_server_exceptions=False so we can inspect the 500 instead
+        # of having TestClient re-raise the supervisor's RuntimeError.
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.post(
+            "/api/applications",
+            json={"jd_url": "https://example.com/jobs/cleanup-test"},
+        )
+        assert resp.status_code == 500
+        # No slug directory survives the failed dispatch.
+        assert list(apps_dir.iterdir()) == [], (
+            f"slug directory leaked after supervisor failure: {list(apps_dir.iterdir())}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Verbosity wire format (review job 938 finding #1 — words, not flags)
+# ---------------------------------------------------------------------------
+
+
+class TestVerbosityVocab:
+    def test_normal_word_accepted_and_translates_to_dash_v(self, apps_dir: Path) -> None:
+        sup = _fake_supervisor()
+        client = _make_client(apps_dir, sup)
+
+        resp = client.post(
+            "/api/applications",
+            json={"jd_url": "https://example.com/jobs/x", "verbosity": "normal"},
+        )
+        assert resp.status_code == 201
+        # Inspect argv passed to the supervisor mock — last arg is the verbosity flag
+        argv = sup.start.await_args.args[1]  # type: ignore[union-attr]
+        assert argv[-1] == "-v", f"expected -v at end of argv, got {argv}"
+
+    def test_verbose_word_translates_to_dash_vv(self, apps_dir: Path) -> None:
+        sup = _fake_supervisor()
+        client = _make_client(apps_dir, sup)
+
+        resp = client.post(
+            "/api/applications",
+            json={"jd_url": "https://example.com/jobs/y", "verbosity": "verbose"},
+        )
+        assert resp.status_code == 201
+        argv = sup.start.await_args.args[1]  # type: ignore[union-attr]
+        assert argv[-1] == "-vv"
+
+    def test_debug_word_translates_to_dash_vvv(self, apps_dir: Path) -> None:
+        sup = _fake_supervisor()
+        client = _make_client(apps_dir, sup)
+
+        resp = client.post(
+            "/api/applications",
+            json={"jd_url": "https://example.com/jobs/z", "verbosity": "debug"},
+        )
+        assert resp.status_code == 201
+        argv = sup.start.await_args.args[1]  # type: ignore[union-attr]
+        assert argv[-1] == "-vvv"
+
+    def test_old_dash_v_token_rejected_with_422(self, apps_dir: Path) -> None:
+        """Frontend must NOT send '-v' / '-vv' / '-vvv' anymore — Pydantic
+        validates against the new word vocabulary."""
+        sup = _fake_supervisor()
+        client = _make_client(apps_dir, sup)
+
+        resp = client.post(
+            "/api/applications",
+            json={"jd_url": "https://example.com/jobs/q", "verbosity": "-v"},
+        )
+        assert resp.status_code == 422

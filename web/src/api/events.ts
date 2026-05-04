@@ -93,7 +93,6 @@ export function openEventStream(
   const url = `${API_BASE_URL}/api/applications/${encodeURIComponent(slug)}/events?verbosity=${verbosity}`;
 
   const dispatch = (frame: ParsedSseFrame) => {
-    if (!frame.event) return;
     let data: unknown;
     try {
       data = JSON.parse(frame.data);
@@ -101,14 +100,22 @@ export function openEventStream(
       opts.onError?.(err);
       return;
     }
-    if (frame.event === 'phase') {
+    // Per the SSE spec, a frame with only `data:` is a default-typed frame
+    // (event = "message"). Surface it through onError as a notice rather
+    // than silently dropping — if the backend ever forgets the `event:`
+    // line we want a signal in the operator log.
+    const eventType = frame.event ?? 'message';
+    if (eventType === 'phase') {
       opts.onEvent({ type: 'phase', data: data as PhaseEventData });
-    } else if (frame.event === 'specialist') {
+    } else if (eventType === 'specialist') {
       opts.onEvent({ type: 'specialist', data: data as SpecialistEventData });
-    } else if (frame.event === 'log') {
+    } else if (eventType === 'log') {
       opts.onEvent({ type: 'log', data: data as LogEventData });
+    } else {
+      opts.onError?.(
+        new Error(`SSE: unhandled event type ${JSON.stringify(eventType)}`),
+      );
     }
-    // Unknown event types are silently dropped (forward-compatible).
   };
 
   const connect = async (): Promise<void> => {

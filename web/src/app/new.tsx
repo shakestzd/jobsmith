@@ -25,11 +25,13 @@ type VerbosityFlag = '' | '-v' | '-vv';
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-// Map UI verbosity flag → API verbosity (CLI-formatted strings the
-// orchestrator forwards verbatim; matches the CLI's --verbose / --quiet flags).
+// Map UI verbosity flag → API verbosity word. The backend turns these
+// human-readable tokens into CLI flags (-v / -vv / -vvv) inside
+// api/applications.py:_verbosity_to_cli_flag.
 function uiVerbosityToApi(v: VerbosityFlag): CreateApplicationBody['verbosity'] {
-  if (v === '-vv' || v === '-v') return '--verbose';
-  return '--normal';
+  if (v === '-vv') return 'debug';
+  if (v === '-v') return 'verbose';
+  return 'normal';
 }
 
 export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalProps) {
@@ -193,13 +195,15 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".txt,.md,.html,.htm,.pdf"
+                  accept=".txt,.md"
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setJdFile(e.target.files?.[0] ?? null)
                   }
                 />
                 <div className="help">
-                  {jdFile ? `Selected: ${jdFile.name} (${jdFile.size} bytes)` : 'plain text / markdown preferred — uploaded as base64.'}
+                  {jdFile
+                    ? `Selected: ${jdFile.name} (${jdFile.size} bytes)`
+                    : 'Plain text or markdown only — backend decodes the upload as UTF-8.'}
                 </div>
               </div>
             )}

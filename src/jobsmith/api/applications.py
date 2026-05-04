@@ -18,8 +18,13 @@ POST /applications/{slug}/run
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+import re
+import secrets
+import shutil
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -39,6 +44,27 @@ from .schemas.applications import (
 )
 
 router = APIRouter(tags=["applications"])
+
+# Slugs are joined into apps_dir; reject anything that could escape it or hit
+# a hidden / case-collision filename. Mirrors events.py:_validate_slug_or_404.
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+
+# Human-readable verbosity → CLI flag the apply pipeline understands.
+_VERBOSITY_FLAG = {
+    "normal": "-v",
+    "verbose": "-vv",
+    "debug": "-vvv",
+}
+
+
+def _verbosity_to_cli_flag(verbosity: str) -> str:
+    """Translate the wire token into the CLI flag the orchestrator forwards."""
+    return _VERBOSITY_FLAG.get(verbosity, "-v")
+
+# Per-slug locks make supervisor.get_active_for_slug + supervisor.start atomic
+# inside this process. Two concurrent re-run requests for the same slug now
+# serialise; the second one sees the first's row when it acquires the lock.
+_slug_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +254,19 @@ async def create_application(
 
         slug = derive_slug(body.jd_url)
     else:
-        slug = f"pasted-{datetime.now(tz=timezone.utc).strftime('%Y%m%d%H%M%S')}"
+        # Append a 6-char hex suffix so two paste/file submissions in the
+        # same second don't 409 each other.
+        ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d%H%M%S")
+        slug = f"pasted-{ts}-{secrets.token_hex(3)}"
+
+    # Validate that the derived slug can't escape apps_dir or look like a
+    # hidden file. derive_slug should return safe values, but exotic URLs
+    # could in principle smuggle in `/`, `..`, or a leading `.`.
+    if not _SLUG_RE.match(slug):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Derived slug is not safe for filesystem use: {slug!r}",
+        )
 
     # 409 if slug directory already exists
     slug_dir = apps_dir / slug
@@ -261,13 +299,19 @@ async def create_application(
         argv.append("--yes")
     if body.force:
         argv.append("--force")
-    argv.append(body.verbosity)
+    argv.append(_verbosity_to_cli_flag(body.verbosity))
 
-    # Dispatch via supervisor
+    # Dispatch via supervisor. If the dispatch fails, clean up the slug
+    # directory we just created — otherwise the next retry sees a 409
+    # forever and the user has no UI affordance to clear it.
     supervisor = _resolve_supervisor(request)
-    run_id = await supervisor.start(slug, argv, cwd=apps_dir.parent)
+    try:
+        run_id = await supervisor.start(slug, argv, cwd=apps_dir.parent)
+    except Exception:
+        shutil.rmtree(slug_dir, ignore_errors=True)
+        raise
 
-    events_url = f"/api/applications/{slug}/events?run_id={run_id}"
+    events_url = f"/api/applications/{slug}/events"
     return CreateApplicationResponse(slug=slug, run_id=run_id, events_url=events_url)
 
 
@@ -283,16 +327,20 @@ def _read_apply_url(slug_dir: Path) -> str | None:
     """Extract the original JD URL from .apply-state/jd-parsed.json.
 
     apply-jd-parser writes the URL under ``apply_url``. Also tries ``jd_url``
-    and ``source_url`` for compatibility with older runs.
+    and ``source_url`` for compatibility with older runs. Returns None for
+    expected I/O / decode / shape failures; other exceptions propagate so a
+    real bug isn't masked.
     """
     jd_parsed = slug_dir / ".apply-state" / "jd-parsed.json"
-    if jd_parsed.is_file():
-        try:
-            data = json.loads(jd_parsed.read_text(encoding="utf-8"))
-            return data.get("apply_url") or data.get("jd_url") or data.get("source_url")
-        except Exception:  # noqa: BLE001
-            return None
-    return None
+    if not jd_parsed.is_file():
+        return None
+    try:
+        data = json.loads(jd_parsed.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data.get("apply_url") or data.get("jd_url") or data.get("source_url")
 
 
 @router.post(
@@ -313,6 +361,13 @@ async def rerun_application(
     4. 409 if a run is already in progress.
     5. Dispatch to RunSupervisor; return 202 with run_id and events_url.
     """
+    # Validate the slug *before* we touch the filesystem — same invariant
+    # as create_application's _SLUG_RE check.
+    if not _SLUG_RE.match(slug):
+        raise HTTPException(
+            status_code=400, detail=f"Invalid slug: {slug!r}"
+        )
+
     apps_dir = _resolve_applications_dir(request)
     slug_dir = apps_dir / slug
 
@@ -337,35 +392,41 @@ async def rerun_application(
                 ),
             )
 
-    # Step 3: 409 if a run is already in flight
     supervisor = _resolve_supervisor(request)
-    existing_run_id = supervisor.get_active_for_slug(slug)
-    if existing_run_id is not None:
-        events_url = f"/api/applications/{slug}/events?run_id={existing_run_id}"
-        raise HTTPException(
-            status_code=409,
-            detail=RerunConflictResponse(
-                slug=slug,
-                run_id=existing_run_id,
-                status="running",
-                events_url=events_url,
-            ).model_dump(),
-        )
 
-    # Step 4: build argv
-    argv: list[str] = ["jobsmith", "apply"]
-    if text_based:
-        argv += [_JD_URL_PLACEHOLDER, "--jd-text-file", str(jd_txt_path)]
-    else:
-        argv.append(jd_url)  # type: ignore[arg-type]
+    # Step 3: 409 if a run is already in flight. Hold a per-slug asyncio lock
+    # across the get_active_for_slug → supervisor.start window so two concurrent
+    # re-run requests can't both pass the check (TOCTOU fix).
+    async with _slug_locks[slug]:
+        existing_run_id = supervisor.get_active_for_slug(slug)
+        if existing_run_id is not None:
+            events_url = f"/api/applications/{slug}/events"
+            raise HTTPException(
+                status_code=409,
+                detail=RerunConflictResponse(
+                    slug=slug,
+                    run_id=existing_run_id,
+                    status="running",
+                    events_url=events_url,
+                ).model_dump(),
+            )
 
-    if body.force:
-        argv.append("--force")
-    argv += ["--yes", body.verbosity]
+        # Step 4: build argv
+        argv: list[str] = ["jobsmith", "apply"]
+        if text_based:
+            argv += [_JD_URL_PLACEHOLDER, "--jd-text-file", str(jd_txt_path)]
+        else:
+            argv.append(jd_url)  # type: ignore[arg-type]
 
-    # Step 5: dispatch and return 202
-    run_id = await supervisor.start(slug, argv, cwd=apps_dir.parent)
-    events_url = f"/api/applications/{slug}/events?run_id={run_id}"
+        if body.skip_confirmations:
+            argv.append("--yes")
+        if body.force:
+            argv.append("--force")
+        argv.append(_verbosity_to_cli_flag(body.verbosity))
+
+        # Step 5: dispatch and return 202
+        run_id = await supervisor.start(slug, argv, cwd=apps_dir.parent)
+    events_url = f"/api/applications/{slug}/events"
     return RerunResponse(slug=slug, run_id=run_id, events_url=events_url)
 
 

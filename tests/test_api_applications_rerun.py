@@ -103,7 +103,10 @@ class TestRerunHappyPathApplyUrl:
         assert body["run_id"] == "rerun-001"
         assert "events" in body["events_url"]
 
-    def test_events_url_shape(self, apps_dir: Path) -> None:
+    def test_events_url_canonical_shape(self, apps_dir: Path) -> None:
+        """events_url is the canonical SSE path /api/applications/{slug}/events
+        — no run_id query string, since events.py:openEventStream uses
+        ?verbosity= and ignores run_id (review job 938)."""
         slug_dir = apps_dir / "techcorp-sre"
         slug_dir.mkdir()
         _write_jd_parsed(slug_dir, apply_url="https://techcorp.io/jobs/sre")
@@ -113,8 +116,7 @@ class TestRerunHappyPathApplyUrl:
 
         resp = client.post("/api/applications/techcorp-sre/run", json={})
         body = resp.json()
-        assert "techcorp-sre" in body["events_url"]
-        assert "run-sre-01" in body["events_url"]
+        assert body["events_url"] == "/api/applications/techcorp-sre/events"
 
 
 # ---------------------------------------------------------------------------
