@@ -4,39 +4,31 @@
 // Sub-components (PhaseCard, PipelineTab, ArtifactsTab, PdfPreview,
 // FactCheckTab, AnchorCheckTab, ConfigTab) are file-local.
 //
-// DOM structure, class names, and visual behaviour are pixel-identical to
-// the design source.
+// Live data flow (slice 6):
+//   useApplication(slug) -> ApplicationDetail
+//     extends Application with `artifacts`, `prose_draft` (truncated to
+//     64 KB by the backend), `cover_letter_draft`, `fact_check`,
+//     `anchor_check`, `bullet_selection`, `variables`, `config`, and
+//     `truncated: bool`. The `truncated` flag is plumbed into ArtifactsTab
+//     so the user can fetch the full file via /api/applications/{slug}/raw/.
+//
+// Slice 8 (SSE) will replace the seeded NEW_EVENTS sim in PipelineTab with
+// a live `useEventStream(slug)` call from `web/src/api/events.ts`.
 
 import { useState, useEffect, useRef } from 'react';
-import type { SampleApp, IconName } from '../types';
-import { Icon, Badge, StatusBadge, SAMPLE_APPS } from './shared';
+import { useApplication } from '../api/hooks';
+import type { Application, ApplicationDetail as TApplicationDetail } from '../api/types';
+import type { IconName } from '../types';
+import { Icon, Badge, StatusBadge } from './shared';
 
 // ── Public prop type ─────────────────────────────────────────────────────────
 
 export interface ApplicationDetailProps {
-  /** The application slug to display. Falls back to SAMPLE_APPS[0] if not found. */
+  /** The application slug to display. */
   slug: string;
   /** Navigate back to the applications list. */
   back: () => void;
 }
-
-// ── File-tree node shape ─────────────────────────────────────────────────────
-
-interface TreeFile {
-  kind: 'file';
-  name: string;
-  size: string;
-  highlight?: boolean;
-}
-
-interface TreeDir {
-  kind: 'dir';
-  name: string;
-  open: boolean;
-  children: TreeFile[];
-}
-
-type TreeNode = TreeDir | TreeFile;
 
 // ── Phase-related helpers ────────────────────────────────────────────────────
 
@@ -95,11 +87,19 @@ const NEW_EVENTS: Omit<LogEvent, 'ts'>[] = [
   { lvl: 'tool', msg: 'Write: <span class="dim">rendered/resume.pdf</span> (92 KB)' },
 ];
 
-function seedEvents(app: SampleApp): LogEvent[] {
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function seedEvents(app: Application): LogEvent[] {
+  const safeUrl = escapeHtml(app.url || '');
   return [
-    { ts: '14:02:01', lvl: 'info', msg: '<span class="dim">apply</span> start <span class="dim">slug=</span>' + app.slug },
+    { ts: '14:02:01', lvl: 'info', msg: '<span class="dim">apply</span> start <span class="dim">slug=</span>' + escapeHtml(app.slug) },
     { ts: '14:02:01', lvl: 'info', msg: '<span class="dim">phase=</span>gather' },
-    { ts: '14:02:02', lvl: 'tool', msg: 'WebFetch: ' + app.url },
+    { ts: '14:02:02', lvl: 'tool', msg: 'WebFetch: ' + safeUrl },
     { ts: '14:02:04', lvl: 'spec', msg: 'apply-jd-parser: extracted 18 requirements, 5 must-haves' },
     { ts: '14:02:05', lvl: 'spec', msg: 'apply-anchor-scorer: 14 anchors, top match deploy-pipeline-rebuild (0.92)' },
     { ts: '14:02:06', lvl: 'tool', msg: 'Write: <span class="dim">.apply-state/spec.json</span>' },
@@ -125,7 +125,7 @@ type ProgressMap = Record<1 | 2 | 3, number>;
 
 // ── Progress derivation helper ───────────────────────────────────────────────
 
-function deriveProgress(app: SampleApp): {
+function deriveProgress(app: Application): {
   progress: ProgressMap;
   activePhase: 1 | 2 | 3;
 } {
@@ -139,9 +139,8 @@ function deriveProgress(app: SampleApp): {
 
   // For failed status, initialize based on phase but don't fake completion
   if (app.status === 'failed') {
-    const failedPhase = (app.phase || 1) as 1 | 2 | 3;
+    const failedPhase = ((app.phase || 1) as 1 | 2 | 3);
     const progress: ProgressMap = { 1: 0, 2: 0, 3: 0 };
-    // Mark all phases up to and including the failed phase as we got there
     if (failedPhase >= 1) progress[1] = 100;
     if (failedPhase >= 2) progress[2] = 100;
     if (failedPhase >= 3) progress[3] = 100;
@@ -149,7 +148,6 @@ function deriveProgress(app: SampleApp): {
   }
 
   // For running statuses: initialize based on phase
-  // Phase 0 (queued) starts at nothing
   if (app.phase === 0) {
     return {
       progress: { 1: 0, 2: 0, 3: 0 },
@@ -157,7 +155,6 @@ function deriveProgress(app: SampleApp): {
     };
   }
 
-  // Phase 1 (gather) running or gather status
   if (app.phase === 1 || app.status === 'gather') {
     return {
       progress: { 1: app.status === 'running' ? 42 : 0, 2: 0, 3: 0 },
@@ -165,7 +162,6 @@ function deriveProgress(app: SampleApp): {
     };
   }
 
-  // Phase 2 (draft) running or draft status
   if (app.phase === 2 || app.status === 'draft') {
     return {
       progress: { 1: 100, 2: app.status === 'running' ? 42 : 0, 3: 0 },
@@ -173,7 +169,6 @@ function deriveProgress(app: SampleApp): {
     };
   }
 
-  // Phase 3 (render) running or review status
   if (app.phase === 3 || app.status === 'review') {
     return {
       progress: { 1: 100, 2: 100, 3: app.status === 'running' ? 42 : 0 },
@@ -181,7 +176,6 @@ function deriveProgress(app: SampleApp): {
     };
   }
 
-  // Default fallback (should not reach here)
   return {
     progress: { 1: 0, 2: 0, 3: 0 },
     activePhase: 1,
@@ -289,7 +283,7 @@ function PipelineTab({ events, running, phase, progress }: PipelineTabProps) {
           <div style={{ padding: '8px 4px' }}>
             {phaseSpec.specs.map(s => {
               const pct = phaseDone ? 100 : Math.min(100, progress[phaseNum] * (1 + Math.random() * 0.4));
-              void pct; // computed but used only implicitly via done/running/queued label
+              void pct;
               const iconName: IconName = phaseDone ? 'check' : 'dot';
               return (
                 <div key={s} style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -331,158 +325,169 @@ function PipelineTab({ events, running, phase, progress }: PipelineTabProps) {
 // ── ArtifactsTab ─────────────────────────────────────────────────────────────
 
 interface ArtifactsTabProps {
-  app: SampleApp;
+  detail: TApplicationDetail;
 }
 
-function ArtifactsTab({ app }: ArtifactsTabProps) {
-  const [sel, setSel] = useState<string>('cover_draft.md');
+interface RenderableFile {
+  /** Filename used as the selection key + the /raw/ allowlist key. */
+  name: string;
+  /** Display name (matches the design's tree). */
+  label: string;
+  /** Display size string ("2.1 KB", "—"). */
+  size: string;
+  /** Pre-loaded preview body, or null if we have no body for this file. */
+  body: string | null;
+  /** True when the body field was server-truncated. */
+  truncated: boolean;
+}
 
-  const tree: TreeNode[] = [
-    {
-      kind: 'dir', name: '.apply-state/', open: true, children: [
-        { kind: 'file', name: 'spec.json', size: '2.1 KB' },
-        { kind: 'file', name: 'bullet_selection.json', size: '4.8 KB' },
-        { kind: 'file', name: 'cover_draft.md', size: '1.6 KB', highlight: true },
-        { kind: 'file', name: 'fact_check.json', size: '820 B' },
-        { kind: 'file', name: 'anchor_check.json', size: '440 B' },
-      ],
-    },
-    {
-      kind: 'dir', name: 'rendered/', open: true, children: [
-        { kind: 'file', name: 'resume.pdf', size: '92 KB' },
-        { kind: 'file', name: 'cover.pdf', size: '58 KB' },
-        { kind: 'file', name: 'index.qmd', size: '3.2 KB' },
-        { kind: 'file', name: '_variables.yml', size: '1.1 KB' },
-      ],
-    },
+function fmtBytes(n: number | undefined): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function jsonOrEmpty(value: Record<string, unknown> | null | undefined): string {
+  if (!value) return '';
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return '';
+  }
+}
+
+function ArtifactsTab({ detail }: ArtifactsTabProps) {
+  // Resolve display sizes from the artifact tree (best effort — fall back to
+  // a string sentinel when the file is not represented).
+  const sizeFor = (name: string): string => {
+    const all = [...(detail.artifacts?.apply_state ?? []), ...(detail.artifacts?.rendered ?? [])];
+    const node = all.find(n => n.name === name);
+    return node ? fmtBytes(node.size) : '—';
+  };
+
+  // Map our preview catalogue to the live payload. `truncated` covers prose +
+  // cover-letter together (matches the backend's single boolean flag).
+  const proseTruncated = detail.truncated && Boolean(detail.prose_draft);
+  const coverTruncated = detail.truncated && Boolean(detail.cover_letter_draft);
+
+  const files: RenderableFile[] = [
+    { name: 'jd-parsed.json',         label: 'jd-parsed.json',         size: sizeFor('jd-parsed.json'),         body: jsonOrEmpty(detail.spec),             truncated: false },
+    { name: 'bullet_selection.json',  label: 'bullet_selection.json',  size: sizeFor('bullet_selection.json'),  body: jsonOrEmpty(detail.bullet_selection), truncated: false },
+    { name: 'prose-draft.md',         label: 'prose-draft.md',         size: sizeFor('prose-draft.md'),         body: detail.prose_draft ?? '',             truncated: proseTruncated },
+    { name: 'cover-letter-draft.md',  label: 'cover-letter-draft.md',  size: sizeFor('cover-letter-draft.md'),  body: detail.cover_letter_draft ?? '',      truncated: coverTruncated },
+    { name: 'fact_check.json',        label: 'fact_check.json',        size: sizeFor('fact_check.json'),        body: jsonOrEmpty(detail.fact_check),       truncated: false },
+    { name: 'anchor_check.json',      label: 'anchor_check.json',      size: sizeFor('anchor_check.json'),      body: jsonOrEmpty(detail.anchor_check),     truncated: false },
+    { name: '_variables.yml',         label: '_variables.yml',         size: sizeFor('_variables.yml'),         body: jsonOrEmpty(detail.variables),        truncated: false },
   ];
 
-  const PREVIEWS: Record<string, string> = {
-    'spec.json': `{
-  "slug": "${app.slug}",
-  "company": "${app.company}",
-  "role": "${app.role}",
-  "url": "${app.url}",
-  "must_haves": [
-    "deep typescript + node",
-    "shipped customer-facing CLI",
-    "performance work"
-  ],
-  "nice_to_haves": ["rust", "edge runtime"],
-  "themes": ["developer experience", "platform"]
-}`,
-    'cover_draft.md': `# Cover — ${app.role}, ${app.company}
+  // Add rendered PDFs (pdf preview is a placeholder in the design)
+  const rendered = detail.artifacts?.rendered ?? [];
+  for (const r of rendered) {
+    if (r.name.endsWith('.pdf')) {
+      files.push({ name: r.name, label: r.name, size: fmtBytes(r.size), body: '__PDF_PREVIEW__', truncated: false });
+    }
+  }
 
-I've been a heavy ${app.company} user for the past three years — the kind
-of user who reads the changelog. The bits of your stack that have stayed
-with me are exactly where I want to spend the next chapter of work.
+  // Default selection: prose-draft.md if it has a body, else first non-empty.
+  const initialSel = files.find(f => f.name === 'prose-draft.md' && f.body)?.name
+    ?? files.find(f => f.body && f.body !== '__PDF_PREVIEW__')?.name
+    ?? files[0]?.name
+    ?? 'prose-draft.md';
+  const [sel, setSel] = useState<string>(initialSel);
 
-In my last role at Recurly Engineering, I rebuilt the deploy pipeline
-(11m → 2m20s median) and shipped the artifact-cache layer that now
-serves 1.2B requests/month at p99 < 38ms. The work that mattered most
-wasn't either of those wins on its own — it was the cultural turn from
-"prod is scary" to "prod is boring."
-
-That's the work I want to bring to ${app.company}. ...`,
-    'fact_check.json': `{
-  "claims": [
-    { "claim": "11m → 2m20s deploy time", "source": "work.yml#deploy-pipeline", "ok": true },
-    { "claim": "1.2B requests/month",     "source": "work.yml#artifact-cache",  "ok": true },
-    { "claim": "p99 < 38ms",              "source": "work.yml#artifact-cache",  "ok": true },
-    { "claim": "$140k/yr recovered",      "source": "work.yml#scheduler-mig",   "ok": true },
-    { "claim": "180 engineers",           "source": "work.yml#dev-env",         "ok": true }
-  ],
-  "unverified": [],
-  "summary": "5 / 5 claims verified against master YAML"
-}`,
-    'bullet_selection.json': `{
-  "selected": [
-    "deploy-pipeline-rebuild",
-    "artifact-cache-rust",
-    "scheduler-migration",
-    "live-reload-dev-env"
-  ],
-  "anchors_preserved": "14/14",
-  "drop_reasons": {},
-  "rationale": "Selected bullets emphasize platform / DX impact + measured performance work, matching the role's stated focus."
-}`,
-    'anchor_check.json': `{
-  "total_anchors": 14,
-  "preserved": 14,
-  "dropped": 0,
-  "ok": true
-}`,
-    '_variables.yml': `slug: ${app.slug}
-company: "${app.company}"
-role:    "${app.role}"
-date:    2026-04-30
-selected_bullets:
-  - id: deploy-pipeline-rebuild
-  - id: artifact-cache-rust
-  - id: scheduler-migration
-  - id: live-reload-dev-env
-cover_path: cover_draft.md`,
-    'index.qmd': `---
-title: "{{< var role >}} — {{< var company >}}"
-format:
-  jobsmith-resume-pdf: default
-  jobsmith-cover-pdf:
-    output-file: cover.pdf
----
-{{< include _bullets.qmd >}}
-{{< include _cover.qmd >}}`,
-    'resume.pdf': '__PDF_PREVIEW__',
-    'cover.pdf': '__PDF_PREVIEW__',
-  };
+  const current = files.find(f => f.name === sel) ?? files[0];
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16 }}>
       <div className="card" style={{ padding: '12px' }}>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 8px 8px' }}>artifacts</div>
         <div className="tree">
-          {tree.map((node, i) => {
-            if (node.kind !== 'dir') return null;
-            const dir = node as TreeDir;
-            return (
-              <div key={i}>
-                <div className="tree-row">
-                  <Icon name="chevd" size={10} className="caret" />
-                  <Icon name="folder" size={12} className="ico" />
-                  <span style={{ color: 'var(--fg)' }}>{dir.name}</span>
+          <div>
+            <div className="tree-row">
+              <Icon name="chevd" size={10} className="caret" />
+              <Icon name="folder" size={12} className="ico" />
+              <span style={{ color: 'var(--fg)' }}>.apply-state/</span>
+            </div>
+            <div className="tree-children">
+              {files.filter(f => f.name.endsWith('.json') || f.name.endsWith('.md')).map(f => (
+                <div
+                  key={f.name}
+                  className={`tree-row ${sel === f.name ? 'active' : ''}`}
+                  onClick={() => setSel(f.name)}
+                >
+                  <span className="caret" />
+                  <Icon name="doc" size={11} className="ico" />
+                  <span style={{ flex: 1 }}>{f.label}</span>
+                  <span style={{ color: 'var(--fg-subtle)', fontSize: 10.5 }}>{f.size}</span>
                 </div>
-                <div className="tree-children">
-                  {dir.children.map(f => (
-                    <div
-                      key={f.name}
-                      className={`tree-row ${sel === f.name ? 'active' : ''}`}
-                      onClick={() => setSel(f.name)}
-                    >
-                      <span className="caret" />
-                      <Icon name="doc" size={11} className="ico" />
-                      <span style={{ flex: 1 }}>{f.name}</span>
-                      <span style={{ color: 'var(--fg-subtle)', fontSize: 10.5 }}>{f.size}</span>
-                    </div>
-                  ))}
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="tree-row">
+              <Icon name="chevd" size={10} className="caret" />
+              <Icon name="folder" size={12} className="ico" />
+              <span style={{ color: 'var(--fg)' }}>rendered/</span>
+            </div>
+            <div className="tree-children">
+              {files.filter(f => f.name.endsWith('.yml') || f.name.endsWith('.pdf')).map(f => (
+                <div
+                  key={f.name}
+                  className={`tree-row ${sel === f.name ? 'active' : ''}`}
+                  onClick={() => setSel(f.name)}
+                >
+                  <span className="caret" />
+                  <Icon name="doc" size={11} className="ico" />
+                  <span style={{ flex: 1 }}>{f.label}</span>
+                  <span style={{ color: 'var(--fg-subtle)', fontSize: 10.5 }}>{f.size}</span>
                 </div>
-              </div>
-            );
-          })}
+              ))}
+              {rendered.length === 0 && (
+                <div style={{ padding: '6px 12px', fontSize: 11, color: 'var(--fg-subtle)' }}>
+                  <span className="mono-sm">no renders yet</span>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
       <div className="card">
         <div className="card-h">
           <Icon name="doc" size={13} />
-          <h3 style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{sel}</h3>
+          <h3 style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{current?.label ?? sel}</h3>
           <div className="right">
+            {current?.truncated && (
+              <a
+                className="btn ghost sm"
+                href={`/api/applications/${detail.slug}/raw/${current.name}`}
+                target="_blank"
+                rel="noreferrer"
+                title="draft truncated; open the full file"
+              >
+                view full file
+              </a>
+            )}
             <button className="btn ghost sm">copy</button>
             <button className="btn ghost sm">open</button>
           </div>
         </div>
-        {PREVIEWS[sel] === '__PDF_PREVIEW__' ? (
-          <PdfPreview name={sel} />
+        {current?.truncated && (
+          <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--fg-muted)', borderBottom: '1px solid var(--border)', background: 'var(--bg-sunk)' }}>
+            <Icon name="flag" size={11} style={{ verticalAlign: 'middle', color: 'var(--accent)' }} />{' '}
+            preview truncated to 64&nbsp;KB — full file at <span className="mono-sm">/api/applications/{detail.slug}/raw/{current.name}</span>
+          </div>
+        )}
+        {current?.body === '__PDF_PREVIEW__' ? (
+          <PdfPreview name={current.name} />
+        ) : current?.body ? (
+          <pre className="code" style={{ border: 'none', borderRadius: 0, margin: 0, maxHeight: 560 }}>{current.body}</pre>
         ) : (
-          <pre className="code" style={{ border: 'none', borderRadius: 0, margin: 0, maxHeight: 560 }}>{PREVIEWS[sel]}</pre>
+          <div style={{ padding: 60, textAlign: 'center', color: 'var(--fg-subtle)' }}>
+            <div className="mono-sm">no content yet</div>
+            <div style={{ fontSize: 12, marginTop: 6 }}>this artifact has not been written for {detail.slug}.</div>
+          </div>
         )}
       </div>
     </div>
@@ -523,29 +528,46 @@ function PdfPreview({ name }: PdfPreviewProps) {
 
 // ── FactCheckTab ─────────────────────────────────────────────────────────────
 
-interface FactClaim {
-  c: string;
-  src: string;
-  ok: boolean;
+interface FactCheckTabProps {
+  detail: TApplicationDetail;
 }
 
-function FactCheckTab() {
-  const claims: FactClaim[] = [
-    { c: '11m → 2m20s deploy time', src: 'work.yml#deploy-pipeline', ok: true },
-    { c: '1.2B requests/month', src: 'work.yml#artifact-cache', ok: true },
-    { c: 'p99 < 38ms', src: 'work.yml#artifact-cache', ok: true },
-    { c: '$140k/yr recovered', src: 'work.yml#scheduler-mig', ok: true },
-    { c: '180 engineers', src: 'work.yml#dev-env', ok: true },
-    { c: '320 services migrated', src: 'work.yml#scheduler-mig', ok: true },
-    { c: '42% page volume reduction', src: 'work.yml#oncall', ok: true },
-  ];
+interface FactClaim {
+  claim?: string;
+  source?: string;
+  ok?: boolean;
+  [key: string]: unknown;
+}
+
+function FactCheckTab({ detail }: FactCheckTabProps) {
+  const raw = (detail.fact_check?.claims ?? []) as unknown;
+  const claims: FactClaim[] = Array.isArray(raw)
+    ? raw.filter((c): c is FactClaim => typeof c === 'object' && c !== null)
+    : [];
+  const verified = claims.filter(c => c.ok === true).length;
+
+  if (claims.length === 0) {
+    return (
+      <div className="card">
+        <div className="card-h">
+          <h3>fact-check</h3>
+          <span className="sub">cover_draft.md → master/work.yml</span>
+        </div>
+        <div style={{ padding: 60, textAlign: 'center', color: 'var(--fg-subtle)' }}>
+          <div className="mono-sm">no fact-check yet</div>
+          <div style={{ fontSize: 12, marginTop: 6 }}>fact_check.json has not been written for {detail.slug}.</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="card">
       <div className="card-h">
         <h3>fact-check</h3>
         <span className="sub">cover_draft.md → master/work.yml</span>
         <div className="right">
-          <Badge kind="success">{claims.filter(c => c.ok).length}/{claims.length} verified</Badge>
+          <Badge kind="success">{verified}/{claims.length} verified</Badge>
         </div>
       </div>
       <table className="table">
@@ -555,8 +577,8 @@ function FactCheckTab() {
         <tbody>
           {claims.map((c, i) => (
             <tr key={i}>
-              <td style={{ fontSize: 13 }}>{c.c}</td>
-              <td><span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{c.src}</span></td>
+              <td style={{ fontSize: 13 }}>{c.claim ?? '—'}</td>
+              <td><span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{c.source ?? '—'}</span></td>
               <td>
                 {c.ok
                   ? <Badge kind="success">verified</Badge>
@@ -572,34 +594,53 @@ function FactCheckTab() {
 
 // ── AnchorCheckTab ───────────────────────────────────────────────────────────
 
-function AnchorCheckTab() {
-  const anchors = [
-    'deploy-pipeline-rebuild',
-    'artifact-cache-rust',
-    'scheduler-migration',
-    'live-reload-dev-env',
-    'oss-rust-style-guide',
-    'team-onboarding-mentorship',
-    'dev-env-cold-start',
-    'rust-rfc-3-accepted',
-    'platform-cost-recovery',
-    'jd-parser-shipped',
-    'q3-incident-response',
-    'quarto-tooling-talk',
-    'onboarding-handbook-rewrite',
-    'cli-launch-200-stars',
-  ];
+interface AnchorCheckTabProps {
+  detail: TApplicationDetail;
+}
+
+function AnchorCheckTab({ detail }: AnchorCheckTabProps) {
+  const ac = detail.anchor_check ?? {};
+  const preserved: string[] = Array.isArray(ac.preserved_anchors)
+    ? (ac.preserved_anchors as unknown[]).filter((s): s is string => typeof s === 'string')
+    : [];
+  const dropped: Array<{ id?: string; reason?: string }> = Array.isArray(ac.dropped_anchors)
+    ? (ac.dropped_anchors as Array<Record<string, unknown>>).map(d => ({
+        id: typeof d.id === 'string' ? d.id : undefined,
+        reason: typeof d.reason === 'string' ? d.reason : undefined,
+      }))
+    : [];
+  const total = typeof ac.total_anchors === 'number' ? ac.total_anchors : preserved.length + dropped.length;
+  const preservedCount = typeof ac.preserved === 'number' ? ac.preserved : preserved.length;
+
+  if (preserved.length === 0 && dropped.length === 0 && !ac.total_anchors) {
+    return (
+      <div className="card">
+        <div className="card-h">
+          <h3>anchor preservation</h3>
+          <span className="sub">bullet_selection.json</span>
+        </div>
+        <div style={{ padding: 60, textAlign: 'center', color: 'var(--fg-subtle)' }}>
+          <div className="mono-sm">no anchor check yet</div>
+          <div style={{ fontSize: 12, marginTop: 6 }}>anchor_check.json has not been written for {detail.slug}.</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="card">
       <div className="card-h">
         <h3>anchor preservation</h3>
         <span className="sub">bullet_selection.json</span>
-        <div className="right"><Badge kind="success">14 / 14 preserved</Badge></div>
+        <div className="right"><Badge kind="success">{preservedCount} / {total} preserved</Badge></div>
       </div>
       <div style={{ padding: '18px 20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
         <div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>preserved anchors</div>
-          {anchors.map(a => (
+          {preserved.length === 0 && (
+            <div className="mono-sm" style={{ color: 'var(--fg-subtle)' }}>none reported</div>
+          )}
+          {preserved.map(a => (
             <div key={a} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}>
               <Icon name="check" size={11} style={{ color: 'var(--success)' }} />
               <span className="mono-sm">{a}</span>
@@ -608,10 +649,19 @@ function AnchorCheckTab() {
         </div>
         <div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>dropped (with reasons)</div>
-          <div style={{ padding: '24px', textAlign: 'center', color: 'var(--fg-subtle)', background: 'var(--bg-sunk)', borderRadius: 'var(--radius)', border: '1px dashed var(--border)' }}>
-            <div className="mono-sm">none</div>
-            <div style={{ fontSize: 12, marginTop: 4 }}>every anchor made it into this draft.</div>
-          </div>
+          {dropped.length === 0 ? (
+            <div style={{ padding: '24px', textAlign: 'center', color: 'var(--fg-subtle)', background: 'var(--bg-sunk)', borderRadius: 'var(--radius)', border: '1px dashed var(--border)' }}>
+              <div className="mono-sm">none</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>every anchor made it into this draft.</div>
+            </div>
+          ) : (
+            dropped.map((d, i) => (
+              <div key={d.id ?? i} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                <div className="mono-sm">{d.id ?? '—'}</div>
+                <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{d.reason ?? 'no reason given'}</div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>
@@ -621,29 +671,22 @@ function AnchorCheckTab() {
 // ── ConfigTab ────────────────────────────────────────────────────────────────
 
 interface ConfigTabProps {
-  app: SampleApp;
+  detail: TApplicationDetail;
 }
 
-function ConfigTab({ app }: ConfigTabProps) {
+function ConfigTab({ detail }: ConfigTabProps) {
+  const cfg = detail.config ?? {};
+  const cfgYaml = JSON.stringify(cfg, null, 2);
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
       <div className="card">
         <div className="card-h"><h3>.apply-config.yaml</h3></div>
-        <pre className="code" style={{ border: 'none', borderRadius: 0, margin: 0 }}>{`author: jordan-smith
-master:
-  work:      master/work.yml
-  skills:    master/skill.yml
-  education: master/education.yml
-benchmark:   master/benchmark.md
-output:
-  resume:    rendered/resume.pdf
-  cover:     rendered/cover.pdf
-phase_timeout_s: 600`}</pre>
+        <pre className="code" style={{ border: 'none', borderRadius: 0, margin: 0 }}>{cfgYaml || '{}'}</pre>
       </div>
       <div className="card">
         <div className="card-h"><h3>run options</h3></div>
         <div style={{ padding: '16px 18px' }}>
-          <div className="field"><label>job url</label><input className="mono" defaultValue={app.url} /></div>
+          <div className="field"><label>job url</label><input className="mono" defaultValue={detail.url} /></div>
           <div className="field"><label>jd-text-file</label><input className="mono" placeholder="(none — fetched from url)" /></div>
           <div className="field">
             <label>verbosity</label>
@@ -662,17 +705,82 @@ phase_timeout_s: 600`}</pre>
 // ── ApplicationDetail (top-level export) ─────────────────────────────────────
 
 export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
-  const app = SAMPLE_APPS.find(a => a.slug === slug) ?? SAMPLE_APPS[0];
+  const query = useApplication(slug);
+
+  // Loading state — match dashboard.tsx pattern (centered mono-sm note).
+  if (query.isLoading) {
+    return (
+      <div className="content wide">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          <button className="btn ghost sm" onClick={back}>
+            <Icon name="arrow" size={12} style={{ transform: 'scaleX(-1)' }} /> applications
+          </button>
+        </div>
+        <div className="card" style={{ padding: 60, textAlign: 'center', color: 'var(--fg-subtle)' }}>
+          <span className="mono-sm">loading {slug}…</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state — 404 → "not found", anything else → retry button.
+  if (query.isError) {
+    const err = query.error as { status?: number } | undefined;
+    const isNotFound = err?.status === 404;
+    return (
+      <div className="content wide">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          <button className="btn ghost sm" onClick={back}>
+            <Icon name="arrow" size={12} style={{ transform: 'scaleX(-1)' }} /> applications
+          </button>
+        </div>
+        <div className="card" style={{ padding: 60, textAlign: 'center', color: 'var(--danger, #c43)' }}>
+          {isNotFound ? (
+            <>
+              <div className="mono-sm" style={{ marginBottom: 8 }}>application not found</div>
+              <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>no slug matched <span className="mono-sm">{slug}</span>.</div>
+            </>
+          ) : (
+            <>
+              <div className="mono-sm" style={{ marginBottom: 8 }}>failed to load {slug}</div>
+              <button className="btn ghost sm" onClick={() => query.refetch()}>retry</button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (!query.data) {
+    // Shouldn't happen given isLoading/isError gates, but render a safe fallback.
+    return (
+      <div className="content wide">
+        <div className="card" style={{ padding: 60, textAlign: 'center', color: 'var(--fg-subtle)' }}>
+          <span className="mono-sm">no data</span>
+        </div>
+      </div>
+    );
+  }
+
+  return <ApplicationDetailReady detail={query.data} back={back} />;
+}
+
+interface ApplicationDetailReadyProps {
+  detail: TApplicationDetail;
+  back: () => void;
+}
+
+function ApplicationDetailReady({ detail, back }: ApplicationDetailReadyProps) {
   const { progress: initialProgress, activePhase: initialActivePhase } =
-    deriveProgress(app);
+    deriveProgress(detail);
 
   const [tab, setTab] = useState<TabName>('pipeline');
   const [activePhase, setActivePhase] = useState<number>(initialActivePhase);
-  const [running, setRunning] = useState<boolean>(app.status === 'running');
+  const [running, setRunning] = useState<boolean>(detail.status === 'running');
   const [progress, setProgress] = useState<ProgressMap>(initialProgress);
-  const [events, setEvents] = useState<LogEvent[]>(() => seedEvents(app));
+  const [events, setEvents] = useState<LogEvent[]>(() => seedEvents(detail));
 
-  // Live progress sim when running
+  // Live progress sim when running. Slice 8 will replace this with real SSE.
   useEffect(() => {
     if (!running) return;
     const id = setInterval(() => {
@@ -705,15 +813,15 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
       <div className="page-head">
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <h1 style={{ margin: 0 }}>{app.role}</h1>
-            <StatusBadge status={running ? 'running' : app.status} />
+            <h1 style={{ margin: 0 }}>{detail.role ?? '—'}</h1>
+            <StatusBadge status={running ? 'running' : detail.status} />
           </div>
           <div style={{ display: 'flex', gap: 14, marginTop: 8, color: 'var(--fg-muted)', fontSize: 13 }}>
-            <span>{app.company}</span>
+            <span>{detail.company ?? '—'}</span>
             <span style={{ color: 'var(--fg-subtle)' }}>·</span>
-            <span className="mono-sm">{app.slug}</span>
+            <span className="mono-sm">{detail.slug}</span>
             <span style={{ color: 'var(--fg-subtle)' }}>·</span>
-            <span className="mono-sm" style={{ color: 'var(--fg-subtle)' }}>updated {app.updated}</span>
+            <span className="mono-sm" style={{ color: 'var(--fg-subtle)' }}>updated {detail.updated}</span>
           </div>
         </div>
         <div className="actions">
@@ -768,10 +876,10 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
       </div>
 
       {tab === 'pipeline' && <PipelineTab events={events} running={running} phase={activePhase} progress={progress} />}
-      {tab === 'artifacts' && <ArtifactsTab app={app} />}
-      {tab === 'factcheck' && <FactCheckTab />}
-      {tab === 'anchors' && <AnchorCheckTab />}
-      {tab === 'config' && <ConfigTab app={app} />}
+      {tab === 'artifacts' && <ArtifactsTab detail={detail} />}
+      {tab === 'factcheck' && <FactCheckTab detail={detail} />}
+      {tab === 'anchors' && <AnchorCheckTab detail={detail} />}
+      {tab === 'config' && <ConfigTab detail={detail} />}
     </div>
   );
 }

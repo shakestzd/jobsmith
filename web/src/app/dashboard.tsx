@@ -6,8 +6,9 @@
 // The `filter` prop maps directly to the initial tab selection.
 
 import { useState, useMemo } from 'react';
-import type { SampleApp } from '../types';
-import { Icon, StatusBadge, SAMPLE_APPS } from './shared';
+import type { Application } from '../api/types';
+import { useApplications } from '../api/hooks';
+import { Icon, StatusBadge } from './shared';
 
 // ── Prop interfaces ──────────────────────────────────────────────────────────
 
@@ -35,19 +36,30 @@ export function Dashboard({ openApp, openNew, filter = 'all' }: DashboardProps) 
   const [tab, setTab] = useState<'all' | 'running' | 'review' | 'rendered'>(filter);
   const [q, setQ] = useState('');
 
-  const filtered = useMemo<SampleApp[]>(() => {
-    let list = SAMPLE_APPS;
-    if (tab === 'running') list = list.filter(a => ['running', 'queued'].includes(a.status));
-    if (tab === 'review')  list = list.filter(a => ['review', 'draft'].includes(a.status));
+  const query = useApplications();
+  const apps: Application[] = query.data ?? [];
+
+  const filtered = useMemo<Application[]>(() => {
+    let list = apps;
+    if (tab === 'running') list = list.filter(a => a.status === 'running' || a.status === 'queued');
+    if (tab === 'review')  list = list.filter(a => a.status === 'review' || a.status === 'draft');
     if (tab === 'rendered') list = list.filter(a => a.status === 'rendered');
-    if (q) list = list.filter(a => (a.slug + a.role + a.company).toLowerCase().includes(q.toLowerCase()));
+    if (q) {
+      const needle = q.toLowerCase();
+      list = list.filter(a =>
+        (a.slug + (a.role ?? '') + (a.company ?? '')).toLowerCase().includes(needle),
+      );
+    }
     return list;
-  }, [tab, q]);
+  }, [apps, tab, q]);
+
+  const renderedCount = apps.filter(a => a.status === 'rendered').length;
+  const inProgressCount = apps.filter(a => a.status === 'running' || a.status === 'queued' || a.status === 'draft').length;
 
   const stats: StatItem[] = [
-    { label: 'total', value: SAMPLE_APPS.length, delta: '+3 this week', up: true },
-    { label: 'rendered', value: SAMPLE_APPS.filter(a => a.status === 'rendered').length, delta: '67% pass on first render' },
-    { label: 'in progress', value: SAMPLE_APPS.filter(a => ['running', 'queued', 'draft'].includes(a.status)).length, delta: '1 phase running' },
+    { label: 'total', value: apps.length, delta: '+3 this week', up: true },
+    { label: 'rendered', value: renderedCount, delta: '67% pass on first render' },
+    { label: 'in progress', value: inProgressCount, delta: '1 phase running' },
     { label: 'avg apply time', value: '4m 12s', delta: '−38% vs last month', up: true },
   ];
 
@@ -81,25 +93,25 @@ export function Dashboard({ openApp, openNew, filter = 'all' }: DashboardProps) 
               className={`tab ${tab === 'all' ? 'active' : ''}`}
               onClick={() => setTab('all')}
             >
-              all <span className="tab-count">{SAMPLE_APPS.length}</span>
+              all <span className="tab-count">{apps.length}</span>
             </div>
             <div
               className={`tab ${tab === 'running' ? 'active' : ''}`}
               onClick={() => setTab('running')}
             >
-              running <span className="tab-count">{SAMPLE_APPS.filter(a => ['running', 'queued'].includes(a.status)).length}</span>
+              running <span className="tab-count">{apps.filter(a => a.status === 'running' || a.status === 'queued').length}</span>
             </div>
             <div
               className={`tab ${tab === 'review' ? 'active' : ''}`}
               onClick={() => setTab('review')}
             >
-              review <span className="tab-count">{SAMPLE_APPS.filter(a => ['review', 'draft'].includes(a.status)).length}</span>
+              review <span className="tab-count">{apps.filter(a => a.status === 'review' || a.status === 'draft').length}</span>
             </div>
             <div
               className={`tab ${tab === 'rendered' ? 'active' : ''}`}
               onClick={() => setTab('rendered')}
             >
-              rendered <span className="tab-count">{SAMPLE_APPS.filter(a => a.status === 'rendered').length}</span>
+              rendered <span className="tab-count">{renderedCount}</span>
             </div>
           </div>
           <div className="right">
@@ -129,11 +141,30 @@ export function Dashboard({ openApp, openNew, filter = 'all' }: DashboardProps) 
             </tr>
           </thead>
           <tbody>
-            {filtered.map(a => (
+            {query.isLoading && (
+              <tr>
+                <td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--fg-subtle)' }}>
+                  <span className="mono-sm">loading applications…</span>
+                </td>
+              </tr>
+            )}
+            {query.isError && (
+              <tr>
+                <td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--danger, #c43)' }}>
+                  <div className="mono-sm" style={{ marginBottom: 8 }}>
+                    failed to load applications
+                  </div>
+                  <button className="btn ghost sm" onClick={() => query.refetch()}>
+                    retry
+                  </button>
+                </td>
+              </tr>
+            )}
+            {query.isSuccess && filtered.map(a => (
               <tr key={a.slug} className="row-clickable" onClick={() => openApp(a.slug)}>
                 <td><span className="slug">{a.slug}</span></td>
-                <td><span className="role">{a.role}</span></td>
-                <td><span className="company">{a.company}</span></td>
+                <td><span className="role">{a.role ?? '—'}</span></td>
+                <td><span className="company">{a.company ?? '—'}</span></td>
                 <td><span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{a.phase}/3</span></td>
                 <td><span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{a.anchors}</span></td>
                 <td><StatusBadge status={a.status} /></td>
@@ -141,7 +172,7 @@ export function Dashboard({ openApp, openNew, filter = 'all' }: DashboardProps) 
                 <td><Icon name="chev" size={12} style={{ opacity: 0.5 }} /></td>
               </tr>
             ))}
-            {filtered.length === 0 && (
+            {query.isSuccess && filtered.length === 0 && (
               <tr>
                 <td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--fg-subtle)' }}>
                   no applications match

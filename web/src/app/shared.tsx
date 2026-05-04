@@ -192,6 +192,10 @@ export function Code({ children }: CodeProps) {
 }
 
 // ── Sample data ──────────────────────────────────────────────────────────
+/**
+ * @deprecated Used only by Storybook and tests. Live application data flows
+ * through `useApplications()` from `../api/hooks.ts`.
+ */
 export const SAMPLE_APPS: SampleApp[] = [
   {
     slug: 'anthropic-applied-ai-2026-04',
@@ -291,6 +295,10 @@ export const SAMPLE_APPS: SampleApp[] = [
   },
 ];
 
+/**
+ * @deprecated Used only by Storybook and tests. Live bullet data flows
+ * through `useMaster()` from `../api/hooks.ts` (work[].details).
+ */
 export const SAMPLE_BULLETS: SampleBullet[] = [
   {
     id: 'b1',

@@ -2,6 +2,26 @@
 //
 // Phase 1 establishes these shapes so Phase 2/3 modules import a stable
 // vocabulary. Add new types here rather than re-declaring inline.
+//
+// Live backend types live in ./api/types.ts and are re-exported here for
+// convenience. The legacy `SampleApp` / `SampleBullet` shapes are retained
+// for Storybook/test fixtures only — prefer `Application` from ./api/types.ts.
+
+export type {
+  Application,
+  ApplicationDetail,
+  ArtifactNode,
+  ArtifactTree,
+  Author,
+  AuthorContact,
+  AuthorName,
+  EducationEntry,
+  MasterPayload,
+  SkillEntry,
+  WorkDetail,
+  WorkDetailDict,
+  WorkEntry,
+} from './api/types';
 
 // ── Icons ────────────────────────────────────────────────────────────────
 // Every key listed below MUST match a `case` in `Icon`'s `paths` map in
@@ -50,6 +70,10 @@ export type AppStatus =
  */
 export type AppPhase = 0 | 1 | 2 | 3;
 
+/**
+ * @deprecated Used only by Storybook and tests. Prefer `Application` from
+ * `./api/types.ts` for live data flows.
+ */
 export interface SampleApp {
   slug: string;
   role: string;
@@ -67,6 +91,10 @@ export interface SampleApp {
 }
 
 // ── Bullets ──────────────────────────────────────────────────────────────
+/**
+ * @deprecated Used only by Storybook and tests. Bullets now flow through
+ * `MasterPayload.work[].details` from `./api/types.ts`.
+ */
 export interface SampleBullet {
   id: string;
   /** Whether this bullet is currently anchored (kept verbatim across renders). */

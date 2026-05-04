@@ -5,7 +5,8 @@
 // presentational components driven by props from the parent shell.
 
 import { Fragment } from 'react';
-import { Icon, SAMPLE_APPS } from './shared';
+import { Icon } from './shared';
+import { useApplications } from '../api/hooks';
 import type { IconName, ThemeName, ViewName } from '../types';
 
 // ── Sidebar ──────────────────────────────────────────────────────────────
@@ -38,12 +39,17 @@ function NavItem({ id, icon, label, count, view, setView }: NavItemProps) {
 }
 
 export function Sidebar({ view, setView, openNew }: SidebarProps) {
+  // Live counts from /api/applications. Defaults to zeroes during loading
+  // and on error so chrome never crashes; tooltip on the brand name (future)
+  // can surface error state.
+  const { data: apps } = useApplications();
+  const list = apps ?? [];
   const counts = {
-    dashboard: SAMPLE_APPS.length,
-    running: SAMPLE_APPS.filter(
+    dashboard: list.length,
+    running: list.filter(
       (a) => a.status === 'running' || a.status === 'queued',
     ).length,
-    review: SAMPLE_APPS.filter(
+    review: list.filter(
       (a) => a.status === 'review' || a.status === 'draft',
     ).length,
   };

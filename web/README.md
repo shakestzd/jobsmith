@@ -9,8 +9,30 @@ Vite + React 18 + TypeScript port of the design package at
 npm install
 npm run dev          # starts on http://localhost:5173
 npm run typecheck    # tsc --noEmit
+npm test             # vitest run (uses msw to mock the API)
 npm run build        # type-check + production build into dist/
 ```
+
+## Backend API
+
+The frontend reads live data from the FastAPI backend (slices 3-5 of
+plan-bd67355e). Start it from the project root with `jobsmith api serve`,
+which listens on `http://localhost:8000` by default.
+
+### `VITE_API_BASE_URL`
+
+Override the backend URL at build/dev time when the API is served on a
+non-default host or port. Copy `.env.example` to `.env.local` and edit:
+
+```bash
+cp .env.example .env.local
+# .env.local
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+The variable is consumed by `web/src/api/client.ts` via `import.meta.env`;
+when unset (or empty), the client falls back to `http://localhost:8000`.
+Trailing slashes are trimmed automatically.
 
 ## Structure
 
