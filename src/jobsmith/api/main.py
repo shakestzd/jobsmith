@@ -37,6 +37,8 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from jobsmith.api.applications import router as applications_router
+from jobsmith.api.artifacts import router as artifacts_router
 from jobsmith.api.auth import verify_token
 from jobsmith.api.master import router as master_router
 
@@ -67,6 +69,16 @@ def create_app() -> FastAPI:
     # --- API routers (all require Bearer token) ---
     app.include_router(
         master_router,
+        prefix="/api",
+        dependencies=[Depends(verify_token)],
+    )
+    app.include_router(
+        artifacts_router,
+        prefix="/api",
+        dependencies=[Depends(verify_token)],
+    )
+    app.include_router(
+        applications_router,
         prefix="/api",
         dependencies=[Depends(verify_token)],
     )
