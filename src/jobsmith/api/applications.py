@@ -38,14 +38,27 @@ def _open_conn(db_path: Path):
 
 
 def _latest_run_per_slug(conn) -> list:
-    """Return one apply_runs row per slug (most recent by started_at)."""
+    """Return one apply_runs row per slug (most recent by started_at, rowid).
+
+    ``started_at`` is text-formatted ISO at second resolution (see
+    :func:`supervisor._now_iso`), so two runs for the same slug started
+    in the same second can both match ``MAX(started_at)``. Tie-break on
+    ``rowid`` (insertion order) to guarantee exactly one row per slug.
+    """
     return conn.execute(
         """
-        SELECT * FROM apply_runs
-        WHERE (slug, started_at) IN (
-            SELECT slug, MAX(started_at) FROM apply_runs GROUP BY slug
+        SELECT ar.* FROM apply_runs ar
+        WHERE ar.rowid IN (
+            SELECT MAX(inner_ar.rowid)
+            FROM apply_runs inner_ar
+            WHERE inner_ar.started_at = (
+                SELECT MAX(started_at)
+                FROM apply_runs
+                WHERE slug = inner_ar.slug
+            )
+            GROUP BY inner_ar.slug
         )
-        ORDER BY started_at DESC
+        ORDER BY ar.started_at DESC, ar.rowid DESC
         """,
     ).fetchall()
 

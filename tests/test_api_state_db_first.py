@@ -231,10 +231,9 @@ class TestFsFallback:
         assert fs_load_calls == [], f"FS load was called with flag off: {fs_load_calls}"
 
     def test_fs_fallback_called_when_kind_missing(self, db_path: Path, caplog):
-        """JOBSMITH_FS_FALLBACK=1 — _fs_fallback_load called and WARNING logged when kind absent."""
+        """JOBSMITH_FS_FALLBACK=1 — _fs_fallback_load called for each absent kind."""
         conn = open_pipeline_db(db_path)
         _insert_run(conn, run_id="run-fb", slug="fallback-co", status="done")
-        # No outputs — FS fallback should be invoked
         conn.close()
 
         from jobsmith.api import state as state_mod
@@ -246,6 +245,10 @@ class TestFsFallback:
 
         def _fake_fs_load(state_dir, kind):
             fallback_calls.append(kind)
+            # Return a non-None payload for one specific kind so we exercise
+            # the "successful fallback" branch (which is the one that logs).
+            if kind == "prose-draft":
+                return {"text": "found on disk"}
             return None
 
         with (
@@ -256,17 +259,17 @@ class TestFsFallback:
         ):
             state_mod.derive_application_state("fallback-co")
 
-        # At least one FS fallback was attempted
+        # Every probe kind got attempted
         assert len(fallback_calls) > 0
-        # WARNING logged for each fallback
+        # Exactly one WARNING fires — only the kind that actually returned data.
+        # Bare misses are silent so logs aren't flooded for early-phase apps.
         warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
-        assert len(warning_msgs) > 0, "Expected WARNING log on FS fallback"
-        # Each warning should mention slug and kind
+        assert len(warning_msgs) >= 1, "Expected WARNING on successful FS fallback"
         for msg in warning_msgs:
             assert "fallback-co" in msg
 
-    def test_fs_fallback_warning_contains_kind(self, db_path: Path, caplog):
-        """FS fallback WARNING messages include the kind being looked up."""
+    def test_fs_fallback_silent_on_miss(self, db_path: Path, caplog):
+        """FS fallback DOES NOT log WARNING when the file is also absent on disk."""
         conn = open_pipeline_db(db_path)
         _insert_run(conn, run_id="run-warnkind", slug="warn-co", status="done")
         conn.close()
@@ -277,7 +280,7 @@ class TestFsFallback:
             return db_path
 
         def _fake_fs_load(state_dir, kind):
-            return None
+            return None  # all probes miss
 
         with (
             patch.object(state_mod, "_get_db_path", _db_path_fn),
@@ -288,11 +291,38 @@ class TestFsFallback:
             state_mod.derive_application_state("warn-co")
 
         warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
-        # At least one warning mentions a specific kind
-        kinds_in_warnings = {msg for msg in warning_msgs if any(
-            k in msg for k in ["jd-parsed", "prose-draft", "cover-letter-draft", "bullet-selection"]
-        )}
-        assert len(kinds_in_warnings) > 0, f"No kind found in warnings: {warning_msgs}"
+        assert warning_msgs == [], (
+            "Expected no WARNINGs when every fallback misses; got: " + str(warning_msgs)
+        )
+
+    def test_fs_fallback_warning_contains_kind(self, db_path: Path, caplog):
+        """A successful FS fallback WARNING message names the kind."""
+        conn = open_pipeline_db(db_path)
+        _insert_run(conn, run_id="run-warnkind2", slug="warn2-co", status="done")
+        conn.close()
+
+        from jobsmith.api import state as state_mod
+
+        def _db_path_fn():
+            return db_path
+
+        def _fake_fs_load(state_dir, kind):
+            if kind == "jd-parsed":
+                return {"company": "X"}
+            return None
+
+        with (
+            patch.object(state_mod, "_get_db_path", _db_path_fn),
+            patch.dict(os.environ, {"JOBSMITH_FS_FALLBACK": "1"}),
+            patch.object(state_mod, "_fs_fallback_load", _fake_fs_load),
+            caplog.at_level(logging.WARNING, logger="jobsmith.api.state"),
+        ):
+            state_mod.derive_application_state("warn2-co")
+
+        warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("jd-parsed" in msg for msg in warning_msgs), (
+            f"Expected 'jd-parsed' in successful-fallback warnings: {warning_msgs}"
+        )
 
 
 # ---------------------------------------------------------------------------

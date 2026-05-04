@@ -105,11 +105,23 @@ def _require_run_outputs(db_path: Path, run_id: str) -> list:
     return rows
 
 
-def _require_run_exists(conn, run_id: str) -> None:
-    """Raise 404 if run_id is not in apply_runs."""
-    row = conn.execute(
-        "SELECT run_id FROM apply_runs WHERE run_id = ?", (run_id,)
-    ).fetchone()
+def _require_run_exists(conn, run_id: str, slug: str | None = None) -> None:
+    """Raise 404 if run_id is not in apply_runs (optionally scoped to *slug*).
+
+    When *slug* is provided, also rejects mismatches between the requested
+    slug and the run's actual slug. Without this guard, a PUT to
+    ``/applications/foo/runs/<run-belonging-to-bar>/artifacts/...`` would
+    silently write a row associated with bar but route through foo.
+    """
+    if slug is None:
+        row = conn.execute(
+            "SELECT run_id FROM apply_runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT run_id FROM apply_runs WHERE run_id = ? AND slug = ?",
+            (run_id, slug),
+        ).fetchone()
     if row is None:
         raise HTTPException(
             status_code=404, detail=f"Run {run_id!r} not found"
@@ -211,8 +223,10 @@ def put_artifact(
         raise HTTPException(status_code=503, detail=f"DB unavailable: {exc}") from exc
 
     try:
-        # Verify run exists
-        _require_run_exists(conn, run_id)
+        # Verify run exists AND belongs to this slug (defends against the
+        # frontend or CLI submitting a run_id that's actually owned by a
+        # different slug, which would silently corrupt the slug directory).
+        _require_run_exists(conn, run_id, slug)
 
         # Check for existing row (any specialist for this run+kind)
         existing = conn.execute(
@@ -291,8 +305,10 @@ def put_artifact(
     finally:
         conn.close()
 
-    # Broadcast the artifact write so SSE consumers see it immediately rather
-    # than waiting on poll latency (feat-1e066d57).
+    # Hook for future SSE pubsub. Currently a no-op — DB poll in events.py
+    # is authoritative; PUTs surface to SSE consumers within one poll
+    # interval (default 0.25s). The call site is preserved as the future
+    # broadcast point.
     _broadcast_artifact_event(slug=slug, run_id=run_id, kind=kind, version=new_version)
 
     return _row_to_envelope(row)
@@ -301,15 +317,14 @@ def put_artifact(
 def _broadcast_artifact_event(
     *, slug: str, run_id: str, kind: str, version: int = 1
 ) -> None:
-    """Broadcast an artifact-write notification to any open SSE streams.
+    """No-op placeholder for an in-process SSE pubsub.
 
-    This is called after every successful PUT so the SSE consumer surfaces
-    the event immediately rather than relying solely on DB poll latency.
-
-    Currently a lightweight no-op when no SSE stream is open for the slug —
-    the DB poll will pick it up on the next interval anyway. Future slices
-    may replace this with an in-process pubsub channel if sub-poll latency
-    matters.
+    The DB poll loop in :mod:`jobsmith.api.events` is the authoritative
+    surface for artifact-write notifications. SSE consumers see new
+    rows within one poll interval, so a true broadcaster is not required
+    today. This function exists as a stable call site in
+    :func:`put_artifact` so a future change can wire an
+    ``asyncio.Queue``-based broadcaster without touching the route.
     """
 
 

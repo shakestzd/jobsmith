@@ -141,6 +141,16 @@ def _serialise_variables_yml(output: dict[str, Any]) -> bytes:
         return (json.dumps(output, indent=2, ensure_ascii=False) + "\n").encode()
 
 
+def _serialise_quarto_config(output: dict[str, Any]) -> bytes:
+    """Re-emit _quarto.yml from a ``{"content": <yaml-text>}`` envelope.
+
+    Falls back to ``text`` for backwards-compatibility with payloads written
+    before the quarto-config envelope was tightened (feat-60be8c3a fix).
+    """
+    content = output.get("content") or output.get("text") or ""
+    return content.encode() if isinstance(content, str) else b""
+
+
 def _serialise_artifact(kind: str, output: dict[str, Any]) -> bytes:
     """Dispatch to the right serialiser for *kind*."""
     if kind == "hm-snippet":
@@ -148,6 +158,8 @@ def _serialise_artifact(kind: str, output: dict[str, Any]) -> bytes:
     # Text/Markdown kinds
     if kind in ("prose-draft", "company-research", "outreach-snippets", "cover-letter-draft"):
         return _serialise_text(output)
+    if kind == "quarto-config":
+        return _serialise_quarto_config(output)
     # YAML kinds
     if kind == "variables":
         return _serialise_variables_yml(output)
@@ -169,11 +181,13 @@ def _atomic_write(dest: Path, data: bytes) -> int:
     dest.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=dest.parent, prefix=".snap-")
     try:
-        os.write(fd, data)
-        os.close(fd)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
         os.replace(tmp_path, str(dest))
     except Exception:
-        os.close(fd)
+        # fdopen takes ownership of *fd* and closes it on context exit (or on
+        # exception inside the with-block), so no manual close here. We only
+        # need to clean up the temp file if rename failed after close.
         with contextlib.suppress(OSError):
             os.unlink(tmp_path)
         raise
@@ -246,12 +260,21 @@ def create_snapshot(
         raise HTTPException(status_code=503, detail=f"DB unavailable: {exc}") from exc
 
     try:
-        # Verify run exists
+        # Verify run exists AND belongs to this slug — without the slug
+        # check a snapshot of /foo/runs/<bar's run> would dump bar's
+        # artifacts into foo's directory.
         run_row = conn.execute(
-            "SELECT run_id FROM apply_runs WHERE run_id = ?", (run_id,)
+            "SELECT run_id FROM apply_runs WHERE run_id = ? AND slug = ?",
+            (run_id, slug),
         ).fetchone()
         if run_row is None:
             raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+
+        # Slug path-traversal guard (mirrors events.py:_validate_slug_or_404).
+        if not slug or "/" in slug or ".." in slug or slug.startswith("."):
+            raise HTTPException(
+                status_code=400, detail=f"Invalid slug: {slug!r}"
+            )
 
         # Fetch artifact rows
         rows = conn.execute(

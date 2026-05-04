@@ -282,12 +282,16 @@ def _benchmark_path(config_path: Path) -> Path:
 
 
 def _content_version(text: str) -> str:
-    """Return a short content-hash version token for *text*."""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    """Return the file content-hash version token for *text*.
+
+    Uses the same full SHA-256 hex digest as :func:`etag_for_section` so
+    GET ``ETag`` and ``BenchmarkResponse.version`` match byte-for-byte.
+    """
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 @router.get("/master/benchmark", response_model=BenchmarkResponse)
-def get_benchmark() -> BenchmarkResponse:
+def get_benchmark(response: Response) -> BenchmarkResponse:
     """Return the raw text + version of benchmark.md.
 
     Returns ``{text: '', version: ''}`` when the file is absent (not a 404)
@@ -296,22 +300,47 @@ def get_benchmark() -> BenchmarkResponse:
     config_path = _require_config_path()
     path = _benchmark_path(config_path)
     if not path.exists():
+        response.headers["ETag"] = '""'
         return BenchmarkResponse(text="", version="")
     text = path.read_text(encoding="utf-8")
-    return BenchmarkResponse(text=text, version=_content_version(text))
+    version = _content_version(text)
+    response.headers["ETag"] = f'"{version}"'
+    return BenchmarkResponse(text=text, version=version)
 
 
 @router.put("/master/benchmark", response_model=BenchmarkResponse)
-def put_benchmark(body: BenchmarkPayload) -> BenchmarkResponse:
+def put_benchmark(
+    body: BenchmarkPayload,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),  # noqa: B008
+) -> BenchmarkResponse:
     """Atomically replace benchmark.md with *body.text*.
 
-    Returns the written text and a fresh version token so the client can
-    detect concurrent writes.
+    Concurrent-write guard: clients SHOULD send ``If-Match: "<version>"``
+    where ``<version>`` is the SHA-256 hex of the file content from the
+    most recent GET. A mismatch returns 412 Precondition Failed. The
+    header is optional for backwards compatibility — omitting it accepts
+    last-writer-wins, matching the existing master-section semantics.
     """
     config_path = _require_config_path()
     path = _benchmark_path(config_path)
+    if if_match is not None:
+        current_text = path.read_text(encoding="utf-8") if path.exists() else ""
+        current_version = _content_version(current_text) if current_text else ""
+        # Strip surrounding double-quotes that conform to the HTTP ETag spec.
+        sent = if_match.strip().strip('"')
+        if sent != current_version:
+            raise HTTPException(
+                status_code=412,
+                detail=(
+                    f"If-Match version mismatch: client sent {sent!r}, "
+                    f"current is {current_version!r}"
+                ),
+            )
     save_benchmark(body.text, path)
-    return BenchmarkResponse(text=body.text, version=_content_version(body.text))
+    new_version = _content_version(body.text)
+    response.headers["ETag"] = f'"{new_version}"'
+    return BenchmarkResponse(text=body.text, version=new_version)
 
 
 # ---------------------------------------------------------------------------
@@ -468,9 +497,9 @@ def post_add_bullet(
         )
     except IndexError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
-    # Determine effective bullet_index for the response
-    import yaml as _yaml  # noqa: PLC0415 (local import to avoid top-level cycle risk)
-    data = _yaml.safe_load(work_path.read_text(encoding="utf-8"))
+    # Determine effective bullet_index for the response (yaml is already
+    # imported at module level — no need for a local re-import).
+    data = yaml.safe_load(work_path.read_text(encoding="utf-8"))
     details = data[role_index].get("details", [])
     effective_index = len(details) - 1 if body.position is None else body.position
     return BulletWriteResponse(

@@ -139,20 +139,23 @@ def derive_application_state(slug: str) -> dict:
 
     present_kinds: set[str] = {r["kind"] for r in kind_rows}
 
-    # FS fallback: for each probe kind absent from DB, attempt FS read
+    # FS fallback: for each probe kind absent from DB, attempt FS read.
+    # Only log a WARNING when the fallback actually returns a non-None value —
+    # absence on disk for an early-phase application is expected and would
+    # otherwise flood logs with noise that obscures real fallback events.
     if fs_fallback_enabled:
-        # Resolve state_dir lazily — we don't fail hard if it's missing
         state_dir = _resolve_state_dir(slug, db_path)
         for kind in _FS_PROBE_KINDS:
-            if kind not in present_kinds:
+            if kind in present_kinds:
+                continue
+            value = _fs_fallback_load(state_dir, kind)
+            if value is not None:
+                present_kinds.add(kind)
                 _log.warning(
-                    "FS fallback: kind %r absent from DB for slug %r — reading filesystem",
+                    "FS fallback hit: kind %r absent from DB for slug %r — read from filesystem",
                     kind,
                     slug,
                 )
-                value = _fs_fallback_load(state_dir, kind)
-                if value is not None:
-                    present_kinds.add(kind)
 
     phase = _derive_phase_from_kinds(present_kinds)
     return {"slug": slug, "run_id": run_id, "phase": phase, "status": db_status}

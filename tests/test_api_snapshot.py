@@ -314,11 +314,18 @@ class TestAtomicWrite:
 
     def test_atomic_write_no_partial_on_failure(self, tmp_path: Path) -> None:
         dest = tmp_path / "out.json"
-        # Simulate a write failure by patching os.write to raise
-        with patch("jobsmith.api.snapshots.os.write", side_effect=OSError("disk full")), pytest.raises(OSError):
+        # Simulate a rename failure (e.g. cross-device move). The atomic write
+        # must clean up the temp file and not leave a partial dest behind.
+        with (
+            patch("jobsmith.api.snapshots.os.replace", side_effect=OSError("EXDEV")),
+            pytest.raises(OSError),
+        ):
             _atomic_write(dest, b"data")
-        # The destination must NOT exist (no partial file)
+        # The destination must NOT exist (rename failed before the move)
         assert not dest.exists()
+        # No temp file leftover either — the except branch unlinks it
+        leftovers = list(tmp_path.glob(".snap-*"))
+        assert leftovers == [], f"temp file leaked: {leftovers}"
 
     def test_atomic_write_overwrites_existing(self, tmp_path: Path) -> None:
         dest = tmp_path / "file.json"

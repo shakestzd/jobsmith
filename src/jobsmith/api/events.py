@@ -60,6 +60,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal
@@ -71,6 +72,8 @@ from jobsmith.api.events_poll import (
     _db_poll_once,
 )
 from jobsmith.api.supervisor import RunSupervisor, get_supervisor
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["events"])
 
@@ -261,7 +264,15 @@ async def _supervisor_log_producer(
         except asyncio.CancelledError:
             return
         except Exception:  # noqa: BLE001 — never let the producer break the SSE
-            # Best-effort: swallow and loop; the DB poll continues regardless.
+            # Log the failure so operators can see when the live-log path
+            # silently degrades to DB-poll-only — without this, a bug in
+            # supervisor.stream() (or any consumer) would have no signal.
+            # The DB poll continues regardless.
+            logger.exception(
+                "supervisor log producer failed for slug=%r run_id=%r",
+                slug,
+                run_id,
+            )
             continue
 
 
