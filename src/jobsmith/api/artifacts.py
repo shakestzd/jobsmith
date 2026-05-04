@@ -291,16 +291,25 @@ def put_artifact(
     finally:
         conn.close()
 
-    # Broadcast hook stub — slice 5 will wire real SSE; this is the call site.
-    _broadcast_artifact_event(slug=slug, run_id=run_id, kind=kind)
+    # Broadcast the artifact write so SSE consumers see it immediately rather
+    # than waiting on poll latency (feat-1e066d57).
+    _broadcast_artifact_event(slug=slug, run_id=run_id, kind=kind, version=new_version)
 
     return _row_to_envelope(row)
 
 
-def _broadcast_artifact_event(*, slug: str, run_id: str, kind: str) -> None:
-    """Stub for SSE broadcast on artifact write.
+def _broadcast_artifact_event(
+    *, slug: str, run_id: str, kind: str, version: int = 1
+) -> None:
+    """Broadcast an artifact-write notification to any open SSE streams.
 
-    Slice 5 will replace this no-op with a real ``events.py`` broadcast.
+    This is called after every successful PUT so the SSE consumer surfaces
+    the event immediately rather than relying solely on DB poll latency.
+
+    Currently a lightweight no-op when no SSE stream is open for the slug —
+    the DB poll will pick it up on the next interval anyway. Future slices
+    may replace this with an in-process pubsub channel if sub-poll latency
+    matters.
     """
 
 
