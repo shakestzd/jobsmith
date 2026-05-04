@@ -143,3 +143,48 @@ export interface MasterPayload {
   education: EducationEntry[];
   author: Author | null;
 }
+
+// ── Mutations ────────────────────────────────────────────────────────────
+//
+// Slice 4 (feat-7784ef64) — POST /api/applications and
+// POST /api/applications/{slug}/run. Verbosity is the CLI flag string so
+// the wire format matches what the backend hands to the supervisor.
+
+export type ApiVerbosity = '-v' | '-vv' | '-vvv';
+
+export interface CreateApplicationRequest {
+  /** Job description URL; mutually exclusive with jd_text / jd_file_b64. */
+  jd_url: string | null;
+  /** Pasted job description text. */
+  jd_text: string | null;
+  /** Base-64 encoded uploaded file body. */
+  jd_file_b64: string | null;
+  verbosity: ApiVerbosity;
+  skip_confirmations: boolean;
+  force: boolean;
+}
+
+export interface CreateApplicationResponse {
+  slug: string;
+  run_id: string;
+  events_url: string;
+}
+
+export interface RerunRequest {
+  verbosity: ApiVerbosity;
+  force: boolean;
+}
+
+export interface RerunResponse {
+  slug: string;
+  run_id: string;
+  events_url: string;
+}
+
+/** Returned with HTTP 409 when a run is already in flight for the slug. */
+export interface RerunConflictResponse {
+  slug: string;
+  run_id: string;
+  status: 'running';
+  events_url: string;
+}

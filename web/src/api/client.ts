@@ -68,6 +68,44 @@ export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> 
   return (await resp.json()) as T;
 }
 
+/**
+ * POST JSON to the API and parse the JSON response. Throws ApiError on
+ * non-2xx (the response body is preserved on the error so callers can
+ * surface backend-supplied detail strings or richer 409 conflict payloads).
+ */
+export async function apiPost<TReq, TRes>(
+  path: string,
+  body: TReq,
+  signal?: AbortSignal,
+): Promise<TRes> {
+  const url = apiUrl(path);
+  const init: RequestInit = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(body),
+  };
+  if (signal) init.signal = signal;
+  const resp = await fetch(url, init);
+  if (!resp.ok) {
+    let respBody = '';
+    try {
+      respBody = await resp.text();
+    } catch {
+      // ignore — best effort
+    }
+    throw new ApiError(
+      `POST ${url} → ${resp.status} ${resp.statusText}`,
+      resp.status,
+      url,
+      respBody,
+    );
+  }
+  return (await resp.json()) as TRes;
+}
+
 /** Fetch raw text from the API (for /raw/{filename} endpoints). */
 export async function apiGetText(
   path: string,

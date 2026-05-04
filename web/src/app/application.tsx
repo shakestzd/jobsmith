@@ -16,14 +16,19 @@
 // a live `useEventStream(slug)` call from `web/src/api/events.ts`.
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useApplication } from '../api/hooks';
+import { useApplication, useRerunApplication } from '../api/hooks';
+import { ApiError } from '../api/client';
 import {
   useEventStream,
   type PipelineEvent,
   type Verbosity,
   type ConnectionStatus,
 } from '../api/events';
-import type { Application, ApplicationDetail as TApplicationDetail } from '../api/types';
+import type {
+  Application,
+  ApplicationDetail as TApplicationDetail,
+  RerunConflictResponse,
+} from '../api/types';
 import type { IconName } from '../types';
 import { Icon, Badge, StatusBadge } from './shared';
 
@@ -835,6 +840,39 @@ interface ApplicationDetailReadyProps {
   back: () => void;
 }
 
+/** Best-effort parse of a 409 response body into RerunConflictResponse. */
+function parseRerunConflict(err: unknown): RerunConflictResponse | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  try {
+    const parsed = JSON.parse(err.body) as Partial<RerunConflictResponse>;
+    if (
+      typeof parsed.slug === 'string' &&
+      typeof parsed.run_id === 'string' &&
+      parsed.status === 'running'
+    ) {
+      return parsed as RerunConflictResponse;
+    }
+  } catch {
+    // not JSON
+  }
+  return null;
+}
+
+/** Best-effort detail string extraction for non-409 ApiErrors. */
+function rerunErrorDetail(err: unknown): string {
+  if (err instanceof ApiError) {
+    try {
+      const parsed = JSON.parse(err.body) as { detail?: unknown };
+      if (typeof parsed.detail === 'string') return parsed.detail;
+    } catch {
+      // body wasn't JSON
+    }
+    return err.body || err.message;
+  }
+  if (err instanceof Error) return err.message;
+  return 'unknown error';
+}
+
 function ApplicationDetailReady({ detail, back }: ApplicationDetailReadyProps) {
   const { progress: initialProgress, activePhase: initialActivePhase } =
     deriveProgress(detail);
@@ -843,6 +881,30 @@ function ApplicationDetailReady({ detail, back }: ApplicationDetailReadyProps) {
   const [activePhase, setActivePhase] = useState<number>(initialActivePhase);
   const [running, setRunning] = useState<boolean>(detail.status === 'running');
   const [progress, setProgress] = useState<ProgressMap>(initialProgress);
+
+  // Slice 4 (feat-7784ef64): re-run apply mutation. The 409 branch is
+  // load-bearing UX — surface the in-flight run_id and let the user watch
+  // it themselves; do NOT auto-redirect or auto-cancel.
+  const rerunMut = useRerunApplication(detail.slug);
+  const rerunConflict = parseRerunConflict(rerunMut.error);
+  const rerunErrorMsg =
+    rerunMut.isError && !rerunConflict ? rerunErrorDetail(rerunMut.error) : null;
+
+  function handleRerun() {
+    rerunMut.reset();
+    rerunMut.mutate(
+      { verbosity: '-v', force: false },
+      {
+        onSuccess: () => {
+          // Switch to the pipeline tab so the live SSE stream is visible
+          // immediately. The Application detail will refetch via the
+          // mutation's invalidateQueries, picking up the new run state.
+          setTab('pipeline');
+          setRunning(true);
+        },
+      },
+    );
+  }
 
   // Live progress sim when running — kept until backend can compute progress
   // server-side and stream it. The actual event log is now driven by SSE
@@ -889,8 +951,14 @@ function ApplicationDetailReady({ detail, back }: ApplicationDetailReadyProps) {
           <button className="btn"><Icon name="doc" size={13} /> open in marimo</button>
           <button className="btn"><Icon name="folder" size={13} /> reveal in finder</button>
           {!running && (
-            <button className="btn primary" onClick={() => setRunning(true)}>
-              <Icon name="play" size={12} /> re-run apply
+            <button
+              className="btn primary"
+              onClick={handleRerun}
+              disabled={rerunMut.isPending}
+            >
+              {rerunMut.isPending
+                ? <><span className="spin" /> starting…</>
+                : <><Icon name="play" size={12} /> re-run apply</>}
             </button>
           )}
           {running && (
@@ -900,6 +968,48 @@ function ApplicationDetailReady({ detail, back }: ApplicationDetailReadyProps) {
           )}
         </div>
       </div>
+
+      {rerunConflict && (
+        <div
+          role="alert"
+          style={{
+            margin: '6px 0 14px',
+            padding: '10px 14px',
+            background: 'var(--bg-sunk)',
+            border: '1px solid var(--accent, #d49a3a)',
+            borderRadius: 'var(--radius)',
+            fontSize: 12.5,
+            color: 'var(--fg)',
+          }}
+        >
+          <Icon name="flag" size={11} style={{ verticalAlign: 'middle', color: 'var(--accent, #d49a3a)' }} />{' '}
+          a run is already in progress for this application
+          {' '}(<span className="mono-sm">run_id: {rerunConflict.run_id}</span>).
+          {' '}Watch it in the <button
+            className="btn ghost sm"
+            style={{ padding: '0 6px', marginLeft: 4 }}
+            onClick={() => setTab('pipeline')}
+          >Pipeline tab</button>.
+        </div>
+      )}
+
+      {rerunErrorMsg && (
+        <div
+          role="alert"
+          style={{
+            margin: '6px 0 14px',
+            padding: '10px 14px',
+            background: 'var(--bg-sunk)',
+            border: '1px solid var(--danger, #c43)',
+            borderRadius: 'var(--radius)',
+            fontSize: 12.5,
+            color: 'var(--danger, #c43)',
+          }}
+        >
+          <div className="mono-sm" style={{ marginBottom: 2 }}>could not start run</div>
+          <div style={{ color: 'var(--fg-muted)' }}>{rerunErrorMsg}</div>
+        </div>
+      )}
 
       <div className="pipeline" style={{ marginBottom: 20 }}>
         {PHASES.map((p, i) => {

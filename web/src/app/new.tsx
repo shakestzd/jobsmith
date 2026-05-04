@@ -3,16 +3,28 @@
 // Pixel-identical DOM structure and class names. Prop shape derived from how
 // main.jsx (design layer) invokes NewApplicationModal:
 //   <NewApplicationModal onClose={() => setShowNew(false)} onLaunch={(slug) => { ... }} />
+//
+// Slice 4 (feat-7784ef64) wires the step-2 "apply" button to
+// `useCreateApplication`. Behavior:
+//   - JD source is one-of: fetched URL, pasted text, or uploaded file
+//     (read with FileReader and base-64 encoded client-side).
+//   - 4xx errors surface inline at the bottom of the modal body.
+//   - On success the parent's `onLaunch(slug)` runs — main.tsx uses that
+//     to set openSlug, which lands the user on the application detail
+//     view with the (default) pipeline tab so the SSE stream picks up.
 
 import { useState } from 'react';
 import { Icon } from './shared';
+import { useCreateApplication } from '../api/hooks';
+import type { ApiVerbosity, CreateApplicationRequest } from '../api/types';
+import { ApiError } from '../api/client';
 
 // ── Prop interface ───────────────────────────────────────────────────────────
 
 export interface NewApplicationModalProps {
   /** Called when the user dismisses the modal (cancel or backdrop click). */
   onClose: () => void;
-  /** Called when the user confirms the application launch; receives the resolved slug. */
+  /** Called with the slug returned by the backend after a successful POST. */
   onLaunch: (slug: string) => void;
 }
 
@@ -21,6 +33,54 @@ export interface NewApplicationModalProps {
 type JdMode = 'fetch' | 'paste' | 'file';
 type VerbosityFlag = '' | '-v' | '-vv';
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Read a File and return its base-64 encoded body (without the data: prefix).
+ * Uses FileReader for compatibility with browsers — atob/btoa would require
+ * us to manually slurp the bytes through a TextDecoder, which is fragile for
+ * binary inputs (.pdf, .docx). Browser will reject memory-prohibitive files
+ * upstream; we surface any read errors as an ApiError-shaped string.
+ */
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== 'string') {
+        reject(new Error('FileReader returned non-string result'));
+        return;
+      }
+      // Strip the "data:<mime>;base64," prefix to send only the payload.
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('file read failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Map the modal's verbosity dropdown to the API enum (empty → '-v'). */
+function toApiVerbosity(v: VerbosityFlag): ApiVerbosity {
+  if (v === '-vv') return '-vv';
+  return '-v';
+}
+
+/** Best-effort parse of an ApiError body to find a `detail` string. */
+function detailFromError(err: unknown): string {
+  if (err instanceof ApiError) {
+    try {
+      const parsed = JSON.parse(err.body) as { detail?: unknown };
+      if (typeof parsed.detail === 'string') return parsed.detail;
+    } catch {
+      // not JSON — fall through to body text
+    }
+    return err.body || err.message;
+  }
+  if (err instanceof Error) return err.message;
+  return 'unknown error';
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalProps) {
@@ -28,8 +88,13 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
   const [url, setUrl] = useState('https://linear.app/careers/product-engineer');
   const [jdMode, setJdMode] = useState<JdMode>('fetch');
   const [jdText, setJdText] = useState('');
+  const [jdFile, setJdFile] = useState<File | null>(null);
   const [verbose, setVerbose] = useState<VerbosityFlag>('-v');
   const [skipConfirm, setSkipConfirm] = useState(true);
+  // Local validation error (e.g. missing input) — distinct from server errors.
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const createMut = useCreateApplication();
 
   const slug = (() => {
     try {
@@ -60,11 +125,74 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
   const commandPreview = [
     `$ jobsmith apply '${url}'`,
     jdMode === 'paste' ? `    --jd-text-file /tmp/jd-${slug}.txt` : null,
+    jdMode === 'file' && jdFile ? `    --jd-file '${jdFile.name}'` : null,
     verbose ? `    ${verbose}` : null,
     skipConfirm ? `    --yes` : null,
   ]
     .filter(Boolean)
     .join(' \\\n');
+
+  const submitting = createMut.isPending;
+  const serverErrorMsg = createMut.isError ? detailFromError(createMut.error) : null;
+  const errorMsg = localError ?? serverErrorMsg;
+
+  async function handleApply() {
+    setLocalError(null);
+    createMut.reset();
+
+    // Build the per-source field — exactly one of jd_url / jd_text / jd_file_b64
+    // is populated. Validate the selected source has content.
+    let jd_url: string | null = null;
+    let jd_text: string | null = null;
+    let jd_file_b64: string | null = null;
+
+    if (jdMode === 'fetch') {
+      if (!url.trim()) {
+        setLocalError('job url is required when fetching from url');
+        return;
+      }
+      jd_url = url.trim();
+    } else if (jdMode === 'paste') {
+      if (!jdText.trim()) {
+        setLocalError('jd text is required when pasting');
+        return;
+      }
+      jd_text = jdText;
+      // Send the URL as a hint when also provided — backend may use it to
+      // derive a slug. Falsy URL is fine; backend will fall back to slug
+      // derivation from the JD itself.
+      jd_url = url.trim() || null;
+    } else if (jdMode === 'file') {
+      if (!jdFile) {
+        setLocalError('please choose a file to upload');
+        return;
+      }
+      try {
+        jd_file_b64 = await readFileAsBase64(jdFile);
+      } catch (e) {
+        setLocalError(
+          `failed to read file: ${e instanceof Error ? e.message : 'unknown error'}`,
+        );
+        return;
+      }
+      jd_url = url.trim() || null;
+    }
+
+    const body: CreateApplicationRequest = {
+      jd_url,
+      jd_text,
+      jd_file_b64,
+      verbosity: toApiVerbosity(verbose),
+      skip_confirmations: skipConfirm,
+      force: false,
+    };
+
+    createMut.mutate(body, {
+      onSuccess: (resp) => {
+        onLaunch(resp.slug);
+      },
+    });
+  }
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -113,6 +241,25 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
                   placeholder="Paste the full job description here…"
                 />
                 <div className="help">written to a tempfile during the run; deleted after.</div>
+              </div>
+            )}
+
+            {jdMode === 'file' && (
+              <div className="field">
+                <label>jd file</label>
+                <input
+                  type="file"
+                  accept=".txt,.md,.pdf,.html,.htm"
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                    const f = e.target.files?.[0] ?? null;
+                    setJdFile(f);
+                  }}
+                />
+                <div className="help">
+                  {jdFile
+                    ? `selected: ${jdFile.name} (${Math.round(jdFile.size / 1024)} KB)`
+                    : 'pdf, html, txt, or markdown — base-64 encoded for transport.'}
+                </div>
               </div>
             )}
 
@@ -173,17 +320,37 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
                 </div>
               ))}
             </div>
+
+            {errorMsg && (
+              <div
+                role="alert"
+                style={{
+                  marginTop: 14,
+                  padding: '10px 12px',
+                  background: 'var(--bg-sunk)',
+                  border: '1px solid var(--danger, #c43)',
+                  borderRadius: 'var(--radius)',
+                  color: 'var(--danger, #c43)',
+                  fontSize: 12.5,
+                }}
+              >
+                <div className="mono-sm" style={{ marginBottom: 2 }}>could not start application</div>
+                <div style={{ color: 'var(--fg-muted)' }}>{errorMsg}</div>
+              </div>
+            )}
           </div>
         )}
 
         <div className="modal-foot">
           {step === 2 && (
-            <button className="btn ghost" onClick={() => setStep(1)}>back</button>
+            <button className="btn ghost" onClick={() => setStep(1)} disabled={submitting}>back</button>
           )}
-          <button className="btn ghost" onClick={onClose}>cancel</button>
+          <button className="btn ghost" onClick={onClose} disabled={submitting}>cancel</button>
           {step === 1
             ? <button className="btn primary" onClick={() => setStep(2)}>review →</button>
-            : <button className="btn primary" onClick={() => onLaunch(slug)}><Icon name="play" size={12} /> apply</button>
+            : <button className="btn primary" onClick={handleApply} disabled={submitting}>
+                {submitting ? <><span className="spin" /> applying…</> : <><Icon name="play" size={12} /> apply</>}
+              </button>
           }
         </div>
       </div>
