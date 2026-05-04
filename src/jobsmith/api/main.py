@@ -43,6 +43,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from jobsmith.api.applications import router as applications_router
+from jobsmith.api.events import router as events_router
 from jobsmith.api.health import router as health_router
 from jobsmith.api.master import router as master_router
 
@@ -51,6 +52,10 @@ def create_app(  # noqa: ANN001
     config=None,
     *,
     applications_dir: Path | None = None,
+    pipeline_db_path: Path | None = None,
+    events_poll_interval_s: float | None = None,
+    events_heartbeat_interval_s: float | None = None,
+    events_idle_timeout_s: float | None = None,
 ) -> FastAPI:
     """Construct and return the configured FastAPI application.
 
@@ -65,6 +70,13 @@ def create_app(  # noqa: ANN001
         Optional explicit override for the slug directory root. Tests pass a
         ``tmp_path`` here so the ``/api/applications`` router can read from a
         fixture filesystem without touching the real config.
+    pipeline_db_path:
+        Optional explicit pipeline DB path used by the SSE events router.
+        Tests inject a ``tmp_path`` SQLite file. When None, the events router
+        derives the path from ``config.output.jobsmith_db``.
+    events_poll_interval_s, events_heartbeat_interval_s, events_idle_timeout_s:
+        Optional knobs for the SSE stream. Tests use small values so they run
+        fast; production uses the module-level defaults.
     """
     app = FastAPI(
         title="jobsmith API",
@@ -85,6 +97,13 @@ def create_app(  # noqa: ANN001
     # Store config in app state for routers that need it.
     app.state.config = config
     app.state.applications_dir = applications_dir
+    app.state.pipeline_db_path = pipeline_db_path
+    if events_poll_interval_s is not None:
+        app.state.events_poll_interval_s = events_poll_interval_s
+    if events_heartbeat_interval_s is not None:
+        app.state.events_heartbeat_interval_s = events_heartbeat_interval_s
+    if events_idle_timeout_s is not None:
+        app.state.events_idle_timeout_s = events_idle_timeout_s
 
     # --- Mount routers ---
 
@@ -98,6 +117,8 @@ def create_app(  # noqa: ANN001
     app.include_router(applications_router, prefix="/api")
 
     # feat-e3b75a8a: mount application detail router here (part of applications_router)
+
     # feat-440324f1: mount SSE events router here
+    app.include_router(events_router, prefix="/api")
 
     return app

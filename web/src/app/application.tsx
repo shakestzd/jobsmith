@@ -15,8 +15,14 @@
 // Slice 8 (SSE) will replace the seeded NEW_EVENTS sim in PipelineTab with
 // a live `useEventStream(slug)` call from `web/src/api/events.ts`.
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useApplication } from '../api/hooks';
+import {
+  useEventStream,
+  type PipelineEvent,
+  type Verbosity,
+  type ConnectionStatus,
+} from '../api/events';
 import type { Application, ApplicationDetail as TApplicationDetail } from '../api/types';
 import type { IconName } from '../types';
 import { Icon, Badge, StatusBadge } from './shared';
@@ -78,15 +84,6 @@ function phaseDuration(n: number): string {
   return (['1.4s', '3.8s', '12.1s'] as const)[n - 1] ?? '—';
 }
 
-const NEW_EVENTS: Omit<LogEvent, 'ts'>[] = [
-  { lvl: 'info', msg: '<span class="dim">phase=</span>render <span class="dim">spec=</span>apply-renderer' },
-  { lvl: 'tool', msg: 'Bash: <span class="dim">quarto render index.qmd</span>' },
-  { lvl: 'tool', msg: 'Read: <span class="dim">.apply-state/cover_draft.md</span>' },
-  { lvl: 'spec', msg: 'apply-assembler: writing _variables.yml' },
-  { lvl: 'info', msg: 'sub-agent <span class="dim">apply-renderer</span> handed off to quarto' },
-  { lvl: 'tool', msg: 'Write: <span class="dim">rendered/resume.pdf</span> (92 KB)' },
-];
-
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -94,25 +91,37 @@ function escapeHtml(s: string): string {
     .replace(/>/g, '&gt;');
 }
 
-function seedEvents(app: Application): LogEvent[] {
-  const safeUrl = escapeHtml(app.url || '');
-  return [
-    { ts: '14:02:01', lvl: 'info', msg: '<span class="dim">apply</span> start <span class="dim">slug=</span>' + escapeHtml(app.slug) },
-    { ts: '14:02:01', lvl: 'info', msg: '<span class="dim">phase=</span>gather' },
-    { ts: '14:02:02', lvl: 'tool', msg: 'WebFetch: ' + safeUrl },
-    { ts: '14:02:04', lvl: 'spec', msg: 'apply-jd-parser: extracted 18 requirements, 5 must-haves' },
-    { ts: '14:02:05', lvl: 'spec', msg: 'apply-anchor-scorer: 14 anchors, top match deploy-pipeline-rebuild (0.92)' },
-    { ts: '14:02:06', lvl: 'tool', msg: 'Write: <span class="dim">.apply-state/spec.json</span>' },
-    { ts: '14:02:06', lvl: 'done', msg: '&lt;&lt;PHASE_COMPLETE&gt;&gt; gather (1.4s)' },
-    { ts: '14:02:07', lvl: 'info', msg: '<span class="dim">phase=</span>draft' },
-    { ts: '14:02:09', lvl: 'spec', msg: 'apply-bullet-selector: selected 14 bullets, dropped 0' },
-    { ts: '14:02:10', lvl: 'spec', msg: 'apply-cover-drafter: 312 words, 4 paragraphs' },
-    { ts: '14:02:11', lvl: 'spec', msg: 'apply-factchecker: 5/5 claims verified' },
-    { ts: '14:02:11', lvl: 'tool', msg: 'Write: <span class="dim">.apply-state/cover_draft.md</span>' },
-    { ts: '14:02:11', lvl: 'done', msg: '&lt;&lt;PHASE_COMPLETE&gt;&gt; draft (3.8s)' },
-    { ts: '14:02:12', lvl: 'info', msg: '<span class="dim">phase=</span>render' },
-    { ts: '14:02:14', lvl: 'spec', msg: 'apply-assembler: wrote _variables.yml (12 vars)' },
-  ];
+/** Format an ISO-ish timestamp as HH:MM:SS, falling back to "—" on garbage. */
+function formatTs(input: string | null | undefined): string {
+  if (!input) return now();
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return now();
+  return d.toTimeString().slice(0, 8);
+}
+
+/** Convert a live SSE PipelineEvent into the row shape PipelineTab renders. */
+function pipelineEventToLog(evt: PipelineEvent): LogEvent {
+  if (evt.kind === 'phase') {
+    const ts = formatTs(evt.data.finished_at ?? evt.data.started_at ?? evt.receivedAt);
+    return {
+      ts,
+      lvl: 'info',
+      msg:
+        '<span class="dim">phase=</span>' +
+        escapeHtml(evt.data.phase) +
+        ' <span class="dim">status=</span>' +
+        escapeHtml(evt.data.status),
+    };
+  }
+  const ts = formatTs(evt.data.finished_at ?? evt.receivedAt);
+  return {
+    ts,
+    lvl: 'spec',
+    msg:
+      escapeHtml(evt.data.specialist) +
+      ': <span class="dim">kind=</span>' +
+      escapeHtml(evt.data.kind),
+  };
 }
 
 // ── Tab type ─────────────────────────────────────────────────────────────────
@@ -226,14 +235,33 @@ function PhaseCard({ num, name, blurb, status, progress, onClick, active, meta }
 // ── PipelineTab ──────────────────────────────────────────────────────────────
 
 interface PipelineTabProps {
-  events: LogEvent[];
+  slug: string;
   running: boolean;
   phase: number;
   progress: ProgressMap;
 }
 
-function PipelineTab({ events, running, phase, progress }: PipelineTabProps) {
+const STATUS_DOT_COLOR: Record<ConnectionStatus, string> = {
+  open: 'var(--success)',
+  connecting: 'var(--accent, #d49a3a)',
+  closed: 'var(--fg-subtle)',
+  error: 'var(--danger, #c43)',
+};
+
+function PipelineTab({ slug, running, phase, progress }: PipelineTabProps) {
   const logRef = useRef<HTMLDivElement>(null);
+  const [verbosity, setVerbosity] = useState<Verbosity>('normal');
+
+  // feat-440324f1: live SSE event stream replaces the previous mock seed.
+  const { events: live, status: streamStatus } = useEventStream(slug, {
+    verbosity,
+  });
+
+  const events = useMemo<LogEvent[]>(
+    () => live.map(pipelineEventToLog),
+    [live],
+  );
+
   useEffect(() => {
     if (logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -244,19 +272,56 @@ function PipelineTab({ events, running, phase, progress }: PipelineTabProps) {
   const phaseNum = phaseSpec.num;
   const phaseDone = progress[phaseNum] >= 100;
 
+  const hasEvents = events.length > 0;
+  const showEmpty = !hasEvents && (streamStatus === 'open' || streamStatus === 'connecting');
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16 }}>
       <div className="card">
         <div className="card-h">
           <h3>event stream</h3>
           <span className="sub">phase {phase} · {events.length} events</span>
+          <span
+            title={`stream ${streamStatus}`}
+            aria-label={`stream ${streamStatus}`}
+            style={{
+              display: 'inline-block',
+              width: 8,
+              height: 8,
+              marginLeft: 8,
+              borderRadius: '50%',
+              background: STATUS_DOT_COLOR[streamStatus],
+            }}
+          />
           <div className="right">
-            <button className="btn ghost sm">−v</button>
-            <button className="btn ghost sm" style={{ borderColor: 'var(--border)', background: 'var(--bg-sunk)' }}>−vv</button>
+            <button
+              className="btn ghost sm"
+              aria-pressed={verbosity === 'quiet'}
+              style={verbosity === 'quiet' ? { borderColor: 'var(--border)', background: 'var(--bg-sunk)' } : undefined}
+              onClick={() => setVerbosity('quiet')}
+            >−v</button>
+            <button
+              className="btn ghost sm"
+              aria-pressed={verbosity === 'normal'}
+              style={verbosity === 'normal' ? { borderColor: 'var(--border)', background: 'var(--bg-sunk)' } : undefined}
+              onClick={() => setVerbosity('normal')}
+            >−vv</button>
+            <button
+              className="btn ghost sm"
+              aria-pressed={verbosity === 'verbose'}
+              style={verbosity === 'verbose' ? { borderColor: 'var(--border)', background: 'var(--bg-sunk)' } : undefined}
+              onClick={() => setVerbosity('verbose')}
+            >−vvv</button>
             <button className="btn ghost sm">copy</button>
           </div>
         </div>
         <div className="eventlog" ref={logRef} style={{ maxHeight: 460, borderRadius: 0, border: 'none' }}>
+          {showEmpty && (
+            <div style={{ padding: '24px 14px', color: 'var(--fg-subtle)', fontSize: 12 }}>
+              <span className="mono-sm">no events yet</span>
+              <span style={{ marginLeft: 6 }}>— start a run to see live activity</span>
+            </div>
+          )}
           {events.map((e, i) => (
             <div key={i}>
               <span className="ts">{e.ts}</span>
@@ -264,7 +329,7 @@ function PipelineTab({ events, running, phase, progress }: PipelineTabProps) {
               <span className="msg" dangerouslySetInnerHTML={{ __html: e.msg }} />
             </div>
           ))}
-          {running && (
+          {running && streamStatus === 'open' && (
             <div>
               <span className="ts">{now()}</span>
               <span className="lvl info">stream</span>
@@ -778,9 +843,10 @@ function ApplicationDetailReady({ detail, back }: ApplicationDetailReadyProps) {
   const [activePhase, setActivePhase] = useState<number>(initialActivePhase);
   const [running, setRunning] = useState<boolean>(detail.status === 'running');
   const [progress, setProgress] = useState<ProgressMap>(initialProgress);
-  const [events, setEvents] = useState<LogEvent[]>(() => seedEvents(detail));
 
-  // Live progress sim when running. Slice 8 will replace this with real SSE.
+  // Live progress sim when running — kept until backend can compute progress
+  // server-side and stream it. The actual event log is now driven by SSE
+  // inside PipelineTab itself (see feat-440324f1).
   useEffect(() => {
     if (!running) return;
     const id = setInterval(() => {
@@ -790,11 +856,6 @@ function ApplicationDetailReady({ detail, back }: ApplicationDetailReadyProps) {
         if (cur === 1 && p[1] >= 100) return p;
         next[cur] = Math.min(100, p[cur] + Math.random() * 7 + 2);
         return next;
-      });
-      setEvents(ev => {
-        if (ev.length > 200) return ev;
-        const pick = NEW_EVENTS[Math.floor(Math.random() * NEW_EVENTS.length)];
-        return [...ev, { ...pick, ts: now() }];
       });
     }, 700);
     return () => clearInterval(id);
@@ -875,7 +936,7 @@ function ApplicationDetailReady({ detail, back }: ApplicationDetailReadyProps) {
         ))}
       </div>
 
-      {tab === 'pipeline' && <PipelineTab events={events} running={running} phase={activePhase} progress={progress} />}
+      {tab === 'pipeline' && <PipelineTab slug={detail.slug} running={running} phase={activePhase} progress={progress} />}
       {tab === 'artifacts' && <ArtifactsTab detail={detail} />}
       {tab === 'factcheck' && <FactCheckTab detail={detail} />}
       {tab === 'anchors' && <AnchorCheckTab detail={detail} />}
