@@ -5,7 +5,7 @@
 //   <Dashboard openApp={setOpenSlug} openNew={() => setShowNew(true)} filter="all"/>
 // The `filter` prop maps directly to the initial tab selection.
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import type { SampleApp } from '../types';
 import { Icon, StatusBadge, SAMPLE_APPS } from './shared';
 
@@ -33,6 +33,12 @@ interface StatItem {
 
 export function Dashboard({ openApp, openNew, filter = 'all' }: DashboardProps) {
   const [tab, setTab] = useState<'all' | 'running' | 'review' | 'rendered'>(filter);
+  // Sidebar nav drives the `filter` prop; sync local tab state when it
+  // changes so the table actually filters. Without this, useState(filter)
+  // only honors the *initial* value and later sidebar clicks are ignored.
+  useEffect(() => {
+    setTab(filter);
+  }, [filter]);
   const [q, setQ] = useState('');
 
   const filtered = useMemo<SampleApp[]>(() => {
