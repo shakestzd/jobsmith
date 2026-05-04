@@ -66,6 +66,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 
+from jobsmith.api.supervisor import RunSupervisor, get_supervisor
 from jobsmith.db import open_pipeline_db
 
 router = APIRouter(tags=["events"])
@@ -150,6 +151,15 @@ def _get_event_tunable(request: Request, name: str, default: float) -> float:
     return float(getattr(request.app.state, name, default))
 
 
+def _resolve_supervisor(request: Request) -> RunSupervisor:
+    """Return the run supervisor (test-injected ``app.state.run_supervisor``
+    if present, otherwise the module-level singleton)."""
+    override = getattr(request.app.state, "run_supervisor", None)
+    if isinstance(override, RunSupervisor):
+        return override
+    return get_supervisor()
+
+
 # ---------------------------------------------------------------------------
 # Slug guard (consistent with the detail endpoint's contract)
 # ---------------------------------------------------------------------------
@@ -232,9 +242,60 @@ def _allow_specialist(verbosity: Verbosity, kind: str) -> bool:
     return True  # verbose
 
 
+def _allow_log(verbosity: Verbosity, _stream_name: str) -> bool:
+    """Whether to forward a supervisor ``log`` event to the wire.
+
+    quiet: drop all log lines (UI shows phase milestones only).
+    normal/verbose: keep stdout + stderr (stderr often carries the most
+    useful diagnostics for the user staring at a stalled pipeline).
+    """
+    if verbosity == "quiet":
+        return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Stream generator
 # ---------------------------------------------------------------------------
+
+
+async def _supervisor_log_producer(
+    supervisor: RunSupervisor,
+    slug: str,
+    queue: asyncio.Queue,
+    poll_interval_s: float,
+    stop_event: asyncio.Event,
+) -> None:
+    """Watch ``slug`` for active runs and forward each LogLine to ``queue``.
+
+    The SSE endpoint is long-lived; a slug may transition through multiple
+    runs while a single browser tab stays connected.  This producer loops:
+    when there is no active run, it polls (cheaply) for one to appear;
+    when there is, it consumes ``supervisor.stream(run_id)`` until that run
+    ends, then loops again.
+    """
+    seen_run_ids: set[str] = set()
+    while not stop_event.is_set():
+        run_id = supervisor.get_active_for_slug(slug)
+        if run_id is None or run_id in seen_run_ids:
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=poll_interval_s)
+            except asyncio.TimeoutError:
+                pass
+            continue
+
+        seen_run_ids.add(run_id)
+        try:
+            async for log_line in supervisor.stream(run_id):
+                if stop_event.is_set():
+                    return
+                # Pair (kind, payload) to disambiguate from DB rows.
+                await queue.put(("log", run_id, log_line))
+        except asyncio.CancelledError:
+            return
+        except Exception:  # noqa: BLE001 — never let the producer break the SSE
+            # Best-effort: swallow and loop; the DB poll continues regardless.
+            continue
 
 
 async def _stream(
@@ -242,6 +303,7 @@ async def _stream(
     request: Request,
     slug: str,
     db_path: Path | None,
+    supervisor: RunSupervisor,
     verbosity: Verbosity,
     since_run_rowid: int,
     since_specialist_rowid: int,
@@ -249,7 +311,21 @@ async def _stream(
     heartbeat_interval_s: float,
     idle_timeout_s: float,
 ) -> AsyncIterator[ServerSentEvent]:
-    """Yield SSE events until the client disconnects or the stream goes idle."""
+    """Yield SSE events until the client disconnects or the stream goes idle.
+
+    Two event sources feed this generator:
+
+    1. **DB poll** (synchronous SQLite reads via ``asyncio.to_thread``) for
+       ``apply_runs`` / ``specialist_outputs`` rows — these survive process
+       restarts and are the canonical source for phase + specialist events.
+    2. **Supervisor log queue** — live stdout/stderr lines from any active
+       subprocess for this slug, fed by a background producer task.
+
+    The two are merged via a shared ``asyncio.Queue``: the producer pushes
+    log items, while the DB poll loop drains the queue between (or after)
+    each poll round.  Heartbeats and idle close are decided after every
+    iteration regardless of source.
+    """
     loop = asyncio.get_event_loop()
     last_activity = loop.time()
     last_heartbeat = loop.time()
@@ -267,6 +343,16 @@ async def _stream(
                 _max_rowid, conn, "specialist_outputs"
             )
 
+    # Spawn the supervisor producer.  Cleaned up in the finally block.
+    log_queue: asyncio.Queue = asyncio.Queue()
+    stop_event = asyncio.Event()
+    producer_task = asyncio.create_task(
+        _supervisor_log_producer(
+            supervisor, slug, log_queue, poll_interval_s, stop_event
+        ),
+        name=f"events-supervisor-producer-{slug}",
+    )
+
     # Emit a sentinel "open" comment so clients see the stream is alive.
     yield ServerSentEvent(comment="stream open")
 
@@ -277,6 +363,28 @@ async def _stream(
 
             now = loop.time()
             saw_activity = False
+
+            # --- Drain the supervisor log queue (non-blocking) ---
+            while True:
+                try:
+                    item = log_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                _kind, run_id, log_line = item
+                if not _allow_log(verbosity, log_line.stream):
+                    saw_activity = True  # still resets idle even if filtered
+                    continue
+                payload = {
+                    "run_id": run_id,
+                    "stream": log_line.stream,
+                    "line": log_line.line,
+                    "timestamp": log_line.timestamp,
+                }
+                yield ServerSentEvent(
+                    event="log",
+                    data=json.dumps(payload),
+                )
+                saw_activity = True
 
             if conn is not None:
                 # Phase events
@@ -340,6 +448,16 @@ async def _stream(
 
             await asyncio.sleep(poll_interval_s)
     finally:
+        # Tear down the supervisor producer.  IMPORTANT: this does NOT
+        # kill the underlying subprocess — the supervisor outlives the SSE
+        # connection.  Only the per-connection subscriber queue closes.
+        stop_event.set()
+        producer_task.cancel()
+        try:
+            await producer_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+
         if conn is not None:
             try:
                 conn.close()
@@ -376,6 +494,7 @@ async def stream_events(
     _validate_slug_or_404(apps_dir, slug)
 
     db_path = _resolve_pipeline_db_path(request)
+    supervisor = _resolve_supervisor(request)
 
     poll_interval_s = _get_event_tunable(
         request, "events_poll_interval_s", DEFAULT_POLL_INTERVAL_S
@@ -391,6 +510,7 @@ async def stream_events(
         request=request,
         slug=slug,
         db_path=db_path,
+        supervisor=supervisor,
         verbosity=verbosity,
         since_run_rowid=since_run,
         since_specialist_rowid=since_specialist,

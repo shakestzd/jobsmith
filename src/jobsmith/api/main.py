@@ -56,6 +56,7 @@ def create_app(  # noqa: ANN001
     events_poll_interval_s: float | None = None,
     events_heartbeat_interval_s: float | None = None,
     events_idle_timeout_s: float | None = None,
+    run_supervisor=None,  # type: ignore[no-untyped-def] — RunSupervisor or None
 ) -> FastAPI:
     """Construct and return the configured FastAPI application.
 
@@ -77,6 +78,10 @@ def create_app(  # noqa: ANN001
     events_poll_interval_s, events_heartbeat_interval_s, events_idle_timeout_s:
         Optional knobs for the SSE stream. Tests use small values so they run
         fast; production uses the module-level defaults.
+    run_supervisor:
+        Optional ``RunSupervisor`` injection (feat-cf348e05). When None, the
+        SSE events router uses the module-level default supervisor. Tests
+        that need an isolated registry construct their own and pass it here.
     """
     app = FastAPI(
         title="jobsmith API",
@@ -104,6 +109,8 @@ def create_app(  # noqa: ANN001
         app.state.events_heartbeat_interval_s = events_heartbeat_interval_s
     if events_idle_timeout_s is not None:
         app.state.events_idle_timeout_s = events_idle_timeout_s
+    if run_supervisor is not None:
+        app.state.run_supervisor = run_supervisor
 
     # --- Mount routers ---
 
