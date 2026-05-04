@@ -38,10 +38,13 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 from jobsmith._state_readers import load_jd_parsed
 
-from .schemas.applications import Application
+from .schemas.applications import Application, ApplicationDetail, ArtifactNode, ArtifactTree
 
 _log = logging.getLogger(__name__)
 
@@ -197,4 +200,195 @@ def derive_application_state(slug_dir: Path) -> Application:
     )
 
 
-__all__ = ["derive_application_state"]
+# ---------------------------------------------------------------------------
+# Detail helpers
+# ---------------------------------------------------------------------------
+
+_PROSE_SIZE_LIMIT = 256 * 1024   # 256 KB — if larger, truncate
+_PROSE_READ_LIMIT = 64 * 1024    # 64 KB — bytes to read when truncating
+
+
+def _node_for(file_path: Path, slug_dir: Path) -> ArtifactNode:
+    """Return an ArtifactNode for a file, with path relative to slug_dir."""
+    stat = file_path.stat()
+    rel = str(file_path.relative_to(slug_dir))
+    mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+    return ArtifactNode(name=file_path.name, path=rel, size=stat.st_size, mtime=mtime)
+
+
+def _build_artifact_tree(slug_dir: Path, slug: str) -> ArtifactTree:
+    """Walk slug_dir and collect ArtifactNodes for apply-state and rendered dirs."""
+    state_dir = slug_dir / ".apply-state"
+    apply_state_nodes: list[ArtifactNode] = []
+    if state_dir.is_dir():
+        for p in sorted(state_dir.iterdir()):
+            if p.is_file():
+                try:
+                    apply_state_nodes.append(_node_for(p, slug_dir))
+                except OSError:
+                    pass
+
+    rendered_dir = slug_dir / "rendered" / slug
+    rendered_nodes: list[ArtifactNode] = []
+    if rendered_dir.is_dir():
+        for p in sorted(rendered_dir.iterdir()):
+            if p.is_file():
+                try:
+                    rendered_nodes.append(_node_for(p, slug_dir))
+                except OSError:
+                    pass
+
+    return ArtifactTree(apply_state=apply_state_nodes, rendered=rendered_nodes)
+
+
+def _read_prose(path: Path) -> tuple[str | None, bool]:
+    """Read prose markdown with size guard. Returns (content, truncated)."""
+    if not path.exists():
+        return None, False
+    size = path.stat().st_size
+    if size > _PROSE_SIZE_LIMIT:
+        raw = path.read_bytes()[:_PROSE_READ_LIMIT]
+        return raw.decode("utf-8", errors="replace"), True
+    return path.read_text(encoding="utf-8", errors="replace"), False
+
+
+def _load_json_file(path: Path) -> dict[str, Any] | None:
+    """Load a JSON file into a dict; return None on missing or error."""
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        _log.warning("Could not parse JSON at %s", path)
+        return None
+
+
+def _load_yaml_file(path: Path) -> dict[str, Any] | None:
+    """Load a YAML file into a dict; return None on missing or error."""
+    if not path.exists():
+        return None
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+        return None
+    except (OSError, yaml.YAMLError):
+        _log.warning("Could not parse YAML at %s", path)
+        return None
+
+
+def _load_config_subset(slug_dir: Path) -> dict[str, Any] | None:
+    """Load .apply-config.yaml and return only the output + render keys.
+
+    Exposes just the output and render sections to avoid leaking sensitive
+    keys (e.g. API keys, personal paths) from the full config.
+    """
+    config_path = slug_dir / ".apply-config.yaml"
+    if not config_path.exists():
+        # Walk up to find config — check parent dirs up to 3 levels
+        for parent in list(slug_dir.parents)[:3]:
+            candidate = parent / ".apply-config.yaml"
+            if candidate.exists():
+                config_path = candidate
+                break
+        else:
+            return None
+
+    data = _load_yaml_file(config_path)
+    if data is None:
+        return None
+
+    # Return only safe public sections
+    safe_keys = {"output", "render"}
+    return {k: v for k, v in data.items() if k in safe_keys} or None
+
+
+# ---------------------------------------------------------------------------
+# Public detail API
+# ---------------------------------------------------------------------------
+
+
+def derive_application_detail(slug_dir: Path) -> ApplicationDetail:
+    """Derive a rich ApplicationDetail record from a slug directory.
+
+    Builds on derive_application_state for base fields and adds:
+    - artifacts: ArtifactTree (apply-state files + rendered files)
+    - spec: parsed jd-parsed.json
+    - prose_draft: raw markdown (size-guarded to 64 KB)
+    - cover_letter_draft: raw markdown (size-guarded to 64 KB)
+    - fact_check: parsed fact_check.json
+    - anchor_check: parsed anchor_check.json
+    - bullet_selection: parsed bullet_selection.json
+    - variables: parsed _variables.yml
+    - config: safe subset of .apply-config.yaml (output + render keys)
+    - truncated: True if any large field was truncated
+
+    Parameters
+    ----------
+    slug_dir:
+        Absolute path to <applications_dir>/<slug>/. Must be a directory.
+
+    Returns
+    -------
+    ApplicationDetail
+        Fully populated detail model.
+    """
+    slug = slug_dir.name
+    state_dir = slug_dir / ".apply-state"
+
+    # Base fields from existing logic
+    base = derive_application_state(slug_dir)
+
+    # Artifact tree
+    artifacts = _build_artifact_tree(slug_dir, slug)
+
+    # Spec (jd-parsed.json)
+    spec = _load_json_file(state_dir / "jd-parsed.json") if state_dir.is_dir() else None
+
+    # Prose drafts with size guard
+    prose_path = state_dir / "prose-draft.md"
+    cover_path = slug_dir / "cover-letter-draft.md"
+    prose_draft, prose_truncated = _read_prose(prose_path)
+    cover_letter_draft, cover_truncated = _read_prose(cover_path)
+    truncated = prose_truncated or cover_truncated
+
+    # JSON state files
+    fact_check = _load_json_file(state_dir / "fact_check.json") if state_dir.is_dir() else None
+    anchor_check = (
+        _load_json_file(state_dir / "anchor_check.json") if state_dir.is_dir() else None
+    )
+    bullet_selection = (
+        _load_json_file(state_dir / "bullet_selection.json") if state_dir.is_dir() else None
+    )
+
+    # YAML files
+    variables = _load_yaml_file(slug_dir / "_variables.yml")
+    config = _load_config_subset(slug_dir)
+
+    return ApplicationDetail(
+        # Base fields (spread from Application)
+        slug=base.slug,
+        role=base.role,
+        company=base.company,
+        status=base.status,
+        updated_at=base.updated_at,
+        phase=base.phase,
+        anchors=base.anchors,
+        factcheck=base.factcheck,
+        renders=base.renders,
+        url=base.url,
+        # Detail-specific fields
+        artifacts=artifacts,
+        spec=spec,
+        prose_draft=prose_draft,
+        cover_letter_draft=cover_letter_draft,
+        fact_check=fact_check,
+        anchor_check=anchor_check,
+        bullet_selection=bullet_selection,
+        variables=variables,
+        config=config,
+        truncated=truncated,
+    )
+
+
+__all__ = ["derive_application_detail", "derive_application_state"]

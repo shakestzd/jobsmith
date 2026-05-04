@@ -49,4 +49,39 @@ class Application(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-__all__ = ["Application"]
+class ArtifactNode(BaseModel):
+    """Metadata for a single file artifact within a slug directory."""
+
+    name: str    # filename (basename)
+    path: str    # path relative to slug_dir
+    size: int    # bytes
+    mtime: str   # ISO 8601 UTC timestamp
+
+
+class ArtifactTree(BaseModel):
+    """Two-bucket tree of artifacts for a slug directory."""
+
+    apply_state: list[ArtifactNode] = Field(default_factory=list)
+    rendered: list[ArtifactNode] = Field(default_factory=list)
+
+
+class ApplicationDetail(Application):
+    """Rich application record returned by GET /api/applications/{slug}.
+
+    Extends Application with artifact tree + parsed document payloads for
+    ArtifactsTab, FactCheckTab, AnchorCheckTab, and ConfigTab in the frontend.
+    """
+
+    artifacts: ArtifactTree
+    spec: dict | None = None               # parsed .apply-state/jd-parsed.json
+    prose_draft: str | None = None         # raw markdown; size-guarded (64 KB max)
+    cover_letter_draft: str | None = None  # raw markdown; size-guarded (64 KB max)
+    fact_check: dict | None = None         # parsed .apply-state/fact_check.json
+    anchor_check: dict | None = None       # parsed .apply-state/anchor_check.json
+    bullet_selection: dict | None = None   # parsed .apply-state/bullet_selection.json
+    variables: dict | None = None          # parsed _variables.yml
+    config: dict | None = None             # subset of .apply-config.yaml: output + render keys
+    truncated: bool = False                # True if any large field was truncated
+
+
+__all__ = ["Application", "ApplicationDetail", "ArtifactNode", "ArtifactTree"]
