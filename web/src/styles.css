@@ -506,6 +506,7 @@ code, .mono { font-family: var(--font-mono); }
 .eventlog .lvl.tool { color: var(--warn); }
 .eventlog .lvl.done { color: var(--success); }
 .eventlog .lvl.spec { color: var(--fg-muted); }
+.eventlog .lvl.log  { color: var(--fg-muted); }
 .eventlog .msg { color: var(--fg); }
 .eventlog .dim { color: var(--fg-muted); }
 .eventlog div { white-space: pre-wrap; }
