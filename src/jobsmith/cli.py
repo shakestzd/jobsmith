@@ -784,6 +784,8 @@ def mark_anchors(
 
     from ruamel.yaml import YAML
 
+    from .master_io import mark_anchor as _mark_anchor
+
     if not master.exists():
         console.print(f"[red]ERROR:[/red] master file not found: {master}")
         raise typer.Exit(code=2)
@@ -816,7 +818,7 @@ def mark_anchors(
             title = pos.get("title", "(untitled)")
             company = pos.get("location", "")
             lines.append(f"## {pi}. {title} @ {company}")
-            for bi, entry in enumerate(pos.get("details") or []):
+            for _bi, entry in enumerate(pos.get("details") or []):
                 text = entry["bullet"] if isinstance(entry, dict) else entry
                 marked = "[a]" if _bullet_already_annotated(entry) and entry.get("anchor") else "[ ]"
                 lines.append(f"- {marked} {text}")
@@ -827,7 +829,60 @@ def mark_anchors(
         console.print("Edit the file, then re-run with --batch (apply mode coming soon).")
         return
 
-    # Interactive walk
+    if dry_run:
+        # Dry-run: accumulate changes in memory, then diff — do not write.
+        changed_dry = False
+        quit_early = False
+        for pi, pos in enumerate(data):
+            if quit_early:
+                break
+            title = pos.get("title", "(untitled)")
+            company = pos.get("location", "")
+            details = pos.get("details")
+            if not isinstance(details, list):
+                continue
+            for bi, entry in enumerate(details):
+                if _bullet_already_annotated(entry) and not force:
+                    continue
+                text = entry["bullet"] if isinstance(entry, dict) else entry
+                console.print()
+                console.print(f"[bold cyan]{title} @ {company}[/bold cyan]  (position {pi}, bullet {bi})")
+                console.print(f"  {text}")
+                answer = typer.prompt("[a]nchor / [n]on-anchor / [s]kip / [q]uit", default="s", show_default=False)
+                action = _normalize_yes_no_skip(answer)
+                while action == "?":
+                    answer = typer.prompt("Please enter a, n, s, or q", default="s", show_default=False)
+                    action = _normalize_yes_no_skip(answer)
+                if action == "q":
+                    quit_early = True
+                    break
+                if action == "s":
+                    continue
+                if action == "a":
+                    reason = typer.prompt("Why is this an anchor?", default="").strip() or None
+                    details[bi] = _convert_to_object_form(text, anchor=True, reason=reason)
+                elif action == "n":
+                    details[bi] = _convert_to_object_form(text, anchor=False, reason=None)
+                changed_dry = True
+
+        if not changed_dry:
+            console.print("[yellow]No changes.[/yellow]")
+            return
+
+        buf = io.StringIO()
+        yaml_rt.dump(data, buf)
+        new_text = buf.getvalue()
+        diff = difflib.unified_diff(
+            original_text.splitlines(keepends=True),
+            new_text.splitlines(keepends=True),
+            fromfile=str(master),
+            tofile=str(master) + " (proposed)",
+        )
+        sys.stdout.writelines(diff)
+        console.print("[yellow](dry-run — no file written)[/yellow]")
+        return
+
+    # Interactive walk — delegate writes to mark_anchor() helper (atomic, comment-safe)
     changed = False
     quit_early = False
     for pi, pos in enumerate(data):
@@ -864,32 +919,22 @@ def mark_anchors(
                 continue
             if action == "a":
                 reason = typer.prompt("Why is this an anchor?", default="").strip() or None
-                details[bi] = _convert_to_object_form(text, anchor=True, reason=reason)
+                _mark_anchor(master, role_index=pi, bullet_index=bi, drop_reason=None, anchor_reason=reason)
+                # Reload data so subsequent indices stay in sync
+                data = yaml_rt.load(master.read_text(encoding="utf-8"))
+                pos = data[pi]
+                details = pos.get("details", [])
             elif action == "n":
-                details[bi] = _convert_to_object_form(text, anchor=False, reason=None)
+                _mark_anchor(master, role_index=pi, bullet_index=bi, drop_reason="non-anchor")
+                data = yaml_rt.load(master.read_text(encoding="utf-8"))
+                pos = data[pi]
+                details = pos.get("details", [])
             changed = True
 
     if not changed:
         console.print("[yellow]No changes.[/yellow]")
         return
 
-    # Render updated YAML to a string
-    buf = io.StringIO()
-    yaml_rt.dump(data, buf)
-    new_text = buf.getvalue()
-
-    if dry_run:
-        diff = difflib.unified_diff(
-            original_text.splitlines(keepends=True),
-            new_text.splitlines(keepends=True),
-            fromfile=str(master),
-            tofile=str(master) + " (proposed)",
-        )
-        sys.stdout.writelines(diff)
-        console.print("[yellow](dry-run — no file written)[/yellow]")
-        return
-
-    master.write_text(new_text, encoding="utf-8")
     console.print(f"[green]wrote[/green] {master}")
 
 
