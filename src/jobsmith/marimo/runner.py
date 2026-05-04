@@ -24,6 +24,7 @@ from __future__ import annotations
 import contextlib
 import json
 import queue
+import sys
 import threading
 import uuid
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from jobsmith.apply import (
+    PipelineEvent,
     phase_for_specialist,
     resolve_canonical_slug,
     run_phase_iter,
@@ -124,6 +126,10 @@ class NotebookRunner:
         self._thread: threading.Thread | None = None
         self._cancel_event = threading.Event()
         self._run_id: str | None = None
+        # Last error message captured from a runner-thread crash. Persisted
+        # on the instance (not just the queue) so the UI can keep showing it
+        # across cell re-runs after the queue is drained (roborev #927).
+        self.last_error: str | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -158,8 +164,10 @@ class NotebookRunner:
                 "NotebookRunner is already running. "
                 "Call cancel() and wait for _Done before starting again."
             )
-        # Reset cancel event and drain stale queue items from prior run
+        # Reset cancel event, clear the last error, and drain stale queue
+        # items from prior run.
         self._cancel_event.clear()
+        self.last_error = None
         while not self.events_queue.empty():
             try:
                 self.events_queue.get_nowait()
@@ -223,6 +231,7 @@ class NotebookRunner:
 
         # Reset cancel event and drain stale queue items
         self._cancel_event.clear()
+        self.last_error = None
         while not self.events_queue.empty():
             try:
                 self.events_queue.get_nowait()
@@ -372,7 +381,29 @@ class NotebookRunner:
                             "cancelled" if self._cancel_event.is_set() else "done"
                         )
 
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                # Surface the traceback to stderr so it lands in the marimo
+                # log; otherwise a runner-thread crash leaves the user with
+                # only a silent ``status='failed'`` row in the DB and no way
+                # to diagnose what went wrong (roborev #926).
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+                # Capture the error message in two places so the UI can
+                # surface it both immediately (queue event) and after the
+                # queue has been drained (instance attribute persists across
+                # cell re-runs — roborev #927).
+                error_message = f"{type(exc).__name__}: {exc}"
+                self.last_error = error_message
+                self.events_queue.put(
+                    PipelineEvent(
+                        kind="runner_error",
+                        phase=phase_label,
+                        payload={
+                            "exc_type": type(exc).__name__,
+                            "message": str(exc),
+                        },
+                    )
+                )
                 final_status = "failed"
 
             # Update apply_runs row with final status
