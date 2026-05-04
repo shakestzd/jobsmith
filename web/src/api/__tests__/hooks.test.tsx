@@ -3,7 +3,7 @@
 // matches what the API stub yielded, (c) mutations invalidate the right
 // cache keys.
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import {
   QueryClient,

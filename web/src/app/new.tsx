@@ -4,8 +4,10 @@
 // main.jsx (design layer) invokes NewApplicationModal:
 //   <NewApplicationModal onClose={() => setShowNew(false)} onLaunch={(slug) => { ... }} />
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Icon } from './shared';
+import { useCreateApplication, type CreateApplicationBody } from '../api/hooks';
+import { ApiError } from '../api/client';
 
 // ── Prop interface ───────────────────────────────────────────────────────────
 
@@ -23,13 +25,24 @@ type VerbosityFlag = '' | '-v' | '-vv';
 
 // ── Component ────────────────────────────────────────────────────────────────
 
+// Map UI verbosity flag → API verbosity (CLI-formatted strings the
+// orchestrator forwards verbatim; matches the CLI's --verbose / --quiet flags).
+function uiVerbosityToApi(v: VerbosityFlag): CreateApplicationBody['verbosity'] {
+  if (v === '-vv' || v === '-v') return '--verbose';
+  return '--normal';
+}
+
 export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalProps) {
   const [step, setStep] = useState<1 | 2>(1);
   const [url, setUrl] = useState('https://linear.app/careers/product-engineer');
   const [jdMode, setJdMode] = useState<JdMode>('fetch');
   const [jdText, setJdText] = useState('');
+  const [jdFile, setJdFile] = useState<File | null>(null);
   const [verbose, setVerbose] = useState<VerbosityFlag>('-v');
   const [skipConfirm, setSkipConfirm] = useState(true);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const create = useCreateApplication();
 
   const slug = (() => {
     try {
@@ -60,11 +73,69 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
   const commandPreview = [
     `$ jobsmith apply '${url}'`,
     jdMode === 'paste' ? `    --jd-text-file /tmp/jd-${slug}.txt` : null,
+    jdMode === 'file' && jdFile ? `    --jd-file '${jdFile.name}'` : null,
     verbose ? `    ${verbose}` : null,
     skipConfirm ? `    --yes` : null,
   ]
     .filter(Boolean)
     .join(' \\\n');
+
+  // Read a File as base64 for the jd_file_b64 path.
+  const readFileAsBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result !== 'string') {
+          reject(new Error('FileReader returned non-string result'));
+          return;
+        }
+        // result is a data URL: "data:text/plain;base64,<payload>".
+        const comma = result.indexOf(',');
+        resolve(comma >= 0 ? result.slice(comma + 1) : result);
+      };
+      reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'));
+      reader.readAsDataURL(file);
+    });
+
+  const handleApply = async () => {
+    setSubmitError(null);
+    try {
+      const body: CreateApplicationBody = {
+        skip_confirmations: skipConfirm,
+        verbosity: uiVerbosityToApi(verbose),
+      };
+      if (jdMode === 'fetch') {
+        body.jd_url = url;
+      } else if (jdMode === 'paste') {
+        if (!jdText.trim()) {
+          setSubmitError('Paste the job description text or switch to fetch / upload.');
+          return;
+        }
+        body.jd_text = jdText;
+      } else if (jdMode === 'file') {
+        if (!jdFile) {
+          setSubmitError('Select a JD file or switch to fetch / paste.');
+          return;
+        }
+        body.jd_file_b64 = await readFileAsBase64(jdFile);
+      }
+      const resp = await create.mutateAsync(body);
+      onLaunch(resp.slug);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        // Surface the server's "detail" field if it's JSON; otherwise show the raw body.
+        try {
+          const parsed = JSON.parse(err.body);
+          setSubmitError(typeof parsed.detail === 'string' ? parsed.detail : err.message);
+        } catch {
+          setSubmitError(err.body || err.message);
+        }
+      } else {
+        setSubmitError(err instanceof Error ? err.message : String(err));
+      }
+    }
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -113,6 +184,23 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
                   placeholder="Paste the full job description here…"
                 />
                 <div className="help">written to a tempfile during the run; deleted after.</div>
+              </div>
+            )}
+
+            {jdMode === 'file' && (
+              <div className="field">
+                <label>jd file</label>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".txt,.md,.html,.htm,.pdf"
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setJdFile(e.target.files?.[0] ?? null)
+                  }
+                />
+                <div className="help">
+                  {jdFile ? `Selected: ${jdFile.name} (${jdFile.size} bytes)` : 'plain text / markdown preferred — uploaded as base64.'}
+                </div>
               </div>
             )}
 
@@ -176,15 +264,60 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
           </div>
         )}
 
+        {submitError && step === 2 && (
+          <div
+            className="error-banner"
+            role="alert"
+            style={{
+              margin: '0 16px 12px',
+              padding: '10px 12px',
+              borderRadius: 'var(--radius)',
+              border: '1px solid var(--danger, #c33)',
+              background: 'var(--bg-sunk)',
+              color: 'var(--danger, #c33)',
+              fontSize: 12.5,
+            }}
+          >
+            {submitError}
+          </div>
+        )}
+
         <div className="modal-foot">
           {step === 2 && (
-            <button className="btn ghost" onClick={() => setStep(1)}>back</button>
+            <button
+              className="btn ghost"
+              onClick={() => setStep(1)}
+              disabled={create.isPending}
+            >
+              back
+            </button>
           )}
-          <button className="btn ghost" onClick={onClose}>cancel</button>
-          {step === 1
-            ? <button className="btn primary" onClick={() => setStep(2)}>review →</button>
-            : <button className="btn primary" onClick={() => onLaunch(slug)}><Icon name="play" size={12} /> apply</button>
-          }
+          <button
+            className="btn ghost"
+            onClick={onClose}
+            disabled={create.isPending}
+          >
+            cancel
+          </button>
+          {step === 1 ? (
+            <button className="btn primary" onClick={() => setStep(2)}>
+              review →
+            </button>
+          ) : (
+            <button
+              className="btn primary"
+              onClick={handleApply}
+              disabled={create.isPending}
+            >
+              {create.isPending ? (
+                <>queuing…</>
+              ) : (
+                <>
+                  <Icon name="play" size={12} /> apply
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>

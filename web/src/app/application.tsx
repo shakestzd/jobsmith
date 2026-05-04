@@ -10,6 +10,8 @@
 import { useState, useEffect, useRef } from 'react';
 import type { SampleApp, IconName } from '../types';
 import { Icon, Badge, StatusBadge, SAMPLE_APPS } from './shared';
+import { useRerunApplication } from '../api/hooks';
+import { ApiError } from '../api/client';
 
 // ── Public prop type ─────────────────────────────────────────────────────────
 
@@ -671,6 +673,28 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   const [running, setRunning] = useState<boolean>(app.status === 'running');
   const [progress, setProgress] = useState<ProgressMap>(initialProgress);
   const [events, setEvents] = useState<LogEvent[]>(() => seedEvents(app));
+  const [rerunError, setRerunError] = useState<string | null>(null);
+  const rerun = useRerunApplication();
+
+  const handleRerun = async () => {
+    setRerunError(null);
+    try {
+      await rerun.mutateAsync({ slug });
+      setRunning(true);
+      setTab('pipeline');
+    } catch (err) {
+      if (err instanceof ApiError) {
+        try {
+          const parsed = JSON.parse(err.body);
+          setRerunError(typeof parsed.detail === 'string' ? parsed.detail : err.message);
+        } catch {
+          setRerunError(err.body || err.message);
+        }
+      } else {
+        setRerunError(err instanceof Error ? err.message : String(err));
+      }
+    }
+  };
 
   // Live progress sim when running
   useEffect(() => {
@@ -720,8 +744,18 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
           <button className="btn"><Icon name="doc" size={13} /> open in marimo</button>
           <button className="btn"><Icon name="folder" size={13} /> reveal in finder</button>
           {!running && (
-            <button className="btn primary" onClick={() => setRunning(true)}>
-              <Icon name="play" size={12} /> re-run apply
+            <button
+              className="btn primary"
+              onClick={handleRerun}
+              disabled={rerun.isPending}
+            >
+              {rerun.isPending ? (
+                <>queuing…</>
+              ) : (
+                <>
+                  <Icon name="play" size={12} /> re-run apply
+                </>
+              )}
             </button>
           )}
           {running && (
@@ -731,6 +765,23 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
           )}
         </div>
       </div>
+
+      {rerunError && (
+        <div
+          role="alert"
+          style={{
+            margin: '0 0 12px',
+            padding: '10px 12px',
+            borderRadius: 'var(--radius)',
+            border: '1px solid var(--danger, #c33)',
+            background: 'var(--bg-sunk)',
+            color: 'var(--danger, #c33)',
+            fontSize: 12.5,
+          }}
+        >
+          {rerunError}
+        </div>
+      )}
 
       <div className="pipeline" style={{ marginBottom: 20 }}>
         {PHASES.map((p, i) => {
