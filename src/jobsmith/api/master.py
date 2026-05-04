@@ -6,6 +6,8 @@ GET  /master                       → MasterPayload  (all four sections)
 GET  /master/{section}             → section content (work | skill | education | author)
 PUT  /master/{section}             → replace section content (validated against schema)
 POST /master/{section}/upload      → upload a raw YAML file replacing the section
+GET  /master/benchmark             → {text, version} for benchmark.md
+PUT  /master/benchmark             → write new benchmark.md text, returns {text, version}
 
 Behavior contract
 -----------------
@@ -13,10 +15,13 @@ Behavior contract
 - Writes use ruamel.yaml round-trip: comments + key order are preserved on every
   PUT/upload cycle (feat-eb277ecd).  Atomic tmp-file + rename guarantees no partial
   writes on failure.
+- benchmark.md is a plain-text markdown file; no schema validation, no YAML round-trip.
+  version is a SHA-256 hex digest of the file content (empty string when file absent).
 """
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any, Literal
 
@@ -25,7 +30,7 @@ from fastapi import APIRouter, Body, HTTPException, UploadFile
 from pydantic import BaseModel, ValidationError
 
 from jobsmith.config import find_config, load_config
-from jobsmith.master_io import MasterSection, save_master
+from jobsmith.master_io import MasterSection, save_benchmark, save_master
 from jobsmith.paths import resolve
 
 from .schemas.master import Author, EducationEntry, MasterPayload, SkillEntry, WorkEntry
@@ -216,6 +221,68 @@ def _normalise_author_payload(raw: Any) -> Any:
     if isinstance(raw, dict):
         return {"author": [raw]}
     return raw
+
+
+# ---------------------------------------------------------------------------
+# Benchmark routes (plain markdown — no YAML round-trip)
+#
+# Registered BEFORE the templated /master/{section} routes so that
+# `/master/benchmark` matches these handlers, not the section-validated ones.
+# ---------------------------------------------------------------------------
+
+_BENCHMARK_DEFAULT = Path("assets/content/benchmark.md")
+
+
+class BenchmarkPayload(BaseModel):
+    """Request body for PUT /master/benchmark."""
+
+    text: str
+
+
+class BenchmarkResponse(BaseModel):
+    """Response body for GET/PUT /master/benchmark."""
+
+    text: str
+    version: str  # SHA-256 hex digest of text content; "" when file absent
+
+
+def _benchmark_path(config_path: Path) -> Path:
+    """Return the benchmark.md path relative to the repo root."""
+    repo_root = config_path.parent
+    return repo_root / _BENCHMARK_DEFAULT
+
+
+def _content_version(text: str) -> str:
+    """Return a short content-hash version token for *text*."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+@router.get("/master/benchmark", response_model=BenchmarkResponse)
+def get_benchmark() -> BenchmarkResponse:
+    """Return the raw text + version of benchmark.md.
+
+    Returns ``{text: '', version: ''}`` when the file is absent (not a 404)
+    so the frontend can show an empty editor rather than an error page.
+    """
+    config_path = _require_config_path()
+    path = _benchmark_path(config_path)
+    if not path.exists():
+        return BenchmarkResponse(text="", version="")
+    text = path.read_text(encoding="utf-8")
+    return BenchmarkResponse(text=text, version=_content_version(text))
+
+
+@router.put("/master/benchmark", response_model=BenchmarkResponse)
+def put_benchmark(body: BenchmarkPayload) -> BenchmarkResponse:
+    """Atomically replace benchmark.md with *body.text*.
+
+    Returns the written text and a fresh version token so the client can
+    detect concurrent writes.
+    """
+    config_path = _require_config_path()
+    path = _benchmark_path(config_path)
+    save_benchmark(body.text, path)
+    return BenchmarkResponse(text=body.text, version=_content_version(body.text))
 
 
 # ---------------------------------------------------------------------------

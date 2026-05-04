@@ -9,6 +9,7 @@ import { Icon, Badge, SAMPLE_BULLETS } from './shared';
 import { SkillForm } from './master/SkillForm';
 import { EducationForm } from './master/EducationForm';
 import { AuthorForm } from './master/AuthorForm';
+import { BenchmarkEditor } from './master/BenchmarkEditor';
 import type { Skill, EducationEntry, Author } from './master/schemas';
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -136,6 +137,7 @@ export function MasterContent() {
     headline: '',
     links: [],
   });
+  const [benchmarkText, setBenchmarkText] = useState<string>('');
 
   return (
     <div className="content">
@@ -166,12 +168,7 @@ export function MasterContent() {
       {tab === 'skill' && <SkillForm skills={skills} onChange={setSkills} />}
       {tab === 'education' && <EducationForm education={education} onChange={setEducation} />}
       {tab === 'author' && <AuthorForm author={author} onChange={setAuthor} />}
-      {tab === 'benchmark' && (
-        <div className="card" style={{ padding: 60, textAlign: 'center', color: 'var(--fg-subtle)' }}>
-          <div className="mono-sm">editor for benchmark.md</div>
-          <div style={{ fontSize: 12, marginTop: 6 }}>(BenchmarkEditor — coming next)</div>
-        </div>
-      )}
+      {tab === 'benchmark' && <BenchmarkEditor text={benchmarkText} onChange={setBenchmarkText} />}
     </div>
   );
 }
