@@ -123,6 +123,71 @@ type TabName = 'pipeline' | 'artifacts' | 'factcheck' | 'anchors' | 'config';
 
 type ProgressMap = Record<1 | 2 | 3, number>;
 
+// ── Progress derivation helper ───────────────────────────────────────────────
+
+function deriveProgress(app: SampleApp): {
+  progress: ProgressMap;
+  activePhase: 1 | 2 | 3;
+} {
+  // If rendered or done, all phases complete
+  if (app.status === 'rendered' || app.status === 'done') {
+    return {
+      progress: { 1: 100, 2: 100, 3: 100 },
+      activePhase: 3,
+    };
+  }
+
+  // For failed status, initialize based on phase but don't fake completion
+  if (app.status === 'failed') {
+    const failedPhase = (app.phase || 1) as 1 | 2 | 3;
+    const progress: ProgressMap = { 1: 0, 2: 0, 3: 0 };
+    // Mark all phases up to and including the failed phase as we got there
+    if (failedPhase >= 1) progress[1] = 100;
+    if (failedPhase >= 2) progress[2] = 100;
+    if (failedPhase >= 3) progress[3] = 100;
+    return { progress, activePhase: failedPhase };
+  }
+
+  // For running statuses: initialize based on phase
+  // Phase 0 (queued) starts at nothing
+  if (app.phase === 0) {
+    return {
+      progress: { 1: 0, 2: 0, 3: 0 },
+      activePhase: 1,
+    };
+  }
+
+  // Phase 1 (gather) running or gather status
+  if (app.phase === 1 || app.status === 'gather') {
+    return {
+      progress: { 1: app.status === 'running' ? 42 : 0, 2: 0, 3: 0 },
+      activePhase: 1,
+    };
+  }
+
+  // Phase 2 (draft) running or draft status
+  if (app.phase === 2 || app.status === 'draft') {
+    return {
+      progress: { 1: 100, 2: app.status === 'running' ? 42 : 0, 3: 0 },
+      activePhase: 2,
+    };
+  }
+
+  // Phase 3 (render) running or review status
+  if (app.phase === 3 || app.status === 'review') {
+    return {
+      progress: { 1: 100, 2: 100, 3: app.status === 'running' ? 42 : 0 },
+      activePhase: 3,
+    };
+  }
+
+  // Default fallback (should not reach here)
+  return {
+    progress: { 1: 0, 2: 0, 3: 0 },
+    activePhase: 1,
+  };
+}
+
 // ── PhaseCard ────────────────────────────────────────────────────────────────
 
 interface PhaseMetaEntry {
@@ -598,15 +663,13 @@ phase_timeout_s: 600`}</pre>
 
 export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   const app = SAMPLE_APPS.find(a => a.slug === slug) ?? SAMPLE_APPS[0];
+  const { progress: initialProgress, activePhase: initialActivePhase } =
+    deriveProgress(app);
 
   const [tab, setTab] = useState<TabName>('pipeline');
-  const [activePhase, setActivePhase] = useState<number>(app.phase || 2);
+  const [activePhase, setActivePhase] = useState<number>(initialActivePhase);
   const [running, setRunning] = useState<boolean>(app.status === 'running');
-  const [progress, setProgress] = useState<ProgressMap>({
-    1: 100,
-    2: 100,
-    3: app.status === 'rendered' ? 100 : (app.status === 'running' ? 42 : 0),
-  });
+  const [progress, setProgress] = useState<ProgressMap>(initialProgress);
   const [events, setEvents] = useState<LogEvent[]>(() => seedEvents(app));
 
   // Live progress sim when running
