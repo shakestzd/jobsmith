@@ -140,6 +140,27 @@ ARTIFACT_READERS: dict[str, tuple[str, Any]] = {
         if (d / "ats-check.json").exists()
         else None,
     ),
+    # slug-root artifacts — live at <app>/ (state_dir.parent), not inside
+    # .apply-state/.  Readers traverse up one level so the dual-write hook
+    # can iterate ARTIFACT_READERS without needing separate path logic.
+    "cover-letter-draft.md": (
+        "cover-letter-draft",
+        lambda d: load_text_artifact(d.parent, "cover-letter-draft.md"),
+    ),
+    "_quarto.yml": (
+        "quarto-config",
+        lambda d: load_text_artifact(d.parent, "_quarto.yml"),
+    ),
+    "_variables.yml": (
+        "variables",
+        lambda d: load_text_artifact(d.parent, "_variables.yml"),
+    ),
+    "manifest.json": (
+        "manifest",
+        lambda d: json.loads((d / "manifest.json").read_text())
+        if (d / "manifest.json").exists()
+        else None,
+    ),
 }
 
 #: Maps a specialist name (as written into manifest.json.invocations[].specialist)
