@@ -229,6 +229,65 @@ def _fetch_new_specialists(
     ).fetchall()
 
 
+def _fetch_current_run_statuses(
+    conn: sqlite3.Connection, slug: str
+) -> list[sqlite3.Row]:
+    """Return the current ``(run_id, phase, status, finished_at)`` snapshot.
+
+    Used to detect terminal state transitions: ``apply_runs`` rows are UPDATED
+    in place when a run completes (rowid stays the same), so a rowid-only poll
+    never sees the transition. Caller compares against a per-stream snapshot
+    and emits a ``phase`` event on any change.
+    """
+    return conn.execute(
+        """
+        SELECT rowid AS rowid, run_id, phase, status,
+               started_at, finished_at
+        FROM apply_runs
+        WHERE slug = ?
+        ORDER BY rowid DESC
+        LIMIT 50
+        """,
+        (slug,),
+    ).fetchall()
+
+
+def _db_poll_once(
+    db_path: Path,
+    slug: str,
+    after_run_rowid: int,
+    after_specialist_rowid: int,
+) -> tuple[
+    list[sqlite3.Row],
+    list[sqlite3.Row],
+    list[sqlite3.Row],
+    int,
+    int,
+]:
+    """Open a fresh connection, run all three queries, close.
+
+    Returning everything from one ``asyncio.to_thread`` worker avoids the
+    cross-thread connection issue that arises when the same ``sqlite3.Connection``
+    is touched from multiple thread-pool workers (default ``check_same_thread=True``
+    rejects this).
+
+    Returns: (new_runs, new_specialists, current_run_snapshot,
+              max_run_rowid, max_specialist_rowid).
+    """
+    conn = open_pipeline_db(db_path)
+    try:
+        if after_run_rowid < 0:
+            after_run_rowid = _max_rowid(conn, "apply_runs")
+        if after_specialist_rowid < 0:
+            after_specialist_rowid = _max_rowid(conn, "specialist_outputs")
+        new_runs = _fetch_new_runs(conn, slug, after_run_rowid)
+        new_specs = _fetch_new_specialists(conn, slug, after_specialist_rowid)
+        current = _fetch_current_run_statuses(conn, slug)
+    finally:
+        conn.close()
+    return new_runs, new_specs, current, after_run_rowid, after_specialist_rowid
+
+
 # ---------------------------------------------------------------------------
 # Filter
 # ---------------------------------------------------------------------------
@@ -330,18 +389,10 @@ async def _stream(
     last_activity = loop.time()
     last_heartbeat = loop.time()
 
-    conn: sqlite3.Connection | None = None
-    if db_path is not None:
-        # Run the (sync) sqlite open in a thread to avoid blocking the loop.
-        conn = await asyncio.to_thread(open_pipeline_db, db_path)
-        # Initialise cursors to skip historical rows when no explicit
-        # ``since`` query parameter was given (since_*_rowid == -1).
-        if since_run_rowid < 0:
-            since_run_rowid = await asyncio.to_thread(_max_rowid, conn, "apply_runs")
-        if since_specialist_rowid < 0:
-            since_specialist_rowid = await asyncio.to_thread(
-                _max_rowid, conn, "specialist_outputs"
-            )
+    # Track last-emitted status per run_id so we can detect terminal-state
+    # transitions: ``apply_runs.status`` is UPDATED in place by the pipeline,
+    # so a rowid-only poll misses the in-progress → done|failed transition.
+    last_status_by_run: dict[str, str] = {}
 
     # Spawn the supervisor producer.  Cleaned up in the finally block.
     log_queue: asyncio.Queue = asyncio.Queue()
@@ -386,34 +437,69 @@ async def _stream(
                 )
                 saw_activity = True
 
-            if conn is not None:
-                # Phase events
-                runs = await asyncio.to_thread(
-                    _fetch_new_runs, conn, slug, since_run_rowid
+            if db_path is not None:
+                # One worker → one connection → all queries → close.
+                # Avoids cross-thread sqlite3.Connection reuse.
+                (
+                    runs,
+                    specs,
+                    current_runs,
+                    since_run_rowid,
+                    since_specialist_rowid,
+                ) = await asyncio.to_thread(
+                    _db_poll_once,
+                    db_path,
+                    slug,
+                    since_run_rowid,
+                    since_specialist_rowid,
                 )
+
+                # Phase events from new rows.
                 for r in runs:
-                    since_run_rowid = int(r["rowid"])
+                    since_run_rowid = max(since_run_rowid, int(r["rowid"]))
+                    last_status_by_run[r["run_id"]] = r["status"]
                     payload: dict[str, Any] = {
                         "run_id": r["run_id"],
                         "phase": r["phase"],
                         "status": r["status"],
                         "started_at": r["started_at"],
                         "finished_at": r["finished_at"],
-                        "rowid": since_run_rowid,
+                        "rowid": int(r["rowid"]),
                     }
                     yield ServerSentEvent(
                         event="phase",
                         data=json.dumps(payload),
-                        id=f"run-{since_run_rowid}",
+                        id=f"run-{int(r['rowid'])}",
                     )
                     saw_activity = True
 
-                # Specialist events (filtered by verbosity)
-                specs = await asyncio.to_thread(
-                    _fetch_new_specialists, conn, slug, since_specialist_rowid
-                )
+                # Phase events from in-place status changes (no new rowid).
+                for r in current_runs:
+                    run_id = r["run_id"]
+                    status = r["status"]
+                    if last_status_by_run.get(run_id) == status:
+                        continue
+                    last_status_by_run[run_id] = status
+                    payload = {
+                        "run_id": run_id,
+                        "phase": r["phase"],
+                        "status": status,
+                        "started_at": r["started_at"],
+                        "finished_at": r["finished_at"],
+                        "rowid": int(r["rowid"]),
+                    }
+                    yield ServerSentEvent(
+                        event="phase",
+                        data=json.dumps(payload),
+                        id=f"run-{int(r['rowid'])}-{status}",
+                    )
+                    saw_activity = True
+
+                # Specialist events (filtered by verbosity).
                 for s in specs:
-                    since_specialist_rowid = int(s["rowid"])
+                    since_specialist_rowid = max(
+                        since_specialist_rowid, int(s["rowid"])
+                    )
                     if not _allow_specialist(verbosity, s["kind"]):
                         continue
                     payload = {
@@ -424,12 +510,12 @@ async def _stream(
                         "status": s["status"],
                         "finished_at": s["finished_at"],
                         "transcript_ref": s["transcript_ref"],
-                        "rowid": since_specialist_rowid,
+                        "rowid": int(s["rowid"]),
                     }
                     yield ServerSentEvent(
                         event="specialist",
                         data=json.dumps(payload),
-                        id=f"so-{since_specialist_rowid}",
+                        id=f"so-{int(s['rowid'])}",
                     )
                     saw_activity = True
 
@@ -457,12 +543,7 @@ async def _stream(
             await producer_task
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
-
-        if conn is not None:
-            try:
-                conn.close()
-            except sqlite3.Error:
-                pass
+        # No connection to close — _db_poll_once owns its lifecycle.
 
 
 # ---------------------------------------------------------------------------

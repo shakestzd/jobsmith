@@ -158,10 +158,8 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
         return;
       }
       jd_text = jdText;
-      // Send the URL as a hint when also provided — backend may use it to
-      // derive a slug. Falsy URL is fine; backend will fall back to slug
-      // derivation from the JD itself.
-      jd_url = url.trim() || null;
+      // jd_url stays null — backend rejects requests with more than one
+      // source set. The URL field is a hint to the user only in this mode.
     } else if (jdMode === 'file') {
       if (!jdFile) {
         setLocalError('please choose a file to upload');
@@ -175,7 +173,7 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
         );
         return;
       }
-      jd_url = url.trim() || null;
+      // jd_url stays null — see paste branch above.
     }
 
     const body: CreateApplicationRequest = {

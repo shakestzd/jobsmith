@@ -847,20 +847,34 @@ interface ApplicationDetailReadyProps {
   back: () => void;
 }
 
-/** Best-effort parse of a 409 response body into RerunConflictResponse. */
+/** Best-effort parse of a 409 response body into RerunConflictResponse.
+ *
+ * FastAPI's HTTPException(detail=...) wraps the payload as {detail: <body>},
+ * so the conflict shape may be at the root *or* nested under .detail. Try
+ * both before giving up.
+ */
 function parseRerunConflict(err: unknown): RerunConflictResponse | null {
   if (!(err instanceof ApiError) || err.status !== 409) return null;
+  let raw: unknown;
   try {
-    const parsed = JSON.parse(err.body) as Partial<RerunConflictResponse>;
-    if (
-      typeof parsed.slug === 'string' &&
-      typeof parsed.run_id === 'string' &&
-      parsed.status === 'running'
-    ) {
-      return parsed as RerunConflictResponse;
-    }
+    raw = JSON.parse(err.body);
   } catch {
-    // not JSON
+    return null;
+  }
+  const candidates: unknown[] = [raw];
+  if (raw && typeof raw === 'object' && 'detail' in raw) {
+    candidates.push((raw as { detail: unknown }).detail);
+  }
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    const c = candidate as Partial<RerunConflictResponse>;
+    if (
+      typeof c.slug === 'string' &&
+      typeof c.run_id === 'string' &&
+      c.status === 'running'
+    ) {
+      return c as RerunConflictResponse;
+    }
   }
   return null;
 }

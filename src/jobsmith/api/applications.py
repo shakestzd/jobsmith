@@ -213,11 +213,13 @@ async def create_application(
     if body.jd_url is not None:
         argv.append(body.jd_url)
     else:
-        # cli.py:411 defines `url` as a required positional Argument. A sentinel
-        # value "pasted" is passed so the CLI receives the required positional
-        # while --jd-text-file supplies the actual JD content. This is a known
-        # limitation; a follow-up should relax the url-required constraint in cli.py.
-        argv.append("pasted")
+        # cli.py:411 defines `url` as a required positional Argument. The CLI
+        # re-derives its own slug from this positional via apply.derive_slug(),
+        # which uses the URL's last path segment. To keep the CLI's slug
+        # aligned with the slug we just created and returned to the client,
+        # pass a synthetic URL whose final path segment IS that slug. (When
+        # cli.py grows a --slug override flag, drop this hack.)
+        argv.append(f"https://local.jobsmith/{slug}")
         argv += ["--jd-text-file", str(jd_file)]
 
     if body.skip_confirmations:
