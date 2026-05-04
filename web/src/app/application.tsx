@@ -118,6 +118,13 @@ function pipelineEventToLog(evt: PipelineEvent): LogEvent {
         escapeHtml(evt.data.status),
     };
   }
+  if (evt.kind === 'log') {
+    return {
+      ts: formatTs(evt.data.timestamp ?? evt.receivedAt),
+      lvl: evt.data.stream === 'stderr' ? 'err' : 'tool',
+      msg: escapeHtml(evt.data.line),
+    };
+  }
   const ts = formatTs(evt.data.finished_at ?? evt.receivedAt);
   return {
     ts,

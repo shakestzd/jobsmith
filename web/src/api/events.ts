@@ -46,9 +46,17 @@ export interface SpecialistEventData {
   rowid: number;
 }
 
+export interface LogEventData {
+  stream: 'stdout' | 'stderr';
+  line: string;
+  timestamp: string;
+  run_id: string;
+}
+
 export type PipelineEvent =
   | { kind: 'phase'; data: PhaseEventData; receivedAt: string }
-  | { kind: 'specialist'; data: SpecialistEventData; receivedAt: string };
+  | { kind: 'specialist'; data: SpecialistEventData; receivedAt: string }
+  | { kind: 'log'; data: LogEventData; receivedAt: string };
 
 export interface UseEventStreamOptions {
   /** Server-side filter — quiet | normal | verbose. Default: 'verbose'. */
@@ -165,6 +173,17 @@ export function useEventStream(
             data,
             receivedAt: new Date().toISOString(),
           });
+        } catch {
+          // Drop malformed payload.
+        }
+      });
+
+      es.addEventListener('log', (rawEvt: Event) => {
+        if (cancelled) return;
+        const ev = rawEvt as MessageEvent;
+        try {
+          const data = JSON.parse(ev.data) as LogEventData;
+          append({ kind: 'log', data, receivedAt: new Date().toISOString() });
         } catch {
           // Drop malformed payload.
         }
