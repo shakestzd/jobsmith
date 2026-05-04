@@ -1,0 +1,23 @@
+# Fixture: master work history (comment-safe round-trip test)
+#
+# These comments MUST survive a save_master() call that only changes the
+# first entry's title.  The second entry and all comments must remain intact.
+
+# Position 1 — anchor-heavy role
+- title: "Senior Data Engineer"
+  location: "Acme Corp"
+  date: "Jan 2023 - Present"
+  description: "Remote"
+  details:
+    # anchor: $250M ITC recovery
+    - "Unlocked $250M in additional Investment Tax Credits across 200K+ assets"
+    - "Shipped 7 automated ETL pipelines at 99.9% reliability"
+
+# Position 2 — older role; keep this comment
+- title: "Data Engineer"
+  location: "Previous Corp"
+  date: "Jun 2020 - Dec 2022"
+  description: "Hybrid"
+  details:
+    - "Built an optimizer that allocated 788 MW of capacity ($4.25B FMV)"
+    - "Reduced processing time by 75%"

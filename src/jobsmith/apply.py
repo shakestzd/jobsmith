@@ -18,6 +18,8 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
+import os
 import re
 import shutil
 import threading
@@ -25,17 +27,111 @@ import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import click
 
 from . import headless
 from . import plugin_dir as get_plugin_dir
+from ._state_readers import ARTIFACT_READERS
 from .benchmarks import resolve_benchmark_or_fallback
 from .config import CONFIG_FILENAME, find_config, load_config
 from .guard import check_anchors
 from .paths import resolve
 from .render import ApplyRenderer
+
+if TYPE_CHECKING:
+    from .api.client import JobsmithClient
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 dual-write — feat-e3d87579
+# ---------------------------------------------------------------------------
+
+
+def _dual_write_enabled() -> bool:
+    """Return True when JOBSMITH_DUAL_WRITE is unset or any value other than '0'."""
+    return os.environ.get("JOBSMITH_DUAL_WRITE", "1") != "0"
+
+
+def _build_client_if_enabled() -> JobsmithClient | None:
+    """Construct a JobsmithClient for the dual-write hook, or None when disabled.
+
+    Returns None when JOBSMITH_DUAL_WRITE=0 or when client construction fails
+    (typically because no API token is resolvable in the supervisor's env).
+    """
+    if not _dual_write_enabled():
+        return None
+    try:
+        from .api.client import JobsmithClient as _JsClient
+
+        return _JsClient()
+    except Exception as exc:  # noqa: BLE001 — never fail phase on client setup
+        logger.warning("dual-write disabled — could not build JobsmithClient: %s", exc)
+        return None
+
+
+def _coerce_to_dict(payload: Any, kind: str) -> dict[str, Any]:
+    """Wrap a non-dict artifact payload into the {text: ...} envelope expected
+    by the API for text-only kinds."""
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, str):
+        return {"text": payload}
+    return {"value": payload}
+
+
+def dual_write_phase_artifacts(
+    *,
+    client: JobsmithClient,
+    slug: str,
+    run_id: str,
+    state_dir: Path,
+) -> None:
+    """Mirror every loadable artifact in *state_dir* to the DB via *client*.
+
+    Iterates ARTIFACT_READERS. For each reader that returns non-None, calls
+    ``client.put_artifact(slug, run_id, kind, output)``. Wraps each PUT in
+    try/except — failures log a WARNING but never raise (Phase 1: FS is still
+    authoritative; DB is shadow).
+
+    Skipped entirely when ``JOBSMITH_DUAL_WRITE=0``.
+    """
+    if not _dual_write_enabled():
+        return
+
+    for filename, (kind, reader) in ARTIFACT_READERS.items():
+        try:
+            payload = reader(state_dir)
+        except Exception:  # noqa: BLE001 — readers must never fail the phase
+            logger.warning(
+                "dual-write reader failed for %s (kind=%s); skipping",
+                filename,
+                kind,
+            )
+            continue
+        if payload is None:
+            continue
+        # Some readers return {} when the source file is absent — skip those too,
+        # otherwise we'd PUT an empty payload for every kind on an empty state dir.
+        if isinstance(payload, dict) and not payload:
+            continue
+        if isinstance(payload, str) and not payload:
+            continue
+        output = _coerce_to_dict(payload, kind)
+        try:
+            client.put_artifact(slug, run_id, kind, output)
+        except Exception as exc:  # noqa: BLE001 — never fail phase on PUT error
+            logger.warning(
+                "dual-write PUT failed for kind=%s slug=%s run=%s: %s",
+                kind,
+                slug,
+                run_id,
+                exc,
+            )
 
 # ---------------------------------------------------------------------------
 # Phase definitions
@@ -1764,6 +1860,36 @@ def _run_apply_phases(
         # has a stable baseline to diff user edits against. Done immediately
         # after the phase succeeds, before the user can edit anything.
         _snapshot_phase_drafts(phase_name, slug, resolved_cwd)
+
+        # Step 3f-dual-write (feat-e3d87579): mirror FS artifacts to the DB.
+        # Phase 1 dual-write — FS remains authoritative; PUT failures log a
+        # WARNING but never fail the phase. Skipped when JOBSMITH_DUAL_WRITE=0.
+        client = _build_client_if_enabled()
+        if client is not None:
+            phase_state_dir = _apply_state_dir(slug, resolved_cwd)
+            if phase_state_dir is not None:
+                try:
+                    dual_write_phase_artifacts(
+                        client=client,
+                        slug=slug,
+                        run_id=db_run_id,
+                        state_dir=phase_state_dir,
+                    )
+                except Exception as exc:  # noqa: BLE001 — never fail phase
+                    logger.warning("dual-write hook failed: %s", exc)
+
+        # Step 3f-snapshot (feat-60be8c3a): before the render phase invokes
+        # quarto, materialise DB-only artifacts back to FS so quarto can read
+        # _quarto.yml / _variables.yml / prose-draft.md / cover-letter-draft.md.
+        # Once specialists drop FS writes (follow-up), this is the only path
+        # that puts those files on disk for the render step.
+        if phase_name == "render" and client is not None:
+            try:
+                client.snapshot_run(slug, db_run_id)
+            except Exception as exc:  # noqa: BLE001 — never fail render
+                logger.warning(
+                    "render-phase snapshot failed (FS may be stale): %s", exc
+                )
 
         # Step 3g: between-phase orchestration. After gather we reconcile the
         # canonical slug (phase 1 may have written artifacts under a different

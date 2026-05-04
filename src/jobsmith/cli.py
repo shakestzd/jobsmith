@@ -784,6 +784,8 @@ def mark_anchors(
 
     from ruamel.yaml import YAML
 
+    from .master_io import mark_anchor as _mark_anchor
+
     if not master.exists():
         console.print(f"[red]ERROR:[/red] master file not found: {master}")
         raise typer.Exit(code=2)
@@ -816,7 +818,7 @@ def mark_anchors(
             title = pos.get("title", "(untitled)")
             company = pos.get("location", "")
             lines.append(f"## {pi}. {title} @ {company}")
-            for bi, entry in enumerate(pos.get("details") or []):
+            for _bi, entry in enumerate(pos.get("details") or []):
                 text = entry["bullet"] if isinstance(entry, dict) else entry
                 marked = "[a]" if _bullet_already_annotated(entry) and entry.get("anchor") else "[ ]"
                 lines.append(f"- {marked} {text}")
@@ -827,7 +829,60 @@ def mark_anchors(
         console.print("Edit the file, then re-run with --batch (apply mode coming soon).")
         return
 
-    # Interactive walk
+    if dry_run:
+        # Dry-run: accumulate changes in memory, then diff — do not write.
+        changed_dry = False
+        quit_early = False
+        for pi, pos in enumerate(data):
+            if quit_early:
+                break
+            title = pos.get("title", "(untitled)")
+            company = pos.get("location", "")
+            details = pos.get("details")
+            if not isinstance(details, list):
+                continue
+            for bi, entry in enumerate(details):
+                if _bullet_already_annotated(entry) and not force:
+                    continue
+                text = entry["bullet"] if isinstance(entry, dict) else entry
+                console.print()
+                console.print(f"[bold cyan]{title} @ {company}[/bold cyan]  (position {pi}, bullet {bi})")
+                console.print(f"  {text}")
+                answer = typer.prompt("[a]nchor / [n]on-anchor / [s]kip / [q]uit", default="s", show_default=False)
+                action = _normalize_yes_no_skip(answer)
+                while action == "?":
+                    answer = typer.prompt("Please enter a, n, s, or q", default="s", show_default=False)
+                    action = _normalize_yes_no_skip(answer)
+                if action == "q":
+                    quit_early = True
+                    break
+                if action == "s":
+                    continue
+                if action == "a":
+                    reason = typer.prompt("Why is this an anchor?", default="").strip() or None
+                    details[bi] = _convert_to_object_form(text, anchor=True, reason=reason)
+                elif action == "n":
+                    details[bi] = _convert_to_object_form(text, anchor=False, reason=None)
+                changed_dry = True
+
+        if not changed_dry:
+            console.print("[yellow]No changes.[/yellow]")
+            return
+
+        buf = io.StringIO()
+        yaml_rt.dump(data, buf)
+        new_text = buf.getvalue()
+        diff = difflib.unified_diff(
+            original_text.splitlines(keepends=True),
+            new_text.splitlines(keepends=True),
+            fromfile=str(master),
+            tofile=str(master) + " (proposed)",
+        )
+        sys.stdout.writelines(diff)
+        console.print("[yellow](dry-run — no file written)[/yellow]")
+        return
+
+    # Interactive walk — delegate writes to mark_anchor() helper (atomic, comment-safe)
     changed = False
     quit_early = False
     for pi, pos in enumerate(data):
@@ -864,33 +919,227 @@ def mark_anchors(
                 continue
             if action == "a":
                 reason = typer.prompt("Why is this an anchor?", default="").strip() or None
-                details[bi] = _convert_to_object_form(text, anchor=True, reason=reason)
+                _mark_anchor(master, role_index=pi, bullet_index=bi, drop_reason=None, anchor_reason=reason)
+                # Reload data so subsequent indices stay in sync
+                data = yaml_rt.load(master.read_text(encoding="utf-8"))
+                pos = data[pi]
+                details = pos.get("details", [])
             elif action == "n":
-                details[bi] = _convert_to_object_form(text, anchor=False, reason=None)
+                _mark_anchor(master, role_index=pi, bullet_index=bi, drop_reason="non-anchor")
+                data = yaml_rt.load(master.read_text(encoding="utf-8"))
+                pos = data[pi]
+                details = pos.get("details", [])
             changed = True
 
     if not changed:
         console.print("[yellow]No changes.[/yellow]")
         return
 
-    # Render updated YAML to a string
-    buf = io.StringIO()
-    yaml_rt.dump(data, buf)
-    new_text = buf.getvalue()
-
-    if dry_run:
-        diff = difflib.unified_diff(
-            original_text.splitlines(keepends=True),
-            new_text.splitlines(keepends=True),
-            fromfile=str(master),
-            tofile=str(master) + " (proposed)",
-        )
-        sys.stdout.writelines(diff)
-        console.print("[yellow](dry-run — no file written)[/yellow]")
-        return
-
-    master.write_text(new_text, encoding="utf-8")
     console.print(f"[green]wrote[/green] {master}")
+
+
+# ---------- snapshot subcommand ----------
+
+
+@app.command()
+def snapshot(
+    slug: str = typer.Argument(..., help="Application slug (e.g. acme-swe)"),
+    run_id: str | None = typer.Option(
+        None,
+        "--run",
+        help=(
+            "Run ID to snapshot. Defaults to the most-recent run for the slug "
+            "when omitted."
+        ),
+    ),
+    kinds: list[str] | None = typer.Option(
+        None,
+        "--kind",
+        help=(
+            "Artifact kind to include. May be repeated. "
+            "When omitted, all artifacts are written."
+        ),
+    ),
+    target: str = typer.Option(
+        "both",
+        "--target",
+        help=(
+            "Which FS tree to write: 'apply-state', 'slug-root', or 'both' (default)."
+        ),
+    ),
+    api_url: str | None = typer.Option(
+        None,
+        "--api-url",
+        help="API base URL (default: JOBSMITH_API_BASE_URL env or http://127.0.0.1:8000).",
+    ),
+) -> None:
+    """Materialise DB artifacts to canonical FS paths (DB→FS snapshot).
+
+    Writes pipeline artifacts for a slug/run from the DB back to disk so that
+    ``quarto render`` and ``git diff`` work after Phase 3 drops FS writes.
+
+    Master YAMLs are never touched.
+
+    Examples::
+
+        jobsmith snapshot acme-swe
+        jobsmith snapshot acme-swe --run run-abc123
+        jobsmith snapshot acme-swe --kind jd-parsed --kind fit-score
+        jobsmith snapshot acme-swe --target apply-state
+    """
+    from .api.client import JobsmithClient, NotFoundError
+    from .db import get_apply_run_by_slug, open_pipeline_db
+
+    # Resolve run_id from DB when not provided
+    resolved_run_id = run_id
+    if resolved_run_id is None:
+        config_path = find_config(Path.cwd())
+        if config_path is None:
+            console.print(f"[red]ERROR:[/red] No {CONFIG_FILENAME} found — run `jobsmith init` first.")
+            raise typer.Exit(code=2)
+        config = load_config(config_path)
+        repo_root = config_path.parent
+        db_path = (repo_root / config.output.jobsmith_db).resolve()
+        if not db_path.exists():
+            console.print(f"[red]ERROR:[/red] Pipeline DB not found at {db_path}.")
+            raise typer.Exit(code=2)
+        conn = open_pipeline_db(db_path)
+        try:
+            row = get_apply_run_by_slug(conn, slug)
+        finally:
+            conn.close()
+        if row is None:
+            console.print(f"[red]ERROR:[/red] No run found for slug {slug!r}.")
+            raise typer.Exit(code=2)
+        resolved_run_id = row["run_id"]
+
+    try:
+        client = JobsmithClient(base_url=api_url)
+        result = client.snapshot_run(
+            slug,
+            resolved_run_id,
+            kinds=kinds or None,
+            target=target,
+        )
+    except NotFoundError as exc:
+        console.print(f"[red]ERROR:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+    except Exception as exc:
+        console.print(f"[red]ERROR:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    finally:
+        if "client" in locals():
+            client.close()
+
+    console.print(
+        f"[green]Snapshotted {len(result.files)} file(s) "
+        f"({result.total_bytes} bytes):[/green]"
+    )
+    for f in result.files:
+        console.print(f"  WROTE [{f.kind}] {f.path}")
+
+
+# ---------- api subcommand group ----------
+
+
+api_app = typer.Typer(
+    name="api",
+    help="Run the jobsmith HTTP API server.",
+    no_args_is_help=True,
+)
+app.add_typer(api_app, name="api")
+
+
+@api_app.command("serve")
+def api_serve(
+    bind_public: bool = typer.Option(
+        False,
+        "--bind-public",
+        help="Bind to 0.0.0.0 instead of 127.0.0.1 (required for non-local access).",
+    ),
+    port: int = typer.Option(8000, "--port", help="Bind port"),
+    reload: bool = typer.Option(False, "--reload", help="Enable auto-reload (development)"),
+) -> None:
+    """Start the jobsmith HTTP API with uvicorn.
+
+    By default binds to 127.0.0.1 (localhost only).  Pass --bind-public to
+    expose on all interfaces (0.0.0.0) — only do this on trusted networks.
+    """
+    from jobsmith.api.server import resolve_host
+    from jobsmith.api.server import serve as _serve
+
+    host = resolve_host(bind_public=bind_public)
+    _serve(host=host, port=port, reload=reload)
+
+
+# ---------- artifact subcommand group (feat-60be8c3a) ----------
+
+
+artifact_app = typer.Typer(
+    name="artifact",
+    help="Submit a pipeline artifact to the DB via the jobsmith HTTP API.",
+    no_args_is_help=True,
+)
+app.add_typer(artifact_app, name="artifact")
+
+
+@artifact_app.command("put")
+def artifact_put(
+    slug: str = typer.Option(..., "--slug", help="Application slug"),
+    run_id: str = typer.Option(..., "--run", help="Apply run id"),
+    kind: str = typer.Option(..., "--kind", help="Artifact kind (see KIND_MODELS)"),
+    json_payload: str = typer.Option(
+        ..., "--json", help="JSON-encoded artifact payload (per the kind's Pydantic schema)"
+    ),
+) -> None:
+    """Submit a pipeline artifact via the jobsmith API.
+
+    Wraps :meth:`JobsmithClient.put_artifact` so specialist subprocesses can
+    write to the DB without importing the SDK directly. Auth + base-URL are
+    resolved from environment (``JOBSMITH_API_TOKEN``, ``JOBSMITH_API_BASE_URL``).
+
+    Exits non-zero on auth, conflict, or not-found errors. Prints the new
+    rowid + version on success.
+    """
+    import json as _json
+
+    from jobsmith.api.client import (
+        AuthError,
+        ConflictError,
+        JobsmithClient,
+        NotFoundError,
+    )
+
+    try:
+        payload = _json.loads(json_payload)
+    except _json.JSONDecodeError as exc:
+        console.print(f"[red]error[/red] invalid --json: {exc}")
+        raise typer.Exit(code=2) from exc
+    if not isinstance(payload, dict):
+        console.print("[red]error[/red] --json must decode to an object")
+        raise typer.Exit(code=2)
+
+    try:
+        client = JobsmithClient()
+    except AuthError as exc:
+        console.print(f"[red]auth error[/red] {exc}")
+        raise typer.Exit(code=3) from exc
+
+    try:
+        envelope = client.put_artifact(slug, run_id, kind, payload)
+    except AuthError as exc:
+        console.print(f"[red]auth error[/red] {exc}")
+        raise typer.Exit(code=3) from exc
+    except NotFoundError as exc:
+        console.print(f"[red]not found[/red] {exc}")
+        raise typer.Exit(code=4) from exc
+    except ConflictError as exc:
+        console.print(f"[red]conflict[/red] {exc}")
+        raise typer.Exit(code=5) from exc
+
+    console.print(
+        f"[green]wrote[/green] kind={envelope.kind} version={envelope.version}"
+    )
 
 
 # ---------- site subcommand group ----------

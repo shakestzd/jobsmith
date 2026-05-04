@@ -96,6 +96,41 @@ def load_text_artifact(state_dir: Path, filename: str) -> str | None:
     return path.read_text()
 
 
+def load_quarto_config(repo_dir: Path) -> dict[str, Any] | None:
+    """Load <repo>/_quarto.yml as ``{"content": <raw text>}`` or None.
+
+    The QuartoConfig DB model uses ``content`` (not ``text``) so the
+    snapshot bridge can re-emit the file verbatim. See feat-60be8c3a.
+    """
+    path = repo_dir / "_quarto.yml"
+    if not path.exists():
+        return None
+    return {"content": path.read_text()}
+
+
+def load_variables_yml(repo_dir: Path) -> dict[str, Any] | None:
+    """Parse <repo>/_variables.yml and return the structured dict.
+
+    The Variables DB model expects keyed fields (company, position, fit, …),
+    not ``{"text": ...}``. We parse the YAML so :func:`_serialise_variables_yml`
+    can round-trip it correctly during snapshot. Returns None if the file is
+    missing or unparseable.
+    """
+    path = repo_dir / "_variables.yml"
+    if not path.exists():
+        return None
+    try:
+        import yaml  # type: ignore[import]
+
+        data = yaml.safe_load(path.read_text())
+    except (OSError, Exception) as exc:  # noqa: BLE001
+        _log.warning("_variables.yml could not be parsed (%s): %s", path, exc)
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
 def load_ai_tell_report(state_dir: Path) -> dict[str, Any] | None:
     """Load .apply-state/ai-tell-report.json; returns None if missing or malformed.
 
@@ -138,6 +173,21 @@ ARTIFACT_READERS: dict[str, tuple[str, Any]] = {
         "ats-check",
         lambda d: json.loads((d / "ats-check.json").read_text())
         if (d / "ats-check.json").exists()
+        else None,
+    ),
+    # slug-root artifacts — live at <app>/ (state_dir.parent), not inside
+    # .apply-state/.  Readers traverse up one level so the dual-write hook
+    # can iterate ARTIFACT_READERS without needing separate path logic.
+    "cover-letter-draft.md": (
+        "cover-letter-draft",
+        lambda d: load_text_artifact(d.parent, "cover-letter-draft.md"),
+    ),
+    "_quarto.yml": ("quarto-config", lambda d: load_quarto_config(d.parent)),
+    "_variables.yml": ("variables", lambda d: load_variables_yml(d.parent)),
+    "manifest.json": (
+        "manifest",
+        lambda d: json.loads((d / "manifest.json").read_text())
+        if (d / "manifest.json").exists()
         else None,
     ),
 }
