@@ -893,6 +893,29 @@ def mark_anchors(
     console.print(f"[green]wrote[/green] {master}")
 
 
+# ---------- api subcommand group ----------
+
+
+api_app = typer.Typer(
+    name="api",
+    help="Run the jobsmith HTTP API server.",
+    no_args_is_help=True,
+)
+app.add_typer(api_app, name="api")
+
+
+@api_app.command("serve")
+def api_serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind host"),
+    port: int = typer.Option(8000, "--port", help="Bind port"),
+    reload: bool = typer.Option(False, "--reload", help="Enable auto-reload (development)"),
+) -> None:
+    """Start the jobsmith HTTP API with uvicorn."""
+    from jobsmith.api.server import serve as _serve
+
+    _serve(host=host, port=port, reload=reload)
+
+
 # ---------- site subcommand group ----------
 
 
