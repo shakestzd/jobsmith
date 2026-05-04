@@ -84,4 +84,71 @@ class ApplicationDetail(Application):
     truncated: bool = False                # True if any large field was truncated
 
 
-__all__ = ["Application", "ApplicationDetail", "ArtifactNode", "ArtifactTree"]
+class CreateApplicationRequest(BaseModel):
+    """Request body for POST /api/applications.
+
+    Exactly one of jd_url, jd_text, or jd_file_b64 must be set.
+    """
+
+    jd_url: str | None = None
+    jd_text: str | None = None
+    jd_file_b64: str | None = None  # base64-encoded text content
+    verbosity: str = "-v"  # '-v' | '-vv' | '-vvv'
+    skip_confirmations: bool = True
+    force: bool = False  # passes --force to apply
+
+
+class CreateApplicationResponse(BaseModel):
+    """Response body for POST /api/applications (201 Created)."""
+
+    slug: str
+    run_id: str
+    events_url: str
+
+
+# ---------------------------------------------------------------------------
+# Re-run endpoint models (feat-9b3cfcfd)
+#
+# Alignment note: RerunResponse intentionally mirrors CreateApplicationResponse
+# (both return slug + run_id + events_url). They are kept as distinct classes
+# so each endpoint can evolve its shape independently without coupling.
+# ---------------------------------------------------------------------------
+
+from typing import Literal  # noqa: E402 (post-class import, avoids reorder churn)
+
+
+class RerunRequest(BaseModel):
+    """Body for POST /api/applications/{slug}/run."""
+
+    verbosity: Literal["-v", "-vv", "-vvv"] = "-v"
+    force: bool = False
+
+
+class RerunResponse(BaseModel):
+    """202 Accepted body for POST /api/applications/{slug}/run."""
+
+    slug: str
+    run_id: str
+    events_url: str
+
+
+class RerunConflictResponse(BaseModel):
+    """409 Conflict detail body — a run is already in flight for this slug."""
+
+    slug: str
+    run_id: str
+    status: str = "running"
+    events_url: str
+
+
+__all__ = [
+    "Application",
+    "ApplicationDetail",
+    "ArtifactNode",
+    "ArtifactTree",
+    "CreateApplicationRequest",
+    "CreateApplicationResponse",
+    "RerunRequest",
+    "RerunResponse",
+    "RerunConflictResponse",
+]

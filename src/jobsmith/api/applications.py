@@ -4,6 +4,7 @@ Endpoints
 ---------
 GET /applications          → list[Application]  (this slice, feat-d08c5002)
 GET /applications/{slug}   → Application         (slice 5, feat-e3b75a8a — extend here)
+POST /applications         → CreateApplicationResponse  (feat-4d9cc3e5)
 
 Behavior contract
 -----------------
@@ -27,15 +28,40 @@ Import ``derive_application_state`` from ``.state`` and add::
 
 from __future__ import annotations
 
+import base64
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
-from .schemas.applications import Application, ApplicationDetail
+from .schemas.applications import (
+    Application,
+    ApplicationDetail,
+    CreateApplicationRequest,
+    CreateApplicationResponse,
+    RerunConflictResponse,
+    RerunRequest,
+    RerunResponse,
+)
 from .state import derive_application_detail, derive_application_state
 
 router = APIRouter(tags=["applications"])
+
+
+# ---------------------------------------------------------------------------
+# Supervisor lazy-import helper (feat-9b3cfcfd)
+#
+# Using a callable indirection lets tests monkeypatch ``_supervisor`` at the
+# module level without needing to import the real RunSupervisor at test time.
+# ---------------------------------------------------------------------------
+
+
+def _supervisor():  # type: ignore[return]
+    """Return the process-wide RunSupervisor singleton (lazy import)."""
+    from jobsmith.api.supervisor import get_supervisor
+
+    return get_supervisor()
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +133,210 @@ def get_application(slug: str, request: Request) -> ApplicationDetail:
     if not slug_dir.is_dir():
         raise HTTPException(status_code=404, detail=f"Slug not found: {slug}")
     return derive_application_detail(slug_dir)
+
+
+# ---------------------------------------------------------------------------
+# Create endpoint (feat-4d9cc3e5)
+# POST /api/applications
+# ---------------------------------------------------------------------------
+
+
+@router.post("/applications", response_model=CreateApplicationResponse, status_code=201)
+async def create_application(
+    body: CreateApplicationRequest,
+    request: Request,
+) -> CreateApplicationResponse:
+    """Create a new application slug directory and queue a pipeline run.
+
+    Exactly one of jd_url, jd_text, or jd_file_b64 must be provided.
+    Returns 201 with slug, run_id, and events_url on success.
+    Returns 400 for bad input, 409 if the slug already exists.
+    """
+    # --- Validate exactly one source is set ---
+    sources = [body.jd_url, body.jd_text, body.jd_file_b64]
+    set_count = sum(1 for s in sources if s is not None)
+    if set_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Exactly one of jd_url, jd_text, or jd_file_b64 must be set.",
+        )
+    if set_count > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Exactly one of jd_url, jd_text, or jd_file_b64 must be set (got multiple).",
+        )
+
+    # --- Validate and decode base64 if provided ---
+    jd_content: str | None = None
+    if body.jd_file_b64 is not None:
+        try:
+            jd_content = base64.b64decode(body.jd_file_b64).decode("utf-8")
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"jd_file_b64 is not valid base64-encoded UTF-8 text: {exc}",
+            ) from exc
+    elif body.jd_text is not None:
+        jd_content = body.jd_text
+
+    # --- Resolve applications_dir ---
+    apps_dir = _resolve_applications_dir(request)
+
+    # --- Derive slug ---
+    if body.jd_url is not None:
+        from jobsmith.apply import derive_slug  # noqa: PLC0415
+
+        slug = derive_slug(body.jd_url)
+    else:
+        # For pasted text / file upload, use a timestamp-based slug.
+        slug = f"pasted-{datetime.now(tz=timezone.utc).strftime('%Y%m%d%H%M%S')}"
+
+    # --- 409 if slug directory already exists ---
+    slug_dir = apps_dir / slug
+    if slug_dir.exists():
+        raise HTTPException(
+            status_code=409,
+            detail=f"Application slug already exists: {slug!r}",
+        )
+
+    # --- Create slug directory ---
+    slug_dir.mkdir(parents=True, exist_ok=False)
+
+    # --- Write jd.txt if content came from text/file ---
+    jd_file: Path | None = None
+    if jd_content is not None:
+        jd_file = slug_dir / "jd.txt"
+        jd_file.write_text(jd_content, encoding="utf-8")
+
+    # --- Build argv for apply pipeline ---
+    argv: list[str] = ["jobsmith", "apply"]
+    if body.jd_url is not None:
+        argv.append(body.jd_url)
+    else:
+        # cli.py:411 defines `url` as a required positional Argument. A sentinel
+        # value "pasted" is passed so the CLI receives the required positional
+        # while --jd-text-file supplies the actual JD content. This is a known
+        # limitation; a follow-up should relax the url-required constraint in cli.py.
+        argv.append("pasted")
+        argv += ["--jd-text-file", str(jd_file)]
+
+    if body.skip_confirmations:
+        argv.append("--yes")
+    if body.force:
+        argv.append("--force")
+    if body.verbosity == "-vv":
+        argv.append("-vv")
+    elif body.verbosity == "-vvv":
+        argv.append("-vvv")
+    else:
+        argv.append("-v")
+
+    # --- Launch via supervisor ---
+    supervisor = _supervisor()
+    run_id = await supervisor.start(slug, argv, cwd=apps_dir.parent)
+
+    events_url = f"/api/applications/{slug}/events?run_id={run_id}"
+
+    return CreateApplicationResponse(slug=slug, run_id=run_id, events_url=events_url)
+
+
+# ---------------------------------------------------------------------------
+# Re-run endpoint (feat-9b3cfcfd)
+# POST /api/applications/{slug}/run
+# ---------------------------------------------------------------------------
+
+# Placeholder URL used when re-running a text-based (jd.txt) application.
+# The apply command requires a positional URL argument; for text-based runs
+# a sentinel value is supplied and the real text is passed via --jd-text-file.
+_JD_URL_PLACEHOLDER = "file://placeholder"
+
+
+def _read_jd_url(slug_dir: Path) -> str | None:
+    """Extract jd_url from .apply-state/jd-parsed.json if present."""
+    jd_parsed = slug_dir / ".apply-state" / "jd-parsed.json"
+    if jd_parsed.is_file():
+        try:
+            import json
+
+            data = json.loads(jd_parsed.read_text(encoding="utf-8"))
+            return data.get("jd_url")  # may be None if key missing
+        except Exception:
+            return None
+    return None
+
+
+@router.post(
+    "/applications/{slug}/run",
+    status_code=202,
+    response_model=RerunResponse,
+)
+async def rerun_application(
+    slug: str,
+    body: RerunRequest,
+    request: Request,
+) -> RerunResponse:
+    """Re-run the apply pipeline for an existing slug.
+
+    Steps
+    -----
+    1. Validate slug (404 if not a directory under applications_dir).
+    2. Determine JD source from .apply-state/jd-parsed.json or jd.txt (400 if neither).
+    3. Check for an in-flight run (409 if already running).
+    4. Build argv and dispatch to RunSupervisor.start().
+    5. Return 202 with slug, run_id, and events_url.
+    """
+    apps_dir = _resolve_applications_dir(request)
+    slug_dir = apps_dir / slug
+
+    # Step 1: slug must exist
+    if not slug_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"Slug not found: {slug}")
+
+    # Step 2: determine JD source
+    jd_url = _read_jd_url(slug_dir)
+    jd_txt_path = slug_dir / "jd.txt"
+    text_based = False
+
+    if jd_url is None:
+        # Fall back to text-based run
+        if jd_txt_path.is_file():
+            text_based = True
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot determine JD source for re-run: no jd-parsed.json or jd.txt found",
+            )
+
+    # Step 3: 409 if a run is already in flight
+    supervisor = _supervisor()
+    existing_run_id = supervisor.get_active_for_slug(slug)
+    if existing_run_id is not None:
+        events_url = f"/api/applications/{slug}/events?run_id={existing_run_id}"
+        raise HTTPException(
+            status_code=409,
+            detail=RerunConflictResponse(
+                slug=slug,
+                run_id=existing_run_id,
+                status="running",
+                events_url=events_url,
+            ).model_dump(),
+        )
+
+    # Step 4: build argv
+    argv: list[str] = ["jobsmith", "apply"]
+    if text_based:
+        argv += [_JD_URL_PLACEHOLDER, "--jd-text-file", str(jd_txt_path)]
+    else:
+        argv.append(jd_url)  # type: ignore[arg-type]
+
+    if body.force:
+        argv.append("--force")
+    argv += ["--yes", body.verbosity]
+
+    # Step 5: dispatch and return 202
+    run_id = await supervisor.start(slug, argv, cwd=apps_dir.parent)
+    events_url = f"/api/applications/{slug}/events?run_id={run_id}"
+    return RerunResponse(slug=slug, run_id=run_id, events_url=events_url)
 
 
 # ---------------------------------------------------------------------------
