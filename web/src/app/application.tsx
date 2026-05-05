@@ -388,34 +388,75 @@ interface FactCheckTabProps {
   artifacts: ApiApplicationArtifact[];
 }
 
-// Extract claims from a fact-check artifact's `output` payload. The shape
-// is intentionally loose (Record<string, unknown>) on the API side, so we
-// defensively narrow it here. Returns [] when no fact-check artifact exists
-// or its shape doesn't match — the empty state renders an explicit "no
-// fact-check data yet" message rather than fabricating claims.
-function extractFactCheckClaims(artifacts: ApiApplicationArtifact[]): FactClaim[] {
+// Extract claims from a fact-check artifact's `output` payload — matches the
+// real serialized FactCheckResult shape from src/jobsmith/factcheck.py:
+//   { passed: bool,
+//     verified_claims: [{ claim, kind, verified, source_file? }],
+//     failed_claims:   [str] }
+// Returns [] when the artifact is absent OR exposes neither field, in which
+// case the tab renders an explicit "no fact-check data yet" empty state.
+// Roborev job 945 fix.
+function extractFactCheckClaims(artifacts: ApiApplicationArtifact[]): {
+  rows: FactClaim[];
+  passed: boolean | null;
+} {
   const fc = artifacts.find(
     a => a.kind === 'fact-check' || a.kind === 'fact_check' || a.kind === 'factcheck',
   );
-  if (!fc) return [];
-  const raw = (fc.output as { claims?: unknown }).claims;
-  if (!Array.isArray(raw)) return [];
-  const out: FactClaim[] = [];
-  for (const item of raw) {
-    if (typeof item !== 'object' || item === null) continue;
-    const obj = item as Record<string, unknown>;
-    const claim = typeof obj.claim === 'string' ? obj.claim : null;
-    const source = typeof obj.source === 'string' ? obj.source : '';
-    const ok = obj.ok === true;
-    if (claim) out.push({ c: claim, src: source, ok });
+  if (!fc) return { rows: [], passed: null };
+  const out = fc.output as {
+    passed?: unknown;
+    verified_claims?: unknown;
+    failed_claims?: unknown;
+    // Legacy shape kept for forward-compat: some agents may still emit `claims[]`.
+    claims?: unknown;
+  };
+  const rows: FactClaim[] = [];
+
+  // Real shape: verified_claims is a list of VerificationResult dicts.
+  if (Array.isArray(out.verified_claims)) {
+    for (const item of out.verified_claims as unknown[]) {
+      if (typeof item !== 'object' || item === null) continue;
+      const obj = item as Record<string, unknown>;
+      const claim = typeof obj.claim === 'string' ? obj.claim : null;
+      if (!claim) continue;
+      const source =
+        typeof obj.source_file === 'string' ? obj.source_file
+          : typeof obj.source === 'string' ? obj.source
+            : '';
+      const verified = obj.verified === true || obj.ok === true;
+      rows.push({ c: claim, src: source, ok: verified });
+    }
   }
-  return out;
+  // Real shape: failed_claims is a list of strings (the un-verifiable claim
+  // text). They have no source.
+  if (Array.isArray(out.failed_claims)) {
+    for (const item of out.failed_claims as unknown[]) {
+      if (typeof item !== 'string') continue;
+      rows.push({ c: item, src: '', ok: false });
+    }
+  }
+  // Legacy: a list of {claim, source, ok}. Only consume if we got nothing
+  // from the real fields above (so a real-shape artifact never double-counts).
+  if (rows.length === 0 && Array.isArray(out.claims)) {
+    for (const item of out.claims as unknown[]) {
+      if (typeof item !== 'object' || item === null) continue;
+      const obj = item as Record<string, unknown>;
+      const claim = typeof obj.claim === 'string' ? obj.claim : null;
+      const source = typeof obj.source === 'string' ? obj.source : '';
+      const ok = obj.ok === true;
+      if (claim) rows.push({ c: claim, src: source, ok });
+    }
+  }
+
+  const passed = typeof out.passed === 'boolean' ? out.passed : null;
+  return { rows, passed };
 }
 
 function FactCheckTab({ artifacts }: FactCheckTabProps) {
-  const claims = extractFactCheckClaims(artifacts);
+  const { rows, passed } = extractFactCheckClaims(artifacts);
 
-  if (claims.length === 0) {
+  if (rows.length === 0) {
     return (
       <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-muted)' }}>
         <div className="mono-sm" style={{ marginBottom: 6 }}>no fact-check data yet</div>
@@ -428,24 +469,32 @@ function FactCheckTab({ artifacts }: FactCheckTabProps) {
     );
   }
 
+  const verifiedCount = rows.filter(r => r.ok).length;
+  const summaryBadge =
+    passed === false
+      ? <Badge kind="danger">{verifiedCount}/{rows.length} verified · failed</Badge>
+      : passed === true
+        ? <Badge kind="success">{verifiedCount}/{rows.length} verified</Badge>
+        : <Badge kind={verifiedCount === rows.length ? 'success' : 'warn'}>
+            {verifiedCount}/{rows.length} verified
+          </Badge>;
+
   return (
     <div className="card">
       <div className="card-h">
         <h3>fact-check</h3>
         <span className="sub">cover_draft.md → master/work.yml</span>
-        <div className="right">
-          <Badge kind="success">{claims.filter(c => c.ok).length}/{claims.length} verified</Badge>
-        </div>
+        <div className="right">{summaryBadge}</div>
       </div>
       <table className="table">
         <thead>
           <tr><th>claim</th><th>source</th><th>status</th></tr>
         </thead>
         <tbody>
-          {claims.map((c, i) => (
+          {rows.map((c, i) => (
             <tr key={i}>
               <td style={{ fontSize: 13 }}>{c.c}</td>
-              <td><span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{c.src}</span></td>
+              <td><span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{c.src || '—'}</span></td>
               <td>
                 {c.ok
                   ? <Badge kind="success">verified</Badge>
@@ -465,39 +514,130 @@ interface AnchorCheckTabProps {
   artifacts: ApiApplicationArtifact[];
 }
 
-interface AnchorCheckSummary {
-  preserved: string[];
-  dropped: { id: string; reason: string }[];
+interface AnchorBulletSummary {
+  id: string;
+  text: string;
 }
 
-// Defensively narrow an anchor-check artifact's output payload. Loose
-// shape on the wire — empty result if absent or malformed.
+interface AnchorCheckSummary {
+  exitCode: number | null;
+  total: number;
+  kept: AnchorBulletSummary[];
+  droppedWithoutReason: AnchorBulletSummary[];
+  droppedWithReason: { bullet: AnchorBulletSummary; reason: string }[];
+  message: string | null;
+}
+
+// Narrow a JSON-serialized Bullet (jobsmith.guard.Bullet) into the bare
+// {id, text} shape we render. Tolerates different id keys (`bullet_id` is
+// canonical; some serializers emit `id`).
+function bulletSummary(item: unknown): AnchorBulletSummary | null {
+  if (typeof item === 'string') return { id: item, text: item };
+  if (typeof item !== 'object' || item === null) return null;
+  const obj = item as Record<string, unknown>;
+  const id =
+    (typeof obj.bullet_id === 'string' && obj.bullet_id) ||
+    (typeof obj.id === 'string' && obj.id) ||
+    (typeof obj.text === 'string' && obj.text.slice(0, 12)) ||
+    null;
+  if (!id) return null;
+  const text = typeof obj.text === 'string' ? obj.text : id;
+  return { id, text };
+}
+
+// Defensively narrow an anchor-check artifact's output payload. The real
+// shape is the JSON serialization of GuardResult from src/jobsmith/guard.py:
+//   { exit_code: int,
+//     anchor_bullets: [Bullet], kept: [Bullet],
+//     dropped_without_reason: [Bullet],
+//     dropped_with_reason: [[Bullet, str]] }
+// The legacy shape ({preserved: [str], dropped: [str|{id,reason}]}) is also
+// accepted as a forward-compat fallback. Roborev job 945 fix.
 function extractAnchorSummary(
   artifacts: ApiApplicationArtifact[],
 ): AnchorCheckSummary | null {
   const a = artifacts.find(x => x.kind === 'anchor-check' || x.kind === 'anchor_check');
   if (!a) return null;
   const out = a.output as {
+    exit_code?: unknown;
+    anchor_bullets?: unknown;
+    kept?: unknown;
+    dropped_without_reason?: unknown;
+    dropped_with_reason?: unknown;
+    message?: unknown;
+    // Legacy compat:
     preserved?: unknown;
     dropped?: unknown;
   };
-  const preserved = Array.isArray(out.preserved)
-    ? (out.preserved as unknown[]).filter((s): s is string => typeof s === 'string')
-    : [];
-  const dropped: { id: string; reason: string }[] = [];
-  if (Array.isArray(out.dropped)) {
-    for (const item of out.dropped as unknown[]) {
-      if (typeof item === 'string') {
-        dropped.push({ id: item, reason: '' });
-      } else if (typeof item === 'object' && item !== null) {
-        const obj = item as Record<string, unknown>;
-        const id = typeof obj.id === 'string' ? obj.id : null;
-        const reason = typeof obj.reason === 'string' ? obj.reason : '';
-        if (id) dropped.push({ id, reason });
+
+  const exitCode = typeof out.exit_code === 'number' ? out.exit_code : null;
+  const message = typeof out.message === 'string' ? out.message : null;
+
+  // Real shape — GuardResult.
+  if (
+    Array.isArray(out.kept) ||
+    Array.isArray(out.dropped_without_reason) ||
+    Array.isArray(out.dropped_with_reason) ||
+    Array.isArray(out.anchor_bullets)
+  ) {
+    const kept = (Array.isArray(out.kept) ? out.kept : [])
+      .map(bulletSummary)
+      .filter((b): b is AnchorBulletSummary => b !== null);
+    const droppedWithoutReason = (Array.isArray(out.dropped_without_reason) ? out.dropped_without_reason : [])
+      .map(bulletSummary)
+      .filter((b): b is AnchorBulletSummary => b !== null);
+    const droppedWithReason: { bullet: AnchorBulletSummary; reason: string }[] = [];
+    if (Array.isArray(out.dropped_with_reason)) {
+      for (const item of out.dropped_with_reason as unknown[]) {
+        if (!Array.isArray(item) || item.length < 2) continue;
+        const bullet = bulletSummary(item[0]);
+        const reason = typeof item[1] === 'string' ? item[1] : '';
+        if (bullet) droppedWithReason.push({ bullet, reason });
       }
     }
+    const total =
+      Array.isArray(out.anchor_bullets)
+        ? out.anchor_bullets.length
+        : kept.length + droppedWithoutReason.length + droppedWithReason.length;
+    return { exitCode, total, kept, droppedWithoutReason, droppedWithReason, message };
   }
-  return { preserved, dropped };
+
+  // Legacy shape — {preserved, dropped}.
+  if (Array.isArray(out.preserved) || Array.isArray(out.dropped)) {
+    const kept = Array.isArray(out.preserved)
+      ? (out.preserved as unknown[])
+          .filter((s): s is string => typeof s === 'string')
+          .map((id) => ({ id, text: id }))
+      : [];
+    const droppedWithReason: { bullet: AnchorBulletSummary; reason: string }[] = [];
+    const droppedWithoutReason: AnchorBulletSummary[] = [];
+    if (Array.isArray(out.dropped)) {
+      for (const item of out.dropped as unknown[]) {
+        if (typeof item === 'string') {
+          droppedWithoutReason.push({ id: item, text: item });
+        } else if (typeof item === 'object' && item !== null) {
+          const obj = item as Record<string, unknown>;
+          const id = typeof obj.id === 'string' ? obj.id : null;
+          const reason = typeof obj.reason === 'string' ? obj.reason : '';
+          if (!id) continue;
+          if (reason) droppedWithReason.push({ bullet: { id, text: id }, reason });
+          else droppedWithoutReason.push({ id, text: id });
+        }
+      }
+    }
+    return {
+      exitCode,
+      total: kept.length + droppedWithoutReason.length + droppedWithReason.length,
+      kept,
+      droppedWithoutReason,
+      droppedWithReason,
+      message,
+    };
+  }
+
+  // Artifact present but neither shape matches — surface as "no data" rather
+  // than fabricate. Caller treats this as an empty result.
+  return null;
 }
 
 function AnchorCheckTab({ artifacts }: AnchorCheckTabProps) {
@@ -514,45 +654,89 @@ function AnchorCheckTab({ artifacts }: AnchorCheckTabProps) {
     );
   }
 
-  const total = summary.preserved.length + summary.dropped.length;
-  const preservedBadge =
-    total === 0
-      ? <Badge kind="default">no anchors recorded</Badge>
-      : <Badge kind={summary.dropped.length === 0 ? 'success' : 'warn'}>
-          {summary.preserved.length} / {total} preserved
-        </Badge>;
+  // exit_code !== 0 OR any anchor dropped without reason → guard failed.
+  const guardFailed =
+    (summary.exitCode !== null && summary.exitCode !== 0) ||
+    summary.droppedWithoutReason.length > 0;
+
+  const summaryBadge =
+    summary.total === 0
+      ? <Badge>no anchors recorded</Badge>
+      : guardFailed
+        ? <Badge kind="danger">{summary.kept.length} / {summary.total} preserved · failed</Badge>
+        : <Badge kind="success">{summary.kept.length} / {summary.total} preserved</Badge>;
 
   return (
     <div className="card">
       <div className="card-h">
         <h3>anchor preservation</h3>
         <span className="sub">bullet_selection.json</span>
-        <div className="right">{preservedBadge}</div>
+        <div className="right">{summaryBadge}</div>
       </div>
+
+      {summary.message && (
+        <div
+          style={{
+            margin: '0 16px',
+            marginTop: 14,
+            padding: '10px 14px',
+            background: guardFailed ? 'var(--bg-sunk)' : 'transparent',
+            border: guardFailed ? '1px solid var(--danger, var(--border))' : '1px solid var(--border)',
+            borderRadius: 'var(--radius)',
+            fontSize: 13,
+            color: guardFailed ? 'var(--danger, var(--fg))' : 'var(--fg-muted)',
+          }}
+        >
+          {summary.message}
+        </div>
+      )}
+
       <div style={{ padding: '18px 20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
         <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>preserved anchors</div>
-          {summary.preserved.length === 0 ? (
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>kept</div>
+          {summary.kept.length === 0 ? (
             <div style={{ color: 'var(--fg-subtle)', fontSize: 13 }}>(none)</div>
-          ) : summary.preserved.map(id => (
-            <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}>
+          ) : summary.kept.map(b => (
+            <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}>
               <Icon name="check" size={11} style={{ color: 'var(--success)' }} />
-              <span className="mono-sm">{id}</span>
+              <span className="mono-sm" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.text}</span>
             </div>
           ))}
         </div>
         <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>dropped (with reasons)</div>
-          {summary.dropped.length === 0 ? (
-            <div style={{ padding: '24px', textAlign: 'center', color: 'var(--fg-subtle)', background: 'var(--bg-sunk)', borderRadius: 'var(--radius)', border: '1px dashed var(--border)' }}>
-              <div className="mono-sm">none</div>
-            </div>
-          ) : summary.dropped.map(d => (
-            <div key={d.id} style={{ padding: '6px 0' }}>
-              <div className="mono-sm">{d.id}</div>
-              {d.reason && <div style={{ color: 'var(--fg-subtle)', fontSize: 12 }}>{d.reason}</div>}
-            </div>
-          ))}
+          {summary.droppedWithoutReason.length > 0 && (
+            <>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--danger, var(--fg-subtle))', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+                dropped without reason ({summary.droppedWithoutReason.length})
+              </div>
+              {summary.droppedWithoutReason.map(b => (
+                <div key={b.id} style={{ padding: '6px 0', borderLeft: '2px solid var(--danger, var(--border))', paddingLeft: 8 }}>
+                  <div className="mono-sm">{b.text}</div>
+                </div>
+              ))}
+            </>
+          )}
+          {summary.droppedWithReason.length > 0 && (
+            <>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10, marginTop: summary.droppedWithoutReason.length > 0 ? 18 : 0 }}>
+                dropped with reason ({summary.droppedWithReason.length})
+              </div>
+              {summary.droppedWithReason.map(({ bullet, reason }) => (
+                <div key={bullet.id} style={{ padding: '6px 0' }}>
+                  <div className="mono-sm">{bullet.text}</div>
+                  {reason && <div style={{ color: 'var(--fg-subtle)', fontSize: 12 }}>{reason}</div>}
+                </div>
+              ))}
+            </>
+          )}
+          {summary.droppedWithoutReason.length === 0 && summary.droppedWithReason.length === 0 && (
+            <>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>dropped</div>
+              <div style={{ padding: '24px', textAlign: 'center', color: 'var(--fg-subtle)', background: 'var(--bg-sunk)', borderRadius: 'var(--radius)', border: '1px dashed var(--border)' }}>
+                <div className="mono-sm">none</div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -798,6 +982,29 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
       }
     };
   }, []);
+
+  // Auto-subscribe to the SSE stream when we open a slug whose latest run
+  // is currently running. Without this, navigating to an in-flight
+  // application leaves the event log + progress bar frozen until the user
+  // clicks "re-run apply" — which is exactly the bug GH#52 reported.
+  // The subscription is keyed by slug + apiDetail.run_id so a true new run
+  // (e.g. user clicks force re-run, server returns a new run_id) drops the
+  // stale stream and resubscribes; cleanup runs on slug change or unmount.
+  // Roborev job 945 fix.
+  const apiStatus = apiDetail?.status;
+  const apiRunId = apiDetail?.run_id;
+  useEffect(() => {
+    if (apiStatus !== 'running') return;
+    if (!apiRunId) return;
+    subscribeToEvents(slug);
+    setRunning(true);
+    return () => {
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+    };
+  }, [slug, apiRunId, apiStatus, subscribeToEvents]);
 
   // Mark not-running when all phases reach 100%.
   const allDone = progress[1] >= 100 && progress[2] >= 100 && progress[3] >= 100;
