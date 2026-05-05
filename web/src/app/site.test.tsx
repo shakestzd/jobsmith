@@ -90,4 +90,20 @@ describe('SiteView regression — no mock leaks', () => {
     expect(screen.getByText('no rendered applications yet.')).toBeInTheDocument();
     expect(screen.queryByText('loading…')).not.toBeInTheDocument();
   });
+
+  // ── feat-aba75dae anti-regression: dead buttons removed ──────────────
+
+  it('does NOT render decorative "render" or "serve" buttons (feat-aba75dae)', async () => {
+    (useApplications as ReturnType<typeof vi.fn>).mockReturnValue({
+      data: [], isLoading: false, error: null,
+    });
+    (useMasterSection as ReturnType<typeof vi.fn>).mockReturnValue({
+      data: { name: { first: 'Real', last: 'Person' } },
+      isLoading: false,
+      error: null,
+    });
+    render(<SiteView />);
+    expect(screen.queryByRole('button', { name: /^render$/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^serve$/i })).toBeNull();
+  });
 });

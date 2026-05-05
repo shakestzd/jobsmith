@@ -123,10 +123,11 @@ function BulletEditor({ role }: BulletEditorProps) {
   useEffect(() => setBullets(initial), [initial]);
 
   const anchorCount = bullets.filter(b => b.anchor).length;
-
-  const toggle = (id: string) => {
-    setBullets(bs => bs.map(b => b.id === id ? { ...b, anchor: !b.anchor } : b));
-  };
+  // The local `toggle(id)` helper that flipped anchor state in setBullets
+  // was removed alongside the per-bullet pill controls in feat-aba75dae —
+  // the toggle never persisted (no PUT to /api/master/work) so the UI lied
+  // about saved state. Anchor flags are now read-only on this overview;
+  // the dedicated Mark Anchors page is the entrypoint for editing them.
 
   if (!role) {
     return (
@@ -143,9 +144,13 @@ function BulletEditor({ role }: BulletEditorProps) {
         <span className="sub">{role.date ?? ''} · {bullets.length} {plural(bullets.length, 'bullet')}</span>
         <div className="right">
           <Badge kind="accent">{anchorCount} anchors</Badge>
-          <button className="btn ghost sm">add bullet</button>
-          {/* save round-trip lossy — see feat-6999e552 for ETag/concurrent-write semantics */}
-          <button className="btn ghost sm">save</button>
+          {/*
+            "add bullet" + "save" buttons removed in feat-aba75dae (GH#53).
+            Both were decorative — there is no inline-edit/persist flow on
+            this page. To add a bullet, edit master/work.yml directly. A
+            future feature can re-introduce these once a PUT-section
+            round-trip with optimistic locking lands (feat-6999e552).
+          */}
         </div>
       </div>
       <div style={{ padding: '10px 14px 8px', fontSize: 12, color: 'var(--fg-muted)', borderBottom: '1px solid var(--border)' }}>
@@ -159,11 +164,16 @@ function BulletEditor({ role }: BulletEditorProps) {
             <div>
               <div className="b-text">{b.text}</div>
               <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                <span className={`pill ${b.anchor ? 'active' : ''}`} onClick={() => toggle(b.id)}>
-                  {b.anchor ? '⚑ anchor' : 'mark anchor'}
-                </span>
-                <span className="pill">edit</span>
-                <span className="pill">drop reason…</span>
+                {/*
+                  Per-bullet pill controls (mark anchor / edit / drop reason…)
+                  removed in feat-aba75dae (GH#53). The previous "mark anchor"
+                  pill toggled local React state only and did not persist via
+                  PUT /api/master/work, which made the UI lie about saved
+                  state. To set anchor flags, use the dedicated Mark Anchors
+                  page (left sidebar) which writes via the comment-preserving
+                  mark-anchors flow.
+                */}
+                {b.anchor && <span className="pill active">⚑ anchor</span>}
               </div>
             </div>
             <div className="b-actions">
@@ -214,11 +224,12 @@ function WorkEditor() {
                 </div>
               </div>
             ))}
-            <div style={{ padding: 8 }}>
-              <button className="btn ghost sm" style={{ width: '100%', justifyContent: 'center' }}>
-                <Icon name="plus" size={11} /> add role
-              </button>
-            </div>
+            {/*
+              "add role" button removed in feat-aba75dae (GH#53). Adding a
+              role requires editing master/work.yml directly — there is no
+              add-role inline flow. Re-introduce when a section-level
+              PUT round-trip exists.
+            */}
           </div>
 
           <BulletEditor role={roles[openIdx] ?? null} />
@@ -336,7 +347,12 @@ export function MasterContent() {
           <button className="btn" onClick={handleValidate} disabled={isValidating}>
             <Icon name="doc" size={13} /> {isValidating ? 'validating…' : 'validate'}
           </button>
-          <button className="btn"><Icon name="folder" size={13} /> open in editor</button>
+          {/*
+            "open in editor" removed in feat-aba75dae (GH#53). It had no
+            handler — the intent was to launch $EDITOR via a vscode://
+            URL, but no such launcher exists. Reintroduce when a
+            platform-shell launcher (Tauri/Electron) exists.
+          */}
         </div>
       </div>
 
@@ -447,7 +463,9 @@ export function MarkAnchorsView() {
           <p>walk every bullet in <span className="mono">master/work.yml</span> and tag the ones that must survive every draft.</p>
         </div>
         <div className="actions">
-          <span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>round-trip via ruamel.yaml — comments preserved</span>
+          <span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>
+            preview only — run <span className="mono">jobsmith mark-anchors</span> from the CLI to persist
+          </span>
         </div>
       </div>
 
@@ -485,9 +503,17 @@ export function MarkAnchorsView() {
               <Icon name="check" size={32} style={{ color: 'var(--success)' }} />
               <div style={{ fontSize: 16, marginTop: 10 }}>all bullets reviewed</div>
               <div style={{ color: 'var(--fg-muted)', marginTop: 4, fontSize: 13 }}>
-                {anchorCount} anchors marked · changes ready to write back to work.yml
+                {anchorCount} anchors marked in this preview.
               </div>
-              <button className="btn primary" style={{ marginTop: 18 }}><Icon name="check" size={12} /> save changes</button>
+              {/*
+                "save changes" button removed in feat-aba75dae (GH#53). It
+                had no handler and no PUT call against /api/master/work.
+                Persistence still requires running `jobsmith mark-anchors`
+                from the CLI; reintroduce here once a save flow lands.
+              */}
+              <div style={{ marginTop: 12, fontSize: 12, color: 'var(--fg-subtle)' }}>
+                to persist these decisions, run <span className="mono-sm">jobsmith mark-anchors master/work.yml</span>.
+              </div>
             </div>
           )}
 
@@ -524,7 +550,13 @@ export function MarkAnchorsView() {
         <div className="card" style={{ height: 'fit-content' }}>
           <div className="card-h"><h3>shortcuts</h3></div>
           <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {([['A', 'mark as anchor'], ['N', 'non-anchor'], ['S', 'skip for now'], ['↑ ↓', 'navigate'], ['⌘ S', 'save & exit']] as [string, string][]).map(([k, v]) => (
+            {/*
+              `⌘ S — save & exit` shortcut removed in feat-aba75dae
+              (roborev job 946) alongside the decorative "save changes"
+              button — handleKeyDown never implemented it, and listing it
+              here advertised a save flow the page does not have.
+            */}
+            {([['A', 'mark as anchor'], ['N', 'non-anchor'], ['S', 'skip for now'], ['↑ ↓', 'navigate']] as [string, string][]).map(([k, v]) => (
               <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
                 <span className="kbd" style={{ minWidth: 36, textAlign: 'center' }}>{k}</span>
                 <span style={{ color: 'var(--fg-muted)' }}>{v}</span>
