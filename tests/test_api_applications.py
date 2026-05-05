@@ -222,3 +222,26 @@ class TestUiPhaseMapping:
         data = resp.json()
         assert "ui_phase" in data
         assert data["ui_phase"] == "rendered"
+
+    def test_unknown_phase_done_maps_to_rendered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The CLI full pipeline records phase='unknown' + status='done' for
+        completed runs. These must map to ui_phase='rendered' so they show up
+        in the rendered dashboard filter (roborev job 940 finding).
+        """
+        client, _ = _make_client(tmp_path, monkeypatch, phase="unknown", status="done")
+        resp = client.get("/api/applications")
+        assert resp.status_code == 200, resp.text
+        row = resp.json()[0]
+        assert row["ui_phase"] == "rendered"
+
+    def test_backfilled_status_maps_to_rendered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """status='backfilled' (any phase) → ui_phase='rendered'."""
+        client, _ = _make_client(tmp_path, monkeypatch, phase="unknown", status="backfilled")
+        resp = client.get("/api/applications")
+        assert resp.status_code == 200, resp.text
+        row = resp.json()[0]
+        assert row["ui_phase"] == "rendered"

@@ -448,6 +448,15 @@ def apply(
         readable=True,
         dir_okay=False,
     ),
+    slug: str | None = typer.Option(
+        None,
+        "--slug",
+        help=(
+            "Override the auto-derived slug. Used by the API when a caller "
+            "POSTs to /api/applications with an explicit slug, so the "
+            "supervisor's tracked slug matches what run_apply writes to disk."
+        ),
+    ),
 ) -> None:
     """Run the three-phase apply pipeline against a JD URL."""
     from .apply import run_apply
@@ -465,6 +474,7 @@ def apply(
             force=force,
             verbosity=verbose,
             jd_text=resolved_jd_text,
+            slug=slug,
         )
     )
 

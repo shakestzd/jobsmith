@@ -1515,6 +1515,7 @@ def run_apply(
     verbosity: int = 0,
     renderer: ApplyRenderer | None = None,
     jd_text: str | None = None,
+    slug: str | None = None,
 ) -> int:
     """Run the three-phase apply pipeline.
 
@@ -1584,7 +1585,14 @@ def run_apply(
     started_at = time.time()
     plugin_directory = get_plugin_dir()
 
-    if force:
+    if slug is not None:
+        # Caller (typically the API) supplied an explicit slug — honor it
+        # without touching the URL→slug index. The supervisor tracks runs
+        # under this slug, so files must be written under it too.
+        from_index = False
+        if force:
+            rdr.print_force_banner()
+    elif force:
         # --force restarts the pipeline but must still target the existing
         # canonical directory if we know about it; otherwise phase 1 writes
         # under the URL slug and the post-phase-1 reconcile would refuse to

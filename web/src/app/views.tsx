@@ -46,8 +46,11 @@ export function SiteView() {
   const { data: author, isLoading: authorLoading } = useMasterSection('author');
   const { data: allApps = [], isLoading: appsLoading } = useApplications();
 
+  // Filter on ui_phase (the UI taxonomy added by the API for exactly this
+  // purpose). Raw status is `done` / `backfilled` for completed runs so a
+  // status==='rendered' check would always be empty (roborev job 940).
   const renderedApps: ApplicationRow[] = allApps.filter(
-    (a) => a.status === 'rendered',
+    (a) => a.ui_phase === 'rendered',
   );
 
   const homepage = author?.homepage ?? '';

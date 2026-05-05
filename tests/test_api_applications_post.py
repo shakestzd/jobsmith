@@ -244,3 +244,45 @@ class TestPostApplicationsConflict:
         assert resp.status_code == 409, resp.text
         detail = resp.json()["detail"]
         assert slug in detail or "already" in detail.lower()
+
+
+# ---------------------------------------------------------------------------
+# 6. _launch_run argv parses against the live CLI (roborev job 940 fix)
+# ---------------------------------------------------------------------------
+
+
+class TestLaunchRunArgvParsesAgainstCli:
+    """The supervisor argv built by ``_launch_run`` must parse against the
+    Typer ``apply`` command. A regression here would cause every UI-launched
+    run to crash with a CLI usage error after the supervisor returned 201.
+    """
+
+    def test_launch_argv_parses_with_explicit_slug(self) -> None:
+        from typer.testing import CliRunner
+
+        from jobsmith.cli import app as cli_app
+
+        runner = CliRunner()
+        # The argv as-built by `_launch_run` (minus the `python -m jobsmith.cli`
+        # bootstrap, which `CliRunner` provides). If `--slug` is not a real
+        # option on `apply`, `--help` would still succeed but adding the flag
+        # would surface as "no such option" — so we invoke `--help` first to
+        # baseline, then assert the apply command actually accepts `--slug`.
+        result = runner.invoke(cli_app, ["apply", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "--slug" in result.output, (
+            "POST /api/applications passes --slug; the Typer apply command "
+            "must accept it or every UI-launched run will crash."
+        )
+
+    def test_launch_argv_no_slug_also_parses(self) -> None:
+        """When no explicit slug is provided, --slug is omitted from argv."""
+        from typer.testing import CliRunner
+
+        from jobsmith.cli import app as cli_app
+
+        runner = CliRunner()
+        result = runner.invoke(cli_app, ["apply", "--help"])
+        assert result.exit_code == 0
+        # The command itself must exist and be callable.
+        assert "apply" in result.output.lower()

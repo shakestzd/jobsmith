@@ -26,16 +26,25 @@ router = APIRouter(tags=["config"])
 
 
 def _parse_body(body: bytes) -> dict[str, Any]:
-    """Parse raw request body as YAML (which is a superset of JSON)."""
+    """Parse raw request body as YAML (which is a superset of JSON).
+
+    Raises HTTPException(400) for any client-side parse error so we never
+    surface a 500 (roborev job 940 finding).
+    """
     try:
         data = yaml.safe_load(body.decode("utf-8") if body else "")
-        if data is None:
-            return {}
-        if not isinstance(data, dict):
-            raise ValueError("Body must be a YAML/JSON object (mapping)")
-        return data
     except yaml.YAMLError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid YAML/JSON: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Body is not valid UTF-8: {exc}") from exc
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="Body must be a YAML/JSON object (mapping)",
+        )
+    return data
 
 
 def _validate_config_data(data: dict[str, Any]) -> tuple[JobsmithConfig | None, list[ValidationError]]:

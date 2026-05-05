@@ -97,7 +97,10 @@ def _derive_ui_phase(phase: str, status: str) -> str:
 
     UI taxonomy:
     - ``running``  — pipeline is actively executing (status='running', any phase)
-    - ``rendered`` — completed render phase (phase='render' or 'backfilled', status='done')
+    - ``rendered`` — any completed run (status in done/backfilled). The CLI
+      records full pipeline runs with phase='unknown' and status='done', so
+      "completed" must not be gated on a specific phase value or those runs
+      vanish from the rendered filter (roborev job 940).
     - ``failed``   — any run that ended in failure
     - ``unknown``  — catch-all
     """
@@ -105,7 +108,7 @@ def _derive_ui_phase(phase: str, status: str) -> str:
         return "failed"
     if status == "running":
         return "running"
-    if status in ("done", "backfilled") and phase in ("render", "backfilled"):
+    if status in ("done", "backfilled"):
         return "rendered"
     return "unknown"
 
