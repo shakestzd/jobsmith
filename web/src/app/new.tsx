@@ -66,13 +66,29 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
     .filter(Boolean)
     .join(' \\\n');
 
+  function handleBackdropClick(e: React.MouseEvent<HTMLDivElement>) {
+    if (e.target === e.currentTarget) onClose();
+  }
+
+  function handleDialogKeyDown(e: React.KeyboardEvent<HTMLElement>) {
+    if (e.key === 'Escape') onClose();
+  }
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" style={{ width: 620 }} onClick={(e: React.MouseEvent<HTMLDivElement>) => e.stopPropagation()}>
+    <div className="modal-backdrop" onClick={handleBackdropClick}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="new application"
+        style={{ width: 620 }}
+        onKeyDown={handleDialogKeyDown}
+        tabIndex={-1}
+      >
         <div className="modal-h">
           <h2>new application</h2>
           <span className="sub mono-sm" style={{ color: 'var(--fg-subtle)', marginLeft: 10 }}>step {step} of 2</span>
-          <button className="btn ghost sm close" onClick={onClose}><Icon name="x" size={12} /></button>
+          <button type="button" className="btn ghost sm close" onClick={onClose}><Icon name="x" size={12} /></button>
         </div>
 
         {step === 1 && (
@@ -178,12 +194,12 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
 
         <div className="modal-foot">
           {step === 2 && (
-            <button className="btn ghost" onClick={() => setStep(1)}>back</button>
+            <button type="button" className="btn ghost" onClick={() => setStep(1)}>back</button>
           )}
-          <button className="btn ghost" onClick={onClose}>cancel</button>
+          <button type="button" className="btn ghost" onClick={onClose}>cancel</button>
           {step === 1
-            ? <button className="btn primary" onClick={() => setStep(2)}>review →</button>
-            : <button className="btn primary" onClick={() => onLaunch(slug)}><Icon name="play" size={12} /> apply</button>
+            ? <button type="button" className="btn primary" onClick={() => setStep(2)}>review →</button>
+            : <button type="submit" className="btn primary" onClick={() => onLaunch(slug)}><Icon name="play" size={12} /> apply</button>
           }
         </div>
       </div>
