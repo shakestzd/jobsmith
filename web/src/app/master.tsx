@@ -9,7 +9,7 @@
 // adapters live in ./master/adapters.ts; no reverse mapping is attempted
 // from form-shape back to API shape in this slice.
 
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { type KeyboardEvent, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, forwardRef } from 'react';
 import type { SampleBullet } from '../types';
 import { Icon, Badge, SAMPLE_BULLETS } from './shared';
 import { SkillForm } from './master/SkillForm';
@@ -33,6 +33,15 @@ import {
 // ── Types ────────────────────────────────────────────────────────────────
 
 type MasterTab = 'work' | 'skill' | 'education' | 'author' | 'benchmark';
+
+/**
+ * Imperative handle exposed by each dirty-aware tab so MasterContent can
+ * request a save before switching away (feat-815279db).
+ */
+interface TabHandle {
+  /** Attempt to save the tab's current state. Returns true on success. */
+  requestSave: () => Promise<boolean>;
+}
 
 /** Save state for ETag-backed sections (skill / education / author). */
 type SaveState =
@@ -241,6 +250,72 @@ function BulletModal({
           <button className="btn ghost sm" onClick={onClose} aria-label="close">×</button>
         </div>
         {children}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Three-action guard dialog shown when the user tries to leave a dirty tab.
+ * feat-815279db: custom AlertDialog — no window.confirm.
+ */
+function UnsavedGuardDialog({
+  onSaveAndSwitch,
+  onDiscardAndSwitch,
+  onCancel,
+  isSaving,
+}: {
+  onSaveAndSwitch: () => void;
+  onDiscardAndSwitch: () => void;
+  onCancel: () => void;
+  isSaving: boolean;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Unsaved changes"
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1100,
+        background: 'rgba(0,0,0,0.45)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      <div
+        className="card"
+        style={{ padding: 24, minWidth: 340, maxWidth: 460, position: 'relative' }}
+      >
+        <div style={{ marginBottom: 12 }}>
+          <strong style={{ fontSize: 14, display: 'block', marginBottom: 6 }}>
+            Unsaved changes
+          </strong>
+          <p style={{ fontSize: 13, color: 'var(--fg-muted)', margin: 0 }}>
+            You have unsaved edits on this tab. What would you like to do?
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            className="btn primary"
+            onClick={onSaveAndSwitch}
+            disabled={isSaving}
+          >
+            {isSaving ? 'saving…' : 'Save & switch'}
+          </button>
+          <button
+            className="btn"
+            onClick={onDiscardAndSwitch}
+            disabled={isSaving}
+          >
+            Discard & switch
+          </button>
+          <button
+            className="btn ghost"
+            onClick={onCancel}
+            disabled={isSaving}
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -581,7 +656,11 @@ function WorkEditor() {
 
 // ── Per-tab wrappers (skill / education / author / benchmark) ────────────
 
-function SkillTab() {
+interface DirtyTabProps {
+  onDirtyChange: (isDirty: boolean) => void;
+}
+
+const SkillTab = forwardRef<TabHandle, DirtyTabProps>(function SkillTab({ onDirtyChange }, ref) {
   const { data, etag, isLoading, error, refetch } = useMasterSectionWithMeta('skill');
   const apiSkills = useMemo(() => apiSkillsToForm(data ?? null), [data]);
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -595,6 +674,9 @@ function SkillTab() {
     () => JSON.stringify(skills) !== JSON.stringify(apiSkills),
     [skills, apiSkills],
   );
+
+  // Notify parent of dirty state changes.
+  useEffect(() => { onDirtyChange(isDirty); }, [isDirty, onDirtyChange]);
 
   const doSave = useCallback(async (ifMatchOverride?: string | null) => {
     setSaveState({ kind: 'saving' });
@@ -619,6 +701,19 @@ function SkillTab() {
       }
     }
   }, [etag, skills, refetch]);
+
+  // Expose requestSave so MasterContent can trigger a save before tab switch.
+  useImperativeHandle(ref, () => ({
+    requestSave: async () => {
+      if (!isDirty) return true;
+      try {
+        await doSave();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  }), [isDirty, doSave]);
 
   const handleDiscard = useCallback(() => {
     setSaveState({ kind: 'idle' });
@@ -647,9 +742,9 @@ function SkillTab() {
       <SkillForm skills={skills} onChange={setSkills} />
     </SectionPane>
   );
-}
+});
 
-function EducationTab() {
+const EducationTab = forwardRef<TabHandle, DirtyTabProps>(function EducationTab({ onDirtyChange }, ref) {
   const { data, etag, isLoading, error, refetch } = useMasterSectionWithMeta('education');
   const apiEdu = useMemo(() => apiEducationToForm(data ?? null), [data]);
   const [education, setEducation] = useState<EducationEntry[]>([]);
@@ -662,6 +757,9 @@ function EducationTab() {
     () => JSON.stringify(education) !== JSON.stringify(apiEdu),
     [education, apiEdu],
   );
+
+  // Notify parent of dirty state changes.
+  useEffect(() => { onDirtyChange(isDirty); }, [isDirty, onDirtyChange]);
 
   const doSave = useCallback(async (ifMatchOverride?: string | null) => {
     setSaveState({ kind: 'saving' });
@@ -685,6 +783,19 @@ function EducationTab() {
       }
     }
   }, [etag, education, refetch]);
+
+  // Expose requestSave for MasterContent guard.
+  useImperativeHandle(ref, () => ({
+    requestSave: async () => {
+      if (!isDirty) return true;
+      try {
+        await doSave();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  }), [isDirty, doSave]);
 
   const handleDiscard = useCallback(() => {
     setSaveState({ kind: 'idle' });
@@ -712,9 +823,9 @@ function EducationTab() {
       <EducationForm education={education} onChange={setEducation} />
     </SectionPane>
   );
-}
+});
 
-function AuthorTab() {
+const AuthorTab = forwardRef<TabHandle, DirtyTabProps>(function AuthorTab({ onDirtyChange }, ref) {
   const { data, etag, isLoading, error, refetch } = useMasterSectionWithMeta('author');
   const apiAuthor = useMemo(() => apiAuthorToForm(data ?? null), [data]);
   // Capture raw API extras for pass-through on save.
@@ -736,6 +847,9 @@ function AuthorTab() {
     () => JSON.stringify(author) !== JSON.stringify(apiAuthor),
     [author, apiAuthor],
   );
+
+  // Notify parent of dirty state changes.
+  useEffect(() => { onDirtyChange(isDirty); }, [isDirty, onDirtyChange]);
 
   const doSave = useCallback(async (ifMatchOverride?: string | null) => {
     setSaveState({ kind: 'saving' });
@@ -759,6 +873,19 @@ function AuthorTab() {
       }
     }
   }, [etag, author, rawExtras, refetch]);
+
+  // Expose requestSave for MasterContent guard.
+  useImperativeHandle(ref, () => ({
+    requestSave: async () => {
+      if (!isDirty) return true;
+      try {
+        await doSave();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  }), [isDirty, doSave]);
 
   const handleDiscard = useCallback(() => {
     setSaveState({ kind: 'idle' });
@@ -786,9 +913,9 @@ function AuthorTab() {
       <AuthorForm author={author} onChange={setAuthor} />
     </SectionPane>
   );
-}
+});
 
-function BenchmarkTab() {
+const BenchmarkTab = forwardRef<TabHandle, DirtyTabProps>(function BenchmarkTab({ onDirtyChange }, ref) {
   const { data, etag, isLoading, error, refetch } = useMasterSectionWithMeta('benchmark');
   const initial = data?.text ?? '';
   const [text, setText] = useState<string>(initial);
@@ -799,6 +926,9 @@ function BenchmarkTab() {
   useEffect(() => setText(initial), [initial]);
 
   const isDirty = text !== initial;
+
+  // Notify parent of dirty state changes.
+  useEffect(() => { onDirtyChange(isDirty); }, [isDirty, onDirtyChange]);
 
   const doSave = useCallback(async (ifMatchOverride?: string | null) => {
     setSaveState({ kind: 'saving' });
@@ -822,6 +952,19 @@ function BenchmarkTab() {
       }
     }
   }, [etag, text, refetch]);
+
+  // Expose requestSave for MasterContent guard.
+  useImperativeHandle(ref, () => ({
+    requestSave: async () => {
+      if (!isDirty) return true;
+      try {
+        await doSave();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  }), [isDirty, doSave]);
 
   const handleDiscard = useCallback(() => {
     setSaveState({ kind: 'idle' });
@@ -859,7 +1002,7 @@ function BenchmarkTab() {
       <BenchmarkEditor text={text} onChange={setText} />
     </SectionPane>
   );
-}
+});
 
 // ── Exported components ──────────────────────────────────────────────────
 
@@ -872,6 +1015,102 @@ export function MasterContent() {
     | { kind: 'errors'; errors: { field: string; message: string }[] }
     | { kind: 'failure'; message: string }
   >({ kind: 'idle' });
+
+  // ── Unsaved-changes guard (feat-815279db) ──────────────────────────────
+
+  /** Tracks which tab currently has unsaved edits. */
+  const [dirtyTabs, setDirtyTabs] = useState<Partial<Record<MasterTab, boolean>>>({});
+
+  /**
+   * Pending navigation request: the tab the user wants to switch to while the
+   * current tab is dirty. Cleared by resolving the guard dialog.
+   */
+  const [pendingTab, setPendingTab] = useState<MasterTab | null>(null);
+  const [guardSaving, setGuardSaving] = useState(false);
+
+  // Imperative refs so MasterContent can call requestSave() on the active tab.
+  const skillRef = useRef<TabHandle>(null);
+  const educationRef = useRef<TabHandle>(null);
+  const authorRef = useRef<TabHandle>(null);
+  const benchmarkRef = useRef<TabHandle>(null);
+
+  const tabRefMap: Partial<Record<MasterTab, React.RefObject<TabHandle | null>>> = {
+    skill: skillRef,
+    education: educationRef,
+    author: authorRef,
+    benchmark: benchmarkRef,
+  };
+
+  const isCurrentTabDirty = Boolean(dirtyTabs[tab]);
+
+  const handleDirtyChange = useCallback((changedTab: MasterTab, isDirty: boolean) => {
+    setDirtyTabs(prev => ({ ...prev, [changedTab]: isDirty }));
+  }, []);
+
+  /** Called when the user clicks a tab. Shows guard if current tab is dirty. */
+  const handleTabClick = useCallback((targetTab: MasterTab) => {
+    if (targetTab === tab) return;
+    if (dirtyTabs[tab]) {
+      setPendingTab(targetTab);
+    } else {
+      setTab(targetTab);
+    }
+  }, [tab, dirtyTabs]);
+
+  /** Guard: Save & switch — trigger active tab's save, then switch. */
+  const handleGuardSaveAndSwitch = useCallback(async () => {
+    if (!pendingTab) return;
+    const tabRef = tabRefMap[tab];
+    if (!tabRef?.current) {
+      // No ref (e.g. 'work' tab has no save handle) — just switch.
+      setTab(pendingTab);
+      setPendingTab(null);
+      return;
+    }
+    setGuardSaving(true);
+    try {
+      const ok = await tabRef.current.requestSave();
+      if (ok) {
+        setTab(pendingTab);
+        setPendingTab(null);
+      }
+      // If save failed, stay on current tab with dialog dismissed (save errors
+      // are shown in the tab's own SaveBar).
+    } finally {
+      setGuardSaving(false);
+      setPendingTab(null);
+    }
+  }, [pendingTab, tab, tabRefMap]);
+
+  /** Guard: Discard & switch — clear dirty flag and switch. */
+  const handleGuardDiscardAndSwitch = useCallback(() => {
+    if (!pendingTab) return;
+    setDirtyTabs(prev => ({ ...prev, [tab]: false }));
+    setTab(pendingTab);
+    setPendingTab(null);
+  }, [pendingTab, tab]);
+
+  /** Guard: Cancel — stay on current tab. */
+  const handleGuardCancel = useCallback(() => {
+    setPendingTab(null);
+  }, []);
+
+  // ── beforeunload guard ─────────────────────────────────────────────────
+
+  const anyDirty = Object.values(dirtyTabs).some(Boolean);
+
+  useEffect(() => {
+    if (!anyDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Modern browsers ignore the custom message but require returnValue to be set.
+      e.returnValue = 'You have unsaved changes. Leave anyway?';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [anyDirty]);
+
+  // ── Validate ───────────────────────────────────────────────────────────
 
   const handleValidate = async () => {
     setValidateState({ kind: 'running' });
@@ -902,6 +1141,12 @@ export function MasterContent() {
   };
 
   const isValidating = validateState.kind === 'running';
+
+  // Stable onDirtyChange callbacks per tab (avoid recreating on every render).
+  const onSkillDirty = useCallback((d: boolean) => handleDirtyChange('skill', d), [handleDirtyChange]);
+  const onEducationDirty = useCallback((d: boolean) => handleDirtyChange('education', d), [handleDirtyChange]);
+  const onAuthorDirty = useCallback((d: boolean) => handleDirtyChange('author', d), [handleDirtyChange]);
+  const onBenchmarkDirty = useCallback((d: boolean) => handleDirtyChange('benchmark', d), [handleDirtyChange]);
 
   return (
     <div className="content">
@@ -963,7 +1208,7 @@ export function MasterContent() {
           <div
             key={id}
             className={`tab ${tab === id ? 'active' : ''}`}
-            onClick={() => setTab(id)}
+            onClick={() => handleTabClick(id)}
           >
             {label} <span className="tab-count">{sub}</span>
           </div>
@@ -971,10 +1216,20 @@ export function MasterContent() {
       </div>
 
       {tab === 'work' && <WorkEditor />}
-      {tab === 'skill' && <SkillTab />}
-      {tab === 'education' && <EducationTab />}
-      {tab === 'author' && <AuthorTab />}
-      {tab === 'benchmark' && <BenchmarkTab />}
+      {tab === 'skill' && <SkillTab ref={skillRef} onDirtyChange={onSkillDirty} />}
+      {tab === 'education' && <EducationTab ref={educationRef} onDirtyChange={onEducationDirty} />}
+      {tab === 'author' && <AuthorTab ref={authorRef} onDirtyChange={onAuthorDirty} />}
+      {tab === 'benchmark' && <BenchmarkTab ref={benchmarkRef} onDirtyChange={onBenchmarkDirty} />}
+
+      {/* Unsaved-changes guard dialog (feat-815279db) */}
+      {pendingTab !== null && isCurrentTabDirty && (
+        <UnsavedGuardDialog
+          onSaveAndSwitch={() => void handleGuardSaveAndSwitch()}
+          onDiscardAndSwitch={handleGuardDiscardAndSwitch}
+          onCancel={handleGuardCancel}
+          isSaving={guardSaving}
+        />
+      )}
     </div>
   );
 }
