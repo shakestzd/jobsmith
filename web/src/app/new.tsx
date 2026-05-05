@@ -6,6 +6,7 @@
 
 import { useState } from 'react';
 import { Icon } from './shared';
+import { useDoctor } from '../api/hooks';
 
 // ── Prop interface ───────────────────────────────────────────────────────────
 
@@ -36,6 +37,8 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
   const [verbose, setVerbose] = useState<VerbosityFlag>('-v');
   const [skipConfirm, setSkipConfirm] = useState(true);
 
+  const { data: doctorChecks, isLoading: doctorLoading, error: doctorError } = useDoctor();
+
   const slug = (() => {
     try {
       const u = new URL(url);
@@ -54,14 +57,6 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
     ['file', 'upload file'],
   ];
 
-  const preflightItems: [string, string][] = [
-    ['claude CLI', 'v1.4.0'],
-    ['quarto', 'v1.5.57'],
-    ['master/work.yml', '38 bullets · valid'],
-    ['benchmark.md', 'present'],
-    ['private/jobsmith.db', 'open · 7 prior runs'],
-  ];
-
   const commandPreview = [
     `$ jobsmith apply '${url}'`,
     jdMode === 'paste' ? `    --jd-text-file /tmp/jd-${slug}.txt` : null,
@@ -77,6 +72,12 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
 
   function handleDialogKeyDown(e: React.KeyboardEvent<HTMLElement>) {
     if (e.key === 'Escape') onClose();
+  }
+
+  function preflightIcon(status: 'pass' | 'warn' | 'fail') {
+    if (status === 'pass') return <Icon name="check" size={12} style={{ color: 'var(--success)' }} />;
+    if (status === 'warn') return <Icon name="check" size={12} style={{ color: 'var(--warn, #e6a817)' }} />;
+    return <Icon name="x" size={12} style={{ color: 'var(--danger, #e55)' }} />;
   }
 
   return (
@@ -186,11 +187,19 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
 
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>preflight</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {preflightItems.map(([k, v]) => (
-                <div key={k} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 10px', background: 'var(--bg-sunk)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
-                  <Icon name="check" size={12} style={{ color: 'var(--success)' }} />
-                  <span className="mono-sm" style={{ flex: 1 }}>{k}</span>
-                  <span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{v}</span>
+              {doctorError ? (
+                <div style={{ padding: '6px 10px', color: 'var(--danger, var(--fg-muted))', fontSize: 13 }}>
+                  preflight unavailable: {doctorError.message}
+                </div>
+              ) : doctorLoading ? (
+                <div style={{ padding: '6px 10px', color: 'var(--fg-subtle)', fontSize: 13 }}>
+                  checking…
+                </div>
+              ) : (doctorChecks ?? []).map((c) => (
+                <div key={c.name} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 10px', background: 'var(--bg-sunk)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+                  {preflightIcon(c.status)}
+                  <span className="mono-sm" style={{ flex: 1 }}>{c.name}</span>
+                  <span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{c.message}</span>
                 </div>
               ))}
             </div>
