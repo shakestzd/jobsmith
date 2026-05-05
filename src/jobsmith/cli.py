@@ -1230,6 +1230,50 @@ def db_backfill(
         conn.close()
 
 
+@db_app.command("load-master")
+def db_load_master(
+    reload: bool = typer.Option(
+        False,
+        "--reload",
+        help="Replace existing master_content rows (default: skip already-loaded sections).",
+    ),
+) -> None:
+    """Load master YAMLs from disk into the master_content DB table (feat-bf06bdea, S1)."""
+    from .master_ingest import ensure_master_loaded
+
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        console.print(f"[red]ERROR:[/red] No {CONFIG_FILENAME} found — run `jobsmith init` first.")
+        raise typer.Exit(code=2)
+    config = load_config(config_path)
+    repo_root = repo_root_for()
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        console.print(f"[red]ERROR:[/red] Pipeline DB not found at {db_path}.")
+        raise typer.Exit(code=2)
+
+    # Capture row count before/after to report a meaningful "Loaded N" line.
+    conn = open_pipeline_db(db_path)
+    try:
+        before = conn.execute("SELECT COUNT(*) FROM master_content").fetchone()[0]
+    finally:
+        conn.close()
+
+    ensure_master_loaded(db_path, repo_root=repo_root, reload=reload)
+
+    conn = open_pipeline_db(db_path)
+    try:
+        after = conn.execute("SELECT COUNT(*) FROM master_content").fetchone()[0]
+    finally:
+        conn.close()
+
+    if reload:
+        console.print(f"[green]Loaded[/green] {after} master section(s) (reload).")
+    else:
+        delta = max(after - before, 0)
+        console.print(f"[green]Loaded[/green] {delta} new master section(s) ({after} total).")
+
+
 @db_app.command("migrate-slugs")
 def db_migrate_slugs() -> None:
     """One-shot: rewrite pre-existing malformed slugs in apply_runs.

@@ -30,6 +30,11 @@ API routers are mounted with ``dependencies=[Depends(verify_token)]``.
 
 from __future__ import annotations
 
+import logging
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -44,6 +49,39 @@ from jobsmith.api.feedback import router as feedback_router
 from jobsmith.api.master import router as master_router
 from jobsmith.api.snapshots import router as snapshots_router
 
+_log = logging.getLogger(__name__)
+
+
+def _try_ingest_master(*, reload: bool = False) -> None:
+    """Best-effort master YAML ingest at startup.
+
+    Resolves the DB path and repo root from the running environment.
+    Logs and swallows all errors so a missing config never prevents startup.
+    """
+    from jobsmith.config import find_config, load_config
+    from jobsmith.master_ingest import ensure_master_loaded
+
+    try:
+        cwd = Path(os.environ.get("JOBSMITH_REPO_ROOT", ".")).resolve()
+        config_path = find_config(cwd)
+        if config_path is None:
+            _log.debug("main: no .apply-config.yaml found, skipping master ingest")
+            return
+        config = load_config(path=config_path)
+        repo_root = config_path.parent
+        db_path = (repo_root / config.output.jobsmith_db).resolve()
+        ensure_master_loaded(db_path, repo_root=repo_root, reload=reload)
+    except Exception:
+        _log.warning("master ingest at startup failed (non-fatal)", exc_info=True)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """FastAPI lifespan handler: ingest master YAML into DB on startup."""
+    reload_master = os.environ.get("JOBSMITH_RELOAD_MASTER", "0") == "1"
+    _try_ingest_master(reload=reload_master)
+    yield
+
 
 def create_app() -> FastAPI:
     """Construct and return the configured FastAPI application."""
@@ -51,6 +89,7 @@ def create_app() -> FastAPI:
         title="jobsmith API",
         description="HTTP interface for the jobsmith apply pipeline.",
         version="0.1.0",
+        lifespan=_lifespan,
     )
 
     # CORS — only allow the Vite dev server origin in development.

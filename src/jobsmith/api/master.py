@@ -23,6 +23,7 @@ Behavior contract
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
 from typing import Any, Literal
 
@@ -31,6 +32,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Response, UploadFile
 from pydantic import BaseModel, ValidationError
 
 from jobsmith.config import find_config, load_config
+from jobsmith.db import open_pipeline_db
 from jobsmith.master_io import (
     MasterSection,
     add_bullet,
@@ -52,6 +54,8 @@ from .schemas.master import (
     ValidateResponse,
     WorkEntry,
 )
+
+_log = logging.getLogger(__name__)
 
 Section = Literal["work", "skill", "education", "author"]
 _SECTIONS: tuple[Section, ...] = ("work", "skill", "education", "author")
@@ -79,6 +83,50 @@ def _require_config_path() -> Path:
     return config_path
 
 
+def _get_db_path_for_master() -> Path | None:
+    """Resolve the pipeline DB path for master content reads.
+
+    Returns None when no config is found (DB path is config-derived).
+    Module-level so tests can monkeypatch it.
+    """
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        return None
+    try:
+        config = load_config(path=config_path)
+        repo_root = config_path.parent
+        return (repo_root / config.output.jobsmith_db).resolve()
+    except Exception:
+        return None
+
+
+def _db_load_section(section: str) -> str | None:
+    """Query ``master_content`` for *section*.  Returns raw YAML text or None.
+
+    Returns None when the DB path cannot be resolved, when the DB has no row
+    for the section, or when any DB error occurs.  Callers fall back to the
+    filesystem when None is returned.
+    """
+    db_path = _get_db_path_for_master()
+    if db_path is None or not db_path.exists():
+        return None
+    try:
+        conn = open_pipeline_db(db_path)
+        try:
+            row = conn.execute(
+                "SELECT content_blob FROM master_content WHERE section = ?",
+                (section,),
+            ).fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        _log.debug("master: DB read failed for section %r", section, exc_info=True)
+        return None
+    if row is None:
+        return None
+    return row["content_blob"]
+
+
 def _load_yaml_list(path: Path) -> list[dict[str, Any]]:
     """Load a YAML file that contains a list. Return [] on missing or error."""
     if not path.exists():
@@ -90,6 +138,62 @@ def _load_yaml_list(path: Path) -> list[dict[str, Any]]:
     if not isinstance(data, list):
         return []
     return [item for item in data if isinstance(item, dict)]
+
+
+def _parse_yaml_list(blob: str) -> list[dict[str, Any]]:
+    """Parse a YAML blob that contains a list.  Return [] on error."""
+    try:
+        data = yaml.safe_load(blob)
+    except yaml.YAMLError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def _parse_skill_blob(blob: str) -> list[SkillEntry]:
+    """Parse a skill YAML blob (list or dict-of-lists form)."""
+    raw = _parse_yaml_list(blob)
+    if raw:
+        return [SkillEntry.model_validate(item) for item in raw]
+    # dict-of-lists form
+    try:
+        data = yaml.safe_load(blob)
+    except yaml.YAMLError:
+        return []
+    if isinstance(data, dict):
+        entries = []
+        for key, val in data.items():
+            if isinstance(val, list):
+                entries.append(
+                    SkillEntry(
+                        title=key,
+                        description=", ".join(str(v) for v in val),
+                        details=[str(v) for v in val],
+                    )
+                )
+        return entries
+    return []
+
+
+def _parse_author_blob(blob: str) -> Author | None:
+    """Parse an author YAML blob into an Author model or None."""
+    try:
+        data = yaml.safe_load(blob)
+    except yaml.YAMLError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    author_val = data.get("author")
+    if isinstance(author_val, list) and author_val:
+        author_dict = author_val[0]
+    elif isinstance(author_val, dict):
+        author_dict = author_val
+    else:
+        return None
+    if not isinstance(author_dict, dict):
+        return None
+    return Author.model_validate(author_dict)
 
 
 def _load_work(config_path: Path) -> list[WorkEntry]:
@@ -177,11 +281,20 @@ def get_master() -> MasterPayload:
 
 @router.get("/master/work", response_model=list[WorkEntry])
 def get_master_work(response: Response) -> list[WorkEntry]:
-    """Return the work history list from work.yml.
+    """Return the work history list.
 
-    Includes an ``ETag`` response header (SHA-256 hex of work.yml content)
-    for concurrent-write safety.
+    DB-first: queries ``master_content`` for the 'work' row; falls back to
+    reading ``work.yml`` from disk when the DB has no entry.
+
+    Includes an ``ETag`` response header for concurrent-write safety.
     """
+    db_blob = _db_load_section("work")
+    if db_blob is not None:
+        etag = hashlib.sha256(db_blob.encode("utf-8")).hexdigest()[:16]
+        response.headers["ETag"] = f'"{etag}"'
+        raw = _parse_yaml_list(db_blob)
+        return [WorkEntry.model_validate(item) for item in raw]
+    # FS fallback — _fs_fallback_load pattern (S3 will remove this)
     config_path = _require_config_path()
     target = _resolve_section_path(config_path, "work")
     response.headers["ETag"] = f'"{etag_for_section(target)}"'
@@ -190,10 +303,18 @@ def get_master_work(response: Response) -> list[WorkEntry]:
 
 @router.get("/master/skill", response_model=list[SkillEntry])
 def get_master_skill(response: Response) -> list[SkillEntry]:
-    """Return the skill categories list from skill.yml.
+    """Return the skill categories list.
+
+    DB-first: queries ``master_content`` for the 'skill' row; falls back to
+    reading ``skill.yml`` from disk when the DB has no entry.
 
     Includes an ``ETag`` response header for concurrent-write safety.
     """
+    db_blob = _db_load_section("skill")
+    if db_blob is not None:
+        etag = hashlib.sha256(db_blob.encode("utf-8")).hexdigest()[:16]
+        response.headers["ETag"] = f'"{etag}"'
+        return _parse_skill_blob(db_blob)
     config_path = _require_config_path()
     target = _resolve_section_path(config_path, "skill")
     response.headers["ETag"] = f'"{etag_for_section(target)}"'
@@ -202,10 +323,19 @@ def get_master_skill(response: Response) -> list[SkillEntry]:
 
 @router.get("/master/education", response_model=list[EducationEntry])
 def get_master_education(response: Response) -> list[EducationEntry]:
-    """Return the education list from education.yml.
+    """Return the education list.
+
+    DB-first: queries ``master_content`` for the 'education' row; falls back
+    to reading ``education.yml`` from disk when the DB has no entry.
 
     Includes an ``ETag`` response header for concurrent-write safety.
     """
+    db_blob = _db_load_section("education")
+    if db_blob is not None:
+        etag = hashlib.sha256(db_blob.encode("utf-8")).hexdigest()[:16]
+        response.headers["ETag"] = f'"{etag}"'
+        raw = _parse_yaml_list(db_blob)
+        return [EducationEntry.model_validate(item) for item in raw]
     config_path = _require_config_path()
     target = _resolve_section_path(config_path, "education")
     response.headers["ETag"] = f'"{etag_for_section(target)}"'
@@ -214,10 +344,18 @@ def get_master_education(response: Response) -> list[EducationEntry]:
 
 @router.get("/master/author", response_model=Author | None)
 def get_master_author(response: Response) -> Author | None:
-    """Return the author block from author.yml, or null if the file is missing.
+    """Return the author block, or null if missing.
+
+    DB-first: queries ``master_content`` for the 'author' row; falls back
+    to reading ``author.yml`` from disk when the DB has no entry.
 
     Includes an ``ETag`` response header for concurrent-write safety.
     """
+    db_blob = _db_load_section("author")
+    if db_blob is not None:
+        etag = hashlib.sha256(db_blob.encode("utf-8")).hexdigest()[:16]
+        response.headers["ETag"] = f'"{etag}"'
+        return _parse_author_blob(db_blob)
     config_path = _require_config_path()
     target = _resolve_section_path(config_path, "author")
     response.headers["ETag"] = f'"{etag_for_section(target)}"'
