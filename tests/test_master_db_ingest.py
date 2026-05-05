@@ -204,6 +204,66 @@ class TestIngestMasterFromDisk:
         assert row is None
 
 
+class TestIngestRespectsCustomFilenames:
+    """Regression for ultrareview bug_009: master_ingest must honor
+    config.master.*_yml customisations, not hardcode canonical filenames."""
+
+    def test_ensure_master_loaded_uses_custom_filenames_from_config(
+        self, tmp_path: Path
+    ):
+        """When .apply-config.yaml renames master.work_yml, ingest must find
+        the renamed file (was failing silently and recommending a broken
+        recovery before the fix)."""
+        from jobsmith.master_ingest import ensure_master_loaded
+
+        config_path = tmp_path / ".apply-config.yaml"
+        config_path.write_text(
+            "master:\n"
+            "  work_yml: assets/content/myresume-work.yml\n"
+            "  skill_yml: assets/content/skill.yml\n"
+            "  education_yml: assets/content/education.yml\n"
+            "  author_yml: assets/content/author.yml\n"
+            "output:\n"
+            "  jobsmith_db: private/jobsmith.db\n",
+            encoding="utf-8",
+        )
+        content_dir = tmp_path / "assets" / "content"
+        content_dir.mkdir(parents=True)
+        # Custom filename for work; canonical for the others
+        (content_dir / "myresume-work.yml").write_text(
+            "- title: Custom-Filename Engineer\n"
+            "  location: Acme\n"
+            "  date: '2024'\n"
+            "  description: x\n"
+            "  details: []\n",
+            encoding="utf-8",
+        )
+        (content_dir / "skill.yml").write_text("- title: x\n  description: x\n  details: []\n")
+        (content_dir / "education.yml").write_text(
+            "- title: x\n  location: x\n  date: '2020'\n  description: x\n  details: []\n"
+        )
+        (content_dir / "author.yml").write_text("author:\n  - name: Alice\n")
+
+        db_path = tmp_path / "private" / "jobsmith.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        open_pipeline_db(db_path).close()
+
+        ensure_master_loaded(db_path, repo_root=tmp_path)
+
+        conn = open_pipeline_db(db_path)
+        try:
+            work_row = conn.execute(
+                "SELECT content_blob FROM master_content WHERE section = 'work'"
+            ).fetchone()
+        finally:
+            conn.close()
+        assert work_row is not None, (
+            "ensure_master_loaded must ingest a section whose YAML lives at a "
+            "custom path (config.master.work_yml = myresume-work.yml)"
+        )
+        assert "Custom-Filename Engineer" in work_row["content_blob"]
+
+
 # ---------------------------------------------------------------------------
 # Integration — ensure_master_loaded (startup hook)
 # ---------------------------------------------------------------------------
