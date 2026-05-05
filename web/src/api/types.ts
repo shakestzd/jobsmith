@@ -111,6 +111,8 @@ export interface ApplicationRow {
   run_id: string;
   phase: string;
   status: string;
+  /** UI-facing taxonomy derived at the API boundary. Values: running | rendered | failed | unknown */
+  ui_phase: string;
   started_at: string | null;
   finished_at: string | null;
   role: string | null;

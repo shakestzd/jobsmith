@@ -14,6 +14,7 @@ class Application(BaseModel):
     run_id: str
     phase: str
     status: str
+    ui_phase: str
     started_at: str | None
     finished_at: str | None
     role: str | None = None
@@ -27,6 +28,7 @@ class ApplicationDetail(BaseModel):
     run_id: str
     phase: str
     status: str
+    ui_phase: str
     started_at: str | None
     finished_at: str | None
     role: str | None = None

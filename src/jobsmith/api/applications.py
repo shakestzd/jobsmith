@@ -92,6 +92,24 @@ def _extract_jd_fields(conn, run_id: str) -> tuple[str | None, str | None]:
         return None, None
 
 
+def _derive_ui_phase(phase: str, status: str) -> str:
+    """Map raw DB (phase, status) → UI-facing taxonomy.
+
+    UI taxonomy:
+    - ``running``  — pipeline is actively executing (status='running', any phase)
+    - ``rendered`` — completed render phase (phase='render' or 'backfilled', status='done')
+    - ``failed``   — any run that ended in failure
+    - ``unknown``  — catch-all
+    """
+    if status == "failed":
+        return "failed"
+    if status == "running":
+        return "running"
+    if status in ("done", "backfilled") and phase in ("render", "backfilled"):
+        return "rendered"
+    return "unknown"
+
+
 def _row_to_application(row, conn) -> Application:
     role, company = _extract_jd_fields(conn, row["run_id"])
     return Application(
@@ -99,6 +117,7 @@ def _row_to_application(row, conn) -> Application:
         run_id=row["run_id"],
         phase=row["phase"],
         status=row["status"],
+        ui_phase=_derive_ui_phase(row["phase"], row["status"]),
         started_at=row["started_at"],
         finished_at=row["finished_at"],
         role=role,
@@ -168,6 +187,7 @@ def get_application(slug: str) -> ApplicationDetail:
         run_id=run_row["run_id"],
         phase=run_row["phase"],
         status=run_row["status"],
+        ui_phase=_derive_ui_phase(run_row["phase"], run_row["status"]),
         started_at=run_row["started_at"],
         finished_at=run_row["finished_at"],
         role=role,

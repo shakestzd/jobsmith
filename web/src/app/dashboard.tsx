@@ -43,16 +43,13 @@ interface DashboardRow {
   role: string;
   company: string;
   status: string;
+  /** UI-facing phase taxonomy from the API (running | rendered | failed | unknown). */
+  uiPhase: string;
   phaseLabel: string;
   anchors: string;
   factcheck: string;
   updated: string;
 }
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-const RUNNING_STATUSES = new Set(['running', 'queued', 'gather', 'draft']);
-const REVIEW_STATUSES = new Set(['review', 'draft']);
 
 function relativeTime(iso: string | null): string {
   if (!iso) return '—';
@@ -76,6 +73,7 @@ function decorate(row: ApplicationRow): DashboardRow {
     role: row.role ?? '—',
     company: row.company ?? '—',
     status: row.status,
+    uiPhase: row.ui_phase,
     phaseLabel: row.phase || '—',
     anchors: '—',
     factcheck: '—',
@@ -101,16 +99,16 @@ export function Dashboard({ openApp, openNew, filter = 'all' }: DashboardProps) 
 
   const counts = useMemo(() => ({
     all: rows.length,
-    running: rows.filter((a) => RUNNING_STATUSES.has(a.status)).length,
-    review: rows.filter((a) => REVIEW_STATUSES.has(a.status)).length,
-    rendered: rows.filter((a) => a.status === 'rendered').length,
+    running: rows.filter((a) => a.uiPhase === 'running').length,
+    review: rows.filter((a) => a.uiPhase === 'review').length,
+    rendered: rows.filter((a) => a.uiPhase === 'rendered').length,
   }), [rows]);
 
   const filtered = useMemo<DashboardRow[]>(() => {
     let list = rows;
-    if (tab === 'running') list = list.filter((a) => RUNNING_STATUSES.has(a.status));
-    if (tab === 'review') list = list.filter((a) => REVIEW_STATUSES.has(a.status));
-    if (tab === 'rendered') list = list.filter((a) => a.status === 'rendered');
+    if (tab === 'running') list = list.filter((a) => a.uiPhase === 'running');
+    if (tab === 'review') list = list.filter((a) => a.uiPhase === 'review');
+    if (tab === 'rendered') list = list.filter((a) => a.uiPhase === 'rendered');
     if (q) {
       const needle = q.toLowerCase();
       list = list.filter((a) => (a.slug + a.role + a.company).toLowerCase().includes(needle));
