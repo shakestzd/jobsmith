@@ -814,6 +814,14 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     };
   }, []);
 
+  // A slug is "complete" when its latest run finished successfully or was
+  // backfilled. Re-running such a slug requires --force on the server side or
+  // the apply pipeline aborts with "Application already complete." (GH#50).
+  const isComplete =
+    app.status === 'done' ||
+    app.status === 'rendered' ||
+    (app.status as string) === 'backfilled';
+
   // ── Re-run apply handler (real API) ──────────────────────────────────
   const handleReRun = useCallback(async () => {
     setRunError(null);
@@ -826,7 +834,9 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     try {
       // POST /api/applications — the URL lives in app.url (may be empty for historical apps).
       const url = app.url || `https://placeholder/${slug}`;
-      await postApplication(url, slug);
+      // Pass force=true when re-running an already-complete slug. Without it
+      // the apply pipeline silently aborts after the supervisor returns 201.
+      await postApplication(url, slug, { force: isComplete });
       subscribeToEvents(slug);
     } catch (err) {
       setRunning(false);
@@ -836,7 +846,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
       // Re-add a failed event.
       setEvents(ev => [...ev, { ts: now(), lvl: 'warn', msg: `launch failed: ${msg}` }]);
     }
-  }, [slug, app.url, subscribeToEvents]);
+  }, [slug, app.url, isComplete, subscribeToEvents]);
 
   // ── Cancel handler ───────────────────────────────────────────────────
   const handleCancel = useCallback(() => {
@@ -922,8 +932,16 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
           <button className="btn"><Icon name="doc" size={13} /> open in marimo</button>
           <button className="btn"><Icon name="folder" size={13} /> reveal in finder</button>
           {!running && (
-            <button className="btn primary" onClick={() => { void handleReRun(); }}>
-              <Icon name="play" size={12} /> re-run apply
+            <button
+              className="btn primary"
+              onClick={() => { void handleReRun(); }}
+              title={
+                isComplete
+                  ? 'This slug already completed. Clicking will overwrite the existing run artifacts (--force).'
+                  : 'Launch a new apply run for this slug.'
+              }
+            >
+              <Icon name="play" size={12} /> {isComplete ? 'force re-run apply' : 're-run apply'}
             </button>
           )}
           {running && (

@@ -136,9 +136,21 @@ def _resolve_supervisor(request: Request) -> RunSupervisor:
     return get_supervisor()
 
 
-async def _launch_run(supervisor: RunSupervisor, slug: str, url: str, cwd: Path) -> str:
-    """Build the apply argv and call supervisor.start(). Returns run_id."""
+async def _launch_run(
+    supervisor: RunSupervisor,
+    slug: str,
+    url: str,
+    cwd: Path,
+    force: bool = False,
+) -> str:
+    """Build the apply argv and call supervisor.start(). Returns run_id.
+
+    When *force* is true, ``--force`` is appended so the apply pipeline
+    restarts from phase 1 even if prior artifacts exist for *slug*.
+    """
     argv = [sys.executable, "-m", "jobsmith.cli", "apply", url, "--slug", slug]
+    if force:
+        argv.append("--force")
     return await supervisor.start(slug=slug, argv=argv, cwd=cwd)
 
 
@@ -228,7 +240,7 @@ async def create_application(
         )
 
     cwd = Path.cwd()
-    run_id = await _launch_run(supervisor, slug, body.url, cwd)
+    run_id = await _launch_run(supervisor, slug, body.url, cwd, force=body.force)
 
     return ApplicationCreated(slug=slug, run_id=run_id)
 
