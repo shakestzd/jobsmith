@@ -39,6 +39,7 @@ from jobsmith.api.artifacts import router as artifacts_router
 from jobsmith.api.auth import verify_token
 from jobsmith.api.doctor import router as doctor_router
 from jobsmith.api.events import router as events_router
+from jobsmith.api.feedback import router as feedback_router
 from jobsmith.api.master import router as master_router
 from jobsmith.api.snapshots import router as snapshots_router
 
@@ -94,6 +95,11 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         doctor_router,
+        prefix="/api",
+        dependencies=[Depends(verify_token)],
+    )
+    app.include_router(
+        feedback_router,
         prefix="/api",
         dependencies=[Depends(verify_token)],
     )
