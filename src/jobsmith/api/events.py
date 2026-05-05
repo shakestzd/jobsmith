@@ -347,10 +347,15 @@ async def _stream(
                     break
                 _kind, run_id, payload_obj = item
                 if isinstance(payload_obj, SynthPhaseEvent):
+                    # Include both ``phase`` (matches the canonical phase-event
+                    # shape consumed by the frontend phase tracker) and
+                    # ``last_phase`` (verbose context for failure diagnostics).
+                    # Closes roborev branch-review MEDIUM (feat-90e70f1f).
                     yield ServerSentEvent(
                         event="phase",
                         data=json.dumps({
                             "run_id": payload_obj.run_id,
+                            "phase": payload_obj.last_phase,
                             "status": payload_obj.status,
                             "last_phase": payload_obj.last_phase,
                             "error_excerpt": payload_obj.error_excerpt,

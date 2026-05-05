@@ -71,6 +71,11 @@ async def test_drain_loop_forwards_synth_event_as_phase_sse():
     )
     payload = json.loads(phase_events[0].data)
     assert payload["status"] == "failed"
+    # Both phase and last_phase must be present so the frontend phase
+    # tracker (which reads data.phase) gets a value, while diagnostic
+    # consumers can still rely on data.last_phase.  Regression for
+    # roborev branch-review MEDIUM (feat-90e70f1f).
+    assert payload["phase"] == "draft"
     assert payload["last_phase"] == "draft"
     assert payload["run_id"] == "run-x"
     assert "Traceback" in payload["error_excerpt"]
