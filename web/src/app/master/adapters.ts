@@ -42,12 +42,17 @@ export function apiSkillsToForm(data: MasterSkillGroup[] | null | undefined): Sk
 
 /**
  * Adapt MasterEducationEntry[] to EducationEntry[] for EducationForm.
+ *
+ * API field mapping (per src/jobsmith/api/types.ts):
+ *   title       → institution (e.g. "Massachusetts Institute of Technology")
+ *   description → degree      (e.g. "S.M., Technology and Policy")
+ *   location, date pass through.
  */
 export function apiEducationToForm(data: MasterEducationEntry[] | null | undefined): EducationEntry[] {
   if (!data) return [];
   return data.map((e): EducationEntry => ({
-    degree: e.title ?? '',
-    institution: e.location ?? '',
+    degree: e.description ?? '',
+    institution: e.title ?? '',
     year: e.date ?? '',
     location: e.location ?? '',
     gpa: undefined,
@@ -67,8 +72,25 @@ const EMPTY_AUTHOR: Author = {
 };
 
 /**
+ * Best-effort classify a fontawesome-style `icon` string → link kind.
+ * Brand contacts ("fa brands github", "fa brands linkedin") map to known kinds;
+ * everything else falls through to "other".
+ */
+function brandFromIcon(icon: string | undefined): 'github' | 'linkedin' | 'website' | 'other' {
+  const lower = (icon ?? '').toLowerCase();
+  if (lower.includes('github')) return 'github';
+  if (lower.includes('linkedin')) return 'linkedin';
+  if (lower.includes('globe') || lower.includes('home') || lower.includes('website')) return 'website';
+  return 'other';
+}
+
+/**
  * Adapt MasterAuthor API shape to the Author form shape.
- * Handles the name-as-object variant (`{ first, middle, last }`).
+ *
+ * The API often emits email/phone/location/links inside `contacts[]` keyed
+ * by fontawesome icon name ("fa envelope", "fa phone", "fa location-crosshairs",
+ * "fa brands github") rather than top-level fields. Fall back to contacts
+ * when top-level keys are empty so users see real values, not placeholders.
  */
 export function apiAuthorToForm(data: MasterAuthor | null | undefined): Author {
   if (!data) return { ...EMPTY_AUTHOR };
@@ -84,12 +106,24 @@ export function apiAuthorToForm(data: MasterAuthor | null | undefined): Author {
     name = [data.firstname, data.lastname].filter(Boolean).join(' ');
   }
 
+  const contacts = data.contacts ?? [];
+  const findContact = (needle: string) =>
+    contacts.find((c) => (c.icon ?? '').toLowerCase().includes(needle));
+  const emailContact = findContact('envelope');
+  const phoneContact = findContact('phone');
+  const locationContact = findContact('location');
+
+  // Brand contacts → typed Author.links rows.
+  const links = contacts
+    .filter((c) => Boolean(c.url) && (c.icon ?? '').toLowerCase().includes('brands'))
+    .map((c) => ({ kind: brandFromIcon(c.icon), url: c.url as string }));
+
   return {
     name,
-    email: data.email ?? '',
-    phone: data.phone ?? '',
-    location: data.address ?? '',
+    email: data.email || emailContact?.text || '',
+    phone: data.phone || phoneContact?.text || '',
+    location: data.address || locationContact?.text || '',
     headline: data.position ?? data.profession ?? '',
-    links: [],
+    links,
   };
 }
