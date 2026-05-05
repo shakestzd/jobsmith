@@ -113,59 +113,101 @@ class TestHealth:
 # ---------------------------------------------------------------------------
 
 
+def _seed_master_content(db_path: Path, section: str, blob: str) -> None:
+    """Seed the master_content table for DB-only API reads (post-S3, feat-eb6c99cb)."""
+    from jobsmith.db import open_pipeline_db
+
+    conn = open_pipeline_db(db_path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO master_content "
+            "(section, content_blob, etag, loaded_at) VALUES (?, ?, ?, ?)",
+            (section, blob, "test", "2026-01-01T00:00:00Z"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 class TestMasterReads:
     def test_get_master_work_returns_list(
-        self, sdk_client: JobsmithClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        sdk_client: JobsmithClient,
+        tmp_path: Path,
+        db_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".apply-config.yaml").write_text("", encoding="utf-8")
-        content_dir = tmp_path / "assets" / "content"
-        content_dir.mkdir(parents=True)
-        (content_dir / "work.yml").write_text(
-            "- title: Engineer\n  location: Acme\n  date: '2023'\n  description: Remote\n  details: []\n"
+        blob = (
+            "- title: Engineer\n  location: Acme\n  date: '2023'\n"
+            "  description: Remote\n  details: []\n"
         )
+        _seed_master_content(db_path, "work", blob)
+        monkeypatch.setattr(
+            "jobsmith.api.master._get_db_path_for_master", lambda: db_path
+        )
+
         result = sdk_client.get_master_work()
         assert isinstance(result, list)
         assert all(isinstance(e, WorkEntry) for e in result)
 
     def test_get_master_skill_returns_list(
-        self, sdk_client: JobsmithClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        sdk_client: JobsmithClient,
+        tmp_path: Path,
+        db_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".apply-config.yaml").write_text("", encoding="utf-8")
-        content_dir = tmp_path / "assets" / "content"
-        content_dir.mkdir(parents=True)
-        (content_dir / "skill.yml").write_text(
-            "- title: Languages\n  description: Python, Go\n  details: [Python, Go]\n"
+        blob = "- title: Languages\n  description: Python, Go\n  details: [Python, Go]\n"
+        _seed_master_content(db_path, "skill", blob)
+        monkeypatch.setattr(
+            "jobsmith.api.master._get_db_path_for_master", lambda: db_path
         )
+
         result = sdk_client.get_master_skill()
         assert isinstance(result, list)
         assert all(isinstance(e, SkillEntry) for e in result)
 
     def test_get_master_education_returns_list(
-        self, sdk_client: JobsmithClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        sdk_client: JobsmithClient,
+        tmp_path: Path,
+        db_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".apply-config.yaml").write_text("", encoding="utf-8")
-        content_dir = tmp_path / "assets" / "content"
-        content_dir.mkdir(parents=True)
-        (content_dir / "education.yml").write_text(
-            "- title: State U\n  location: NY\n  date: '2018'\n  description: B.Sc CS\n  details: []\n"
+        blob = (
+            "- title: State U\n  location: NY\n  date: '2018'\n"
+            "  description: B.Sc CS\n  details: []\n"
         )
+        _seed_master_content(db_path, "education", blob)
+        monkeypatch.setattr(
+            "jobsmith.api.master._get_db_path_for_master", lambda: db_path
+        )
+
         result = sdk_client.get_master_education()
         assert isinstance(result, list)
         assert all(isinstance(e, EducationEntry) for e in result)
 
     def test_get_master_author_returns_author_or_none(
-        self, sdk_client: JobsmithClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        sdk_client: JobsmithClient,
+        tmp_path: Path,
+        db_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".apply-config.yaml").write_text("", encoding="utf-8")
-        content_dir = tmp_path / "assets" / "content"
-        content_dir.mkdir(parents=True)
-        (content_dir / "author.yml").write_text(
-            "author:\n  - name: Jane Doe\n    email: jane@example.com\n"
+        blob = "author:\n  - name: Jane Doe\n    email: jane@example.com\n"
+        _seed_master_content(db_path, "author", blob)
+        monkeypatch.setattr(
+            "jobsmith.api.master._get_db_path_for_master", lambda: db_path
         )
+
         result = sdk_client.get_master_author()
         assert result is None or isinstance(result, Author)
 

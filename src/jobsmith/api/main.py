@@ -75,11 +75,108 @@ def _try_ingest_master(*, reload: bool = False) -> None:
         _log.warning("master ingest at startup failed (non-fatal)", exc_info=True)
 
 
+def _detect_fs_only_apps(repo_root: Path, db_path: Path) -> list[str]:
+    """Return slugs that have .apply-state/ on disk but no apply_runs row.
+
+    Best-effort: any error returns an empty list so a missing/broken DB
+    doesn't crash startup.  S7 of trk-144d42b1 (feat-4c0c39e6).
+    """
+    if not db_path.exists():
+        return []
+    try:
+        from jobsmith.config import load_config
+
+        config_path = repo_root / ".apply-config.yaml"
+        if not config_path.exists():
+            return []
+        config = load_config(path=config_path)
+        from jobsmith.paths import resolve
+
+        apps_dir = resolve(config.output.applications_dir, repo_root)
+        if not apps_dir.is_dir():
+            return []
+
+        from jobsmith.db import open_pipeline_db
+
+        conn = open_pipeline_db(db_path)
+        try:
+            db_slugs = {
+                r["slug"]
+                for r in conn.execute("SELECT DISTINCT slug FROM apply_runs").fetchall()
+            }
+        finally:
+            conn.close()
+
+        fs_slugs: list[str] = []
+        for child in apps_dir.iterdir():
+            if not child.is_dir():
+                continue
+            if (child / ".apply-state").is_dir() and child.name not in db_slugs:
+                fs_slugs.append(child.name)
+        return sorted(fs_slugs)
+    except Exception:
+        _log.debug("first-run detection failed (non-fatal)", exc_info=True)
+        return []
+
+
+def _maybe_warn_fs_only_state(repo_root: Path, db_path: Path) -> None:
+    """Log a single WARNING when FS-only state is detected at startup."""
+    fs_only = _detect_fs_only_apps(repo_root, db_path)
+    if not fs_only:
+        return
+    sample = ", ".join(fs_only[:5])
+    suffix = "" if len(fs_only) <= 5 else f" (and {len(fs_only) - 5} more)"
+    _log.warning(
+        "FS-only application state detected for %d slug(s): %s%s. "
+        "Recovery: `jobsmith db backfill --all` to ingest. "
+        "Master sections: `jobsmith db load-master` if also FS-only. "
+        "Set JOBSMITH_AUTO_BACKFILL=1 to backfill on startup.",
+        len(fs_only),
+        sample,
+        suffix,
+    )
+
+    if os.environ.get("JOBSMITH_AUTO_BACKFILL", "0") == "1":
+        try:
+            from jobsmith.config import load_config
+            from jobsmith.db import open_pipeline_db
+            from jobsmith.db_ingest import backfill_all
+            from jobsmith.paths import resolve
+
+            config = load_config(path=repo_root / ".apply-config.yaml")
+            apps_dir = resolve(config.output.applications_dir, repo_root)
+            conn = open_pipeline_db(db_path)
+            try:
+                results = backfill_all(conn, apps_dir)
+            finally:
+                conn.close()
+            _log.warning(
+                "JOBSMITH_AUTO_BACKFILL: backfilled %d slug(s)", len(results)
+            )
+        except Exception:
+            _log.warning("JOBSMITH_AUTO_BACKFILL backfill failed", exc_info=True)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    """FastAPI lifespan handler: ingest master YAML into DB on startup."""
+    """FastAPI lifespan handler: ingest master YAML and warn on FS-only state."""
     reload_master = os.environ.get("JOBSMITH_RELOAD_MASTER", "0") == "1"
     _try_ingest_master(reload=reload_master)
+
+    # First-run UX: warn if .apply-state/ dirs exist without DB rows (S7).
+    try:
+        cwd = Path(os.environ.get("JOBSMITH_REPO_ROOT", ".")).resolve()
+        from jobsmith.config import find_config, load_config
+
+        config_path = find_config(cwd)
+        if config_path is not None:
+            config = load_config(path=config_path)
+            repo_root = config_path.parent
+            db_path = (repo_root / config.output.jobsmith_db).resolve()
+            _maybe_warn_fs_only_state(repo_root, db_path)
+    except Exception:
+        _log.debug("first-run check failed (non-fatal)", exc_info=True)
+
     yield
 
 
