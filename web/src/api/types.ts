@@ -117,6 +117,14 @@ export interface ApplicationRow {
   finished_at: string | null;
   role: string | null;
   company: string | null;
+  /**
+   * Original job-description URL the apply run was launched against, when
+   * the server has it persisted. Optional because older `apply_runs` rows
+   * pre-date URL persistence (`feat-d6b1e167` follow-up will add it to
+   * apply_runs schema). Front-end consumers must treat undefined/empty
+   * as "URL not available" — see ApplicationDetail re-run flow.
+   */
+  url?: string | null;
 }
 
 /** One specialist artifact envelope (from /api/applications/{slug}.artifacts[]). */

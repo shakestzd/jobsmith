@@ -48,6 +48,9 @@ class FakeEventSource {
 }
 (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
 
+// Default fixture has a URL set so the re-run button is enabled. Tests
+// that exercise the URL-missing path override `url` to '' or null on the
+// returned object.
 const BASE_API_DETAIL = {
   slug: 'acme-eng-2026-04',
   run_id: 'run-1',
@@ -59,6 +62,7 @@ const BASE_API_DETAIL = {
   role: 'Engineer',
   company: 'Acme',
   artifacts: [],
+  url: 'https://example.com/jobs/acme-eng',
 };
 
 describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
@@ -149,5 +153,62 @@ describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
         { force: false },
       );
     });
+  });
+
+  it('clicking force button passes the REAL url, never a placeholder (roborev job 944)', async () => {
+    // Anti-regression: previously `handleReRun` used
+    //   const url = app.url || `https://placeholder/${slug}`;
+    // which would destructively force-restart a real run with a fake URL
+    // when the API didn't expose the original URL. Now the button is
+    // disabled when there's no URL, and when it IS clickable the real
+    // URL is what flows to postApplication.
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'done',
+      url: 'https://real.example.com/jobs/clay-gtm-data-analyst',
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /force re-run apply/i });
+    fireEvent.click(btn);
+    await waitFor(() => {
+      expect(postApplication).toHaveBeenCalledWith(
+        'https://real.example.com/jobs/clay-gtm-data-analyst',
+        'acme-eng-2026-04',
+        { force: true },
+      );
+    });
+    // Confirm no placeholder URL was ever sent.
+    const calls = (postApplication as ReturnType<typeof vi.fn>).mock.calls;
+    for (const call of calls) {
+      expect(call[0]).not.toMatch(/placeholder/);
+    }
+  });
+
+  it('disables the re-run button when the API does not expose a URL (roborev job 944)', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'done',
+      url: '', // server has no URL on file for this slug
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /force re-run apply/i });
+    expect(btn).toBeDisabled();
+  });
+
+  it('disables the re-run button when the API URL field is missing entirely', async () => {
+    // Older runs may not include the `url` key at all (pre-feat-d6b1e167
+    // apply_runs rows). Treat undefined the same as empty string.
+    const { url: _drop, ...detailWithoutUrl } = {
+      ...BASE_API_DETAIL,
+      status: 'failed',
+    };
+    void _drop;
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue(detailWithoutUrl);
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /^re-run apply$/i });
+    expect(btn).toBeDisabled();
+    // No postApplication call should fire from the disabled click.
+    fireEvent.click(btn);
+    expect(postApplication).not.toHaveBeenCalled();
   });
 });

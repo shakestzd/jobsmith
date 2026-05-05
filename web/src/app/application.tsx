@@ -683,7 +683,12 @@ function fromApi(slug: string, api: ApiApplicationDetail | undefined): SampleApp
     anchors: '—',
     factcheck: '—',
     renders: [],
-    url: '',
+    // The detail API does not yet persist the original job URL on
+    // apply_runs (TODO in feat-d6b1e167 follow-up to add the column).
+    // When it does land, this propagates the live URL into the SampleApp
+    // shape and `hasLaunchableUrl` flips to true so re-run/force re-run
+    // can launch with a real URL instead of a placeholder.
+    url: api?.url ?? '',
   };
 }
 
@@ -822,8 +827,25 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     app.status === 'rendered' ||
     (app.status as string) === 'backfilled';
 
+  // The detail API does not currently expose the original job URL — fromApi()
+  // sets `url: ''` unconditionally. Without a real URL we cannot launch a
+  // valid apply run; in particular, sending a placeholder with `force=true`
+  // would destructively restart the pipeline against a fake URL and
+  // overwrite real artifacts (roborev job 944). So: when no URL is
+  // available, the re-run button is disabled and the user is pointed at the
+  // CLI. Re-enable here once /api/applications/{slug} returns a `url` field.
+  const hasLaunchableUrl = Boolean(app.url);
+
   // ── Re-run apply handler (real API) ──────────────────────────────────
   const handleReRun = useCallback(async () => {
+    if (!hasLaunchableUrl) {
+      setRunError(
+        'this slug has no recorded job URL on the server — use ' +
+        '`jobsmith apply --force <url>` from the CLI to re-run.',
+      );
+      return;
+    }
+
     setRunError(null);
     // Reset state for a fresh run.
     setProgress({ 1: 0, 2: 0, 3: 0 });
@@ -832,11 +854,9 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     setRunning(true);
 
     try {
-      // POST /api/applications — the URL lives in app.url (may be empty for historical apps).
-      const url = app.url || `https://placeholder/${slug}`;
       // Pass force=true when re-running an already-complete slug. Without it
       // the apply pipeline silently aborts after the supervisor returns 201.
-      await postApplication(url, slug, { force: isComplete });
+      await postApplication(app.url, slug, { force: isComplete });
       subscribeToEvents(slug);
     } catch (err) {
       setRunning(false);
@@ -846,7 +866,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
       // Re-add a failed event.
       setEvents(ev => [...ev, { ts: now(), lvl: 'warn', msg: `launch failed: ${msg}` }]);
     }
-  }, [slug, app.url, isComplete, subscribeToEvents]);
+  }, [slug, app.url, isComplete, hasLaunchableUrl, subscribeToEvents]);
 
   // ── Cancel handler ───────────────────────────────────────────────────
   const handleCancel = useCallback(() => {
@@ -935,8 +955,11 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
             <button
               className="btn primary"
               onClick={() => { void handleReRun(); }}
+              disabled={!hasLaunchableUrl}
               title={
-                isComplete
+                !hasLaunchableUrl
+                  ? 'This slug has no recorded job URL on the server. Use `jobsmith apply --force <url>` from the CLI to re-run.'
+                  : isComplete
                   ? 'This slug already completed. Clicking will overwrite the existing run artifacts (--force).'
                   : 'Launch a new apply run for this slug.'
               }
