@@ -81,7 +81,6 @@ export function Sidebar({ view, setView, openNew }: SidebarProps) {
       <NavItem id="master" icon="yaml" label="Master content" view={view} setView={setView} />
       <NavItem id="anchors" icon="flag" label="Mark anchors" view={view} setView={setView} />
 
-      <div className="nav-section">Outputs</div>
       <NavItem id="site" icon="site" label="Listings site" view={view} setView={setView} />
       <NavItem id="feedback" icon="msg" label="Feedback" view={view} setView={setView} />
 
