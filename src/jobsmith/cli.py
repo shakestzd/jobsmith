@@ -31,12 +31,12 @@ from rich.table import Table
 from . import __version__
 from .assemble import PACKAGE_ROOT, assemble_all, assemble_application
 from .config import CONFIG_FILENAME, find_config, load_config
+from .db import open_pipeline_db
+from .db_ingest import backfill_all, backfill_slug, iter_backfillable_slugs
 from .factcheck import check_draft
 from .guard import check_anchors, render_diff_md
 from .paths import all_master_paths, repo_root_for, resolve
 from .site import discover_applications, init_site, render_site
-from .db import open_pipeline_db
-from .db_ingest import backfill_all, backfill_slug, iter_backfillable_slugs
 from .voice import _extract_bullets_from_qmd
 
 app = typer.Typer(

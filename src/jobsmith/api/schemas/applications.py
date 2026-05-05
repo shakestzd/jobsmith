@@ -16,6 +16,8 @@ class Application(BaseModel):
     status: str
     started_at: str | None
     finished_at: str | None
+    role: str | None = None
+    company: str | None = None
 
 
 class ApplicationDetail(BaseModel):
@@ -27,7 +29,29 @@ class ApplicationDetail(BaseModel):
     status: str
     started_at: str | None
     finished_at: str | None
+    role: str | None = None
+    company: str | None = None
     artifacts: list[ArtifactEnvelope]
 
 
-__all__ = ["Application", "ApplicationDetail", "ArtifactEnvelope"]
+class ApplicationCreate(BaseModel):
+    """Request body for POST /applications."""
+
+    url: str
+    slug: str | None = None
+
+
+class ApplicationCreated(BaseModel):
+    """Response body for POST /applications (201 Created)."""
+
+    slug: str
+    run_id: str
+
+
+__all__ = [
+    "Application",
+    "ApplicationCreate",
+    "ApplicationCreated",
+    "ApplicationDetail",
+    "ArtifactEnvelope",
+]

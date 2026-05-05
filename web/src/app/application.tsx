@@ -7,9 +7,12 @@
 // DOM structure, class names, and visual behaviour are pixel-identical to
 // the design source.
 
-import { useState, useEffect, useRef } from 'react';
-import type { SampleApp, IconName } from '../types';
-import { Icon, Badge, StatusBadge, SAMPLE_APPS } from './shared';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import type { SampleApp, AppPhase, AppStatus, IconName } from '../types';
+import { Icon, Badge, StatusBadge } from './shared';
+import { useApplication } from '../api/hooks';
+import { JobsmithApiError } from '../api/client';
+import type { ApplicationDetail as ApiApplicationDetail } from '../api/types';
 
 // ── Public prop type ─────────────────────────────────────────────────────────
 
@@ -661,8 +664,43 @@ phase_timeout_s: 600`}</pre>
 
 // ── ApplicationDetail (top-level export) ─────────────────────────────────────
 
+/**
+ * Synthesise a `SampleApp`-shaped object from the API row so the existing
+ * presentational subtree (PhaseCard / PipelineTab / ArtifactsTab / etc.)
+ * can keep working without invasive refactors.
+ *
+ * TODO feat-?: replace this once the API exposes role/company/url + a
+ * structured `events` array + an `artifacts` tree. For now anchors,
+ * factcheck, renders, url, role, company are placeholder values.
+ */
+function fromApi(slug: string, api: ApiApplicationDetail | undefined): SampleApp {
+  const phaseStr = api?.phase ?? '';
+  const phaseNum: AppPhase =
+    phaseStr === 'gather' ? 1 :
+    phaseStr === 'draft' ? 2 :
+    phaseStr === 'render' ? 3 :
+    api?.status === 'rendered' ? 3 :
+    api?.status === 'done' ? 3 :
+    1;
+  const updatedAt = api?.finished_at ?? api?.started_at ?? null;
+  return {
+    slug,
+    role: api?.role ?? '—',
+    company: api?.company ?? '—',
+    status: (api?.status ?? 'queued') as AppStatus,
+    updated: updatedAt ? new Date(updatedAt).toLocaleString() : '—',
+    phase: phaseNum,
+    anchors: '—',
+    factcheck: '—',
+    renders: [],
+    url: '',
+  };
+}
+
 export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
-  const app = SAMPLE_APPS.find(a => a.slug === slug) ?? SAMPLE_APPS[0];
+  const { data: apiDetail, isLoading, error } = useApplication(slug);
+
+  const app = useMemo<SampleApp>(() => fromApi(slug, apiDetail), [slug, apiDetail]);
   const { progress: initialProgress, activePhase: initialActivePhase } =
     deriveProgress(app);
 
@@ -694,6 +732,33 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
 
   const allDone = progress[1] >= 100 && progress[2] >= 100 && progress[3] >= 100;
   useEffect(() => { if (allDone) setRunning(false); }, [allDone]);
+
+  if (isLoading || error) {
+    return (
+      <div className="content wide">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          <button className="btn ghost sm" onClick={back}>
+            <Icon name="arrow" size={12} style={{ transform: 'scaleX(-1)' }} /> applications
+          </button>
+        </div>
+        <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-muted)' }}>
+          {isLoading && <span>loading <span className="mono">{slug}</span>…</span>}
+          {error && (error instanceof JobsmithApiError && error.status === 401 ? (
+            <div>
+              <div style={{ marginBottom: 8, color: 'var(--danger, #c0392b)' }}>
+                API requires <span className="mono">VITE_JOBSMITH_API_TOKEN</span>.
+              </div>
+              <div className="mono-sm">
+                copy from <code>&lt;project&gt;/private/jobsmith.token</code> to <code>web/.env.local</code>, then restart <code>npm run dev</code>.
+              </div>
+            </div>
+          ) : (
+            <span>failed to load application: {error.message}</span>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="content wide">

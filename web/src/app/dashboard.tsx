@@ -1,4 +1,5 @@
-// dashboard.tsx — port of design/app/dashboard.jsx
+// dashboard.tsx — port of design/app/dashboard.jsx, now wired to the live
+// /api/applications endpoint via React Query (feat-a6702b30 phase 2).
 //
 // Pixel-identical DOM structure and class names. Prop shape derived from how
 // main.jsx (design layer) invokes Dashboard:
@@ -6,8 +7,10 @@
 // The `filter` prop maps directly to the initial tab selection.
 
 import { useState, useMemo, useEffect } from 'react';
-import type { SampleApp } from '../types';
-import { Icon, StatusBadge, SAMPLE_APPS } from './shared';
+import { useApplications } from '../api/hooks';
+import { JobsmithApiError } from '../api/client';
+import type { ApplicationRow } from '../api/types';
+import { Icon, StatusBadge } from './shared';
 
 // ── Prop interfaces ──────────────────────────────────────────────────────────
 
@@ -29,6 +32,57 @@ interface StatItem {
   up?: boolean;
 }
 
+/**
+ * Decorated row: wraps the raw `ApplicationRow` with cheap derived display
+ * fields. Until the API exposes role/company/anchors/factcheck, we synthesise
+ * them from slug + timestamps. (TODO feat-?: extend `ApplicationRow` with
+ * these fields or a sibling `display` envelope.)
+ */
+interface DashboardRow {
+  slug: string;
+  role: string;
+  company: string;
+  status: string;
+  phaseLabel: string;
+  anchors: string;
+  factcheck: string;
+  updated: string;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+const RUNNING_STATUSES = new Set(['running', 'queued', 'gather', 'draft']);
+const REVIEW_STATUSES = new Set(['review', 'draft']);
+
+function relativeTime(iso: string | null): string {
+  if (!iso) return '—';
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return iso;
+  const deltaMs = Date.now() - ts;
+  const sec = Math.max(0, Math.round(deltaMs / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 48) return `${hr} hr ago`;
+  const day = Math.round(hr / 24);
+  return `${day}d ago`;
+}
+
+function decorate(row: ApplicationRow): DashboardRow {
+  const updatedAt = row.finished_at ?? row.started_at;
+  return {
+    slug: row.slug,
+    role: row.role ?? '—',
+    company: row.company ?? '—',
+    status: row.status,
+    phaseLabel: row.phase || '—',
+    anchors: '—',
+    factcheck: '—',
+    updated: relativeTime(updatedAt),
+  };
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function Dashboard({ openApp, openNew, filter = 'all' }: DashboardProps) {
@@ -41,20 +95,34 @@ export function Dashboard({ openApp, openNew, filter = 'all' }: DashboardProps) 
   }, [filter]);
   const [q, setQ] = useState('');
 
-  const filtered = useMemo<SampleApp[]>(() => {
-    let list = SAMPLE_APPS;
-    if (tab === 'running') list = list.filter(a => ['running', 'queued'].includes(a.status));
-    if (tab === 'review')  list = list.filter(a => ['review', 'draft'].includes(a.status));
-    if (tab === 'rendered') list = list.filter(a => a.status === 'rendered');
-    if (q) list = list.filter(a => (a.slug + a.role + a.company).toLowerCase().includes(q.toLowerCase()));
+  const { data: apiApps = [], isLoading, error } = useApplications();
+
+  const rows: DashboardRow[] = useMemo(() => apiApps.map(decorate), [apiApps]);
+
+  const counts = useMemo(() => ({
+    all: rows.length,
+    running: rows.filter((a) => RUNNING_STATUSES.has(a.status)).length,
+    review: rows.filter((a) => REVIEW_STATUSES.has(a.status)).length,
+    rendered: rows.filter((a) => a.status === 'rendered').length,
+  }), [rows]);
+
+  const filtered = useMemo<DashboardRow[]>(() => {
+    let list = rows;
+    if (tab === 'running') list = list.filter((a) => RUNNING_STATUSES.has(a.status));
+    if (tab === 'review') list = list.filter((a) => REVIEW_STATUSES.has(a.status));
+    if (tab === 'rendered') list = list.filter((a) => a.status === 'rendered');
+    if (q) {
+      const needle = q.toLowerCase();
+      list = list.filter((a) => (a.slug + a.role + a.company).toLowerCase().includes(needle));
+    }
     return list;
-  }, [tab, q]);
+  }, [rows, tab, q]);
 
   const stats: StatItem[] = [
-    { label: 'total', value: SAMPLE_APPS.length, delta: '+3 this week', up: true },
-    { label: 'rendered', value: SAMPLE_APPS.filter(a => a.status === 'rendered').length, delta: '67% pass on first render' },
-    { label: 'in progress', value: SAMPLE_APPS.filter(a => ['running', 'queued', 'draft'].includes(a.status)).length, delta: '1 phase running' },
-    { label: 'avg apply time', value: '4m 12s', delta: '−38% vs last month', up: true },
+    { label: 'total', value: counts.all, delta: '' },
+    { label: 'rendered', value: counts.rendered, delta: '' },
+    { label: 'in progress', value: counts.running, delta: '' },
+    { label: 'avg apply time', value: '—', delta: 'TODO: derive from finished/started timestamps' },
   ];
 
   return (
@@ -83,29 +151,17 @@ export function Dashboard({ openApp, openNew, filter = 'all' }: DashboardProps) 
       <div className="card">
         <div className="card-h">
           <div className="tabs" style={{ borderBottom: 'none', marginBottom: 0 }}>
-            <div
-              className={`tab ${tab === 'all' ? 'active' : ''}`}
-              onClick={() => setTab('all')}
-            >
-              all <span className="tab-count">{SAMPLE_APPS.length}</span>
+            <div className={`tab ${tab === 'all' ? 'active' : ''}`} onClick={() => setTab('all')}>
+              all <span className="tab-count">{counts.all}</span>
             </div>
-            <div
-              className={`tab ${tab === 'running' ? 'active' : ''}`}
-              onClick={() => setTab('running')}
-            >
-              running <span className="tab-count">{SAMPLE_APPS.filter(a => ['running', 'queued'].includes(a.status)).length}</span>
+            <div className={`tab ${tab === 'running' ? 'active' : ''}`} onClick={() => setTab('running')}>
+              running <span className="tab-count">{counts.running}</span>
             </div>
-            <div
-              className={`tab ${tab === 'review' ? 'active' : ''}`}
-              onClick={() => setTab('review')}
-            >
-              review <span className="tab-count">{SAMPLE_APPS.filter(a => ['review', 'draft'].includes(a.status)).length}</span>
+            <div className={`tab ${tab === 'review' ? 'active' : ''}`} onClick={() => setTab('review')}>
+              review <span className="tab-count">{counts.review}</span>
             </div>
-            <div
-              className={`tab ${tab === 'rendered' ? 'active' : ''}`}
-              onClick={() => setTab('rendered')}
-            >
-              rendered <span className="tab-count">{SAMPLE_APPS.filter(a => a.status === 'rendered').length}</span>
+            <div className={`tab ${tab === 'rendered' ? 'active' : ''}`} onClick={() => setTab('rendered')}>
+              rendered <span className="tab-count">{counts.rendered}</span>
             </div>
           </div>
           <div className="right">
@@ -135,25 +191,64 @@ export function Dashboard({ openApp, openNew, filter = 'all' }: DashboardProps) 
             </tr>
           </thead>
           <tbody>
-            {filtered.map(a => (
-              <tr key={a.slug} className="row-clickable" onClick={() => openApp(a.slug)}>
-                <td><span className="slug">{a.slug}</span></td>
-                <td><span className="role">{a.role}</span></td>
-                <td><span className="company">{a.company}</span></td>
-                <td><span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{a.phase}/3</span></td>
-                <td><span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{a.anchors}</span></td>
-                <td><StatusBadge status={a.status} /></td>
-                <td><span className="mono-sm" style={{ color: 'var(--fg-subtle)' }}>{a.updated}</span></td>
-                <td><Icon name="chev" size={12} style={{ opacity: 0.5 }} /></td>
+            {isLoading && (
+              [0, 1, 2, 3].map((i) => (
+                <tr key={`skeleton-${i}`}>
+                  <td colSpan={8} style={{ padding: '14px 16px' }}>
+                    <div style={{
+                      height: 14,
+                      background: 'var(--bg-sunk)',
+                      borderRadius: 4,
+                      opacity: 0.6 - i * 0.1,
+                    }} />
+                  </td>
+                </tr>
+              ))
+            )}
+            {!isLoading && error && (
+              <tr>
+                <td colSpan={8} style={{ padding: 32, textAlign: 'center', color: 'var(--fg-muted)' }}>
+                  {error instanceof JobsmithApiError && error.status === 401 ? (
+                    <div>
+                      <div style={{ marginBottom: 8, color: 'var(--danger, #c0392b)' }}>
+                        API requires <span className="mono">VITE_JOBSMITH_API_TOKEN</span>.
+                      </div>
+                      <div className="mono-sm">
+                        copy from <code>&lt;project&gt;/private/jobsmith.token</code> to <code>web/.env.local</code>, then restart <code>npm run dev</code>.
+                      </div>
+                    </div>
+                  ) : (
+                    <span>failed to load applications: {error.message}</span>
+                  )}
+                </td>
               </tr>
-            ))}
-            {filtered.length === 0 && (
+            )}
+            {!isLoading && !error && filtered.length === 0 && rows.length === 0 && (
+              <tr>
+                <td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--fg-subtle)' }}>
+                  no applications yet — run <span className="mono">jobsmith apply &lt;jd-url&gt;</span> to create one.
+                </td>
+              </tr>
+            )}
+            {!isLoading && !error && filtered.length === 0 && rows.length > 0 && (
               <tr>
                 <td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--fg-subtle)' }}>
                   no applications match
                 </td>
               </tr>
             )}
+            {!isLoading && !error && filtered.map((a) => (
+              <tr key={a.slug} className="row-clickable" onClick={() => openApp(a.slug)}>
+                <td><span className="slug">{a.slug}</span></td>
+                <td><span className="role">{a.role}</span></td>
+                <td><span className="company">{a.company}</span></td>
+                <td><span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{a.phaseLabel}</span></td>
+                <td><span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{a.anchors}</span></td>
+                <td><StatusBadge status={a.status} /></td>
+                <td><span className="mono-sm" style={{ color: 'var(--fg-subtle)' }}>{a.updated}</span></td>
+                <td><Icon name="chev" size={12} style={{ opacity: 0.5 }} /></td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
