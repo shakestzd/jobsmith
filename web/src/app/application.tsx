@@ -7,11 +7,11 @@
 // DOM structure, class names, and visual behaviour are pixel-identical to
 // the design source.
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { SampleApp, AppPhase, AppStatus, IconName } from '../types';
 import { Icon, Badge, StatusBadge } from './shared';
 import { useApplication } from '../api/hooks';
-import { JobsmithApiError } from '../api/client';
+import { JobsmithApiError, postApplication, buildEventsUrl } from '../api/client';
 import type { ApplicationDetail as ApiApplicationDetail } from '../api/types';
 
 // ── Public prop type ─────────────────────────────────────────────────────────
@@ -89,14 +89,7 @@ function phaseDuration(n: number): string {
   return (['1.4s', '3.8s', '12.1s'] as const)[n - 1] ?? '—';
 }
 
-const NEW_EVENTS: Omit<LogEvent, 'ts'>[] = [
-  { lvl: 'info', msg: '<span class="dim">phase=</span>render <span class="dim">spec=</span>apply-renderer' },
-  { lvl: 'tool', msg: 'Bash: <span class="dim">quarto render index.qmd</span>' },
-  { lvl: 'tool', msg: 'Read: <span class="dim">.apply-state/cover_draft.md</span>' },
-  { lvl: 'spec', msg: 'apply-assembler: writing _variables.yml' },
-  { lvl: 'info', msg: 'sub-agent <span class="dim">apply-renderer</span> handed off to quarto' },
-  { lvl: 'tool', msg: 'Write: <span class="dim">rendered/resume.pdf</span> (92 KB)' },
-];
+// NEW_EVENTS removed — event log is now driven by the real SSE stream.
 
 function seedEvents(app: SampleApp): LogEvent[] {
   return [
@@ -697,6 +690,41 @@ function fromApi(slug: string, api: ApiApplicationDetail | undefined): SampleApp
   };
 }
 
+// ── SSE event shapes ─────────────────────────────────────────────────────
+
+interface SsePhaseEvent {
+  run_id: string;
+  phase: string;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+interface SseLogEvent {
+  run_id: string;
+  stream: string;
+  line: string;
+  timestamp: string | null;
+}
+
+interface SseSpecialistEvent {
+  run_id: string;
+  specialist: string;
+  kind: string;
+  kind_label: string;
+  phase: string;
+  status: string;
+  finished_at: string | null;
+}
+
+// Map a phase string from the SSE event to a 1|2|3 number.
+function ssePhaseToNum(phase: string): 1 | 2 | 3 {
+  if (phase === 'gather') return 1;
+  if (phase === 'draft') return 2;
+  if (phase === 'render') return 3;
+  return 1;
+}
+
 export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   const { data: apiDetail, isLoading, error } = useApplication(slug);
 
@@ -709,29 +737,134 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   const [running, setRunning] = useState<boolean>(app.status === 'running');
   const [progress, setProgress] = useState<ProgressMap>(initialProgress);
   const [events, setEvents] = useState<LogEvent[]>(() => seedEvents(app));
+  const [runError, setRunError] = useState<string | null>(null);
 
-  // Live progress sim when running
+  // Ref to hold the active EventSource so we can close it on cancel/unmount.
+  const esRef = useRef<EventSource | null>(null);
+
+  // ── Subscribe to SSE stream ──────────────────────────────────────────
+  const subscribeToEvents = useCallback((targetSlug: string) => {
+    // Close any existing connection.
+    if (esRef.current) {
+      esRef.current.close();
+      esRef.current = null;
+    }
+
+    const url = buildEventsUrl(targetSlug);
+    const es = new EventSource(url);
+    esRef.current = es;
+
+    es.addEventListener('phase', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data as string) as SsePhaseEvent;
+        const phaseNum = ssePhaseToNum(data.phase);
+        if (data.status === 'done' || data.status === 'backfilled') {
+          setProgress(p => ({ ...p, [phaseNum]: 100 }));
+        } else if (data.status === 'running') {
+          setProgress(p => ({ ...p, [phaseNum]: Math.max(p[phaseNum], 10) }));
+          setActivePhase(phaseNum);
+          setRunning(true);
+        } else if (data.status === 'failed') {
+          setRunning(false);
+        }
+        // Add a log entry for the phase event.
+        const msg = `&lt;&lt;PHASE&gt;&gt; ${data.phase} status=${data.status}`;
+        setEvents(ev => [...ev, { ts: now(), lvl: 'done', msg }]);
+      } catch { /* ignore malformed event */ }
+    });
+
+    es.addEventListener('specialist', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data as string) as SseSpecialistEvent;
+        const msg = `<span class="dim">specialist=</span>${data.specialist} <span class="dim">kind=</span>${data.kind_label}`;
+        setEvents(ev => ev.length > 400 ? ev : [...ev, { ts: now(), lvl: 'spec', msg }]);
+        // Advance phase bar progress incrementally for each specialist.
+        const phaseNum = ssePhaseToNum(data.phase);
+        setProgress(p => ({
+          ...p,
+          [phaseNum]: Math.min(90, p[phaseNum] + 15),
+        }));
+      } catch { /* ignore malformed event */ }
+    });
+
+    es.addEventListener('log', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data as string) as SseLogEvent;
+        const line = data.line.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const lvl = data.stream === 'stderr' ? 'warn' : 'info';
+        setEvents(ev => ev.length > 400 ? ev : [...ev, { ts: now(), lvl, msg: line }]);
+      } catch { /* ignore malformed event */ }
+    });
+
+    es.addEventListener('idle-close', () => {
+      setRunning(false);
+      es.close();
+      esRef.current = null;
+    });
+
+    es.onerror = () => {
+      // EventSource will auto-reconnect; mark not running if it was a terminal error.
+      // We only stop running if the connection fails immediately (readyState CLOSED).
+      if (es.readyState === EventSource.CLOSED) {
+        setRunning(false);
+      }
+    };
+  }, []);
+
+  // ── Re-run apply handler (real API) ──────────────────────────────────
+  const handleReRun = useCallback(async () => {
+    setRunError(null);
+    // Reset state for a fresh run.
+    setProgress({ 1: 0, 2: 0, 3: 0 });
+    setActivePhase(1);
+    setEvents([{ ts: now(), lvl: 'info', msg: `<span class="dim">apply</span> start <span class="dim">slug=</span>${slug}` }]);
+    setRunning(true);
+
+    try {
+      // POST /api/applications — the URL lives in app.url (may be empty for historical apps).
+      const url = app.url || `https://placeholder/${slug}`;
+      await postApplication(url, slug);
+      subscribeToEvents(slug);
+    } catch (err) {
+      setRunning(false);
+      const msg = err instanceof JobsmithApiError ? err.message : String(err);
+      setRunError(msg);
+      // Re-add a failed event.
+      setEvents(ev => [...ev, { ts: now(), lvl: 'warn', msg: `launch failed: ${msg}` }]);
+    }
+  }, [slug, app.url, subscribeToEvents]);
+
+  // ── Cancel handler ───────────────────────────────────────────────────
+  const handleCancel = useCallback(() => {
+    if (esRef.current) {
+      esRef.current.close();
+      esRef.current = null;
+    }
+    setRunning(false);
+    setEvents(ev => [...ev, { ts: now(), lvl: 'warn', msg: 'run cancelled by user' }]);
+  }, []);
+
+  // Close SSE on unmount.
   useEffect(() => {
-    if (!running) return;
-    const id = setInterval(() => {
-      setProgress(p => {
-        const next: ProgressMap = { ...p };
-        const cur = (p[3] < 100 ? 3 : p[2] < 100 ? 2 : 1) as 1 | 2 | 3;
-        if (cur === 1 && p[1] >= 100) return p;
-        next[cur] = Math.min(100, p[cur] + Math.random() * 7 + 2);
-        return next;
-      });
-      setEvents(ev => {
-        if (ev.length > 200) return ev;
-        const pick = NEW_EVENTS[Math.floor(Math.random() * NEW_EVENTS.length)];
-        return [...ev, { ...pick, ts: now() }];
-      });
-    }, 700);
-    return () => clearInterval(id);
-  }, [running]);
+    return () => {
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+    };
+  }, []);
 
+  // Mark not-running when all phases reach 100%.
   const allDone = progress[1] >= 100 && progress[2] >= 100 && progress[3] >= 100;
-  useEffect(() => { if (allDone) setRunning(false); }, [allDone]);
+  useEffect(() => {
+    if (allDone) {
+      setRunning(false);
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+    }
+  }, [allDone]);
 
   if (isLoading || error) {
     return (
@@ -785,14 +918,19 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
           <button className="btn"><Icon name="doc" size={13} /> open in marimo</button>
           <button className="btn"><Icon name="folder" size={13} /> reveal in finder</button>
           {!running && (
-            <button className="btn primary" onClick={() => setRunning(true)}>
+            <button className="btn primary" onClick={() => { void handleReRun(); }}>
               <Icon name="play" size={12} /> re-run apply
             </button>
           )}
           {running && (
-            <button className="btn danger" onClick={() => setRunning(false)}>
+            <button className="btn danger" onClick={handleCancel}>
               <Icon name="x" size={12} /> cancel run
             </button>
+          )}
+          {runError && (
+            <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)', maxWidth: 260 }}>
+              {runError}
+            </span>
           )}
         </div>
       </div>
