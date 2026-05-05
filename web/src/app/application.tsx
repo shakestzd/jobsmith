@@ -808,12 +808,12 @@ function fromApi(slug: string, api: ApiApplicationDetail | undefined): SampleApp
     anchors: '—',
     factcheck: '—',
     renders: [],
-    // The detail API does not yet persist the original job URL on
-    // apply_runs (TODO in feat-d6b1e167 follow-up to add the column).
-    // When it does land, this propagates the live URL into the SampleApp
-    // shape and `hasLaunchableUrl` flips to true so re-run/force re-run
-    // can launch with a real URL instead of a placeholder.
-    url: api?.url ?? '',
+    // Prefer the new `apply_url` field (feat-bb81c3ce, extracted from the
+    // jd-parsed artifact by the backend). Fall back to the legacy `url` field
+    // on ApplicationRow for older rows that pre-date apply_url persistence.
+    // Empty string when neither is available — `hasLaunchableUrl` will be
+    // false and the re-run button stays disabled.
+    url: api?.apply_url ?? api?.url ?? '',
   };
 }
 

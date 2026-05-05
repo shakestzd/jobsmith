@@ -498,6 +498,75 @@ describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
   });
 });
 
+// ── apply_url wiring tests (feat-bb81c3ce) ───────────────────────────────────
+//
+// The backend now returns `apply_url` from GET /api/applications/{slug}.
+// When present and non-null, the re-run button must stay enabled and POST
+// with that URL. When null/absent, the CLI tooltip path is preserved.
+describe('ApplicationDetail apply_url wiring (feat-bb81c3ce)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    constructorCalls.length = 0;
+    (postApplication as ReturnType<typeof vi.fn>).mockResolvedValue({
+      slug: 'acme-eng-2026-04',
+      run_id: 'run-new',
+    });
+  });
+
+  it('apply_url present: button is enabled and POST uses apply_url', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'done',
+      apply_url: 'https://example.com/jobs/123',
+      url: undefined,
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /force re-run apply/i });
+    expect(btn).not.toBeDisabled();
+    fireEvent.click(btn);
+    await waitFor(() => {
+      expect(postApplication).toHaveBeenCalledWith(
+        'https://example.com/jobs/123',
+        'acme-eng-2026-04',
+        { force: true },
+      );
+    });
+  });
+
+  it('apply_url null: button is disabled and POST is not called', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'done',
+      apply_url: null,
+      url: undefined,
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /force re-run apply/i });
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
+    expect(postApplication).not.toHaveBeenCalled();
+  });
+
+  it('apply_url takes precedence over legacy url field when both present', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'done',
+      apply_url: 'https://new-field.example.com/jobs/456',
+      url: 'https://old-field.example.com/jobs/old',
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /force re-run apply/i });
+    fireEvent.click(btn);
+    await waitFor(() => {
+      expect(postApplication).toHaveBeenCalledWith(
+        'https://new-field.example.com/jobs/456',
+        'acme-eng-2026-04',
+        { force: true },
+      );
+    });
+  });
+});
+
 // ── SSE phase wiring tests (feat-6e148975, GH#59) ────────────────────────────
 //
 // These tests assert that incoming SSE `event: phase` frames update both the
