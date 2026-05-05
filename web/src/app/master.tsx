@@ -18,8 +18,8 @@ import { AuthorForm } from './master/AuthorForm';
 import { BenchmarkEditor } from './master/BenchmarkEditor';
 import type { Skill, EducationEntry, Author } from './master/schemas';
 import { useMasterSection } from '../api/hooks';
-import { JobsmithApiError } from '../api/client';
-import type { MasterWorkRole } from '../api/types';
+import { JobsmithApiError, apiGet, apiPost } from '../api/client';
+import type { MasterWorkRole, MasterValidateResponse } from '../api/types';
 import {
   apiAuthorToForm,
   apiEducationToForm,
@@ -287,6 +287,43 @@ function BenchmarkTab() {
 
 export function MasterContent() {
   const [tab, setTab] = useState<MasterTab>('work');
+  const [validateState, setValidateState] = useState<
+    | { kind: 'idle' }
+    | { kind: 'running' }
+    | { kind: 'ok' }
+    | { kind: 'errors'; errors: { field: string; message: string }[] }
+    | { kind: 'failure'; message: string }
+  >({ kind: 'idle' });
+
+  const handleValidate = async () => {
+    setValidateState({ kind: 'running' });
+    try {
+      const payload = await apiGet<{
+        work: unknown[];
+        skill: unknown[];
+        education: unknown[];
+        author: Record<string, unknown> | null;
+      }>('/api/master');
+      const result = await apiPost<MasterValidateResponse>('/api/master/validate', {
+        work: payload.work,
+        skill: payload.skill,
+        education: payload.education,
+        author: payload.author,
+      });
+      if (result.ok) {
+        setValidateState({ kind: 'ok' });
+      } else {
+        setValidateState({ kind: 'errors', errors: result.errors });
+      }
+    } catch (err) {
+      setValidateState({
+        kind: 'failure',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  const isValidating = validateState.kind === 'running';
 
   return (
     <div className="content">
@@ -296,10 +333,47 @@ export function MasterContent() {
           <p>the canonical YAML files every <span className="mono">jobsmith apply</span> draws from. edits here propagate to every future application.</p>
         </div>
         <div className="actions">
-          <button className="btn"><Icon name="doc" size={13} /> validate</button>
+          <button className="btn" onClick={handleValidate} disabled={isValidating}>
+            <Icon name="doc" size={13} /> {isValidating ? 'validating…' : 'validate'}
+          </button>
           <button className="btn"><Icon name="folder" size={13} /> open in editor</button>
         </div>
       </div>
+
+      {validateState.kind === 'ok' && (
+        <div
+          className="card"
+          style={{ padding: '10px 14px', marginBottom: 12, color: 'var(--success, var(--fg-muted))', fontSize: 13 }}
+          role="status"
+        >
+          all sections valid.
+        </div>
+      )}
+      {validateState.kind === 'errors' && (
+        <div
+          className="card"
+          style={{ padding: '10px 14px', marginBottom: 12, fontSize: 13 }}
+          role="alert"
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>{validateState.errors.length} validation error{validateState.errors.length === 1 ? '' : 's'}</div>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {validateState.errors.map((e, i) => (
+              <li key={i}>
+                <span className="mono-sm">{e.field}</span>: {e.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {validateState.kind === 'failure' && (
+        <div
+          className="card"
+          style={{ padding: '10px 14px', marginBottom: 12, color: 'var(--danger, var(--fg-muted))', fontSize: 13 }}
+          role="alert"
+        >
+          validation request failed: {validateState.message}
+        </div>
+      )}
 
       <div className="tabs">
         {TABS.map(([id, label, sub]) => (

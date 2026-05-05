@@ -660,11 +660,8 @@ phase_timeout_s: 600`}</pre>
 /**
  * Synthesise a `SampleApp`-shaped object from the API row so the existing
  * presentational subtree (PhaseCard / PipelineTab / ArtifactsTab / etc.)
- * can keep working without invasive refactors.
- *
- * TODO feat-?: replace this once the API exposes role/company/url + a
- * structured `events` array + an `artifacts` tree. For now anchors,
- * factcheck, renders, url, role, company are placeholder values.
+ * keeps working. `role`/`company` come from the API; anchors/factcheck/renders
+ * remain placeholders until the API surfaces them.
  */
 function fromApi(slug: string, api: ApiApplicationDetail | undefined): SampleApp {
   const phaseStr = api?.phase ?? '';

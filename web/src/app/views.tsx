@@ -2,10 +2,11 @@
 //
 // Exports: SiteView, FeedbackView, DoctorView, ConfigView
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Icon, Badge } from './shared';
-import { useApplications, useMasterSection } from '../api/hooks';
-import type { MasterAuthor, ApplicationRow } from '../api/types';
+import { apiPost, apiPut, JobsmithApiError } from '../api/client';
+import { useApplications, useMasterSection, useConfig, useFeedback, useDoctor } from '../api/hooks';
+import type { MasterAuthor, ApplicationRow, JobsmithConfig, ConfigValidateResponse, ConfigValidationError } from '../api/types';
 
 // ── SiteView ─────────────────────────────────────────────────────────────
 
@@ -175,25 +176,26 @@ export function SiteView() {
 
 // ── FeedbackView ─────────────────────────────────────────────────────────
 
-interface FeedbackRow {
-  slug: string;
-  date: string;
-  kind: 'edit' | 'outcome';
-  summary: string;
-  tag: string;
+/** Format an ISO timestamp as a YYYY-MM-DD date string. */
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toISOString().slice(0, 10);
 }
 
-const FEEDBACK_ROWS: FeedbackRow[] = [
-  { slug: 'anthropic-applied-ai-2026-04',       date: '2026-04-30', kind: 'edit',    summary: 'tightened cover paragraph 2; reduced from 4 sentences to 3.',               tag: 'cover'   },
-  { slug: 'vercel-platform-eng-2026-04',         date: '2026-04-30', kind: 'edit',    summary: 'swapped scheduler-migration for live-reload-dev-env; better fit.',           tag: 'bullets' },
-  { slug: 'resend-developer-experience-2026-03', date: '2026-04-12', kind: 'outcome', summary: 'phone screen scheduled.',                                                    tag: 'outcome' },
-  { slug: 'render-cli-2026-03',                  date: '2026-04-08', kind: 'outcome', summary: 'on-site invite.',                                                             tag: 'outcome' },
-  { slug: 'fly-systems-2026-03',                 date: '2026-04-02', kind: 'outcome', summary: 'rejection (no reason cited).',                                               tag: 'outcome' },
-  { slug: 'stripe-infra-2026-03',                date: '2026-04-01', kind: 'edit',    summary: 'rephrased "1.2B requests" as "billion-scale" — too specific.',               tag: 'voice'   },
-];
+/** Compose a one-line summary from a feedback record. Prefers `lesson`. */
+function feedbackSummary(r: { before: string; after: string; lesson: string }): string {
+  if (r.lesson) return r.lesson;
+  if (r.before && r.after) return `${r.before} → ${r.after}`;
+  return r.after || r.before || '';
+}
 
 export function FeedbackView() {
-  const rows = FEEDBACK_ROWS;
+  const { data: rows = [], isLoading, error } = useFeedback();
+
+  const editCount = rows.filter(r => r.kind !== 'outcome').length;
+  const outcomeCount = rows.filter(r => r.kind === 'outcome').length;
+  const slugCount = new Set(rows.map(r => r.slug)).size;
 
   return (
     <div className="content">
@@ -213,17 +215,17 @@ export function FeedbackView() {
         <div className="stat">
           <div className="label">total entries</div>
           <div className="value">{rows.length}</div>
-          <div className="delta">across 6 slugs</div>
+          <div className="delta">across {slugCount} slug{slugCount === 1 ? '' : 's'}</div>
         </div>
         <div className="stat">
           <div className="label">edits captured</div>
-          <div className="value">{rows.filter(r => r.kind === 'edit').length}</div>
-          <div className="delta">↓ 2 vs last month</div>
+          <div className="value">{editCount}</div>
+          <div className="delta"></div>
         </div>
         <div className="stat">
           <div className="label">outcomes</div>
-          <div className="value">{rows.filter(r => r.kind === 'outcome').length}</div>
-          <div className="delta up">2 advanced to interview</div>
+          <div className="value">{outcomeCount}</div>
+          <div className="delta"></div>
         </div>
       </div>
 
@@ -232,22 +234,31 @@ export function FeedbackView() {
           <h3>recent entries</h3>
           <span className="sub mono-sm">private/feedback.db</span>
         </div>
-        <table className="table">
-          <thead>
-            <tr><th>date</th><th>slug</th><th>kind</th><th>summary</th><th>tag</th></tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} className="row-clickable">
-                <td><span className="mono-sm" style={{ color: 'var(--fg-subtle)' }}>{r.date}</span></td>
-                <td><span className="slug">{r.slug}</span></td>
-                <td>{r.kind === 'outcome' ? <Badge kind="success">outcome</Badge> : <Badge kind="accent">edit</Badge>}</td>
-                <td style={{ fontSize: 13 }}>{r.summary}</td>
-                <td><Badge>{r.tag}</Badge></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {error ? (
+          <div style={{ padding: '14px 16px', color: 'var(--danger, var(--fg-muted))', fontSize: 13 }}>
+            failed to load feedback: {error.message}
+          </div>
+        ) : isLoading ? (
+          <div style={{ padding: '14px 16px', color: 'var(--fg-subtle)', fontSize: 13 }}>loading…</div>
+        ) : rows.length === 0 ? (
+          <div style={{ padding: '14px 16px', color: 'var(--fg-subtle)', fontSize: 13 }}>no feedback recorded yet.</div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr><th>date</th><th>slug</th><th>kind</th><th>summary</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={`${r.slug}-${r.timestamp}-${i}`} className="row-clickable">
+                  <td><span className="mono-sm" style={{ color: 'var(--fg-subtle)' }}>{formatDate(r.timestamp)}</span></td>
+                  <td><span className="slug">{r.slug}</span></td>
+                  <td>{r.kind === 'outcome' ? <Badge kind="success">outcome</Badge> : <Badge kind="accent">{r.kind || 'edit'}</Badge>}</td>
+                  <td style={{ fontSize: 13 }}>{feedbackSummary(r)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
@@ -255,28 +266,14 @@ export function FeedbackView() {
 
 // ── DoctorView ───────────────────────────────────────────────────────────
 
-interface DoctorCheck {
-  name: string;
-  status: 'ok' | 'warn';
-  detail: string;
+function doctorBadge(status: 'pass' | 'warn' | 'fail') {
+  if (status === 'pass') return <Badge kind="success">ok</Badge>;
+  if (status === 'warn') return <Badge kind="warn">warn</Badge>;
+  return <Badge kind="danger">fail</Badge>;
 }
 
-const DOCTOR_CHECKS: DoctorCheck[] = [
-  { name: 'claude CLI',             status: 'ok',   detail: 'v1.4.0 at /usr/local/bin/claude' },
-  { name: 'quarto',                 status: 'ok',   detail: 'v1.5.57' },
-  { name: '.apply-config.yaml',     status: 'ok',   detail: 'valid · schema v3' },
-  { name: 'master/work.yml',        status: 'ok',   detail: '38 bullets · 14 anchors marked' },
-  { name: 'master/skill.yml',       status: 'ok',   detail: '12 groups' },
-  { name: 'master/education.yml',   status: 'ok',   detail: '2 entries' },
-  { name: 'benchmark.md',           status: 'warn', detail: 'present but last edited 4 months ago' },
-  { name: 'private/jobsmith.db',    status: 'ok',   detail: 'open · 8 prior runs' },
-  { name: 'private/feedback.db',    status: 'ok',   detail: 'open · 6 entries' },
-  { name: 'plugin/system-prompts/', status: 'ok',   detail: '3 phase prompts found' },
-  { name: 'plugin/agents/',         status: 'ok',   detail: '8 specialist contracts found' },
-];
-
 export function DoctorView() {
-  const checks = DOCTOR_CHECKS;
+  const { data: checks = [], isLoading, error, refetch } = useDoctor();
 
   return (
     <div className="content">
@@ -286,28 +283,42 @@ export function DoctorView() {
           <p>preflight environment checks. the same set <span className="mono">jobsmith doctor</span> runs from the CLI.</p>
         </div>
         <div className="actions">
-          <button className="btn primary"><Icon name="play" size={12} /> re-run checks</button>
+          <button
+            className="btn primary"
+            onClick={refetch}
+            disabled={isLoading}
+          >
+            <Icon name="play" size={12} /> {isLoading ? 'running…' : 're-run checks'}
+          </button>
         </div>
       </div>
       <div className="card">
-        <table className="table">
-          <thead>
-            <tr>
-              <th style={{ width: '24%' }}>check</th>
-              <th>detail</th>
-              <th style={{ width: 120 }}>status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {checks.map(c => (
-              <tr key={c.name}>
-                <td><span className="mono-sm">{c.name}</span></td>
-                <td style={{ color: 'var(--fg-muted)', fontSize: 13 }}>{c.detail}</td>
-                <td>{c.status === 'ok' ? <Badge kind="success">ok</Badge> : <Badge kind="warn">warn</Badge>}</td>
+        {error ? (
+          <div style={{ padding: '14px 16px', color: 'var(--danger, var(--fg-muted))', fontSize: 13 }}>
+            failed to load checks: {error.message}
+          </div>
+        ) : isLoading && checks.length === 0 ? (
+          <div style={{ padding: '14px 16px', color: 'var(--fg-subtle)', fontSize: 13 }}>loading…</div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th style={{ width: '24%' }}>check</th>
+                <th>detail</th>
+                <th style={{ width: 120 }}>status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {checks.map(c => (
+                <tr key={c.name}>
+                  <td><span className="mono-sm">{c.name}</span></td>
+                  <td style={{ color: 'var(--fg-muted)', fontSize: 13 }}>{c.message}</td>
+                  <td>{doctorBadge(c.status)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
@@ -315,7 +326,137 @@ export function DoctorView() {
 
 // ── ConfigView ───────────────────────────────────────────────────────────
 
+
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+type ValidateStatus = 'idle' | 'validating' | 'valid' | 'invalid' | 'error';
+
+/** Safely extract field errors from a 422 JobsmithApiError detail payload. */
+function extract422Errors(err: unknown): ConfigValidationError[] {
+  if (!(err instanceof JobsmithApiError) || err.status !== 422) return [];
+  try {
+    const parsed = JSON.parse(err.message);
+    if (Array.isArray(parsed)) {
+      return parsed as ConfigValidationError[];
+    }
+  } catch {
+    // message wasn't JSON — fall through
+  }
+  return [{ field: 'root', message: err.message }];
+}
+
 export function ConfigView() {
+  const { data: remoteConfig, isLoading, error: loadError } = useConfig();
+
+  // Local controlled state — mirrors the subset of fields shown in the UI.
+  // master paths
+  const [workYml, setWorkYml] = useState('');
+  const [skillYml, setSkillYml] = useState('');
+  const [educationYml, setEducationYml] = useState('');
+  const [authorYml, setAuthorYml] = useState('');
+  // output paths
+  const [applicationsDir, setApplicationsDir] = useState('');
+  const [jobsmithDb, setJobsmithDb] = useState('');
+
+  // Feedback state
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [validateStatus, setValidateStatus] = useState<ValidateStatus>('idle');
+  const [fieldErrors, setFieldErrors] = useState<ConfigValidationError[]>([]);
+  const [saveError, setSaveError] = useState<string>('');
+
+  // Hydrate controlled inputs when GET resolves.
+  useEffect(() => {
+    if (!remoteConfig) return;
+    setWorkYml(String(remoteConfig.master?.work_yml ?? ''));
+    setSkillYml(String(remoteConfig.master?.skill_yml ?? ''));
+    setEducationYml(String(remoteConfig.master?.education_yml ?? ''));
+    setAuthorYml(String(remoteConfig.master?.author_yml ?? ''));
+    setApplicationsDir(String(remoteConfig.output?.applications_dir ?? ''));
+    setJobsmithDb(String(remoteConfig.output?.jobsmith_db ?? ''));
+  }, [remoteConfig]);
+
+  /** Build a config payload from current UI state, merged over remote defaults. */
+  const buildPayload = useCallback((): Record<string, unknown> => {
+    return {
+      ...(remoteConfig ?? {}),
+      master: {
+        ...(remoteConfig?.master ?? {}),
+        work_yml: workYml,
+        skill_yml: skillYml,
+        education_yml: educationYml,
+        author_yml: authorYml,
+      },
+      output: {
+        ...(remoteConfig?.output ?? {}),
+        applications_dir: applicationsDir,
+        jobsmith_db: jobsmithDb,
+      },
+    };
+  }, [remoteConfig, workYml, skillYml, educationYml, authorYml, applicationsDir, jobsmithDb]);
+
+  const handleValidate = useCallback(async () => {
+    setValidateStatus('validating');
+    setFieldErrors([]);
+    try {
+      const result = await apiPost<ConfigValidateResponse>('/api/config/validate', buildPayload() as unknown);
+      if (result.ok) {
+        setValidateStatus('valid');
+      } else {
+        setFieldErrors(result.errors);
+        setValidateStatus('invalid');
+      }
+    } catch (err) {
+      setValidateStatus('error');
+      setSaveError(err instanceof Error ? err.message : String(err));
+    }
+  }, [buildPayload]);
+
+  const handleSave = useCallback(async () => {
+    setSaveStatus('saving');
+    setFieldErrors([]);
+    setSaveError('');
+    try {
+      await apiPut<JobsmithConfig>('/api/config', buildPayload() as unknown);
+      setSaveStatus('saved');
+    } catch (err) {
+      const errors422 = extract422Errors(err);
+      if (errors422.length > 0) {
+        setFieldErrors(errors422);
+        setSaveError('422: validation errors — see details above.');
+      } else {
+        setSaveError(err instanceof Error ? err.message : String(err));
+      }
+      setSaveStatus('error');
+    }
+  }, [buildPayload]);
+
+  if (isLoading) {
+    return (
+      <div className="content">
+        <div className="page-head"><div><h1>config</h1></div></div>
+        <div style={{ padding: 32, color: 'var(--fg-muted)', fontSize: 13 }}>loading config…</div>
+      </div>
+    );
+  }
+
+  // GET /api/config failed. Don't render the form — saving from blank local
+  // state would PUT a partial config and clobber the remote file.
+  if (loadError) {
+    return (
+      <div className="content">
+        <div className="page-head"><div><h1>config</h1></div></div>
+        <div
+          style={{ padding: 24, color: 'var(--danger, var(--fg-muted))', fontSize: 13 }}
+          role="alert"
+        >
+          failed to load config: {loadError.message}
+        </div>
+      </div>
+    );
+  }
+
+  const hasErrors = fieldErrors.length > 0;
+  const formDisabled = !remoteConfig;
+
   return (
     <div className="content">
       <div className="page-head">
@@ -324,29 +465,94 @@ export function ConfigView() {
           <p>workspace settings — written to <span className="mono">.apply-config.yaml</span>.</p>
         </div>
         <div className="actions">
-          <button className="btn"><Icon name="doc" size={13} /> validate</button>
-          <button className="btn primary"><Icon name="check" size={12} /> save</button>
+          {validateStatus === 'valid' && (
+            <span style={{ fontSize: 12, color: 'var(--success)', marginRight: 4 }}>config is valid</span>
+          )}
+          {validateStatus === 'invalid' && (
+            <span style={{ fontSize: 12, color: 'var(--error, #e55)', marginRight: 4 }}>invalid — see errors below</span>
+          )}
+          {validateStatus === 'error' && (
+            <span style={{ fontSize: 12, color: 'var(--error, #e55)', marginRight: 4 }}>validate failed — see details below</span>
+          )}
+          {saveStatus === 'saved' && (
+            <span style={{ fontSize: 12, color: 'var(--success)', marginRight: 4 }}>saved</span>
+          )}
+          {saveStatus === 'error' && (
+            <span style={{ fontSize: 12, color: 'var(--error, #e55)', marginRight: 4 }}>{saveError || 'save failed'}</span>
+          )}
+          <button
+            type="button"
+            className="btn"
+            disabled={formDisabled || validateStatus === 'validating'}
+            onClick={handleValidate}
+          >
+            <Icon name="doc" size={13} /> validate
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={formDisabled || saveStatus === 'saving'}
+            onClick={handleSave}
+          >
+            <Icon name="check" size={12} /> save
+          </button>
         </div>
       </div>
+
+      {validateStatus === 'error' && saveError && (
+        <div
+          style={{ marginBottom: 16, padding: '12px 16px', background: 'var(--bg-elev)', border: '1px solid var(--error, #e55)', borderRadius: 'var(--radius)', fontSize: 13, color: 'var(--fg-muted)' }}
+          role="alert"
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--error, #e55)' }}>validate request failed</div>
+          {saveError}
+        </div>
+      )}
+
+      {hasErrors && (
+        <div style={{ marginBottom: 16, padding: '12px 16px', background: 'var(--bg-elev)', border: '1px solid var(--error, #e55)', borderRadius: 'var(--radius)', fontSize: 13 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6, color: 'var(--error, #e55)' }}>validation errors</div>
+          {fieldErrors.map((e, i) => (
+            <div key={i} style={{ color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)', fontSize: 12, marginTop: 2 }}>
+              <span style={{ color: 'var(--fg)' }}>{e.field}</span> — {e.message}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <div className="card">
           <div className="card-h"><h3>workspace</h3></div>
           <div style={{ padding: '16px 18px' }}>
-            <div className="field"><label>author</label><input className="mono" defaultValue="jordan-smith" /></div>
-            <div className="field"><label>applications dir</label><input className="mono" defaultValue="applications/" /></div>
-            <div className="field"><label>private dir</label><input className="mono" defaultValue="private/" /></div>
-            <div className="field"><label>phase timeout (s)</label><input className="mono" defaultValue="600" /></div>
+            <div className="field">
+              <label>applications dir</label>
+              <input className="mono" value={applicationsDir} onChange={e => setApplicationsDir(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>jobsmith db</label>
+              <input className="mono" value={jobsmithDb} onChange={e => setJobsmithDb(e.target.value)} />
+            </div>
           </div>
         </div>
         <div className="card">
           <div className="card-h"><h3>master files</h3></div>
           <div style={{ padding: '16px 18px' }}>
-            <div className="field"><label>work</label><input className="mono" defaultValue="master/work.yml" /></div>
-            <div className="field"><label>skills</label><input className="mono" defaultValue="master/skill.yml" /></div>
-            <div className="field"><label>education</label><input className="mono" defaultValue="master/education.yml" /></div>
-            <div className="field"><label>author</label><input className="mono" defaultValue="master/author.yml" /></div>
-            <div className="field"><label>benchmark</label><input className="mono" defaultValue="master/benchmark.md" /></div>
+            <div className="field">
+              <label>work</label>
+              <input className="mono" value={workYml} onChange={e => setWorkYml(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>skills</label>
+              <input className="mono" value={skillYml} onChange={e => setSkillYml(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>education</label>
+              <input className="mono" value={educationYml} onChange={e => setEducationYml(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>author</label>
+              <input className="mono" value={authorYml} onChange={e => setAuthorYml(e.target.value)} />
+            </div>
           </div>
         </div>
       </div>

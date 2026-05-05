@@ -1230,6 +1230,39 @@ def db_backfill(
         conn.close()
 
 
+@db_app.command("migrate-slugs")
+def db_migrate_slugs() -> None:
+    """One-shot: rewrite pre-existing malformed slugs in apply_runs.
+
+    Idempotent — re-running on a clean DB is a no-op.
+    """
+    from .db_migrate_slugs import normalize_existing_slugs
+
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        console.print(f"[red]ERROR:[/red] No {CONFIG_FILENAME} found — run `jobsmith init` first.")
+        raise typer.Exit(code=2)
+    config = load_config(config_path)
+    repo_root = repo_root_for()
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        console.print(f"[red]ERROR:[/red] Pipeline DB not found at {db_path}.")
+        raise typer.Exit(code=2)
+
+    conn = open_pipeline_db(db_path)
+    try:
+        rewritten = normalize_existing_slugs(conn)
+    finally:
+        conn.close()
+
+    if not rewritten:
+        console.print("[green]no malformed slugs found.[/green]")
+        return
+    console.print(f"[green]rewrote {len(rewritten)} slug(s):[/green]")
+    for old, new in rewritten.items():
+        console.print(f"  {old} -> {new}")
+
+
 # ---------- site subcommand group ----------
 
 

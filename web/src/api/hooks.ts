@@ -8,7 +8,7 @@
 //   useApplication     — GET /api/applications/{slug} → ApplicationDetail
 //   useMasterSection   — GET /api/master/{section} → section data
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiGet, JobsmithApiError } from './client';
 import type {
   ApplicationRow,
@@ -19,6 +19,9 @@ import type {
   MasterAuthor,
   MasterBenchmark,
   MasterSectionData,
+  JobsmithConfig,
+  FeedbackRecord,
+  DoctorCheckResult,
 } from './types';
 
 // Re-export so callers can import from one place.
@@ -85,4 +88,52 @@ export function useMasterSection<K extends keyof MasterSectionData>(
   section: K,
 ): UseQueryResult<MasterSectionData[K]> {
   return useFetch<MasterSectionData[K]>(`/api/master/${section}`);
+}
+
+// ── Config ───────────────────────────────────────────────────────────────
+
+export function useConfig(): UseQueryResult<JobsmithConfig> {
+  return useFetch<JobsmithConfig>('/api/config');
+}
+
+// ── Feedback ─────────────────────────────────────────────────────────────
+
+export function useFeedback(): UseQueryResult<FeedbackRecord[]> {
+  return useFetch<FeedbackRecord[]>('/api/feedback');
+}
+
+// ── Doctor (with refetch) ────────────────────────────────────────────────
+
+interface UseRefetchableQueryResult<T> extends UseQueryResult<T> {
+  refetch: () => void;
+}
+
+export function useDoctor(): UseRefetchableQueryResult<DoctorCheckResult[]> {
+  const [tick, setTick] = useState(0);
+  const [data, setData] = useState<DoctorCheckResult[] | undefined>(undefined);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+    apiGet<DoctorCheckResult[]>('/api/doctor')
+      .then((result) => {
+        if (!cancelled) {
+          setData(result);
+          setIsLoading(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err : new Error(String(err)));
+          setIsLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [tick]);
+
+  const refetch = useCallback(() => setTick((t) => t + 1), []);
+  return { data, isLoading, error, refetch };
 }

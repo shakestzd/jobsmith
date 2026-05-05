@@ -4,6 +4,7 @@
 //   JobsmithApiError  — typed error class; callers check `.status`
 //   apiGet            — authenticated GET, returns parsed JSON
 //   apiPost           — authenticated POST with JSON body, returns parsed JSON
+//   apiPut            — authenticated PUT with JSON body, returns parsed JSON
 //   postApplication   — POST /api/applications → { slug, run_id }
 //   buildEventsUrl    — construct the SSE URL for a slug
 
@@ -57,6 +58,16 @@ export async function apiGet<T>(path: string): Promise<T> {
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  await throwIfError(res);
+  return res.json() as Promise<T>;
+}
+
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'PUT',
     headers: authHeaders(),
     body: JSON.stringify(body),
   });

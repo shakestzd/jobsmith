@@ -5,7 +5,8 @@
 // presentational components driven by props from the parent shell.
 
 import { Fragment } from 'react';
-import { Icon, SAMPLE_APPS } from './shared';
+import { Icon } from './shared';
+import { useApplications } from '../api/hooks';
 import type { IconName, ThemeName, ViewName } from '../types';
 
 // ── Sidebar ──────────────────────────────────────────────────────────────
@@ -38,15 +39,19 @@ function NavItem({ id, icon, label, count, view, setView }: NavItemProps) {
 }
 
 export function Sidebar({ view, setView, openNew }: SidebarProps) {
-  const counts = {
-    dashboard: SAMPLE_APPS.length,
-    running: SAMPLE_APPS.filter(
-      (a) => a.status === 'running' || a.status === 'queued',
-    ).length,
-    review: SAMPLE_APPS.filter(
-      (a) => a.status === 'review' || a.status === 'draft',
-    ).length,
-  };
+  const { data: apps } = useApplications();
+
+  // Counts are undefined while loading; show nothing until data arrives.
+  const counts = apps
+    ? {
+        dashboard: apps.length,
+        running: apps.filter((a) => a.ui_phase === 'running').length,
+        // "review" is always 0 today — _derive_ui_phase in
+        // src/jobsmith/api/applications.py does not emit this ui_phase yet.
+        // When a "sent/submitted" domain concept is added, wire it here.
+        review: apps.filter((a) => a.ui_phase === 'review').length,
+      }
+    : undefined;
 
   return (
     <aside className="sidebar">
@@ -73,9 +78,9 @@ export function Sidebar({ view, setView, openNew }: SidebarProps) {
         </span>
       </button>
 
-      <NavItem id="dashboard" icon="home" label="Applications" count={counts.dashboard} view={view} setView={setView} />
-      <NavItem id="running" icon="bolt" label="In progress" count={counts.running} view={view} setView={setView} />
-      <NavItem id="review" icon="eye" label="Needs review" count={counts.review} view={view} setView={setView} />
+      <NavItem id="dashboard" icon="home" label="Applications" count={counts?.dashboard} view={view} setView={setView} />
+      <NavItem id="running" icon="bolt" label="In progress" count={counts?.running} view={view} setView={setView} />
+      <NavItem id="review" icon="eye" label="Needs review" count={counts?.review} view={view} setView={setView} />
 
       <div className="nav-section">Authoring</div>
       <NavItem id="master" icon="yaml" label="Master content" view={view} setView={setView} />
