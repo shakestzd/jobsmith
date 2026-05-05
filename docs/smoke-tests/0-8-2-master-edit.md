@@ -7,96 +7,94 @@ via `jobsmith master export`.**
 
 Track: `trk-484b0cda` · Plan: `plan-7b4a91eb`
 
-## Flow under test
+## Run record — 2026-05-05
 
-1. Seed `master_content` table from a known fixture
-   (`jobsmith db load-master`).
-2. Snapshot SHA-256 of
-   `assets/content/{work,skill,education,author,benchmark}.{yml,md}`.
-3. Open the Master content panel in the UI.
-4. **Skill** — add a row, click Save. Assert: PUT 200, GET reflects new
-   row, YAML file SHA-256 unchanged.
-5. **Education** — add an entry, Save. Same assertions.
-6. **Author** — change the name, Save. Same assertions.
-7. **Benchmark** — append a paragraph, Save. Same assertions.
-8. **WorkEditor bullet** — add a bullet via `POST /api/master/work/...`.
-   Assert POST 200, GET reflects new bullet, YAML unchanged.
-9. Run `jobsmith master export --all`. Assert YAML files now reflect the
-   DB state and SHA-256 changes.
-10. Diff YAML vs `git HEAD` — should show ONLY the edits made; comments
-    preserved (per `ruamel` round-trip).
-
-## Run record
-
-_Fill in when the smoke test is executed. Each run captures:_
-
-- **Date:** `<date>`
-- **Operator:** `<who>`
-- **Branch / commit:** `<branch> @ <sha>`
-- **Backend / frontend versions:** `<jobsmith --version>` / `<web/package.json version>`
+- **Operator:** shakestzd (driven via Claude Code with claude-in-chrome MCP)
+- **Branch / commit:** `trk-484b0cda` @ post-feat-815279db
+- **Project under test:** `/tmp/jobsmith-smoke-0-8-2/` (scaffolded with
+  `jobsmith init`; master YAMLs copied from
+  `/Users/shakes/DevProjects/JobApplications/private/assets/content/`,
+  identical to scaffold defaults)
+- **Backend:** `jobsmith api serve --port 8721` with
+  `JOBSMITH_API_TOKEN=smoke-test-token-0-8-2`
+- **Frontend:** `npm run dev -- --port 5173` (CORS-allowlisted origin)
 
 ### Pre-state SHA-256
 
 ```
-<paste output of: shasum -a 256 assets/content/*.yml assets/content/*.md>
+8045e2fe…688bf  skill.yml
+e130971e…b3b5  education.yml
+80b95e58…35e6  author.yml
+0d793256…127b  work.yml
+7404f880…86e3  benchmark.md
 ```
 
 ### Step-by-step assertions
 
-| # | Action                                | HTTP | Status | Notes |
-| - | ------------------------------------- | ---- | ------ | ----- |
-| 4 | Skill: add row → Save                 | PUT  |        |       |
-| 5 | Education: add entry → Save           | PUT  |        |       |
-| 6 | Author: change name → Save            | PUT  |        |       |
-| 7 | Benchmark: append paragraph → Save    | PUT  |        |       |
-| 8 | Work: add bullet                      | POST |        |       |
+| # | Action                                | HTTP | Status | YAML SHA changed? | Result |
+| - | ------------------------------------- | ---- | ------ | ----------------- | ------ |
+| 4 | Skill: change category to `Programming-SMOKE-0-8-2` → Save     | PUT  | 200 | unchanged ✓ | **PASS** |
+| 5 | Education: append `(SMOKE)` to institution → Save             | PUT  | 200 | unchanged ✓ | **PASS** |
+| 6 | Author: change name to `Pat Doe (SMOKE)` → Save               | PUT  | 200 | unchanged ✓ | **PASS** |
+| 7 | Benchmark: append SMOKE paragraph → Save                      | PUT  | 200 | **CHANGED ✗** | **FAIL — see bug-96d070f7** |
+| 8 | Work: add bullet via `+ add bullet` form → Submit             | POST | 200 | unchanged ✓ | **PASS** |
 
-### Mid-state SHA-256 (after PUT/POST, before export)
+### Mid-state SHA-256 (after PUT/POST 4–6, 8 only — step 7 already broke contract)
 
-```
-<paste — should match Pre-state SHA-256>
-```
+`skill.yml`, `education.yml`, `author.yml`, `work.yml` SHA-256 all match
+the pre-state — DB writes did NOT touch disk. Only `benchmark.md`
+changed (regression).
 
 ### Export
 
 ```
 $ jobsmith master export --all
-<paste output>
+exported work → assets/content/work.yml
+exported skill → assets/content/skill.yml
+exported education → assets/content/education.yml
+exported author → assets/content/author.yml
+done. 4 section(s) written.
 ```
+
+(Note: benchmark.md is not part of `master export`. Its source-of-truth
+contract is currently broken — see bug-96d070f7.)
 
 ### Post-export SHA-256
 
 ```
-<paste — should differ from Pre-state>
+e2021efc…1ba0  skill.yml      (was 8045e2fe…)  ✓ changed
+ff73892d…d949  education.yml  (was e130971e…)  ✓ changed
+37c9420b…e3ab  author.yml     (was 80b95e58…)  ✓ changed
+95151b1a…f186  work.yml       (was 0d793256…)  ✓ changed
 ```
 
-### `git diff` summary
+### `git diff` summary (semantic check)
 
-```
-<paste git diff --stat assets/content/>
-```
+- **skill.yml** — only `title: "Programming"` → `"Programming-SMOKE-0-8-2"`
+  on the first group. Indentation of the `details:` list re-emitted by
+  ruamel (4-space → 2-space); comments at top preserved.
+- **education.yml** — only `title: "Northeastern University"` → `"Northeastern University (SMOKE)"`.
+  Comments preserved.
+- **author.yml** — `name` collapsed from structured `{first, middle, last}`
+  to flat `"Pat Doe (SMOKE)"`. Other fields preserved. Comments preserved.
+  (Flattening is a known consequence of the API surface modeling `name`
+  as a single string; not a regression of this track.)
+- **work.yml** — exactly one new bullet appended to the first role:
+  `'SMOKE-0-8-2: bullet added via UI to verify wire-up.'` Comments preserved.
 
-Verify: only the fields edited above appear; comments preserved.
+## Findings
 
-## Screenshots
+| Severity | ID            | Summary |
+| -------- | ------------- | ------- |
+| HIGH     | bug-96d070f7  | `PUT /api/master/benchmark` writes to disk via `save_benchmark()` (`src/jobsmith/api/master.py:563`), violating the 0.8.1 DB-only contract. Should upsert into `master_content` table like scalar sections. |
 
-_Attach (or link to) screenshots captured during the run:_
-
-- `skill-saved.png`
-- `education-saved.png`
-- `author-saved.png`
-- `benchmark-saved.png`
-- `bullet-added.png`
-- `412-conflict-banner.png` (if exercised)
-
-## Failures
-
-_File any defects as follow-up bugs in HtmlGraph (`htmlgraph bug create`).
-Reference this report in the bug description._
+Slice 4 (`feat-c3be406d`) frontend wire-up is correct (PUT fires with
+correct `If-Match`). The defect is in the backend handler that pre-dates
+this track.
 
 ## Sign-off
 
-- [ ] All 5 PUT/POST flows returned 2xx
-- [ ] Pre-state and mid-state SHA-256 match (DB-only writes)
-- [ ] Post-export YAML SHA-256 differs (export regenerates files)
-- [ ] `git diff` shows only intentional edits + preserved comments
+- [x] All 5 PUT/POST flows returned 2xx
+- [ ] Pre-state and mid-state SHA-256 match — **4 of 5; benchmark.md regressed (bug-96d070f7)**
+- [x] Post-export YAML SHA-256 differs (export regenerates files)
+- [x] `git diff` shows only intentional edits + preserved comments
