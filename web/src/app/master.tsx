@@ -550,7 +550,13 @@ export function MarkAnchorsView() {
         <div className="card" style={{ height: 'fit-content' }}>
           <div className="card-h"><h3>shortcuts</h3></div>
           <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {([['A', 'mark as anchor'], ['N', 'non-anchor'], ['S', 'skip for now'], ['↑ ↓', 'navigate'], ['⌘ S', 'save & exit']] as [string, string][]).map(([k, v]) => (
+            {/*
+              `⌘ S — save & exit` shortcut removed in feat-aba75dae
+              (roborev job 946) alongside the decorative "save changes"
+              button — handleKeyDown never implemented it, and listing it
+              here advertised a save flow the page does not have.
+            */}
+            {([['A', 'mark as anchor'], ['N', 'non-anchor'], ['S', 'skip for now'], ['↑ ↓', 'navigate']] as [string, string][]).map(([k, v]) => (
               <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
                 <span className="kbd" style={{ minWidth: 36, textAlign: 'center' }}>{k}</span>
                 <span style={{ color: 'var(--fg-muted)' }}>{v}</span>
