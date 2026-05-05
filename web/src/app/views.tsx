@@ -2,10 +2,11 @@
 //
 // Exports: SiteView, FeedbackView, DoctorView, ConfigView
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Icon, Badge } from './shared';
-import { useApplications, useMasterSection } from '../api/hooks';
-import type { MasterAuthor, ApplicationRow } from '../api/types';
+import { apiPost, apiPut, JobsmithApiError } from '../api/client';
+import { useApplications, useMasterSection, useConfig } from '../api/hooks';
+import type { MasterAuthor, ApplicationRow, JobsmithConfig, ConfigValidateResponse, ConfigValidationError } from '../api/types';
 
 // ── SiteView ─────────────────────────────────────────────────────────────
 
@@ -315,7 +316,120 @@ export function DoctorView() {
 
 // ── ConfigView ───────────────────────────────────────────────────────────
 
+
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+type ValidateStatus = 'idle' | 'validating' | 'valid' | 'invalid' | 'error';
+
+/** Safely extract field errors from a 422 JobsmithApiError detail payload. */
+function extract422Errors(err: unknown): ConfigValidationError[] {
+  if (!(err instanceof JobsmithApiError) || err.status !== 422) return [];
+  try {
+    const parsed = JSON.parse(err.message);
+    if (Array.isArray(parsed)) {
+      return parsed as ConfigValidationError[];
+    }
+  } catch {
+    // message wasn't JSON — fall through
+  }
+  return [{ field: 'root', message: err.message }];
+}
+
 export function ConfigView() {
+  const { data: remoteConfig, isLoading } = useConfig();
+
+  // Local controlled state — mirrors the subset of fields shown in the UI.
+  // master paths
+  const [workYml, setWorkYml] = useState('');
+  const [skillYml, setSkillYml] = useState('');
+  const [educationYml, setEducationYml] = useState('');
+  const [authorYml, setAuthorYml] = useState('');
+  // output paths
+  const [applicationsDir, setApplicationsDir] = useState('');
+  const [jobsmithDb, setJobsmithDb] = useState('');
+
+  // Feedback state
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [validateStatus, setValidateStatus] = useState<ValidateStatus>('idle');
+  const [fieldErrors, setFieldErrors] = useState<ConfigValidationError[]>([]);
+  const [saveError, setSaveError] = useState<string>('');
+
+  // Hydrate controlled inputs when GET resolves.
+  useEffect(() => {
+    if (!remoteConfig) return;
+    setWorkYml(String(remoteConfig.master?.work_yml ?? ''));
+    setSkillYml(String(remoteConfig.master?.skill_yml ?? ''));
+    setEducationYml(String(remoteConfig.master?.education_yml ?? ''));
+    setAuthorYml(String(remoteConfig.master?.author_yml ?? ''));
+    setApplicationsDir(String(remoteConfig.output?.applications_dir ?? ''));
+    setJobsmithDb(String(remoteConfig.output?.jobsmith_db ?? ''));
+  }, [remoteConfig]);
+
+  /** Build a config payload from current UI state, merged over remote defaults. */
+  const buildPayload = useCallback((): Record<string, unknown> => {
+    return {
+      ...(remoteConfig ?? {}),
+      master: {
+        ...(remoteConfig?.master ?? {}),
+        work_yml: workYml,
+        skill_yml: skillYml,
+        education_yml: educationYml,
+        author_yml: authorYml,
+      },
+      output: {
+        ...(remoteConfig?.output ?? {}),
+        applications_dir: applicationsDir,
+        jobsmith_db: jobsmithDb,
+      },
+    };
+  }, [remoteConfig, workYml, skillYml, educationYml, authorYml, applicationsDir, jobsmithDb]);
+
+  const handleValidate = useCallback(async () => {
+    setValidateStatus('validating');
+    setFieldErrors([]);
+    try {
+      const result = await apiPost<ConfigValidateResponse>('/api/config/validate', buildPayload() as unknown);
+      if (result.ok) {
+        setValidateStatus('valid');
+      } else {
+        setFieldErrors(result.errors);
+        setValidateStatus('invalid');
+      }
+    } catch (err) {
+      setValidateStatus('error');
+      setSaveError(err instanceof Error ? err.message : String(err));
+    }
+  }, [buildPayload]);
+
+  const handleSave = useCallback(async () => {
+    setSaveStatus('saving');
+    setFieldErrors([]);
+    setSaveError('');
+    try {
+      await apiPut<JobsmithConfig>('/api/config', buildPayload() as unknown);
+      setSaveStatus('saved');
+    } catch (err) {
+      const errors422 = extract422Errors(err);
+      if (errors422.length > 0) {
+        setFieldErrors(errors422);
+        setSaveError('422: validation errors — see details above.');
+      } else {
+        setSaveError(err instanceof Error ? err.message : String(err));
+      }
+      setSaveStatus('error');
+    }
+  }, [buildPayload]);
+
+  if (isLoading) {
+    return (
+      <div className="content">
+        <div className="page-head"><div><h1>config</h1></div></div>
+        <div style={{ padding: 32, color: 'var(--fg-muted)', fontSize: 13 }}>loading config…</div>
+      </div>
+    );
+  }
+
+  const hasErrors = fieldErrors.length > 0;
+
   return (
     <div className="content">
       <div className="page-head">
@@ -324,29 +438,81 @@ export function ConfigView() {
           <p>workspace settings — written to <span className="mono">.apply-config.yaml</span>.</p>
         </div>
         <div className="actions">
-          <button className="btn"><Icon name="doc" size={13} /> validate</button>
-          <button className="btn primary"><Icon name="check" size={12} /> save</button>
+          {validateStatus === 'valid' && (
+            <span style={{ fontSize: 12, color: 'var(--success)', marginRight: 4 }}>config is valid</span>
+          )}
+          {validateStatus === 'invalid' && (
+            <span style={{ fontSize: 12, color: 'var(--error, #e55)', marginRight: 4 }}>invalid — see errors below</span>
+          )}
+          {saveStatus === 'saved' && (
+            <span style={{ fontSize: 12, color: 'var(--success)', marginRight: 4 }}>saved</span>
+          )}
+          {saveStatus === 'error' && (
+            <span style={{ fontSize: 12, color: 'var(--error, #e55)', marginRight: 4 }}>{saveError || 'save failed'}</span>
+          )}
+          <button
+            type="button"
+            className="btn"
+            disabled={validateStatus === 'validating'}
+            onClick={handleValidate}
+          >
+            <Icon name="doc" size={13} /> validate
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={saveStatus === 'saving'}
+            onClick={handleSave}
+          >
+            <Icon name="check" size={12} /> save
+          </button>
         </div>
       </div>
+
+      {hasErrors && (
+        <div style={{ marginBottom: 16, padding: '12px 16px', background: 'var(--bg-elev)', border: '1px solid var(--error, #e55)', borderRadius: 'var(--radius)', fontSize: 13 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6, color: 'var(--error, #e55)' }}>validation errors</div>
+          {fieldErrors.map((e, i) => (
+            <div key={i} style={{ color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)', fontSize: 12, marginTop: 2 }}>
+              <span style={{ color: 'var(--fg)' }}>{e.field}</span> — {e.message}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <div className="card">
           <div className="card-h"><h3>workspace</h3></div>
           <div style={{ padding: '16px 18px' }}>
-            <div className="field"><label>author</label><input className="mono" defaultValue="jordan-smith" /></div>
-            <div className="field"><label>applications dir</label><input className="mono" defaultValue="applications/" /></div>
-            <div className="field"><label>private dir</label><input className="mono" defaultValue="private/" /></div>
-            <div className="field"><label>phase timeout (s)</label><input className="mono" defaultValue="600" /></div>
+            <div className="field">
+              <label>applications dir</label>
+              <input className="mono" value={applicationsDir} onChange={e => setApplicationsDir(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>jobsmith db</label>
+              <input className="mono" value={jobsmithDb} onChange={e => setJobsmithDb(e.target.value)} />
+            </div>
           </div>
         </div>
         <div className="card">
           <div className="card-h"><h3>master files</h3></div>
           <div style={{ padding: '16px 18px' }}>
-            <div className="field"><label>work</label><input className="mono" defaultValue="master/work.yml" /></div>
-            <div className="field"><label>skills</label><input className="mono" defaultValue="master/skill.yml" /></div>
-            <div className="field"><label>education</label><input className="mono" defaultValue="master/education.yml" /></div>
-            <div className="field"><label>author</label><input className="mono" defaultValue="master/author.yml" /></div>
-            <div className="field"><label>benchmark</label><input className="mono" defaultValue="master/benchmark.md" /></div>
+            <div className="field">
+              <label>work</label>
+              <input className="mono" value={workYml} onChange={e => setWorkYml(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>skills</label>
+              <input className="mono" value={skillYml} onChange={e => setSkillYml(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>education</label>
+              <input className="mono" value={educationYml} onChange={e => setEducationYml(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>author</label>
+              <input className="mono" value={authorYml} onChange={e => setAuthorYml(e.target.value)} />
+            </div>
           </div>
         </div>
       </div>

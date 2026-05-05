@@ -19,6 +19,7 @@ import type {
   MasterAuthor,
   MasterBenchmark,
   MasterSectionData,
+  JobsmithConfig,
 } from './types';
 
 // Re-export so callers can import from one place.
@@ -85,4 +86,10 @@ export function useMasterSection<K extends keyof MasterSectionData>(
   section: K,
 ): UseQueryResult<MasterSectionData[K]> {
   return useFetch<MasterSectionData[K]>(`/api/master/${section}`);
+}
+
+// ── Config ───────────────────────────────────────────────────────────────
+
+export function useConfig(): UseQueryResult<JobsmithConfig> {
+  return useFetch<JobsmithConfig>('/api/config');
 }

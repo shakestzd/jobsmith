@@ -187,6 +187,18 @@ export interface JobsmithConfig {
   [k: string]: unknown;
 }
 
+export interface ConfigValidationError {
+  field: string;
+  message: string;
+}
+
+/** Response from POST /api/config/validate */
+export interface ConfigValidateResponse {
+  ok: boolean;
+  errors: ConfigValidationError[];
+}
+
+/** Legacy alias kept for any callers using the old name. */
 export interface ValidateResponse {
   ok: boolean;
   errors: string[];
