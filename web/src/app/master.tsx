@@ -9,7 +9,7 @@
 // adapters live in ./master/adapters.ts; no reverse mapping is attempted
 // from form-shape back to API shape in this slice.
 
-import { type KeyboardEvent, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { SampleBullet } from '../types';
 import { Icon, Badge, SAMPLE_BULLETS } from './shared';
 import { SkillForm } from './master/SkillForm';
@@ -17,19 +17,30 @@ import { EducationForm } from './master/EducationForm';
 import { AuthorForm } from './master/AuthorForm';
 import { BenchmarkEditor } from './master/BenchmarkEditor';
 import type { Skill, EducationEntry, Author } from './master/schemas';
-import { useMasterSection } from '../api/hooks';
-import { JobsmithApiError, apiGet, apiPost } from '../api/client';
+import { useMasterSection, useMasterSectionWithMeta } from '../api/hooks';
+import { JobsmithApiError, apiGet, apiPost, apiPut, formatDetail } from '../api/client';
 import type { MasterWorkRole, MasterValidateResponse } from '../api/types';
 import {
   apiAuthorToForm,
   apiEducationToForm,
   apiSkillsToForm,
   apiWorkToRoles,
+  formToApiSkills,
+  formToApiEducation,
+  formToApiAuthor,
 } from './master/adapters';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
 type MasterTab = 'work' | 'skill' | 'education' | 'author' | 'benchmark';
+
+/** Save state for ETag-backed sections (skill / education / author). */
+type SaveState =
+  | { kind: 'idle' }
+  | { kind: 'saving' }
+  | { kind: 'saved' }          // transient 2s pill
+  | { kind: 'conflict'; newEtag: string | null }  // 412 — local edits preserved
+  | { kind: 'missing'; suggestion: string };      // 404 missing_in_db
 
 // ── Internal helpers ─────────────────────────────────────────────────────
 
@@ -93,6 +104,98 @@ function SectionPane({
     );
   }
   return <>{children}</>;
+}
+
+// ── SaveBar ──────────────────────────────────────────────────────────────
+
+/**
+ * Renders the save button + status pills + conflict/missing banners
+ * for an ETag-backed tab (Skill, Education, Author).
+ */
+function SaveBar({
+  isDirty,
+  saveState,
+  onSave,
+  onDiscard,
+  onOverwrite,
+  onCopyCode,
+  codeToCopy,
+}: {
+  isDirty: boolean;
+  saveState: SaveState;
+  onSave: () => void;
+  onDiscard: () => void;
+  onOverwrite: () => void;
+  onCopyCode: (code: string) => void;
+  codeToCopy?: string;
+}) {
+  const isSaving = saveState.kind === 'saving';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button
+          className="btn primary"
+          onClick={onSave}
+          disabled={!isDirty || isSaving}
+        >
+          {isSaving ? 'saving…' : 'save'}
+        </button>
+        {saveState.kind === 'saved' && (
+          <span
+            className="pill active"
+            role="status"
+            style={{ fontSize: 12 }}
+          >
+            saved
+          </span>
+        )}
+      </div>
+
+      {saveState.kind === 'conflict' && (
+        <div
+          className="card"
+          role="alert"
+          style={{ padding: '10px 14px', fontSize: 13, color: 'var(--danger, var(--fg-muted))' }}
+        >
+          <div style={{ marginBottom: 6 }}>
+            section changed elsewhere — refresh to see latest
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={onDiscard}>
+              discard local + refresh
+            </button>
+            <button className="btn ghost" onClick={onOverwrite}>
+              overwrite anyway
+            </button>
+          </div>
+        </div>
+      )}
+
+      {saveState.kind === 'missing' && codeToCopy !== undefined && (
+        <div
+          className="card"
+          role="alert"
+          style={{ padding: '10px 14px', fontSize: 13 }}
+        >
+          <div style={{ marginBottom: 6, color: 'var(--fg-muted)' }}>
+            {saveState.suggestion}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <code style={{ fontSize: 12, padding: '2px 6px', background: 'var(--bg-sunk)', borderRadius: 'var(--radius)', flex: 1 }}>
+              {codeToCopy}
+            </code>
+            <button
+              className="btn ghost sm"
+              onClick={() => onCopyCode(codeToCopy)}
+            >
+              copy
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── BulletEditor ─────────────────────────────────────────────────────────
@@ -242,40 +345,207 @@ function WorkEditor() {
 // ── Per-tab wrappers (skill / education / author / benchmark) ────────────
 
 function SkillTab() {
-  const { data, isLoading, error } = useMasterSection('skill');
+  const { data, etag, isLoading, error, refetch } = useMasterSectionWithMeta('skill');
   const apiSkills = useMemo(() => apiSkillsToForm(data ?? null), [data]);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Hydrate from API on mount and whenever upstream data changes.
   useEffect(() => setSkills(apiSkills), [apiSkills]);
+
+  const isDirty = useMemo(
+    () => JSON.stringify(skills) !== JSON.stringify(apiSkills),
+    [skills, apiSkills],
+  );
+
+  const doSave = useCallback(async (ifMatchOverride?: string | null) => {
+    setSaveState({ kind: 'saving' });
+    const effectiveEtag = ifMatchOverride !== undefined ? ifMatchOverride : etag;
+    try {
+      await apiPut('/api/master/skill', formToApiSkills(skills), {
+        ifMatch: effectiveEtag ?? undefined,
+      });
+      refetch();
+      setSaveState({ kind: 'saved' });
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSaveState({ kind: 'idle' }), 2000);
+    } catch (err) {
+      if (err instanceof JobsmithApiError && err.status === 412) {
+        // Capture new ETag from 412 response if available (backend may include it).
+        setSaveState({ kind: 'conflict', newEtag: null });
+      } else if (err instanceof JobsmithApiError && err.status === 404) {
+        const suggestion = formatDetail(null, 'jobsmith db load-master  # to backfill skill');
+        setSaveState({ kind: 'missing', suggestion });
+      } else {
+        setSaveState({ kind: 'idle' });
+      }
+    }
+  }, [etag, skills, refetch]);
+
+  const handleDiscard = useCallback(() => {
+    setSaveState({ kind: 'idle' });
+    refetch();
+  }, [refetch]);
+
+  const handleOverwrite = useCallback(() => {
+    // Re-PUT with no If-Match (force overwrite).
+    void doSave(null);
+  }, [doSave]);
+
+  const missing404 = saveState.kind === 'missing';
+  const suggestion404 = missing404 ? saveState.suggestion : '';
+
   return (
     <SectionPane isLoading={isLoading} error={error as Error | null}>
-      {/* save round-trip lossy — see feat-6999e552 for ETag/concurrent-write semantics */}
+      <SaveBar
+        isDirty={isDirty}
+        saveState={saveState}
+        onSave={() => void doSave()}
+        onDiscard={handleDiscard}
+        onOverwrite={handleOverwrite}
+        onCopyCode={(code) => void navigator.clipboard.writeText(code)}
+        codeToCopy={missing404 ? suggestion404 : undefined}
+      />
       <SkillForm skills={skills} onChange={setSkills} />
     </SectionPane>
   );
 }
 
 function EducationTab() {
-  const { data, isLoading, error } = useMasterSection('education');
+  const { data, etag, isLoading, error, refetch } = useMasterSectionWithMeta('education');
   const apiEdu = useMemo(() => apiEducationToForm(data ?? null), [data]);
   const [education, setEducation] = useState<EducationEntry[]>([]);
+  const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => setEducation(apiEdu), [apiEdu]);
+
+  const isDirty = useMemo(
+    () => JSON.stringify(education) !== JSON.stringify(apiEdu),
+    [education, apiEdu],
+  );
+
+  const doSave = useCallback(async (ifMatchOverride?: string | null) => {
+    setSaveState({ kind: 'saving' });
+    const effectiveEtag = ifMatchOverride !== undefined ? ifMatchOverride : etag;
+    try {
+      await apiPut('/api/master/education', formToApiEducation(education), {
+        ifMatch: effectiveEtag ?? undefined,
+      });
+      refetch();
+      setSaveState({ kind: 'saved' });
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSaveState({ kind: 'idle' }), 2000);
+    } catch (err) {
+      if (err instanceof JobsmithApiError && err.status === 412) {
+        setSaveState({ kind: 'conflict', newEtag: null });
+      } else if (err instanceof JobsmithApiError && err.status === 404) {
+        const suggestion = formatDetail(null, 'jobsmith db load-master  # to backfill education');
+        setSaveState({ kind: 'missing', suggestion });
+      } else {
+        setSaveState({ kind: 'idle' });
+      }
+    }
+  }, [etag, education, refetch]);
+
+  const handleDiscard = useCallback(() => {
+    setSaveState({ kind: 'idle' });
+    refetch();
+  }, [refetch]);
+
+  const handleOverwrite = useCallback(() => {
+    void doSave(null);
+  }, [doSave]);
+
+  const missing404 = saveState.kind === 'missing';
+  const suggestion404 = missing404 ? saveState.suggestion : '';
+
   return (
     <SectionPane isLoading={isLoading} error={error as Error | null}>
-      {/* save round-trip lossy — see feat-6999e552 */}
+      <SaveBar
+        isDirty={isDirty}
+        saveState={saveState}
+        onSave={() => void doSave()}
+        onDiscard={handleDiscard}
+        onOverwrite={handleOverwrite}
+        onCopyCode={(code) => void navigator.clipboard.writeText(code)}
+        codeToCopy={missing404 ? suggestion404 : undefined}
+      />
       <EducationForm education={education} onChange={setEducation} />
     </SectionPane>
   );
 }
 
 function AuthorTab() {
-  const { data, isLoading, error } = useMasterSection('author');
+  const { data, etag, isLoading, error, refetch } = useMasterSectionWithMeta('author');
   const apiAuthor = useMemo(() => apiAuthorToForm(data ?? null), [data]);
+  // Capture raw API extras for pass-through on save.
+  const rawExtras = useMemo<Record<string, unknown>>(() => {
+    if (!data) return {};
+    // Strip the fields we re-map from author; pass everything else through.
+    const { name: _n, email: _e, phone: _p, address: _a, position: _pos,
+      profession: _pr, firstname: _f, lastname: _l, contacts: _c, ...rest } = data as Record<string, unknown>;
+    return rest;
+  }, [data]);
+
   const [author, setAuthor] = useState<Author>(apiAuthor);
+  const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => setAuthor(apiAuthor), [apiAuthor]);
+
+  const isDirty = useMemo(
+    () => JSON.stringify(author) !== JSON.stringify(apiAuthor),
+    [author, apiAuthor],
+  );
+
+  const doSave = useCallback(async (ifMatchOverride?: string | null) => {
+    setSaveState({ kind: 'saving' });
+    const effectiveEtag = ifMatchOverride !== undefined ? ifMatchOverride : etag;
+    try {
+      await apiPut('/api/master/author', formToApiAuthor(author, rawExtras), {
+        ifMatch: effectiveEtag ?? undefined,
+      });
+      refetch();
+      setSaveState({ kind: 'saved' });
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSaveState({ kind: 'idle' }), 2000);
+    } catch (err) {
+      if (err instanceof JobsmithApiError && err.status === 412) {
+        setSaveState({ kind: 'conflict', newEtag: null });
+      } else if (err instanceof JobsmithApiError && err.status === 404) {
+        const suggestion = formatDetail(null, 'jobsmith db load-master  # to backfill author');
+        setSaveState({ kind: 'missing', suggestion });
+      } else {
+        setSaveState({ kind: 'idle' });
+      }
+    }
+  }, [etag, author, rawExtras, refetch]);
+
+  const handleDiscard = useCallback(() => {
+    setSaveState({ kind: 'idle' });
+    refetch();
+  }, [refetch]);
+
+  const handleOverwrite = useCallback(() => {
+    void doSave(null);
+  }, [doSave]);
+
+  const missing404 = saveState.kind === 'missing';
+  const suggestion404 = missing404 ? saveState.suggestion : '';
+
   return (
     <SectionPane isLoading={isLoading} error={error as Error | null}>
-      {/* save round-trip lossy — see feat-6999e552 */}
+      <SaveBar
+        isDirty={isDirty}
+        saveState={saveState}
+        onSave={() => void doSave()}
+        onDiscard={handleDiscard}
+        onOverwrite={handleOverwrite}
+        onCopyCode={(code) => void navigator.clipboard.writeText(code)}
+        codeToCopy={missing404 ? suggestion404 : undefined}
+      />
       <AuthorForm author={author} onChange={setAuthor} />
     </SectionPane>
   );
