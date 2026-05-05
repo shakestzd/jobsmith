@@ -2,8 +2,14 @@
 //
 // Exports: MasterContent, MarkAnchorsView
 // Internal helpers: WorkEditor, BulletEditor (file-local)
+//
+// feat-a6702b30 phase 2: each tab now reads from /api/master/<section> via
+// `useMasterSection`. Saves remain local-state today (round-trip lossy —
+// see feat-6999e552 for ETag/concurrent-write semantics). Forward-only
+// adapters live in ./master/adapters.ts; no reverse mapping is attempted
+// from form-shape back to API shape in this slice.
 
-import { type KeyboardEvent, useState } from 'react';
+import { type KeyboardEvent, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { SampleBullet } from '../types';
 import { Icon, Badge, SAMPLE_BULLETS } from './shared';
 import { SkillForm } from './master/SkillForm';
@@ -11,6 +17,15 @@ import { EducationForm } from './master/EducationForm';
 import { AuthorForm } from './master/AuthorForm';
 import { BenchmarkEditor } from './master/BenchmarkEditor';
 import type { Skill, EducationEntry, Author } from './master/schemas';
+import { useMasterSection } from '../api/hooks';
+import { JobsmithApiError } from '../api/client';
+import type { MasterWorkRole } from '../api/types';
+import {
+  apiAuthorToForm,
+  apiEducationToForm,
+  apiSkillsToForm,
+  apiWorkToRoles,
+} from './master/adapters';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -18,44 +33,118 @@ type MasterTab = 'work' | 'skill' | 'education' | 'author' | 'benchmark';
 
 // ── Internal helpers ─────────────────────────────────────────────────────
 
-interface Role {
-  id: string;
-  company: string;
-  role: string;
-  dates: string;
-  bullets: number;
+/** Pluralize a count and noun. */
+function plural(count: number, singular: string): string {
+  return count === 1 ? singular : `${singular}s`;
 }
 
-const ROLES: Role[] = [
-  { id: 'recurly',   company: 'Recurly Engineering', role: 'Senior Engineer',    dates: '2022 — present', bullets: SAMPLE_BULLETS.length },
-  { id: 'fastly',    company: 'Fastly',              role: 'Engineer',            dates: '2019 — 2022',    bullets: 6 },
-  { id: 'thumbtack', company: 'Thumbtack',           role: 'Software Engineer',   dates: '2017 — 2019',    bullets: 5 },
-];
-
 const TABS: Array<[MasterTab, string, string]> = [
-  ['work',      'work.yml',      '6 roles · 38 bullets'],
-  ['skill',     'skill.yml',     '12 groups'],
-  ['education', 'education.yml', '2 entries'],
+  ['work',      'work.yml',      'roles + bullets'],
+  ['skill',     'skill.yml',     'skill groups'],
+  ['education', 'education.yml', 'entries'],
   ['author',    'author.yml',    'profile'],
   ['benchmark', 'benchmark.md',  'tone reference'],
 ];
 
-function BulletEditor() {
-  const [bullets, setBullets] = useState<SampleBullet[]>(SAMPLE_BULLETS);
+/** Shared loading + error chrome for tabs that wrap a form component. */
+function SectionPane({
+  isLoading,
+  error,
+  children,
+}: {
+  isLoading: boolean;
+  error: Error | null;
+  children: ReactNode;
+}) {
+  if (isLoading) {
+    return (
+      <div className="card" style={{ padding: 24 }}>
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            style={{
+              height: 18,
+              marginBottom: 10,
+              background: 'var(--bg-sunk)',
+              borderRadius: 4,
+              opacity: 0.6 - i * 0.15,
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="card" style={{ padding: 24, color: 'var(--fg-muted)' }}>
+        {error instanceof JobsmithApiError && error.status === 401 ? (
+          <div>
+            <div style={{ marginBottom: 8, color: 'var(--danger, #c0392b)' }}>
+              API requires <span className="mono">VITE_JOBSMITH_API_TOKEN</span>.
+            </div>
+            <div className="mono-sm">
+              copy from <code>&lt;project&gt;/private/jobsmith.token</code> to <code>web/.env.local</code>, then restart <code>npm run dev</code>.
+            </div>
+          </div>
+        ) : (
+          <span>failed to load section: {error.message}</span>
+        )}
+      </div>
+    );
+  }
+  return <>{children}</>;
+}
+
+// ── BulletEditor ─────────────────────────────────────────────────────────
+
+interface BulletEditorProps {
+  role: MasterWorkRole | null;
+}
+
+function BulletEditor({ role }: BulletEditorProps) {
+  // Convert API bullet shape (string | { bullet, anchor, ... }) into the
+  // local SampleBullet shape used by the existing presentational subtree.
+  const initial = useMemo<SampleBullet[]>(() => {
+    const details = role?.details ?? [];
+    return details.map((d, i) => {
+      if (typeof d === 'string') {
+        return { id: `${role?.title ?? 'role'}-${i}`, anchor: false, text: d };
+      }
+      return {
+        id: `${role?.title ?? 'role'}-${i}`,
+        anchor: Boolean(d.anchor),
+        text: d.bullet,
+      };
+    });
+  }, [role]);
+
+  const [bullets, setBullets] = useState<SampleBullet[]>(initial);
+  // Re-seed when the selected role changes upstream.
+  useEffect(() => setBullets(initial), [initial]);
+
   const anchorCount = bullets.filter(b => b.anchor).length;
 
   const toggle = (id: string) => {
     setBullets(bs => bs.map(b => b.id === id ? { ...b, anchor: !b.anchor } : b));
   };
 
+  if (!role) {
+    return (
+      <div className="card" style={{ padding: 24, color: 'var(--fg-muted)' }}>
+        no role selected.
+      </div>
+    );
+  }
+
   return (
     <div className="card">
       <div className="card-h">
-        <h3>Senior Engineer · Recurly Engineering</h3>
-        <span className="sub">2022 — present · {bullets.length} bullets</span>
+        <h3>{role.title}{role.location ? ` · ${role.location}` : ''}</h3>
+        <span className="sub">{role.date ?? ''} · {bullets.length} {plural(bullets.length, 'bullet')}</span>
         <div className="right">
           <Badge kind="accent">{anchorCount} anchors</Badge>
           <button className="btn ghost sm">add bullet</button>
+          {/* save round-trip lossy — see feat-6999e552 for ETag/concurrent-write semantics */}
           <button className="btn ghost sm">save</button>
         </div>
       </div>
@@ -87,39 +176,110 @@ function BulletEditor() {
   );
 }
 
+// ── WorkEditor ───────────────────────────────────────────────────────────
+
 function WorkEditor() {
-  const [open, setOpen] = useState<string>('recurly');
+  const { data, isLoading, error } = useMasterSection('work');
+  const roles: MasterWorkRole[] = useMemo(() => apiWorkToRoles(data), [data]);
+  const [openIdx, setOpenIdx] = useState<number>(0);
+  // Reset selection when roles change upstream (e.g., refetch).
+  useEffect(() => { if (openIdx >= roles.length) setOpenIdx(0); }, [roles, openIdx]);
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16 }}>
-      <div className="card" style={{ padding: 8 }}>
-        {ROLES.map(r => (
-          <div
-            key={r.id}
-            onClick={() => setOpen(r.id)}
-            style={{
-              padding: '10px 12px',
-              borderRadius: 'var(--radius)',
-              background: open === r.id ? 'var(--bg-sunk)' : 'transparent',
-              border: open === r.id ? '1px solid var(--border)' : '1px solid transparent',
-              cursor: 'pointer',
-              marginBottom: 4,
-            }}
-          >
-            <div style={{ fontWeight: 500, fontSize: 13.5 }}>{r.role}</div>
-            <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{r.company}</div>
-            <div className="mono-sm" style={{ color: 'var(--fg-subtle)', marginTop: 2 }}>{r.dates} · {r.bullets} bullets</div>
-          </div>
-        ))}
-        <div style={{ padding: 8 }}>
-          <button className="btn ghost sm" style={{ width: '100%', justifyContent: 'center' }}>
-            <Icon name="plus" size={11} /> add role
-          </button>
+    <SectionPane isLoading={isLoading} error={error as Error | null}>
+      {roles.length === 0 ? (
+        <div className="card" style={{ padding: 24, color: 'var(--fg-muted)' }}>
+          no roles in <span className="mono">master/work.yml</span>.
         </div>
-      </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16 }}>
+          <div className="card" style={{ padding: 8 }}>
+            {roles.map((r, i) => (
+              <div
+                key={`${r.title}-${i}`}
+                onClick={() => setOpenIdx(i)}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 'var(--radius)',
+                  background: openIdx === i ? 'var(--bg-sunk)' : 'transparent',
+                  border: openIdx === i ? '1px solid var(--border)' : '1px solid transparent',
+                  cursor: 'pointer',
+                  marginBottom: 4,
+                }}
+              >
+                <div style={{ fontWeight: 500, fontSize: 13.5 }}>{r.title}</div>
+                <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{r.location ?? ''}</div>
+                <div className="mono-sm" style={{ color: 'var(--fg-subtle)', marginTop: 2 }}>
+                  {(r.date ?? '—')} · {(r.details ?? []).length} {plural((r.details ?? []).length, 'bullet')}
+                </div>
+              </div>
+            ))}
+            <div style={{ padding: 8 }}>
+              <button className="btn ghost sm" style={{ width: '100%', justifyContent: 'center' }}>
+                <Icon name="plus" size={11} /> add role
+              </button>
+            </div>
+          </div>
 
-      <BulletEditor />
-    </div>
+          <BulletEditor role={roles[openIdx] ?? null} />
+        </div>
+      )}
+    </SectionPane>
+  );
+}
+
+// ── Per-tab wrappers (skill / education / author / benchmark) ────────────
+
+function SkillTab() {
+  const { data, isLoading, error } = useMasterSection('skill');
+  const apiSkills = useMemo(() => apiSkillsToForm(data ?? null), [data]);
+  const [skills, setSkills] = useState<Skill[]>([]);
+  // Hydrate from API on mount and whenever upstream data changes.
+  useEffect(() => setSkills(apiSkills), [apiSkills]);
+  return (
+    <SectionPane isLoading={isLoading} error={error as Error | null}>
+      {/* save round-trip lossy — see feat-6999e552 for ETag/concurrent-write semantics */}
+      <SkillForm skills={skills} onChange={setSkills} />
+    </SectionPane>
+  );
+}
+
+function EducationTab() {
+  const { data, isLoading, error } = useMasterSection('education');
+  const apiEdu = useMemo(() => apiEducationToForm(data ?? null), [data]);
+  const [education, setEducation] = useState<EducationEntry[]>([]);
+  useEffect(() => setEducation(apiEdu), [apiEdu]);
+  return (
+    <SectionPane isLoading={isLoading} error={error as Error | null}>
+      {/* save round-trip lossy — see feat-6999e552 */}
+      <EducationForm education={education} onChange={setEducation} />
+    </SectionPane>
+  );
+}
+
+function AuthorTab() {
+  const { data, isLoading, error } = useMasterSection('author');
+  const apiAuthor = useMemo(() => apiAuthorToForm(data ?? null), [data]);
+  const [author, setAuthor] = useState<Author>(apiAuthor);
+  useEffect(() => setAuthor(apiAuthor), [apiAuthor]);
+  return (
+    <SectionPane isLoading={isLoading} error={error as Error | null}>
+      {/* save round-trip lossy — see feat-6999e552 */}
+      <AuthorForm author={author} onChange={setAuthor} />
+    </SectionPane>
+  );
+}
+
+function BenchmarkTab() {
+  const { data, isLoading, error } = useMasterSection('benchmark');
+  const initial = data?.text ?? '';
+  const [text, setText] = useState<string>(initial);
+  useEffect(() => setText(initial), [initial]);
+  return (
+    <SectionPane isLoading={isLoading} error={error as Error | null}>
+      {/* save round-trip lossy — see feat-6999e552 */}
+      <BenchmarkEditor text={text} onChange={setText} />
+    </SectionPane>
   );
 }
 
@@ -127,17 +287,6 @@ function WorkEditor() {
 
 export function MasterContent() {
   const [tab, setTab] = useState<MasterTab>('work');
-  const [skills, setSkills] = useState<Skill[]>([]);
-  const [education, setEducation] = useState<EducationEntry[]>([]);
-  const [author, setAuthor] = useState<Author>({
-    name: '',
-    email: '',
-    phone: '',
-    location: '',
-    headline: '',
-    links: [],
-  });
-  const [benchmarkText, setBenchmarkText] = useState<string>('');
 
   return (
     <div className="content">
@@ -165,10 +314,10 @@ export function MasterContent() {
       </div>
 
       {tab === 'work' && <WorkEditor />}
-      {tab === 'skill' && <SkillForm skills={skills} onChange={setSkills} />}
-      {tab === 'education' && <EducationForm education={education} onChange={setEducation} />}
-      {tab === 'author' && <AuthorForm author={author} onChange={setAuthor} />}
-      {tab === 'benchmark' && <BenchmarkEditor text={benchmarkText} onChange={setBenchmarkText} />}
+      {tab === 'skill' && <SkillTab />}
+      {tab === 'education' && <EducationTab />}
+      {tab === 'author' && <AuthorTab />}
+      {tab === 'benchmark' && <BenchmarkTab />}
     </div>
   );
 }
