@@ -12,8 +12,13 @@ import { Icon } from './shared';
 export interface NewApplicationModalProps {
   /** Called when the user dismisses the modal (cancel or backdrop click). */
   onClose: () => void;
-  /** Called when the user confirms the application launch; receives the resolved slug. */
-  onLaunch: (slug: string) => void;
+  /**
+   * Called when the user confirms the application launch.
+   * Receives the locally-derived slug and the raw job URL so the caller
+   * can hand both to `postApplication(url, slug)` and then navigate to
+   * the server-assigned slug.
+   */
+  onLaunch: (slug: string, url: string) => void;
 }
 
 // ── Internal types ───────────────────────────────────────────────────────────
@@ -199,7 +204,7 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
           <button type="button" className="btn ghost" onClick={onClose}>cancel</button>
           {step === 1
             ? <button type="button" className="btn primary" onClick={() => setStep(2)}>review →</button>
-            : <button type="submit" className="btn primary" onClick={() => onLaunch(slug)}><Icon name="play" size={12} /> apply</button>
+            : <button type="submit" className="btn primary" onClick={() => onLaunch(slug, url)}><Icon name="play" size={12} /> apply</button>
           }
         </div>
       </div>

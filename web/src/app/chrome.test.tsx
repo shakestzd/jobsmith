@@ -1,12 +1,12 @@
 // chrome.test.tsx
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { Sidebar } from './chrome';
 
 describe('Sidebar', () => {
-  function renderSidebar() {
+  function renderSidebar(openNew = vi.fn()) {
     return render(
-      <Sidebar view="dashboard" setView={vi.fn()} openNew={vi.fn()} />,
+      <Sidebar view="dashboard" setView={vi.fn()} openNew={openNew} />,
     );
   }
 
@@ -21,5 +21,14 @@ describe('Sidebar', () => {
     renderSidebar();
     expect(screen.getByText('Listings site')).toBeInTheDocument();
     expect(screen.getByText('Feedback')).toBeInTheDocument();
+  });
+
+  it('new application button calls openNew, not a hardcoded route', () => {
+    const openNew = vi.fn();
+    renderSidebar(openNew);
+    // The button text contains "new application" (with the ⌘N kbd hint alongside)
+    const btn = screen.getByRole('button', { name: /new application/i });
+    fireEvent.click(btn);
+    expect(openNew).toHaveBeenCalledTimes(1);
   });
 });

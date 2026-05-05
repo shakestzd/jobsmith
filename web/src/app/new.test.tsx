@@ -38,7 +38,7 @@ describe('NewApplicationModal', () => {
     expect(screen.getByText(/step 2 of 2/i)).toBeInTheDocument();
   });
 
-  it('apply button on step 2 calls onLaunch with slug', () => {
+  it('apply button on step 2 calls onLaunch with slug and url', () => {
     const onLaunch = vi.fn();
     render(<NewApplicationModal onClose={vi.fn()} onLaunch={onLaunch} />);
     // advance to step 2
@@ -47,7 +47,9 @@ describe('NewApplicationModal', () => {
     expect(applyBtn).toHaveAttribute('type', 'submit');
     fireEvent.click(applyBtn);
     expect(onLaunch).toHaveBeenCalledTimes(1);
+    // first arg: locally-derived slug; second arg: the raw job URL
     expect(onLaunch.mock.calls[0][0]).toMatch(/linear-product-engineer/);
+    expect(onLaunch.mock.calls[0][1]).toMatch(/^https?:\/\//);
   });
 
   it('pressing Enter in the URL field does not trigger cancel', () => {
