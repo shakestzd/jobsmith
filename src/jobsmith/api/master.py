@@ -6,6 +6,7 @@ GET  /master                       → MasterPayload  (all four sections)
 GET  /master/{section}             → section content (work | skill | education | author)
 PUT  /master/{section}             → replace section content (validated against schema)
 POST /master/{section}/upload      → upload a raw YAML file replacing the section
+POST /master/validate              → validate master content body; returns {ok, errors}
 GET  /master/benchmark             → {text, version} for benchmark.md
 PUT  /master/benchmark             → write new benchmark.md text, returns {text, version}
 
@@ -41,7 +42,16 @@ from jobsmith.master_io import (
 )
 from jobsmith.paths import resolve
 
-from .schemas.master import Author, EducationEntry, MasterPayload, SkillEntry, WorkEntry
+from .schemas.master import (
+    Author,
+    EducationEntry,
+    MasterPayload,
+    SkillEntry,
+    ValidateError,
+    ValidateRequest,
+    ValidateResponse,
+    WorkEntry,
+)
 
 Section = Literal["work", "skill", "education", "author"]
 _SECTIONS: tuple[Section, ...] = ("work", "skill", "education", "author")
@@ -250,6 +260,94 @@ def _normalise_author_payload(raw: Any) -> Any:
     if isinstance(raw, dict):
         return {"author": [raw]}
     return raw
+
+
+# ---------------------------------------------------------------------------
+# Validate route — registered before the templated /master/{section} routes
+# so that `/master/validate` is not shadowed by the section-parameterised ones.
+# ---------------------------------------------------------------------------
+
+
+def _validate_work(entries: list[WorkEntry]) -> list[ValidateError]:
+    errors: list[ValidateError] = []
+    for i, entry in enumerate(entries):
+        if not entry.title or not entry.title.strip():
+            errors.append(
+                ValidateError(
+                    field=f"work[{i}].title",
+                    message="title must not be empty",
+                )
+            )
+    return errors
+
+
+def _validate_skill(entries: list[SkillEntry]) -> list[ValidateError]:
+    errors: list[ValidateError] = []
+    for i, entry in enumerate(entries):
+        if not entry.title or not entry.title.strip():
+            errors.append(
+                ValidateError(
+                    field=f"skill[{i}].title",
+                    message="title must not be empty",
+                )
+            )
+    return errors
+
+
+def _validate_education(entries: list[EducationEntry]) -> list[ValidateError]:
+    errors: list[ValidateError] = []
+    for i, entry in enumerate(entries):
+        if not entry.title or not entry.title.strip():
+            errors.append(
+                ValidateError(
+                    field=f"education[{i}].title",
+                    message="title must not be empty",
+                )
+            )
+    return errors
+
+
+def _validate_author(author: Author | None) -> list[ValidateError]:
+    """Validate author block; returns errors if required fields are absent."""
+    if author is None:
+        return []
+    errors: list[ValidateError] = []
+    # name must be a non-empty string or a dict with at least first/last
+    name = author.name
+    if name is None and not author.firstname and not author.lastname:
+        errors.append(
+            ValidateError(
+                field="author.name",
+                message="author must have a name",
+            )
+        )
+    elif isinstance(name, str) and not name.strip():
+        errors.append(
+            ValidateError(
+                field="author.name",
+                message="author name must not be empty",
+            )
+        )
+    return errors
+
+
+@router.post("/master/validate", response_model=ValidateResponse)
+def post_master_validate(body: ValidateRequest) -> ValidateResponse:
+    """Validate master content body against section schemas.
+
+    Returns ``{ok: true, errors: []}`` when all sections are valid.
+    Returns ``{ok: false, errors: [{field, message}, ...]}`` when any
+    section fails validation.
+
+    This endpoint does **not** read or write any files — it validates
+    only the submitted payload.
+    """
+    errors: list[ValidateError] = []
+    errors.extend(_validate_work(body.work))
+    errors.extend(_validate_skill(body.skill))
+    errors.extend(_validate_education(body.education))
+    errors.extend(_validate_author(body.author))
+    return ValidateResponse(ok=len(errors) == 0, errors=errors)
 
 
 # ---------------------------------------------------------------------------
