@@ -182,6 +182,11 @@ def _now_iso() -> str:
 
 
 _TERMINAL_STATUSES = frozenset({"success", "failed", "done"})
+# render.py emits phase events as {"type": "phase_complete"} or
+# {"type": "phase_failed"} without a "status" field — recognise both
+# shapes so the synth gate doesn't fire duplicate failures.
+# Closes roborev branch-review MEDIUM (feat-6d76bb22).
+_TERMINAL_TYPES = frozenset({"phase_complete", "phase_failed"})
 _TRANSCRIPT_TAIL_LINES = 50
 
 
@@ -231,9 +236,10 @@ def synth_terminal_phase_failed(
             continue
         status = obj.get("status")
         phase = obj.get("phase")
+        event_type = obj.get("type")
         if phase:
             last_phase = phase
-        if status in _TERMINAL_STATUSES:
+        if status in _TERMINAL_STATUSES or event_type in _TERMINAL_TYPES:
             has_terminal = True
             # Do not break — keep scanning so last_phase stays current.
 

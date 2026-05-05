@@ -94,6 +94,45 @@ class TestSynthTerminalPhaseFailed:
         )
         assert result is None
 
+    def test_synth_returns_none_when_phase_complete_type_present(
+        self, tmp_path: Path
+    ) -> None:
+        """render.py writes {type: phase_complete} without a status field;
+        the synth gate must recognise it as terminal.  Regression for
+        roborev branch-review MEDIUM (feat-6d76bb22)."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps({"type": "phase_started", "phase": "gather"}) + "\n"
+            + json.dumps({"type": "phase_complete", "phase": "gather"}) + "\n",
+            encoding="utf-8",
+        )
+        result = synth_terminal_phase_failed(
+            transcript_path=transcript,
+            returncode=0,
+            last_stderr_lines=[],
+        )
+        assert result is None, (
+            "Type=phase_complete must be treated as terminal — "
+            "duplicate synth events would fire otherwise"
+        )
+
+    def test_synth_returns_none_when_phase_failed_type_present(
+        self, tmp_path: Path
+    ) -> None:
+        """{type: phase_failed} (no status field) must also be terminal."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps({"type": "phase_started", "phase": "draft"}) + "\n"
+            + json.dumps({"type": "phase_failed", "phase": "draft"}) + "\n",
+            encoding="utf-8",
+        )
+        result = synth_terminal_phase_failed(
+            transcript_path=transcript,
+            returncode=1,
+            last_stderr_lines=["boom"],
+        )
+        assert result is None
+
     def test_synth_returns_dict_when_no_terminal_event(
         self, tmp_path: Path
     ) -> None:
