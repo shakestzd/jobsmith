@@ -21,8 +21,8 @@ import type { Skill, EducationEntry, Author } from './schemas';
  * Work roles are already MasterWorkRole[] from the API — pass through.
  * Returns [] when data is undefined/null.
  */
-export function apiWorkToRoles(data: MasterWorkRole[] | undefined | null): MasterWorkRole[] {
-  return data ?? [];
+export function apiWorkToRoles(data: unknown): MasterWorkRole[] {
+  return Array.isArray(data) ? (data as MasterWorkRole[]) : [];
 }
 
 // ── Skills ───────────────────────────────────────────────────────────────

@@ -194,7 +194,7 @@ interface UseQueryWithMetaResult<T> {
 
 /**
  * Like useMasterSection but also exposes `etag` and `refetch`.
- * Used by SkillTab / EducationTab / AuthorTab for ETag-based PUT round-trips.
+ * Used by SkillTab / EducationTab / AuthorTab / BenchmarkTab for ETag-based PUT round-trips.
  * Do NOT modify useMasterSection — it has 6+ callers.
  */
 export function useMasterSectionWithMeta(
@@ -206,6 +206,12 @@ export function useMasterSectionWithMeta(
 export function useMasterSectionWithMeta(
   section: 'author',
 ): UseQueryWithMetaResult<MasterAuthor | null>;
+export function useMasterSectionWithMeta(
+  section: 'benchmark',
+): UseQueryWithMetaResult<MasterBenchmark>;
+export function useMasterSectionWithMeta(
+  section: 'work',
+): UseQueryWithMetaResult<MasterSectionData['work']>;
 export function useMasterSectionWithMeta<K extends keyof MasterSectionData>(
   section: K,
 ): UseQueryWithMetaResult<MasterSectionData[K]> {

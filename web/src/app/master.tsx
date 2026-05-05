@@ -17,8 +17,8 @@ import { EducationForm } from './master/EducationForm';
 import { AuthorForm } from './master/AuthorForm';
 import { BenchmarkEditor } from './master/BenchmarkEditor';
 import type { Skill, EducationEntry, Author } from './master/schemas';
-import { useMasterSection, useMasterSectionWithMeta } from '../api/hooks';
-import { JobsmithApiError, apiGet, apiPost, apiPut, formatDetail } from '../api/client';
+import { useMasterSectionWithMeta } from '../api/hooks';
+import { JobsmithApiError, apiGet, apiGetWithMeta, apiPost, apiPut, apiDelete, formatDetail } from '../api/client';
 import type { MasterWorkRole, MasterValidateResponse } from '../api/types';
 import {
   apiAuthorToForm,
@@ -199,12 +199,54 @@ function SaveBar({
 }
 
 // ── BulletEditor ─────────────────────────────────────────────────────────
+// feat-c41539d5: per-bullet ops (mark anchor / drop anchor / add / remove)
+// wired to /api/master/work/roles/{i}/bullets/{j}/anchor, .../bullets, and
+// DELETE .../bullets/{j}. All mutations are immediate (no Save button) and
+// trigger a work-section refetch on success.
 
 interface BulletEditorProps {
   role: MasterWorkRole | null;
+  roleIndex: number;
+  refetch: () => void;
 }
 
-function BulletEditor({ role }: BulletEditorProps) {
+/** Inline modal overlay — no window.confirm / window.prompt. */
+function BulletModal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(0,0,0,0.45)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="card"
+        style={{ padding: 20, minWidth: 340, maxWidth: 480, position: 'relative' }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <strong style={{ fontSize: 14 }}>{title}</strong>
+          <button className="btn ghost sm" onClick={onClose} aria-label="close">×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function BulletEditor({ role, roleIndex, refetch }: BulletEditorProps) {
   // Convert API bullet shape (string | { bullet, anchor, ... }) into the
   // local SampleBullet shape used by the existing presentational subtree.
   const initial = useMemo<SampleBullet[]>(() => {
@@ -225,12 +267,100 @@ function BulletEditor({ role }: BulletEditorProps) {
   // Re-seed when the selected role changes upstream.
   useEffect(() => setBullets(initial), [initial]);
 
+  // Mutation in-flight guard: prevents concurrent rapid-click races.
+  const [mutating, setMutating] = useState(false);
+
+  // Add bullet inline form.
+  const [showAdd, setShowAdd] = useState(false);
+  const [addText, setAddText] = useState('');
+  const [addPosition, setAddPosition] = useState<number | ''>('');
+  const [addError, setAddError] = useState('');
+
+  // Drop anchor modal (fires with a drop_reason).
+  const [dropModal, setDropModal] = useState<{ bulletIndex: number } | null>(null);
+  const [dropReason, setDropReason] = useState('');
+  const [dropError, setDropError] = useState('');
+
+  // Remove bullet modal (fires with a reason).
+  const [removeModal, setRemoveModal] = useState<{ bulletIndex: number } | null>(null);
+  const [removeReason, setRemoveReason] = useState('');
+  const [removeError, setRemoveError] = useState('');
+
   const anchorCount = bullets.filter(b => b.anchor).length;
-  // The local `toggle(id)` helper that flipped anchor state in setBullets
-  // was removed alongside the per-bullet pill controls in feat-aba75dae —
-  // the toggle never persisted (no PUT to /api/master/work) so the UI lied
-  // about saved state. Anchor flags are now read-only on this overview;
-  // the dedicated Mark Anchors page is the entrypoint for editing them.
+
+  const handleMarkAnchor = useCallback(async (bulletIndex: number) => {
+    setMutating(true);
+    try {
+      await apiPost(`/api/master/work/roles/${roleIndex}/bullets/${bulletIndex}/anchor`, {});
+      refetch();
+    } finally {
+      setMutating(false);
+    }
+  }, [roleIndex, refetch]);
+
+  const handleDropAnchor = useCallback(async () => {
+    if (!dropModal) return;
+    if (!dropReason.trim()) {
+      setDropError('drop reason is required');
+      return;
+    }
+    setMutating(true);
+    try {
+      await apiPost(
+        `/api/master/work/roles/${roleIndex}/bullets/${dropModal.bulletIndex}/anchor`,
+        { drop_reason: dropReason.trim() },
+      );
+      refetch();
+      setDropModal(null);
+      setDropReason('');
+      setDropError('');
+    } finally {
+      setMutating(false);
+    }
+  }, [dropModal, dropReason, roleIndex, refetch]);
+
+  const handleAddBullet = useCallback(async () => {
+    if (!addText.trim()) {
+      setAddError('bullet text is required');
+      return;
+    }
+    setMutating(true);
+    try {
+      const position = addPosition === '' ? undefined : Number(addPosition);
+      await apiPost(`/api/master/work/roles/${roleIndex}/bullets`, {
+        text: addText.trim(),
+        ...(position !== undefined ? { position } : {}),
+      });
+      refetch();
+      setShowAdd(false);
+      setAddText('');
+      setAddPosition('');
+      setAddError('');
+    } finally {
+      setMutating(false);
+    }
+  }, [addText, addPosition, roleIndex, refetch]);
+
+  const handleRemoveBullet = useCallback(async () => {
+    if (!removeModal) return;
+    if (!removeReason.trim()) {
+      setRemoveError('reason is required');
+      return;
+    }
+    setMutating(true);
+    try {
+      await apiDelete(
+        `/api/master/work/roles/${roleIndex}/bullets/${removeModal.bulletIndex}`,
+        { reason: removeReason.trim() },
+      );
+      refetch();
+      setRemoveModal(null);
+      setRemoveReason('');
+      setRemoveError('');
+    } finally {
+      setMutating(false);
+    }
+  }, [removeModal, removeReason, roleIndex, refetch]);
 
   if (!role) {
     return (
@@ -241,58 +371,165 @@ function BulletEditor({ role }: BulletEditorProps) {
   }
 
   return (
-    <div className="card">
-      <div className="card-h">
-        <h3>{role.title}{role.location ? ` · ${role.location}` : ''}</h3>
-        <span className="sub">{role.date ?? ''} · {bullets.length} {plural(bullets.length, 'bullet')}</span>
-        <div className="right">
-          <Badge kind="accent">{anchorCount} anchors</Badge>
-          {/*
-            "add bullet" + "save" buttons removed in feat-aba75dae (GH#53).
-            Both were decorative — there is no inline-edit/persist flow on
-            this page. To add a bullet, edit master/work.yml directly. A
-            future feature can re-introduce these once a PUT-section
-            round-trip with optimistic locking lands (feat-6999e552).
-          */}
+    <>
+      <div className="card">
+        <div className="card-h">
+          <h3>{role.title}{role.location ? ` · ${role.location}` : ''}</h3>
+          <span className="sub">{role.date ?? ''} · {bullets.length} {plural(bullets.length, 'bullet')}</span>
+          <div className="right">
+            <Badge kind="accent">{anchorCount} anchors</Badge>
+          </div>
         </div>
-      </div>
-      <div style={{ padding: '10px 14px 8px', fontSize: 12, color: 'var(--fg-muted)', borderBottom: '1px solid var(--border)' }}>
-        <Icon name="flag" size={11} style={{ verticalAlign: 'middle', color: 'var(--accent)' }} />{' '}
-        anchors are bullets <b style={{ color: 'var(--fg)' }}>jobsmith</b> must preserve in every draft (or document a drop-reason).
-      </div>
-      <div>
-        {bullets.map((b, i) => (
-          <div key={b.id} className={`bullet-row ${b.anchor ? 'is-anchor' : ''}`}>
-            <span className="b-num">{String(i + 1).padStart(2, '0')}</span>
-            <div>
-              <div className="b-text">{b.text}</div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                {/*
-                  Per-bullet pill controls (mark anchor / edit / drop reason…)
-                  removed in feat-aba75dae (GH#53). The previous "mark anchor"
-                  pill toggled local React state only and did not persist via
-                  PUT /api/master/work, which made the UI lie about saved
-                  state. To set anchor flags, use the dedicated Mark Anchors
-                  page (left sidebar) which writes via the comment-preserving
-                  mark-anchors flow.
-                */}
-                {b.anchor && <span className="pill active">⚑ anchor</span>}
+        <div style={{ padding: '10px 14px 8px', fontSize: 12, color: 'var(--fg-muted)', borderBottom: '1px solid var(--border)' }}>
+          <Icon name="flag" size={11} style={{ verticalAlign: 'middle', color: 'var(--accent)' }} />{' '}
+          anchors are bullets <b style={{ color: 'var(--fg)' }}>jobsmith</b> must preserve in every draft (or document a drop-reason).
+        </div>
+
+        {/* + add bullet */}
+        <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)' }}>
+          {!showAdd ? (
+            <button
+              className="btn ghost sm"
+              disabled={mutating}
+              onClick={() => setShowAdd(true)}
+            >
+              + add bullet
+            </button>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <textarea
+                value={addText}
+                onChange={(e) => { setAddText(e.target.value); setAddError(''); }}
+                placeholder="bullet text…"
+                rows={2}
+                style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: 13 }}
+              />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <label style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
+                  position (blank = append):{' '}
+                  <input
+                    type="number"
+                    value={addPosition}
+                    onChange={(e) => setAddPosition(e.target.value === '' ? '' : Number(e.target.value))}
+                    style={{ width: 60, marginLeft: 4 }}
+                    min={0}
+                  />
+                </label>
+                <button className="btn primary sm" disabled={mutating} onClick={() => void handleAddBullet()}>
+                  {mutating ? 'saving…' : 'add'}
+                </button>
+                <button className="btn ghost sm" onClick={() => { setShowAdd(false); setAddText(''); setAddPosition(''); setAddError(''); }}>
+                  cancel
+                </button>
+              </div>
+              {addError && <div style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>{addError}</div>}
+            </div>
+          )}
+        </div>
+
+        <div>
+          {bullets.map((b, i) => (
+            <div key={b.id} className={`bullet-row ${b.anchor ? 'is-anchor' : ''}`}>
+              <span className="b-num">{String(i + 1).padStart(2, '0')}</span>
+              <div>
+                <div className="b-text">{b.text}</div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                  {b.anchor ? (
+                    <>
+                      <span className="pill active">⚑ anchor</span>
+                      <button
+                        className="pill"
+                        disabled={mutating}
+                        style={{ cursor: mutating ? 'not-allowed' : 'pointer', background: 'none', border: '1px solid var(--border)', borderRadius: 12, padding: '1px 8px', fontSize: 11 }}
+                        onClick={() => { setDropModal({ bulletIndex: i }); setDropReason(''); setDropError(''); }}
+                      >
+                        drop
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="pill"
+                      disabled={mutating}
+                      style={{ cursor: mutating ? 'not-allowed' : 'pointer', background: 'none', border: '1px solid var(--border)', borderRadius: 12, padding: '1px 8px', fontSize: 11 }}
+                      onClick={() => void handleMarkAnchor(i)}
+                    >
+                      mark anchor
+                    </button>
+                  )}
+                  <button
+                    className="btn ghost sm"
+                    disabled={mutating}
+                    style={{ fontSize: 11, color: 'var(--fg-muted)' }}
+                    onClick={() => { setRemoveModal({ bulletIndex: i }); setRemoveReason(''); setRemoveError(''); }}
+                  >
+                    remove
+                  </button>
+                </div>
+              </div>
+              <div className="b-actions">
+                <button className="btn ghost sm"><Icon name="chevd" size={11} /></button>
               </div>
             </div>
-            <div className="b-actions">
-              <button className="btn ghost sm"><Icon name="chevd" size={11} /></button>
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
-    </div>
+
+      {/* Drop anchor modal */}
+      {dropModal && (
+        <BulletModal title="drop anchor" onClose={() => setDropModal(null)}>
+          <div style={{ fontSize: 13, color: 'var(--fg-muted)', marginBottom: 10 }}>
+            document why this bullet is being un-anchored:
+          </div>
+          <textarea
+            value={dropReason}
+            onChange={(e) => { setDropReason(e.target.value); setDropError(''); }}
+            placeholder="drop reason…"
+            rows={3}
+            style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: 13, marginBottom: 8 }}
+            autoFocus
+          />
+          {dropError && <div style={{ fontSize: 12, color: 'var(--danger, #c0392b)', marginBottom: 8 }}>{dropError}</div>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn primary" disabled={mutating} onClick={() => void handleDropAnchor()}>
+              {mutating ? 'saving…' : 'drop anchor'}
+            </button>
+            <button className="btn ghost" onClick={() => setDropModal(null)}>cancel</button>
+          </div>
+        </BulletModal>
+      )}
+
+      {/* Remove bullet modal */}
+      {removeModal && (
+        <BulletModal title="remove bullet" onClose={() => setRemoveModal(null)}>
+          <div style={{ fontSize: 13, color: 'var(--fg-muted)', marginBottom: 10 }}>
+            provide a reason for removing this bullet:
+          </div>
+          <textarea
+            value={removeReason}
+            onChange={(e) => { setRemoveReason(e.target.value); setRemoveError(''); }}
+            placeholder="reason…"
+            rows={3}
+            style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: 13, marginBottom: 8 }}
+            autoFocus
+          />
+          {removeError && <div style={{ fontSize: 12, color: 'var(--danger, #c0392b)', marginBottom: 8 }}>{removeError}</div>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn primary" disabled={mutating} onClick={() => void handleRemoveBullet()}>
+              {mutating ? 'saving…' : 'remove'}
+            </button>
+            <button className="btn ghost" onClick={() => setRemoveModal(null)}>cancel</button>
+          </div>
+        </BulletModal>
+      )}
+    </>
   );
 }
 
 // ── WorkEditor ───────────────────────────────────────────────────────────
 
 function WorkEditor() {
-  const { data, isLoading, error } = useMasterSection('work');
+  // useMasterSectionWithMeta gives us refetch to trigger after bullet mutations.
+  const { data, isLoading, error, refetch } = useMasterSectionWithMeta('work');
   const roles: MasterWorkRole[] = useMemo(() => apiWorkToRoles(data), [data]);
   const [openIdx, setOpenIdx] = useState<number>(0);
   // Reset selection when roles change upstream (e.g., refetch).
@@ -335,7 +572,7 @@ function WorkEditor() {
             */}
           </div>
 
-          <BulletEditor role={roles[openIdx] ?? null} />
+          <BulletEditor role={roles[openIdx] ?? null} roleIndex={openIdx} refetch={refetch} />
         </div>
       )}
     </SectionPane>
@@ -552,13 +789,73 @@ function AuthorTab() {
 }
 
 function BenchmarkTab() {
-  const { data, isLoading, error } = useMasterSection('benchmark');
+  const { data, etag, isLoading, error, refetch } = useMasterSectionWithMeta('benchmark');
   const initial = data?.text ?? '';
   const [text, setText] = useState<string>(initial);
+  const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Hydrate from API on mount and whenever upstream data changes.
   useEffect(() => setText(initial), [initial]);
+
+  const isDirty = text !== initial;
+
+  const doSave = useCallback(async (ifMatchOverride?: string | null) => {
+    setSaveState({ kind: 'saving' });
+    const effectiveEtag = ifMatchOverride !== undefined ? ifMatchOverride : etag;
+    try {
+      await apiPut('/api/master/benchmark', { text }, {
+        ifMatch: effectiveEtag ?? undefined,
+      });
+      refetch();
+      setSaveState({ kind: 'saved' });
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSaveState({ kind: 'idle' }), 2000);
+    } catch (err) {
+      if (err instanceof JobsmithApiError && err.status === 412) {
+        setSaveState({ kind: 'conflict', newEtag: null });
+      } else if (err instanceof JobsmithApiError && err.status === 404) {
+        const suggestion = 'jobsmith db load-master  # to backfill benchmark';
+        setSaveState({ kind: 'missing', suggestion });
+      } else {
+        setSaveState({ kind: 'idle' });
+      }
+    }
+  }, [etag, text, refetch]);
+
+  const handleDiscard = useCallback(() => {
+    setSaveState({ kind: 'idle' });
+    refetch();
+  }, [refetch]);
+
+  // Overwrite-anyway: re-fetch the current server version so the PUT carries a
+  // valid If-Match and the server can detect a further race between refetch and
+  // the second PUT. Falls back to force-overwrite (no If-Match) if refetch fails.
+  const handleOverwrite = useCallback(async () => {
+    try {
+      const { etag: freshEtag } = await apiGetWithMeta<{ text: string; version: string }>(
+        '/api/master/benchmark',
+      );
+      await doSave(freshEtag);
+    } catch {
+      await doSave(null);
+    }
+  }, [doSave]);
+
+  const missing404 = saveState.kind === 'missing';
+  const suggestion404 = missing404 ? saveState.suggestion : '';
+
   return (
     <SectionPane isLoading={isLoading} error={error as Error | null}>
-      {/* save round-trip lossy — see feat-6999e552 */}
+      <SaveBar
+        isDirty={isDirty}
+        saveState={saveState}
+        onSave={() => void doSave()}
+        onDiscard={handleDiscard}
+        onOverwrite={() => void handleOverwrite()}
+        onCopyCode={(code) => void navigator.clipboard.writeText(code)}
+        codeToCopy={missing404 ? suggestion404 : undefined}
+      />
       <BenchmarkEditor text={text} onChange={setText} />
     </SectionPane>
   );
