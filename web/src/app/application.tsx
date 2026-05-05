@@ -11,7 +11,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { SampleApp, AppPhase, AppStatus, IconName } from '../types';
 import { Icon, Badge, StatusBadge } from './shared';
 import { useApplication } from '../api/hooks';
-import { JobsmithApiError, postApplication, buildEventsUrl } from '../api/client';
+import { JobsmithApiError, postApplication, buildEventsUrl, redactSensitive } from '../api/client';
 import type { ApplicationDetail as ApiApplicationDetail } from '../api/types';
 
 // ── Public prop type ─────────────────────────────────────────────────────────
@@ -773,7 +773,9 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     es.addEventListener('specialist', (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data as string) as SseSpecialistEvent;
-        const msg = `<span class="dim">specialist=</span>${data.specialist} <span class="dim">kind=</span>${data.kind_label}`;
+        const specialist = redactSensitive(String(data.specialist ?? ''));
+        const kindLabel = redactSensitive(String(data.kind_label ?? ''));
+        const msg = `<span class="dim">specialist=</span>${specialist} <span class="dim">kind=</span>${kindLabel}`;
         setEvents(ev => ev.length > 400 ? ev : [...ev, { ts: now(), lvl: 'spec', msg }]);
         // Advance phase bar progress incrementally for each specialist.
         const phaseNum = ssePhaseToNum(data.phase);
@@ -787,7 +789,11 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     es.addEventListener('log', (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data as string) as SseLogEvent;
-        const line = data.line.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        // Redact tokens BEFORE HTML escaping so the redaction matches the raw
+        // server-emitted string (which may contain `?token=…` from request URLs
+        // logged to stderr).
+        const safe = redactSensitive(data.line);
+        const line = safe.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const lvl = data.stream === 'stderr' ? 'warn' : 'info';
         setEvents(ev => ev.length > 400 ? ev : [...ev, { ts: now(), lvl, msg: line }]);
       } catch { /* ignore malformed event */ }
@@ -824,7 +830,8 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
       subscribeToEvents(slug);
     } catch (err) {
       setRunning(false);
-      const msg = err instanceof JobsmithApiError ? err.message : String(err);
+      const raw = err instanceof JobsmithApiError ? err.message : String(err);
+      const msg = redactSensitive(raw);
       setRunError(msg);
       // Re-add a failed event.
       setEvents(ev => [...ev, { ts: now(), lvl: 'warn', msg: `launch failed: ${msg}` }]);
