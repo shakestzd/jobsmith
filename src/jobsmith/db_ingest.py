@@ -414,15 +414,12 @@ def backfill_slug(
     )
     conn.commit()
 
-    existing = conn.execute(
-        "SELECT COUNT(*) FROM specialist_outputs WHERE run_id=?", (run_id,)
-    ).fetchone()[0]
-    if existing:
-        return 0
-
-    # Ingest every completed phase so earlier-phase artifacts also land.
-    # When manifest is missing/legacy, fall back to the single-phase
-    # heuristic so older app dirs still backfill something.
+    # Both ingest paths use INSERT OR IGNORE on (run_id, specialist, kind),
+    # so re-running is a no-op for rows already present.  We do NOT short-circuit
+    # when specialist_outputs has rows: the standalone-artifact ingest below
+    # was added in 0.8.1 (S2, feat-b0d38439) and must run for slugs backfilled
+    # under 0.8 to pick up the 4 newly-ingestable kinds (cover-letter-draft,
+    # _quarto.yml, _variables.yml, .agent.md).  Closes ultrareview bug_003.
     phases_to_ingest = completed_phases or [last_phase]
     inserted = 0
     for phase in phases_to_ingest:
@@ -436,9 +433,6 @@ def backfill_slug(
             state_dir=state_dir,
         )
 
-    # Ingest standalone artifacts (cover-letter-draft, _quarto.yml,
-    # _variables.yml, .agent.md snapshots) that have no specialist entry
-    # and are therefore skipped by ingest_phase_outputs.
     inserted += ingest_standalone_artifacts(conn, run_id=run_id, state_dir=state_dir)
 
     return inserted

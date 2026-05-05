@@ -321,3 +321,55 @@ class TestBackfillStandaloneArtifacts:
 
         assert first > 0
         assert second == 0, "Second call must be a no-op (INSERT OR IGNORE)"
+
+    def test_backfill_slug_picks_up_orphans_for_previously_backfilled_slug(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression for ultrareview bug_003: a 0.8 backfill (with phase rows
+        only) must still get the new orphaned kinds when re-run under 0.8.1.
+        The early-return guard at db_ingest.py:417-421 was removed because
+        both ingest paths use INSERT OR IGNORE."""
+        from jobsmith import db as jobsmith_db
+        from jobsmith.db_ingest import _backfill_run_id, backfill_slug
+
+        apps_dir, app_dir, state_dir = self._make_full_fixture(tmp_path)
+
+        conn = jobsmith_db.open_pipeline_db(tmp_path / "jobsmith.db")
+
+        # Simulate a 0.8-era backfill: insert apply_runs row + a phase
+        # specialist_outputs row under the deterministic backfill run_id.
+        # Pre-fix, this would trip the early-return and skip standalone ingest.
+        run_id = _backfill_run_id("acme-swe")
+        jobsmith_db.insert_apply_run(
+            conn,
+            run_id=run_id,
+            slug="acme-swe",
+            phase="render",
+            started_at="2024-01-01T10:00:00",
+            finished_at=None,
+            status="backfilled",
+        )
+        conn.execute(
+            "INSERT INTO specialist_outputs "
+            "(run_id, specialist, kind, output_json, finished_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (run_id, "legacy-specialist", "jd-parsed", "{}", "2024-01-01T10:01:00"),
+        )
+        conn.commit()
+
+        backfill_slug(conn, "acme-swe", apps_dir)
+
+        kinds = {
+            r[0]
+            for r in conn.execute(
+                "SELECT kind FROM specialist_outputs WHERE run_id = ?", (run_id,)
+            ).fetchall()
+        }
+        conn.close()
+
+        assert "jd-parsed" in kinds, "Pre-existing phase row must remain"
+        assert "cover-letter-draft" in kinds, (
+            "Standalone artifacts must be ingested even when phase rows already exist"
+        )
+        assert "quarto-config" in kinds
+        assert "variables" in kinds
