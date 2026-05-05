@@ -86,6 +86,29 @@ def test_collision_skips_rewrite(tmp_path):
     assert rows["r2"] == "linear-linear-product-engineer"
 
 
+def test_sibling_collision_does_not_collapse_runs(tmp_path):
+    """Two malformed slugs that normalize to the same target must not collide.
+
+    Both rows are runs of separate applications. The migration must rewrite at
+    most one of them and leave the other untouched, never collapse them onto
+    one slug.
+    """
+    conn = open_pipeline_db(tmp_path / "p.db")
+    # Both normalize to "linear-product-engineer".
+    _seed_run(conn, "r1", "linear-linear-product-engineer")
+    _seed_run(conn, "r2", "linear-linear-linear-product-engineer")
+
+    rewritten = normalize_existing_slugs(conn)
+
+    slugs = {
+        row["run_id"]: row["slug"]
+        for row in conn.execute("SELECT run_id, slug FROM apply_runs").fetchall()
+    }
+    # Exactly one rewrite happened, and the two run_ids still have distinct slugs.
+    assert len(rewritten) == 1
+    assert slugs["r1"] != slugs["r2"]
+
+
 def test_specialist_outputs_remain_consistent(tmp_path):
     """run_id-keyed FK rows are unaffected by slug rewrites."""
     conn = open_pipeline_db(tmp_path / "p.db")

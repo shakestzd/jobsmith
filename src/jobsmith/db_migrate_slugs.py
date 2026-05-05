@@ -53,7 +53,9 @@ def normalize_existing_slugs(conn: sqlite3.Connection) -> dict[str, str]:
 
     The transformation is performed in a single transaction. On collision —
     where two malformed slugs normalize to the same target — the later row's
-    slug stays as-is and is *not* included in the returned map.
+    slug stays as-is and is *not* included in the returned map. A target is
+    considered "taken" if it was already in the table before this pass *or*
+    if a sibling rewrite has already claimed it during this pass.
     """
     malformed = find_malformed_slugs(conn)
     if not malformed:
@@ -64,21 +66,27 @@ def normalize_existing_slugs(conn: sqlite3.Connection) -> dict[str, str]:
         row[0]
         for row in conn.execute("SELECT DISTINCT slug FROM apply_runs").fetchall()
     }
+    # Track every slug name "in use" after this pass — initial DB contents plus
+    # any target slug a sibling rewrite has already claimed. We never reuse a
+    # claimed target, so two malformed slugs with the same normalized form
+    # cannot collapse onto one row.
+    claimed: set[str] = set(existing)
 
     for old_slug in malformed:
         new_slug = normalize_slug(old_slug)
         if new_slug == old_slug:
             continue
-        # Skip collisions — a clean slug already exists with this name.
-        if new_slug in existing and new_slug not in rewritten.values():
+        # Skip collisions: target is either already in the DB or was just
+        # claimed by another rewrite in this pass.
+        if new_slug in claimed:
             continue
         conn.execute(
             "UPDATE apply_runs SET slug = ? WHERE slug = ?",
             (new_slug, old_slug),
         )
         rewritten[old_slug] = new_slug
-        existing.discard(old_slug)
-        existing.add(new_slug)
+        claimed.discard(old_slug)
+        claimed.add(new_slug)
 
     conn.commit()
     return rewritten

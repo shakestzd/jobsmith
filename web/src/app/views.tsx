@@ -345,7 +345,7 @@ function extract422Errors(err: unknown): ConfigValidationError[] {
 }
 
 export function ConfigView() {
-  const { data: remoteConfig, isLoading } = useConfig();
+  const { data: remoteConfig, isLoading, error: loadError } = useConfig();
 
   // Local controlled state — mirrors the subset of fields shown in the UI.
   // master paths
@@ -438,7 +438,24 @@ export function ConfigView() {
     );
   }
 
+  // GET /api/config failed. Don't render the form — saving from blank local
+  // state would PUT a partial config and clobber the remote file.
+  if (loadError) {
+    return (
+      <div className="content">
+        <div className="page-head"><div><h1>config</h1></div></div>
+        <div
+          style={{ padding: 24, color: 'var(--danger, var(--fg-muted))', fontSize: 13 }}
+          role="alert"
+        >
+          failed to load config: {loadError.message}
+        </div>
+      </div>
+    );
+  }
+
   const hasErrors = fieldErrors.length > 0;
+  const formDisabled = !remoteConfig;
 
   return (
     <div className="content">
@@ -454,6 +471,9 @@ export function ConfigView() {
           {validateStatus === 'invalid' && (
             <span style={{ fontSize: 12, color: 'var(--error, #e55)', marginRight: 4 }}>invalid — see errors below</span>
           )}
+          {validateStatus === 'error' && (
+            <span style={{ fontSize: 12, color: 'var(--error, #e55)', marginRight: 4 }}>validate failed — see details below</span>
+          )}
           {saveStatus === 'saved' && (
             <span style={{ fontSize: 12, color: 'var(--success)', marginRight: 4 }}>saved</span>
           )}
@@ -463,7 +483,7 @@ export function ConfigView() {
           <button
             type="button"
             className="btn"
-            disabled={validateStatus === 'validating'}
+            disabled={formDisabled || validateStatus === 'validating'}
             onClick={handleValidate}
           >
             <Icon name="doc" size={13} /> validate
@@ -471,13 +491,23 @@ export function ConfigView() {
           <button
             type="button"
             className="btn primary"
-            disabled={saveStatus === 'saving'}
+            disabled={formDisabled || saveStatus === 'saving'}
             onClick={handleSave}
           >
             <Icon name="check" size={12} /> save
           </button>
         </div>
       </div>
+
+      {validateStatus === 'error' && saveError && (
+        <div
+          style={{ marginBottom: 16, padding: '12px 16px', background: 'var(--bg-elev)', border: '1px solid var(--error, #e55)', borderRadius: 'var(--radius)', fontSize: 13, color: 'var(--fg-muted)' }}
+          role="alert"
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--error, #e55)' }}>validate request failed</div>
+          {saveError}
+        </div>
+      )}
 
       {hasErrors && (
         <div style={{ marginBottom: 16, padding: '12px 16px', background: 'var(--bg-elev)', border: '1px solid var(--error, #e55)', borderRadius: 'var(--radius)', fontSize: 13 }}>

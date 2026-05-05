@@ -75,6 +75,32 @@ beforeEach(() => {
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 describe('ConfigView', () => {
+  it('renders a load-error state when GET /api/config fails (does not show form)', async () => {
+    mockApiGet.mockRejectedValue(new Error('boom'));
+    render(<ConfigView />);
+    await waitFor(() => {
+      expect(screen.getByText(/failed to load config: boom/)).toBeInTheDocument();
+    });
+    // The form must not render — saving from blank local state would PUT a partial config.
+    expect(screen.queryByDisplayValue('assets/content/work.yml')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+  });
+
+  it('renders a validate-failure message when /api/config/validate throws', async () => {
+    render(<ConfigView />);
+    await waitFor(() =>
+      expect(screen.getByDisplayValue('assets/content/work.yml')).toBeInTheDocument(),
+    );
+    mockApiPost.mockRejectedValue(new Error('network down'));
+
+    fireEvent.click(screen.getByRole('button', { name: /validate/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/validate request failed/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/network down/)).toBeInTheDocument();
+  });
+
   it('shows a loading state while GET is in flight', () => {
     // GET never resolves in this test — stays pending
     mockApiGet.mockReturnValue(new Promise(() => {}));
