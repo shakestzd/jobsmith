@@ -35,9 +35,9 @@ from jobsmith.config import find_config, load_config
 from jobsmith.db import open_pipeline_db
 from jobsmith.master_io import (
     MasterSection,
-    add_bullet,
-    mark_anchor,
-    remove_bullet,
+    add_bullet_in_blob,
+    mark_anchor_in_blob,
+    remove_bullet_in_blob,
     save_benchmark,
 )
 from jobsmith.paths import resolve
@@ -686,9 +686,37 @@ class BulletWriteResponse(BaseModel):
     action: str
 
 
-def _require_work_path(config_path: Path) -> Path:
-    """Return the work.yml path, raising 404 if the config is missing."""
-    return _resolve_section_path(config_path, "work")
+def _load_work_blob_for_bullet_op() -> str:
+    """Return the work section blob from master_content, or 404 with backfill hint."""
+    blob = _db_load_section("work")
+    if blob is None:
+        _raise_missing_section("work")
+    return blob
+
+
+def _persist_work_blob(new_blob: str) -> None:
+    """Write *new_blob* to the master_content table for the work section.
+
+    S5 contract: writes go to DB only, never to disk.  Closes ultrareview
+    bug_005 — the bullet endpoints used to call _atomic_write to work.yml.
+    """
+    from datetime import datetime, timezone
+
+    db_path = _get_db_path_for_master()
+    if db_path is None or not db_path.exists():
+        raise HTTPException(503, "pipeline DB unavailable — cannot persist bullet edit")
+
+    etag_short = hashlib.sha256(new_blob.encode("utf-8")).hexdigest()[:16]
+    conn = open_pipeline_db(db_path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO master_content "
+            "(section, content_blob, etag, loaded_at) VALUES (?, ?, ?, ?)",
+            ("work", new_blob, etag_short, datetime.now(tz=timezone.utc).isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 @router.post(
@@ -702,21 +730,19 @@ def post_anchor_bullet(
 ) -> BulletWriteResponse:
     """Mark bullet at ``work[role_index].details[bullet_index]`` as an anchor.
 
-    When ``drop_reason`` is omitted, sets ``anchor=True``.
-    When ``drop_reason`` is provided, sets ``anchor=False`` and
-    ``drop_when=<drop_reason>``.
+    DB-only: edits the master_content row, never the YAML file (S5).
     """
-    config_path = _require_config_path()
-    work_path = _require_work_path(config_path)
+    blob = _load_work_blob_for_bullet_op()
     try:
-        mark_anchor(
-            work_path,
+        new_blob = mark_anchor_in_blob(
+            blob,
             role_index=role_index,
             bullet_index=bullet_index,
             drop_reason=body.drop_reason,
         )
     except IndexError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
+    _persist_work_blob(new_blob)
     action = "drop" if body.drop_reason is not None else "anchor"
     return BulletWriteResponse(
         role_index=role_index,
@@ -733,23 +759,18 @@ def post_add_bullet(
     role_index: int,
     body: AddBulletPayload,
 ) -> BulletWriteResponse:
-    """Append or insert a new bullet into ``work[role_index].details``."""
-    config_path = _require_config_path()
-    work_path = _require_work_path(config_path)
+    """Append or insert a new bullet (DB-only, S5)."""
+    blob = _load_work_blob_for_bullet_op()
     try:
-        add_bullet(
-            work_path,
+        new_blob, effective_index = add_bullet_in_blob(
+            blob,
             role_index=role_index,
             text=body.text,
             position=body.position,
         )
     except IndexError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
-    # Determine effective bullet_index for the response (yaml is already
-    # imported at module level — no need for a local re-import).
-    data = yaml.safe_load(work_path.read_text(encoding="utf-8"))
-    details = data[role_index].get("details", [])
-    effective_index = len(details) - 1 if body.position is None else body.position
+    _persist_work_blob(new_blob)
     return BulletWriteResponse(
         role_index=role_index,
         bullet_index=effective_index,
@@ -766,18 +787,18 @@ def delete_bullet(
     bullet_index: int,
     body: RemoveBulletPayload,
 ) -> BulletWriteResponse:
-    """Remove or soft-drop bullet at ``work[role_index].details[bullet_index]``."""
-    config_path = _require_config_path()
-    work_path = _require_work_path(config_path)
+    """Remove or soft-drop bullet (DB-only, S5)."""
+    blob = _load_work_blob_for_bullet_op()
     try:
-        remove_bullet(
-            work_path,
+        new_blob = remove_bullet_in_blob(
+            blob,
             role_index=role_index,
             bullet_index=bullet_index,
             reason=body.reason,
         )
     except IndexError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
+    _persist_work_blob(new_blob)
     return BulletWriteResponse(
         role_index=role_index,
         bullet_index=bullet_index,
