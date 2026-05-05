@@ -130,27 +130,26 @@ describe('NewApplicationModal', () => {
   // ── DOD: anti-regression — no hardcoded fixture values survive in DOM ────
 
   it('hardcoded fixture strings are absent from rendered modal when API returns any response', async () => {
-    render(<NewApplicationModal onClose={vi.fn()} onLaunch={vi.fn()} />);
+    // Single render: walk to step 2, wait for the API sentinel to confirm
+    // the live data path actually reached the DOM, then assert the legacy
+    // fixture strings are absent on that same container. This proves the
+    // negative against an actually-rendered preflight panel — not against
+    // an empty/loading state where everything would trivially be missing.
+    // (roborev job 943 fix.)
+    const { container } = render(
+      <NewApplicationModal onClose={vi.fn()} onLaunch={vi.fn()} />,
+    );
     fireEvent.click(screen.getByRole('button', { name: /review/i }));
 
-    // Wait for API data to settle
     await waitFor(() => {
       expect(screen.getByText('FROM_API_FIXTURE_claude_v9.99.99')).toBeInTheDocument();
     });
 
-    const { container } = render(<NewApplicationModal onClose={vi.fn()} onLaunch={vi.fn()} />);
-    fireEvent.click(container.querySelector('button[type="button"]')!);
-    // Advance to step 2 via the review button
-    const reviewBtn = container.querySelector('button.btn.primary') as HTMLButtonElement;
-    if (reviewBtn) fireEvent.click(reviewBtn);
-
-    await waitFor(() => {
-      const text = container.textContent ?? '';
-      expect(text).not.toContain('v1.4.0');
-      expect(text).not.toContain('v1.5.57');
-      expect(text).not.toContain('38 bullets');
-      expect(text).not.toContain('7 prior runs');
-      expect(text).not.toContain('claude CLI');
-    });
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('v1.4.0');
+    expect(text).not.toContain('v1.5.57');
+    expect(text).not.toContain('38 bullets');
+    expect(text).not.toContain('7 prior runs');
+    expect(text).not.toContain('claude CLI');
   });
 });
