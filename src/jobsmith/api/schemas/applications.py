@@ -33,6 +33,9 @@ class ApplicationDetail(BaseModel):
     finished_at: str | None
     role: str | None = None
     company: str | None = None
+    # The original job-description URL stored in the jd-parsed artifact.
+    # Null when the run predates URL persistence or jd-parsed is absent.
+    apply_url: str | None = None
     artifacts: list[ArtifactEnvelope]
 
 

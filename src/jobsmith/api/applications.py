@@ -77,19 +77,24 @@ def _latest_run_per_slug(conn) -> list:
     ).fetchall()
 
 
-def _extract_jd_fields(conn, run_id: str) -> tuple[str | None, str | None]:
-    """Return (role, company) from the jd-parsed artifact for *run_id*, or (None, None)."""
+def _extract_jd_fields(conn, run_id: str) -> tuple[str | None, str | None, str | None]:
+    """Return (role, company, apply_url) from the jd-parsed artifact for *run_id*.
+
+    All three values are None when the artifact is absent or unparseable.
+    ``apply_url`` is read from the ``apply_url`` field in jd-parsed.json,
+    which is written by the ``apply-jd-parser`` specialist.
+    """
     row = conn.execute(
         "SELECT output_json FROM specialist_outputs WHERE run_id = ? AND kind = 'jd-parsed' LIMIT 1",
         (run_id,),
     ).fetchone()
     if row is None:
-        return None, None
+        return None, None, None
     try:
         data = json.loads(row["output_json"])
-        return data.get("position"), data.get("company")
+        return data.get("position"), data.get("company"), data.get("apply_url")
     except (json.JSONDecodeError, KeyError):
-        return None, None
+        return None, None, None
 
 
 def _derive_ui_phase(phase: str, status: str) -> str:
@@ -114,7 +119,7 @@ def _derive_ui_phase(phase: str, status: str) -> str:
 
 
 def _row_to_application(row, conn) -> Application:
-    role, company = _extract_jd_fields(conn, row["run_id"])
+    role, company, _apply_url = _extract_jd_fields(conn, row["run_id"])
     return Application(
         slug=row["slug"],
         run_id=row["run_id"],
@@ -193,7 +198,7 @@ def get_application(slug: str) -> ApplicationDetail:
             "SELECT * FROM specialist_outputs WHERE run_id = ?",
             (run_id,),
         ).fetchall()
-        role, company = _extract_jd_fields(conn, run_id)
+        role, company, apply_url = _extract_jd_fields(conn, run_id)
     finally:
         conn.close()
     artifacts = [_row_to_envelope(r) for r in artifact_rows]
@@ -207,6 +212,7 @@ def get_application(slug: str) -> ApplicationDetail:
         finished_at=run_row["finished_at"],
         role=role,
         company=company,
+        apply_url=apply_url,
         artifacts=artifacts,
     )
 
