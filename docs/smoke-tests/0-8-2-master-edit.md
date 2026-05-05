@@ -92,9 +92,43 @@ Slice 4 (`feat-c3be406d`) frontend wire-up is correct (PUT fires with
 correct `If-Match`). The defect is in the backend handler that pre-dates
 this track.
 
+## DB persistence check (post-test)
+
+Direct query of `master_content` after the UI edits + master export:
+
+```
+skill       found: ['Programming-SMOKE-0-8-2']
+education   found: ['Northeastern University (SMOKE)']
+author      found: ['Pat Doe (SMOKE)']
+work        found: ['SMOKE-0-8-2: bullet added via UI to verify wire-up.']
+```
+
+All four UI-driven edits persisted to the `master_content` table. This is
+the direct evidence that the wire-up writes to the DB.
+
+## Full-pipeline attempt (out-of-scope follow-up)
+
+Tried running `jobsmith apply` from the new-application form to verify
+the apply pipeline reads master content from the DB end-to-end. Three
+attempts failed before phase 1 could surface master content into spec.json:
+
+1. Run 1 — `specialist-contracts.yaml` had `frozen_at: null` (auto-freeze
+   didn't run for this install path). Manually froze it.
+2. Run 2 — Microsoft Eightfold portal is JS-rendered; WebFetch returned no
+   usable JD. The CLI has `--jd-text` for this; the form has a "paste text"
+   mode.
+3. Run 3 — Switched to "paste text" mode, pasted a fabricated Microsoft
+   data-engineer JD. Backend received `jd_url` (the still-populated URL
+   field) and `jd_text: null` — the form's paste-text radio doesn't actually
+   suppress the URL submission.
+
+Filed as `bug-1c800e09` (form regression, not 0.8.2 scope). End-to-end
+apply-pipeline validation is deferred until that lands.
+
 ## Sign-off
 
 - [x] All 5 PUT/POST flows returned 2xx
 - [ ] Pre-state and mid-state SHA-256 match — **4 of 5; benchmark.md regressed (bug-96d070f7)**
 - [x] Post-export YAML SHA-256 differs (export regenerates files)
 - [x] `git diff` shows only intentional edits + preserved comments
+- [x] DB confirmed as source-of-truth: all 4 UI edits persisted in `master_content` table
