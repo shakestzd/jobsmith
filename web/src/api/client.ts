@@ -3,8 +3,10 @@
 // Exports:
 //   JobsmithApiError  — typed error class; callers check `.status`
 //   apiGet            — authenticated GET, returns parsed JSON
+//   apiGetWithMeta    — authenticated GET, returns { data, etag, status }
 //   apiPost           — authenticated POST with JSON body, returns parsed JSON
-//   apiPut            — authenticated PUT with JSON body, returns parsed JSON
+//   apiPut            — authenticated PUT with JSON body + optional If-Match header
+//   apiDelete         — authenticated DELETE with optional JSON body
 //   postApplication   — POST /api/applications → { slug, run_id }
 //   buildEventsUrl    — construct the SSE URL for a slug
 
@@ -80,12 +82,49 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+export async function apiPut<T>(
+  path: string,
+  body: unknown,
+  options: { ifMatch?: string; headers?: Record<string, string> } = {},
+): Promise<T> {
+  const headers: Record<string, string> = { ...authHeaders(), ...options.headers };
+  if (options.ifMatch !== undefined) {
+    // Strip surrounding double-quotes from the ETag value before sending —
+    // ETag headers arrive quoted but the backend's strip is single-pass.
+    headers['If-Match'] = options.ifMatch.replace(/^"|"$/g, '');
+  }
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'PUT',
-    headers: authHeaders(),
+    headers,
     body: JSON.stringify(body),
   });
+  await throwIfError(res);
+  return res.json() as Promise<T>;
+}
+
+export async function apiGetWithMeta<T>(
+  path: string,
+): Promise<{ data: T; etag: string | null; status: number }> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: authHeaders(),
+  });
+  await throwIfError(res);
+  const data = (await res.json()) as T;
+  const etag = res.headers.get('etag');
+  return { data, etag, status: res.status };
+}
+
+export async function apiDelete<T>(path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = { ...authHeaders() };
+  const init: RequestInit = { method: 'DELETE', headers };
+  if (body !== undefined) {
+    init.body = JSON.stringify(body);
+    headers['Content-Type'] = 'application/json';
+  } else {
+    // No body — remove Content-Type to avoid misleading empty-body requests.
+    delete headers['Content-Type'];
+  }
+  const res = await fetch(`${BASE_URL}${path}`, init);
   await throwIfError(res);
   return res.json() as Promise<T>;
 }
