@@ -865,6 +865,10 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   const [progress, setProgress] = useState<ProgressMap>(initialProgress);
   const [events, setEvents] = useState<LogEvent[]>([]);
   const [runError, setRunError] = useState<string | null>(null);
+  // SSE-derived terminal status — overrides app.status in the header badge when
+  // a phase event with status=failed arrives over the stream. Null means no SSE
+  // terminal event has been received yet; fall back to app.status in that case.
+  const [sseStatus, setSseStatus] = useState<AppStatus | null>(null);
 
   // Ref to hold the active EventSource so we can close it on cancel/unmount.
   const esRef = useRef<EventSource | null>(null);
@@ -887,12 +891,18 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         const phaseNum = ssePhaseToNum(data.phase);
         if (data.status === 'done' || data.status === 'backfilled') {
           setProgress(p => ({ ...p, [phaseNum]: 100 }));
+          // Only mark the whole run done when the last phase (render=3) completes.
+          if (phaseNum === 3) {
+            setSseStatus('done');
+          }
         } else if (data.status === 'running') {
           setProgress(p => ({ ...p, [phaseNum]: Math.max(p[phaseNum], 10) }));
           setActivePhase(phaseNum);
           setRunning(true);
+          setSseStatus('running');
         } else if (data.status === 'failed') {
           setRunning(false);
+          setSseStatus('failed');
         }
         // Add a log entry for the phase event.
         const msg = `&lt;&lt;PHASE&gt;&gt; ${data.phase} status=${data.status}`;
@@ -975,6 +985,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     // Reset state for a fresh run.
     setProgress({ 1: 0, 2: 0, 3: 0 });
     setActivePhase(1);
+    setSseStatus(null);
     setEvents([{ ts: now(), lvl: 'info', msg: `<span class="dim">apply</span> start <span class="dim">slug=</span>${slug}` }]);
     setRunning(true);
 
@@ -1086,7 +1097,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <h1 style={{ margin: 0 }}>{app.role}</h1>
-            <StatusBadge status={running ? 'running' : app.status} />
+            <StatusBadge status={running ? 'running' : (sseStatus ?? app.status)} />
           </div>
           <div style={{ display: 'flex', gap: 14, marginTop: 8, color: 'var(--fg-muted)', fontSize: 13 }}>
             <span>{app.company}</span>
