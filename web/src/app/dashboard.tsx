@@ -33,10 +33,9 @@ interface StatItem {
 }
 
 /**
- * Decorated row: wraps the raw `ApplicationRow` with cheap derived display
- * fields. Until the API exposes role/company/anchors/factcheck, we synthesise
- * them from slug + timestamps. (TODO feat-?: extend `ApplicationRow` with
- * these fields or a sibling `display` envelope.)
+ * Decorated row: wraps the raw `ApplicationRow` with derived display fields.
+ * `role` and `company` are sourced from the API; `anchors` and `factcheck` are
+ * not yet available and render as `—`.
  */
 interface DashboardRow {
   slug: string;
@@ -64,6 +63,26 @@ function relativeTime(iso: string | null): string {
   if (hr < 48) return `${hr} hr ago`;
   const day = Math.round(hr / 24);
   return `${day}d ago`;
+}
+
+/** Average finished-started duration over rows that have both timestamps. */
+function formatAvgApplyTime(rows: ApplicationRow[]): string {
+  const deltas: number[] = [];
+  for (const r of rows) {
+    if (!r.started_at || !r.finished_at) continue;
+    const start = Date.parse(r.started_at);
+    const end = Date.parse(r.finished_at);
+    if (Number.isNaN(start) || Number.isNaN(end) || end < start) continue;
+    deltas.push(end - start);
+  }
+  if (deltas.length === 0) return '—';
+  const avgMs = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+  const sec = Math.round(avgMs / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.round(min / 60);
+  return `${hr}h`;
 }
 
 function decorate(row: ApplicationRow): DashboardRow {
@@ -116,11 +135,13 @@ export function Dashboard({ openApp, openNew, filter = 'all' }: DashboardProps) 
     return list;
   }, [rows, tab, q]);
 
+  const avgApplyTime = useMemo(() => formatAvgApplyTime(apiApps), [apiApps]);
+
   const stats: StatItem[] = [
     { label: 'total', value: counts.all, delta: '' },
     { label: 'rendered', value: counts.rendered, delta: '' },
     { label: 'in progress', value: counts.running, delta: '' },
-    { label: 'avg apply time', value: '—', delta: 'TODO: derive from finished/started timestamps' },
+    { label: 'avg apply time', value: avgApplyTime, delta: '' },
   ];
 
   return (
