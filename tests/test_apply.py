@@ -3696,3 +3696,119 @@ def test_get_or_create_session_id_no_orphan_returns_persisted(
     assert returned_id == persisted_id, (
         "Must return the persisted ID when no orphan file exists"
     )
+
+
+# ---------------------------------------------------------------------------
+# auto-freeze contracts (feat-385f3405)
+# ---------------------------------------------------------------------------
+
+
+def _scaffold_apply_config_minimal(root: Path) -> Path:
+    """Scaffold a minimal .apply-config.yaml for auto-freeze tests."""
+    import yaml
+
+    config_file = root / ".apply-config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "master": {
+                    "work_yml": "assets/content/work.yml",
+                    "skill_yml": "assets/content/skill.yml",
+                    "education_yml": "assets/content/education.yml",
+                    "author_yml": "assets/content/author.yml",
+                },
+                "output": {
+                    "applications_dir": "private/applications",
+                },
+            }
+        )
+    )
+    content = root / "assets" / "content"
+    content.mkdir(parents=True, exist_ok=True)
+    for name in ("work.yml", "skill.yml", "education.yml", "author.yml"):
+        (content / name).write_text("# placeholder\n")
+    return config_file
+
+
+def test_auto_freeze_stamps_frozen_at_when_null(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When specialist-contracts.yaml has frozen_at: null, run_apply auto-freezes
+    it (stamps today's ISO date) before the gather phase starts.
+
+    TDD: fails before _auto_freeze_contracts() is wired in.
+    """
+    import yaml
+    from jobsmith.apply import run_apply
+
+    _scaffold_apply_config_minimal(tmp_path)
+
+    plugin_fake = _scaffold_plugin(tmp_path)
+    agents_apply = plugin_fake / "agents" / "apply"
+    agents_apply.mkdir(parents=True, exist_ok=True)
+    contracts_file = agents_apply / "specialist-contracts.yaml"
+    # Start with frozen_at: null — the first-run "wall"
+    contracts_file.write_text("version: 1\nfrozen_at: null\n")
+
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    call_count = [0]
+    phase_sequence = ["gather", "draft", "render"]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        idx = call_count[0]
+        call_count[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: True)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+
+    rc = run_apply("https://example.com/jobs/ml-engineer", cwd=tmp_path, skip_confirm=True)
+    assert rc == 0, f"run_apply returned {rc}"
+
+    # After run_apply, frozen_at must be a non-null ISO date string
+    updated = yaml.safe_load(contracts_file.read_text())
+    assert updated.get("frozen_at") is not None, (
+        "frozen_at should be stamped with today's date after auto-freeze"
+    )
+    assert updated["frozen_at"] != "null", "frozen_at must not be the string 'null'"
+
+
+def test_auto_freeze_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When frozen_at is already set, run_apply must NOT overwrite it."""
+    import yaml
+    from jobsmith.apply import run_apply
+
+    _scaffold_apply_config_minimal(tmp_path)
+
+    plugin_fake = _scaffold_plugin(tmp_path)
+    agents_apply = plugin_fake / "agents" / "apply"
+    agents_apply.mkdir(parents=True, exist_ok=True)
+    contracts_file = agents_apply / "specialist-contracts.yaml"
+    # Pre-existing freeze date
+    contracts_file.write_text("version: 1\nfrozen_at: '2025-01-15'\n")
+
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    call_count = [0]
+    phase_sequence = ["gather", "draft", "render"]
+
+    def fake_run_phase(phase, session_id, prompt, plugin_dir, system_prompt, resume=False, **kwargs):
+        idx = call_count[0]
+        call_count[0] += 1
+        return iter(_make_phase_events(phase_sequence[idx]))
+
+    monkeypatch.setattr("jobsmith.apply.headless.run_phase", fake_run_phase)
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: True)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+
+    rc = run_apply("https://example.com/jobs/ml-engineer", cwd=tmp_path, skip_confirm=True)
+    assert rc == 0, f"run_apply returned {rc}"
+
+    updated = yaml.safe_load(contracts_file.read_text())
+    assert updated["frozen_at"] == "2025-01-15", (
+        "existing frozen_at must not be overwritten"
+    )

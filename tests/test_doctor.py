@@ -264,9 +264,9 @@ def test_check_plugin_dir_resolves_fail_no_plugin_json(monkeypatch: pytest.Monke
 # run_all_checks
 # ---------------------------------------------------------------------------
 
-def test_run_all_checks_returns_seven_results() -> None:
+def test_run_all_checks_returns_eight_results() -> None:
     results = run_all_checks()
-    assert len(results) == 7
+    assert len(results) == 8
     assert all(isinstance(r, CheckResult) for r in results)
 
 
@@ -282,6 +282,7 @@ def test_run_all_checks_stable_order() -> None:
         "apply_config",
         "master_yaml",
         "benchmarks",
+        "contracts_frozen",
     ]
     assert names == expected_names
 
@@ -415,3 +416,63 @@ def test_cli_doctor_exit_1_any_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# check_contracts_frozen (feat-385f3405)
+# ---------------------------------------------------------------------------
+
+def test_check_contracts_frozen_pass_when_frozen(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """check_contracts_frozen passes when frozen_at is a non-null ISO date."""
+    from jobsmith.doctor import check_contracts_frozen
+    import jobsmith
+
+    plugin_fake = tmp_path / "plugin"
+    agents_apply = plugin_fake / "agents" / "apply"
+    agents_apply.mkdir(parents=True, exist_ok=True)
+    (agents_apply / "specialist-contracts.yaml").write_text(
+        "version: 1\nfrozen_at: '2025-06-01'\n"
+    )
+    monkeypatch.setattr(jobsmith, "plugin_dir", lambda: plugin_fake)
+
+    result = check_contracts_frozen()
+    assert result.ok is True
+    assert result.name == "contracts_frozen"
+
+
+def test_check_contracts_frozen_fail_when_null(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """check_contracts_frozen fails when frozen_at is null and includes remediation command."""
+    from jobsmith.doctor import check_contracts_frozen
+    import jobsmith
+
+    plugin_fake = tmp_path / "plugin"
+    agents_apply = plugin_fake / "agents" / "apply"
+    agents_apply.mkdir(parents=True, exist_ok=True)
+    (agents_apply / "specialist-contracts.yaml").write_text(
+        "version: 1\nfrozen_at: null\n"
+    )
+    monkeypatch.setattr(jobsmith, "plugin_dir", lambda: plugin_fake)
+
+    result = check_contracts_frozen()
+    assert result.ok is False
+    assert result.name == "contracts_frozen"
+    assert result.remediation is not None
+    # Remediation must tell the user how to fix it
+    assert "specialist-contracts.yaml" in result.remediation
+
+
+def test_check_contracts_frozen_pass_when_file_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """check_contracts_frozen passes (skip) when contracts file does not exist.
+
+    Non-blocking: users who don't use the apply pipeline should not see a red row.
+    """
+    from jobsmith.doctor import check_contracts_frozen
+    import jobsmith
+
+    plugin_fake = tmp_path / "plugin"
+    plugin_fake.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(jobsmith, "plugin_dir", lambda: plugin_fake)
+
+    result = check_contracts_frozen()
+    assert result.ok is True
+    assert "not found" in result.message or "skip" in result.message.lower()
