@@ -1,7 +1,8 @@
-// application.test.tsx — DOD-pinned tests for the application-detail page
-// (feat-83d6cf54, GH#52).
+// application.test.tsx — DOD-pinned tests for the application-detail page.
 //
-// Locks in:
+// Combines two PR's worth of regression coverage:
+//
+// feat-83d6cf54 (GH#52) — fixture removal:
 // - The 15-line fabricated event log (`14:02:01` … `14:02:14`) is gone — the
 //   stream starts empty and only grows from the real SSE subscription.
 // - The hardcoded "Recurly Engineering" / "11m → 2m20s" / "$140k/yr" /
@@ -13,6 +14,16 @@
 //   …) is gone.
 // - When the API returns artifacts, ArtifactsTab / FactCheckTab / AnchorCheckTab
 //   render the API values (sentinel test).
+// - SSE auto-subscribes when opening a status='running' slug.
+//
+// feat-d6b1e167 (GH#50) — re-run-apply behavior:
+// - For an already-complete slug (status=done/rendered/backfilled), the
+//   re-run button is labelled "force re-run apply" and the click invokes
+//   postApplication with `{ force: true }`.
+// - For an in-flight or failed slug, the button is labelled "re-run apply"
+//   and postApplication is invoked WITHOUT force (or with force=false).
+// - The button is DISABLED entirely when the API has no `url` field for the
+//   slug — protects against destructive force-restart with a placeholder URL.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -30,7 +41,7 @@ vi.mock('../api/client', () => ({
   },
 }));
 
-import { apiGet } from '../api/client';
+import { apiGet, postApplication } from '../api/client';
 
 // Mock EventSource — jsdom doesn't ship one, and we don't need real SSE here.
 // `constructorCalls` lets a test assert whether (and with what URL) the
@@ -54,6 +65,9 @@ class FakeEventSource {
 }
 (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
 
+// Default fixture has a URL set so the re-run button is enabled. Tests
+// that exercise the URL-missing path override `url` to '' or null on the
+// returned object.
 const BASE_API_DETAIL = {
   slug: 'acme-eng-2026-04',
   run_id: 'run-1',
@@ -65,11 +79,13 @@ const BASE_API_DETAIL = {
   role: 'Engineer',
   company: 'Acme',
   artifacts: [],
+  url: 'https://example.com/jobs/acme-eng',
 };
 
 describe('ApplicationDetail anti-regression: no fabricated fixtures (feat-83d6cf54)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    constructorCalls.length = 0;
     (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue(BASE_API_DETAIL);
   });
 
@@ -109,7 +125,6 @@ describe('ApplicationDetail anti-regression: no fabricated fixtures (feat-83d6cf
 
   it('does not render any of the fabricated anchor IDs in the anchors tab', async () => {
     render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
-    // Wait for the page to load, then switch to the anchors tab.
     await waitFor(() => {
       expect(screen.getByText('anchors')).toBeInTheDocument();
     });
@@ -125,7 +140,6 @@ describe('ApplicationDetail anti-regression: no fabricated fixtures (feat-83d6cf
     for (const id of anchorIds) {
       expect(screen.queryByText(id)).toBeNull();
     }
-    // Empty-state message should appear instead.
     expect(screen.getByText(/no anchor-check data yet/i)).toBeInTheDocument();
   });
 
@@ -149,7 +163,6 @@ describe('ApplicationDetail anti-regression: no fabricated fixtures (feat-83d6cf
     });
     fireEvent.click(screen.getByText('factcheck'));
     expect(screen.getByText(/no fact-check data yet/i)).toBeInTheDocument();
-    // None of the fake claims should leak in.
     expect(screen.queryByText(/work\.yml#deploy-pipeline/)).toBeNull();
     expect(screen.queryByText(/work\.yml#artifact-cache/)).toBeNull();
     expect(screen.queryByText(/42% page volume reduction/)).toBeNull();
@@ -159,6 +172,7 @@ describe('ApplicationDetail anti-regression: no fabricated fixtures (feat-83d6cf
 describe('ApplicationDetail positive: API artifacts surface in DOM (feat-83d6cf54)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    constructorCalls.length = 0;
   });
 
   it('renders fact-check rows from the real FactCheckResult schema (verified_claims + failed_claims)', async () => {
@@ -249,12 +263,8 @@ describe('ApplicationDetail positive: API artifacts surface in DOM (feat-83d6cf5
     expect(screen.getByText('FROM_API_BULLET_beta')).toBeInTheDocument();
     expect(screen.getByText('FROM_API_BULLET_gamma')).toBeInTheDocument();
     expect(screen.getByText('FROM_API_REASON_delta')).toBeInTheDocument();
-    // Top-level message surfaces (esp. on failure path).
     expect(screen.getByText('FROM_API_GUARD_MESSAGE_epsilon')).toBeInTheDocument();
-    // exit_code !== 0 OR dropped_without_reason >0 → "failed" badge.
-    // Badge text: "1 / 3 preserved · failed".
     expect(screen.getByText(/1 \/ 3 preserved · failed/)).toBeInTheDocument();
-    // The "dropped without reason" header surfaces with count, in danger color.
     expect(screen.getByText(/dropped without reason \(1\)/i)).toBeInTheDocument();
   });
 
@@ -281,7 +291,6 @@ describe('ApplicationDetail positive: API artifacts surface in DOM (feat-83d6cf5
     });
     fireEvent.click(screen.getByText('artifacts'));
     await waitFor(() => {
-      // The artifact's JSON is rendered as a <pre> block.
       expect(
         screen.getByText(/FROM_API_FIXTURE_company_omega/),
       ).toBeInTheDocument();
@@ -319,9 +328,6 @@ describe('ApplicationDetail SSE auto-subscribe (roborev job 945)', () => {
     await waitFor(() => {
       expect(constructorCalls.length).toBeGreaterThan(0);
     });
-    // The buildEventsUrl mock returns a known URL — confirm EventSource was
-    // constructed with it. Without the auto-subscribe effect, opening a
-    // running slug would never call EventSource and the log would freeze.
     expect(constructorCalls[0]).toBe('http://localhost/events-noop');
   });
 
@@ -332,10 +338,147 @@ describe('ApplicationDetail SSE auto-subscribe (roborev job 945)', () => {
       ui_phase: 'rendered',
     });
     render(<ApplicationDetail slug="finished" back={() => {}} />);
-    // Wait long enough that any auto-subscribe would have fired.
     await waitFor(() => {
       expect(screen.getByText('finished')).toBeInTheDocument();
     });
     expect(constructorCalls.length).toBe(0);
+  });
+});
+
+describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    constructorCalls.length = 0;
+    (postApplication as ReturnType<typeof vi.fn>).mockResolvedValue({
+      slug: 'acme-eng-2026-04',
+      run_id: 'run-2',
+    });
+  });
+
+  it('shows "force re-run apply" label for a slug whose status is "done"', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'done',
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /force re-run apply/i })).toBeInTheDocument();
+    });
+  });
+
+  it('shows "force re-run apply" label for a slug whose status is "rendered"', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'rendered',
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /force re-run apply/i })).toBeInTheDocument();
+    });
+  });
+
+  it('shows "force re-run apply" label for a slug whose status is "backfilled"', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'backfilled',
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /force re-run apply/i })).toBeInTheDocument();
+    });
+  });
+
+  it('shows plain "re-run apply" label when the slug has not completed', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'failed',
+      finished_at: null,
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^re-run apply$/i })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /force re-run apply/i })).toBeNull();
+  });
+
+  it('clicking the force button invokes postApplication with force=true', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'done',
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /force re-run apply/i });
+    fireEvent.click(btn);
+    await waitFor(() => {
+      expect(postApplication).toHaveBeenCalledWith(
+        expect.any(String),
+        'acme-eng-2026-04',
+        { force: true },
+      );
+    });
+  });
+
+  it('clicking the plain re-run button invokes postApplication with force=false', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'failed',
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /^re-run apply$/i });
+    fireEvent.click(btn);
+    await waitFor(() => {
+      expect(postApplication).toHaveBeenCalledWith(
+        expect.any(String),
+        'acme-eng-2026-04',
+        { force: false },
+      );
+    });
+  });
+
+  it('clicking force button passes the REAL url, never a placeholder (roborev job 944)', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'done',
+      url: 'https://real.example.com/jobs/clay-gtm-data-analyst',
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /force re-run apply/i });
+    fireEvent.click(btn);
+    await waitFor(() => {
+      expect(postApplication).toHaveBeenCalledWith(
+        'https://real.example.com/jobs/clay-gtm-data-analyst',
+        'acme-eng-2026-04',
+        { force: true },
+      );
+    });
+    const calls = (postApplication as ReturnType<typeof vi.fn>).mock.calls;
+    for (const call of calls) {
+      expect(call[0]).not.toMatch(/placeholder/);
+    }
+  });
+
+  it('disables the re-run button when the API does not expose a URL (roborev job 944)', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'done',
+      url: '',
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /force re-run apply/i });
+    expect(btn).toBeDisabled();
+  });
+
+  it('disables the re-run button when the API URL field is missing entirely', async () => {
+    const { url: _drop, ...detailWithoutUrl } = {
+      ...BASE_API_DETAIL,
+      status: 'failed',
+    };
+    void _drop;
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue(detailWithoutUrl);
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /^re-run apply$/i });
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
+    expect(postApplication).not.toHaveBeenCalled();
   });
 });

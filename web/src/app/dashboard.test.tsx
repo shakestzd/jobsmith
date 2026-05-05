@@ -88,4 +88,15 @@ describe('Dashboard', () => {
     const dashes = screen.getAllByText('—');
     expect(dashes.length).toBeGreaterThan(0);
   });
+
+  // ── feat-aba75dae anti-regression: dead "import existing" button removed ──
+
+  it('does NOT render the decorative "import existing" button (feat-aba75dae)', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue([BASE_ROW]);
+    render(<Dashboard openApp={() => {}} openNew={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByText('acme-eng-2026-04')).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /import existing/i })).toBeNull();
+  });
 });

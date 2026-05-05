@@ -247,6 +247,92 @@ class TestPostApplicationsConflict:
 
 
 # ---------------------------------------------------------------------------
+# 6a. force=True propagates --force to the launched argv (feat-d6b1e167, GH#50)
+# ---------------------------------------------------------------------------
+
+
+class TestPostApplicationsForce:
+    """Re-running an already-complete slug requires --force on the server side
+    or the apply pipeline silently aborts. The UI surfaces this via a `force`
+    field on the request body; the API must plumb it through to argv.
+    """
+
+    def test_force_true_appends_force_to_argv(self, client: TestClient) -> None:
+        """When body.force=True, the argv built by _launch_run includes --force."""
+        from jobsmith.api import applications as apps_mod
+
+        captured: dict[str, list[str]] = {}
+
+        async def fake_start(self, *, slug: str, argv: list[str], cwd):
+            captured["argv"] = argv
+            return "run-force-001"
+
+        with patch.object(apps_mod.RunSupervisor, "start", new=fake_start):
+            resp = client.post(
+                "/api/applications",
+                json={
+                    "url": "https://example.com/jobs/eng",
+                    "slug": "completed-slug",
+                    "force": True,
+                },
+                headers=_auth_header(),
+            )
+
+        assert resp.status_code == 201, resp.text
+        assert "argv" in captured, "supervisor.start was not invoked"
+        assert "--force" in captured["argv"], (
+            f"--force missing from argv when body.force=True. argv={captured['argv']!r}"
+        )
+
+    def test_force_false_omits_force_from_argv(self, client: TestClient) -> None:
+        """When body.force=False (default), --force is NOT in argv."""
+        from jobsmith.api import applications as apps_mod
+
+        captured: dict[str, list[str]] = {}
+
+        async def fake_start(self, *, slug: str, argv: list[str], cwd):
+            captured["argv"] = argv
+            return "run-force-002"
+
+        with patch.object(apps_mod.RunSupervisor, "start", new=fake_start):
+            resp = client.post(
+                "/api/applications",
+                json={
+                    "url": "https://example.com/jobs/eng",
+                    "slug": "fresh-slug",
+                    "force": False,
+                },
+                headers=_auth_header(),
+            )
+
+        assert resp.status_code == 201, resp.text
+        assert "argv" in captured
+        assert "--force" not in captured["argv"], (
+            f"--force should NOT be in argv when body.force=False. argv={captured['argv']!r}"
+        )
+
+    def test_force_omitted_defaults_to_false(self, client: TestClient) -> None:
+        """When body has no `force` key, server treats it as force=False."""
+        from jobsmith.api import applications as apps_mod
+
+        captured: dict[str, list[str]] = {}
+
+        async def fake_start(self, *, slug: str, argv: list[str], cwd):
+            captured["argv"] = argv
+            return "run-force-003"
+
+        with patch.object(apps_mod.RunSupervisor, "start", new=fake_start):
+            resp = client.post(
+                "/api/applications",
+                json={"url": "https://example.com/jobs/eng", "slug": "default-slug"},
+                headers=_auth_header(),
+            )
+
+        assert resp.status_code == 201, resp.text
+        assert "--force" not in captured["argv"]
+
+
+# ---------------------------------------------------------------------------
 # 6. _launch_run argv parses against the live CLI (roborev job 940 fix)
 # ---------------------------------------------------------------------------
 

@@ -110,4 +110,15 @@ describe('MasterContent validate button', () => {
 
     resolveGet!(MOCK_PAYLOAD);
   });
+
+  // ── feat-aba75dae anti-regression: dead buttons removed ──────────────
+
+  it('does NOT render the decorative "open in editor" button (feat-aba75dae)', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue(MOCK_PAYLOAD);
+    render(<MasterContent />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /validate/i })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /open in editor/i })).toBeNull();
+  });
 });

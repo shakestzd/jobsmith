@@ -92,4 +92,17 @@ describe('FeedbackView', () => {
     const stats = screen.getAllByText('2');
     expect(stats.length).toBeGreaterThan(0);
   });
+
+  // ── feat-aba75dae anti-regression: dead action buttons removed ────────
+
+  it('does NOT render decorative "export json", "prune", or "record" buttons (feat-aba75dae)', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue(MOCK_ROWS);
+    render(<FeedbackView />);
+    await waitFor(() => {
+      expect(screen.getByText('anthropic-applied-ai-2026-04')).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /export json/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^prune$/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^record$/i })).toBeNull();
+  });
 });
