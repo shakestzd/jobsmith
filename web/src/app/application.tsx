@@ -1,8 +1,8 @@
 // application.tsx — port of design/app/application.jsx
 //
 // Exports: ApplicationDetail (top-level).
-// Sub-components (PhaseCard, PipelineTab, ArtifactsTab, PdfPreview,
-// FactCheckTab, AnchorCheckTab, ConfigTab) are file-local.
+// Sub-components (PhaseCard, PipelineTab, ArtifactsTab, FactCheckTab,
+// AnchorCheckTab, ConfigTab) are file-local.
 //
 // DOM structure, class names, and visual behaviour are pixel-identical to
 // the design source.
@@ -12,7 +12,10 @@ import type { SampleApp, AppPhase, AppStatus, IconName } from '../types';
 import { Icon, Badge, StatusBadge } from './shared';
 import { useApplication } from '../api/hooks';
 import { JobsmithApiError, postApplication, buildEventsUrl, redactSensitive } from '../api/client';
-import type { ApplicationDetail as ApiApplicationDetail } from '../api/types';
+import type {
+  ApplicationDetail as ApiApplicationDetail,
+  ApplicationArtifact as ApiApplicationArtifact,
+} from '../api/types';
 
 // ── Public prop type ─────────────────────────────────────────────────────────
 
@@ -22,24 +25,6 @@ export interface ApplicationDetailProps {
   /** Navigate back to the applications list. */
   back: () => void;
 }
-
-// ── File-tree node shape ─────────────────────────────────────────────────────
-
-interface TreeFile {
-  kind: 'file';
-  name: string;
-  size: string;
-  highlight?: boolean;
-}
-
-interface TreeDir {
-  kind: 'dir';
-  name: string;
-  open: boolean;
-  children: TreeFile[];
-}
-
-type TreeNode = TreeDir | TreeFile;
 
 // ── Phase-related helpers ────────────────────────────────────────────────────
 
@@ -89,27 +74,10 @@ function phaseDuration(n: number): string {
   return (['1.4s', '3.8s', '12.1s'] as const)[n - 1] ?? '—';
 }
 
-// NEW_EVENTS removed — event log is now driven by the real SSE stream.
-
-function seedEvents(app: SampleApp): LogEvent[] {
-  return [
-    { ts: '14:02:01', lvl: 'info', msg: '<span class="dim">apply</span> start <span class="dim">slug=</span>' + app.slug },
-    { ts: '14:02:01', lvl: 'info', msg: '<span class="dim">phase=</span>gather' },
-    { ts: '14:02:02', lvl: 'tool', msg: 'WebFetch: ' + app.url },
-    { ts: '14:02:04', lvl: 'spec', msg: 'apply-jd-parser: extracted 18 requirements, 5 must-haves' },
-    { ts: '14:02:05', lvl: 'spec', msg: 'apply-anchor-scorer: 14 anchors, top match deploy-pipeline-rebuild (0.92)' },
-    { ts: '14:02:06', lvl: 'tool', msg: 'Write: <span class="dim">.apply-state/spec.json</span>' },
-    { ts: '14:02:06', lvl: 'done', msg: '&lt;&lt;PHASE_COMPLETE&gt;&gt; gather (1.4s)' },
-    { ts: '14:02:07', lvl: 'info', msg: '<span class="dim">phase=</span>draft' },
-    { ts: '14:02:09', lvl: 'spec', msg: 'apply-bullet-selector: selected 14 bullets, dropped 0' },
-    { ts: '14:02:10', lvl: 'spec', msg: 'apply-cover-drafter: 312 words, 4 paragraphs' },
-    { ts: '14:02:11', lvl: 'spec', msg: 'apply-factchecker: 5/5 claims verified' },
-    { ts: '14:02:11', lvl: 'tool', msg: 'Write: <span class="dim">.apply-state/cover_draft.md</span>' },
-    { ts: '14:02:11', lvl: 'done', msg: '&lt;&lt;PHASE_COMPLETE&gt;&gt; draft (3.8s)' },
-    { ts: '14:02:12', lvl: 'info', msg: '<span class="dim">phase=</span>render' },
-    { ts: '14:02:14', lvl: 'spec', msg: 'apply-assembler: wrote _variables.yml (12 vars)' },
-  ];
-}
+// The event log starts empty — entries are appended ONLY from the real SSE
+// stream subscribed in subscribeToEvents(). Previously this seeded a 15-line
+// fabricated event sequence (see GH#52); rendering those alongside live SSE
+// data made the UI lie about what the pipeline was doing.
 
 // ── Tab type ─────────────────────────────────────────────────────────────────
 
@@ -306,19 +274,12 @@ function PipelineTab({ events, running, phase, progress }: PipelineTabProps) {
           </div>
         </div>
 
-        <div className="card">
-          <div className="card-h">
-            <h3>db writes</h3>
-            <span className="sub">private/jobsmith.db</span>
-          </div>
-          <div style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.9 }}>
-            <div><b style={{ color: 'var(--fg)' }}>apply_runs</b>     <span style={{ color: 'var(--fg-subtle)' }}>1 row</span></div>
-            <div><b style={{ color: 'var(--fg)' }}>spec</b>           <span style={{ color: 'var(--fg-subtle)' }}>1 row</span></div>
-            <div><b style={{ color: 'var(--fg)' }}>bullet_selection</b><span style={{ color: 'var(--fg-subtle)', marginLeft: 6 }}>14 rows</span></div>
-            <div><b style={{ color: 'var(--fg)' }}>cover_draft</b>    <span style={{ color: 'var(--fg-subtle)' }}>1 row</span></div>
-            <div><b style={{ color: 'var(--fg)' }}>renders</b>        <span style={{ color: 'var(--fg-subtle)' }}>2 rows</span></div>
-          </div>
-        </div>
+        {/*
+          The "db writes" panel previously displayed hardcoded row counts
+          (apply_runs 1, spec 1, bullet_selection 14, …) regardless of the
+          actual pipeline state (GH#52). Removed entirely until an API
+          endpoint exposes real counts; reintroduce here when it does.
+        */}
       </div>
     </div>
   );
@@ -327,195 +288,93 @@ function PipelineTab({ events, running, phase, progress }: PipelineTabProps) {
 // ── ArtifactsTab ─────────────────────────────────────────────────────────────
 
 interface ArtifactsTabProps {
-  app: SampleApp;
+  artifacts: ApiApplicationArtifact[];
 }
 
-function ArtifactsTab({ app }: ArtifactsTabProps) {
-  const [sel, setSel] = useState<string>('cover_draft.md');
+// API artifact `kind` values to friendly display names.
+const ARTIFACT_KIND_LABELS: Record<string, string> = {
+  'jd-parsed': 'spec.json',
+  'bullet-selection': 'bullet_selection.json',
+  'cover-draft': 'cover_draft.md',
+  'fact-check': 'fact_check.json',
+  'anchor-check': 'anchor_check.json',
+};
 
-  const tree: TreeNode[] = [
-    {
-      kind: 'dir', name: '.apply-state/', open: true, children: [
-        { kind: 'file', name: 'spec.json', size: '2.1 KB' },
-        { kind: 'file', name: 'bullet_selection.json', size: '4.8 KB' },
-        { kind: 'file', name: 'cover_draft.md', size: '1.6 KB', highlight: true },
-        { kind: 'file', name: 'fact_check.json', size: '820 B' },
-        { kind: 'file', name: 'anchor_check.json', size: '440 B' },
-      ],
-    },
-    {
-      kind: 'dir', name: 'rendered/', open: true, children: [
-        { kind: 'file', name: 'resume.pdf', size: '92 KB' },
-        { kind: 'file', name: 'cover.pdf', size: '58 KB' },
-        { kind: 'file', name: 'index.qmd', size: '3.2 KB' },
-        { kind: 'file', name: '_variables.yml', size: '1.1 KB' },
-      ],
-    },
-  ];
+function artifactDisplayName(kind: string): string {
+  return ARTIFACT_KIND_LABELS[kind] ?? `${kind}.json`;
+}
 
-  const PREVIEWS: Record<string, string> = {
-    'spec.json': `{
-  "slug": "${app.slug}",
-  "company": "${app.company}",
-  "role": "${app.role}",
-  "url": "${app.url}",
-  "must_haves": [
-    "deep typescript + node",
-    "shipped customer-facing CLI",
-    "performance work"
-  ],
-  "nice_to_haves": ["rust", "edge runtime"],
-  "themes": ["developer experience", "platform"]
-}`,
-    'cover_draft.md': `# Cover — ${app.role}, ${app.company}
+function ArtifactsTab({ artifacts }: ArtifactsTabProps) {
+  const [sel, setSel] = useState<string | null>(
+    artifacts.length > 0 ? artifacts[0].kind : null,
+  );
 
-I've been a heavy ${app.company} user for the past three years — the kind
-of user who reads the changelog. The bits of your stack that have stayed
-with me are exactly where I want to spend the next chapter of work.
+  if (artifacts.length === 0) {
+    return (
+      <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-muted)' }}>
+        <div className="mono-sm" style={{ marginBottom: 6 }}>no artifacts yet</div>
+        <div style={{ fontSize: 13 }}>
+          this run hasn't produced any specialist outputs. once the pipeline
+          writes to <code>.apply-state/</code> the artifacts will appear here.
+        </div>
+      </div>
+    );
+  }
 
-In my last role at Recurly Engineering, I rebuilt the deploy pipeline
-(11m → 2m20s median) and shipped the artifact-cache layer that now
-serves 1.2B requests/month at p99 < 38ms. The work that mattered most
-wasn't either of those wins on its own — it was the cultural turn from
-"prod is scary" to "prod is boring."
-
-That's the work I want to bring to ${app.company}. ...`,
-    'fact_check.json': `{
-  "claims": [
-    { "claim": "11m → 2m20s deploy time", "source": "work.yml#deploy-pipeline", "ok": true },
-    { "claim": "1.2B requests/month",     "source": "work.yml#artifact-cache",  "ok": true },
-    { "claim": "p99 < 38ms",              "source": "work.yml#artifact-cache",  "ok": true },
-    { "claim": "$140k/yr recovered",      "source": "work.yml#scheduler-mig",   "ok": true },
-    { "claim": "180 engineers",           "source": "work.yml#dev-env",         "ok": true }
-  ],
-  "unverified": [],
-  "summary": "5 / 5 claims verified against master YAML"
-}`,
-    'bullet_selection.json': `{
-  "selected": [
-    "deploy-pipeline-rebuild",
-    "artifact-cache-rust",
-    "scheduler-migration",
-    "live-reload-dev-env"
-  ],
-  "anchors_preserved": "14/14",
-  "drop_reasons": {},
-  "rationale": "Selected bullets emphasize platform / DX impact + measured performance work, matching the role's stated focus."
-}`,
-    'anchor_check.json': `{
-  "total_anchors": 14,
-  "preserved": 14,
-  "dropped": 0,
-  "ok": true
-}`,
-    '_variables.yml': `slug: ${app.slug}
-company: "${app.company}"
-role:    "${app.role}"
-date:    2026-04-30
-selected_bullets:
-  - id: deploy-pipeline-rebuild
-  - id: artifact-cache-rust
-  - id: scheduler-migration
-  - id: live-reload-dev-env
-cover_path: cover_draft.md`,
-    'index.qmd': `---
-title: "{{< var role >}} — {{< var company >}}"
-format:
-  jobsmith-resume-pdf: default
-  jobsmith-cover-pdf:
-    output-file: cover.pdf
----
-{{< include _bullets.qmd >}}
-{{< include _cover.qmd >}}`,
-    'resume.pdf': '__PDF_PREVIEW__',
-    'cover.pdf': '__PDF_PREVIEW__',
-  };
+  const selectedArtifact = artifacts.find(a => a.kind === sel) ?? artifacts[0];
+  const previewJson = JSON.stringify(selectedArtifact.output, null, 2);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16 }}>
       <div className="card" style={{ padding: '12px' }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 8px 8px' }}>artifacts</div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 8px 8px' }}>
+          artifacts ({artifacts.length})
+        </div>
         <div className="tree">
-          {tree.map((node, i) => {
-            if (node.kind !== 'dir') return null;
-            const dir = node as TreeDir;
-            return (
-              <div key={i}>
-                <div className="tree-row">
-                  <Icon name="chevd" size={10} className="caret" />
-                  <Icon name="folder" size={12} className="ico" />
-                  <span style={{ color: 'var(--fg)' }}>{dir.name}</span>
-                </div>
-                <div className="tree-children">
-                  {dir.children.map(f => (
-                    <div
-                      key={f.name}
-                      className={`tree-row ${sel === f.name ? 'active' : ''}`}
-                      onClick={() => setSel(f.name)}
-                    >
-                      <span className="caret" />
-                      <Icon name="doc" size={11} className="ico" />
-                      <span style={{ flex: 1 }}>{f.name}</span>
-                      <span style={{ color: 'var(--fg-subtle)', fontSize: 10.5 }}>{f.size}</span>
-                    </div>
-                  ))}
-                </div>
+          <div className="tree-children">
+            {artifacts.map(a => (
+              <div
+                key={`${a.run_id}-${a.kind}-${a.version ?? 0}`}
+                className={`tree-row ${sel === a.kind ? 'active' : ''}`}
+                onClick={() => setSel(a.kind)}
+              >
+                <span className="caret" />
+                <Icon name="doc" size={11} className="ico" />
+                <span style={{ flex: 1 }}>{artifactDisplayName(a.kind)}</span>
+                <span style={{ color: 'var(--fg-subtle)', fontSize: 10.5 }}>
+                  {a.specialist}
+                </span>
               </div>
-            );
-          })}
+            ))}
+          </div>
         </div>
       </div>
 
       <div className="card">
         <div className="card-h">
           <Icon name="doc" size={13} />
-          <h3 style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{sel}</h3>
-          <div className="right">
-            <button className="btn ghost sm">copy</button>
-            <button className="btn ghost sm">open</button>
-          </div>
+          <h3 style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>
+            {artifactDisplayName(selectedArtifact.kind)}
+          </h3>
+          <span className="sub" style={{ color: 'var(--fg-subtle)' }}>
+            {selectedArtifact.specialist}
+            {selectedArtifact.finished_at ? ` · ${selectedArtifact.finished_at}` : ''}
+          </span>
         </div>
-        {PREVIEWS[sel] === '__PDF_PREVIEW__' ? (
-          <PdfPreview name={sel} />
-        ) : (
-          <pre className="code" style={{ border: 'none', borderRadius: 0, margin: 0, maxHeight: 560 }}>{PREVIEWS[sel]}</pre>
-        )}
+        <pre className="code" style={{ border: 'none', borderRadius: 0, margin: 0, maxHeight: 560 }}>
+          {previewJson}
+        </pre>
       </div>
     </div>
   );
 }
 
-// ── PdfPreview ───────────────────────────────────────────────────────────────
-
-interface PdfPreviewProps {
-  name: string;
-}
-
-function PdfPreview({ name }: PdfPreviewProps) {
-  return (
-    <div style={{ padding: 24, background: 'var(--bg-sunk)', minHeight: 520 }}>
-      <div style={{
-        background: '#fff', color: '#111', maxWidth: 540, margin: '0 auto',
-        padding: '48px 56px', boxShadow: 'var(--shadow-md)', fontFamily: 'Inter, sans-serif',
-        aspectRatio: '8.5 / 11', minHeight: 480, borderRadius: 4,
-      }}>
-        <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em' }}>jordan smith</div>
-        <div style={{ fontSize: 12, color: '#666', marginBottom: 18, fontFamily: 'JetBrains Mono, monospace' }}>jordan@smith.dev · github.com/jsmith · sf, ca</div>
-        <div style={{ height: 1, background: '#ddd', margin: '12px 0 16px' }} />
-        <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#333', marginBottom: 6 }}>experience</div>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>Recurly Engineering · Senior Engineer</div>
-        <div style={{ fontSize: 11, color: '#666', marginBottom: 6 }}>2022 — present</div>
-        <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11, color: '#222', lineHeight: 1.55 }}>
-          <li>Rebuilt deploy pipeline; cut median deploy time 11m → 2m20s.</li>
-          <li>Designed artifact-cache layer (Rust + S3) serving 1.2B req/mo at p99 &lt; 38ms.</li>
-          <li>Migrated 320 services off legacy scheduler; recovered ~$140k/yr in idle compute.</li>
-          <li>Built live-reload dev env used by ~180 engineers; cold-start 18s → 3s.</li>
-        </ul>
-        <div style={{ marginTop: 14, fontSize: 10, color: '#999', fontFamily: 'JetBrains Mono, monospace' }}>{name} · rendered by jobsmith via quarto</div>
-      </div>
-    </div>
-  );
-}
+// PdfPreview was removed in feat-83d6cf54 (GH#52). It previously rendered a
+// hardcoded resume mockup ("Recurly Engineering · Senior Engineer",
+// "11m → 2m20s deploy time", "$140k/yr recovered", etc.) regardless of the
+// real master/work.yml content. The new ArtifactsTab renders artifact JSON
+// directly; rendered-PDF preview will return when an API endpoint serves
+// the bytes.
 
 // ── FactCheckTab ─────────────────────────────────────────────────────────────
 
@@ -525,16 +384,50 @@ interface FactClaim {
   ok: boolean;
 }
 
-function FactCheckTab() {
-  const claims: FactClaim[] = [
-    { c: '11m → 2m20s deploy time', src: 'work.yml#deploy-pipeline', ok: true },
-    { c: '1.2B requests/month', src: 'work.yml#artifact-cache', ok: true },
-    { c: 'p99 < 38ms', src: 'work.yml#artifact-cache', ok: true },
-    { c: '$140k/yr recovered', src: 'work.yml#scheduler-mig', ok: true },
-    { c: '180 engineers', src: 'work.yml#dev-env', ok: true },
-    { c: '320 services migrated', src: 'work.yml#scheduler-mig', ok: true },
-    { c: '42% page volume reduction', src: 'work.yml#oncall', ok: true },
-  ];
+interface FactCheckTabProps {
+  artifacts: ApiApplicationArtifact[];
+}
+
+// Extract claims from a fact-check artifact's `output` payload. The shape
+// is intentionally loose (Record<string, unknown>) on the API side, so we
+// defensively narrow it here. Returns [] when no fact-check artifact exists
+// or its shape doesn't match — the empty state renders an explicit "no
+// fact-check data yet" message rather than fabricating claims.
+function extractFactCheckClaims(artifacts: ApiApplicationArtifact[]): FactClaim[] {
+  const fc = artifacts.find(
+    a => a.kind === 'fact-check' || a.kind === 'fact_check' || a.kind === 'factcheck',
+  );
+  if (!fc) return [];
+  const raw = (fc.output as { claims?: unknown }).claims;
+  if (!Array.isArray(raw)) return [];
+  const out: FactClaim[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const obj = item as Record<string, unknown>;
+    const claim = typeof obj.claim === 'string' ? obj.claim : null;
+    const source = typeof obj.source === 'string' ? obj.source : '';
+    const ok = obj.ok === true;
+    if (claim) out.push({ c: claim, src: source, ok });
+  }
+  return out;
+}
+
+function FactCheckTab({ artifacts }: FactCheckTabProps) {
+  const claims = extractFactCheckClaims(artifacts);
+
+  if (claims.length === 0) {
+    return (
+      <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-muted)' }}>
+        <div className="mono-sm" style={{ marginBottom: 6 }}>no fact-check data yet</div>
+        <div style={{ fontSize: 13 }}>
+          this run hasn't produced a <code>fact_check.json</code> artifact.
+          once the factchecker specialist completes, verified claims will
+          appear here.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="card">
       <div className="card-h">
@@ -568,46 +461,98 @@ function FactCheckTab() {
 
 // ── AnchorCheckTab ───────────────────────────────────────────────────────────
 
-function AnchorCheckTab() {
-  const anchors = [
-    'deploy-pipeline-rebuild',
-    'artifact-cache-rust',
-    'scheduler-migration',
-    'live-reload-dev-env',
-    'oss-rust-style-guide',
-    'team-onboarding-mentorship',
-    'dev-env-cold-start',
-    'rust-rfc-3-accepted',
-    'platform-cost-recovery',
-    'jd-parser-shipped',
-    'q3-incident-response',
-    'quarto-tooling-talk',
-    'onboarding-handbook-rewrite',
-    'cli-launch-200-stars',
-  ];
+interface AnchorCheckTabProps {
+  artifacts: ApiApplicationArtifact[];
+}
+
+interface AnchorCheckSummary {
+  preserved: string[];
+  dropped: { id: string; reason: string }[];
+}
+
+// Defensively narrow an anchor-check artifact's output payload. Loose
+// shape on the wire — empty result if absent or malformed.
+function extractAnchorSummary(
+  artifacts: ApiApplicationArtifact[],
+): AnchorCheckSummary | null {
+  const a = artifacts.find(x => x.kind === 'anchor-check' || x.kind === 'anchor_check');
+  if (!a) return null;
+  const out = a.output as {
+    preserved?: unknown;
+    dropped?: unknown;
+  };
+  const preserved = Array.isArray(out.preserved)
+    ? (out.preserved as unknown[]).filter((s): s is string => typeof s === 'string')
+    : [];
+  const dropped: { id: string; reason: string }[] = [];
+  if (Array.isArray(out.dropped)) {
+    for (const item of out.dropped as unknown[]) {
+      if (typeof item === 'string') {
+        dropped.push({ id: item, reason: '' });
+      } else if (typeof item === 'object' && item !== null) {
+        const obj = item as Record<string, unknown>;
+        const id = typeof obj.id === 'string' ? obj.id : null;
+        const reason = typeof obj.reason === 'string' ? obj.reason : '';
+        if (id) dropped.push({ id, reason });
+      }
+    }
+  }
+  return { preserved, dropped };
+}
+
+function AnchorCheckTab({ artifacts }: AnchorCheckTabProps) {
+  const summary = extractAnchorSummary(artifacts);
+
+  if (!summary) {
+    return (
+      <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-muted)' }}>
+        <div className="mono-sm" style={{ marginBottom: 6 }}>no anchor-check data yet</div>
+        <div style={{ fontSize: 13 }}>
+          this run hasn't produced an <code>anchor_check.json</code> artifact.
+        </div>
+      </div>
+    );
+  }
+
+  const total = summary.preserved.length + summary.dropped.length;
+  const preservedBadge =
+    total === 0
+      ? <Badge kind="default">no anchors recorded</Badge>
+      : <Badge kind={summary.dropped.length === 0 ? 'success' : 'warn'}>
+          {summary.preserved.length} / {total} preserved
+        </Badge>;
+
   return (
     <div className="card">
       <div className="card-h">
         <h3>anchor preservation</h3>
         <span className="sub">bullet_selection.json</span>
-        <div className="right"><Badge kind="success">14 / 14 preserved</Badge></div>
+        <div className="right">{preservedBadge}</div>
       </div>
       <div style={{ padding: '18px 20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
         <div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>preserved anchors</div>
-          {anchors.map(a => (
-            <div key={a} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}>
+          {summary.preserved.length === 0 ? (
+            <div style={{ color: 'var(--fg-subtle)', fontSize: 13 }}>(none)</div>
+          ) : summary.preserved.map(id => (
+            <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}>
               <Icon name="check" size={11} style={{ color: 'var(--success)' }} />
-              <span className="mono-sm">{a}</span>
+              <span className="mono-sm">{id}</span>
             </div>
           ))}
         </div>
         <div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>dropped (with reasons)</div>
-          <div style={{ padding: '24px', textAlign: 'center', color: 'var(--fg-subtle)', background: 'var(--bg-sunk)', borderRadius: 'var(--radius)', border: '1px dashed var(--border)' }}>
-            <div className="mono-sm">none</div>
-            <div style={{ fontSize: 12, marginTop: 4 }}>every anchor made it into this draft.</div>
-          </div>
+          {summary.dropped.length === 0 ? (
+            <div style={{ padding: '24px', textAlign: 'center', color: 'var(--fg-subtle)', background: 'var(--bg-sunk)', borderRadius: 'var(--radius)', border: '1px dashed var(--border)' }}>
+              <div className="mono-sm">none</div>
+            </div>
+          ) : summary.dropped.map(d => (
+            <div key={d.id} style={{ padding: '6px 0' }}>
+              <div className="mono-sm">{d.id}</div>
+              {d.reason && <div style={{ color: 'var(--fg-subtle)', fontSize: 12 }}>{d.reason}</div>}
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -621,34 +566,30 @@ interface ConfigTabProps {
 }
 
 function ConfigTab({ app }: ConfigTabProps) {
+  // The .apply-config.yaml panel previously displayed a hardcoded YAML
+  // body (author: jordan-smith, phase_timeout_s: 600, etc.) regardless of
+  // the user's actual config. Removed pending an /api/applications/{slug}/config
+  // endpoint; the existing /api/config view (Config page) is the authoritative
+  // source for the global config in the meantime.
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
       <div className="card">
         <div className="card-h"><h3>.apply-config.yaml</h3></div>
-        <pre className="code" style={{ border: 'none', borderRadius: 0, margin: 0 }}>{`author: jordan-smith
-master:
-  work:      master/work.yml
-  skills:    master/skill.yml
-  education: master/education.yml
-benchmark:   master/benchmark.md
-output:
-  resume:    rendered/resume.pdf
-  cover:     rendered/cover.pdf
-phase_timeout_s: 600`}</pre>
+        <div style={{ padding: '24px 18px', color: 'var(--fg-muted)', fontSize: 13 }}>
+          per-application config view not yet wired. visit the global{' '}
+          <span className="mono-sm">Config</span> page in the sidebar to inspect
+          <span className="mono-sm"> .apply-config.yaml</span>.
+        </div>
       </div>
       <div className="card">
         <div className="card-h"><h3>run options</h3></div>
         <div style={{ padding: '16px 18px' }}>
-          <div className="field"><label>job url</label><input className="mono" defaultValue={app.url} /></div>
-          <div className="field"><label>jd-text-file</label><input className="mono" placeholder="(none — fetched from url)" /></div>
-          <div className="field">
-            <label>verbosity</label>
-            <select>
-              <option>−v</option>
-              <option>−vv</option>
-            </select>
+          <div className="field"><label>job url</label><input className="mono" defaultValue={app.url} readOnly /></div>
+          <div className="field"><label>slug</label><input className="mono" defaultValue={app.slug} readOnly /></div>
+          <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 8 }}>
+            run options are read-only here; use <span className="mono-sm">re-run apply</span> on the
+            page header to launch a new run.
           </div>
-          <button className="btn primary"><Icon name="play" size={12} /> apply</button>
         </div>
       </div>
     </div>
@@ -733,7 +674,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   const [activePhase, setActivePhase] = useState<number>(initialActivePhase);
   const [running, setRunning] = useState<boolean>(app.status === 'running');
   const [progress, setProgress] = useState<ProgressMap>(initialProgress);
-  const [events, setEvents] = useState<LogEvent[]>(() => seedEvents(app));
+  const [events, setEvents] = useState<LogEvent[]>([]);
   const [runError, setRunError] = useState<string | null>(null);
 
   // Ref to hold the active EventSource so we can close it on cancel/unmount.
@@ -975,9 +916,9 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
       </div>
 
       {tab === 'pipeline' && <PipelineTab events={events} running={running} phase={activePhase} progress={progress} />}
-      {tab === 'artifacts' && <ArtifactsTab app={app} />}
-      {tab === 'factcheck' && <FactCheckTab />}
-      {tab === 'anchors' && <AnchorCheckTab />}
+      {tab === 'artifacts' && <ArtifactsTab artifacts={apiDetail?.artifacts ?? []} />}
+      {tab === 'factcheck' && <FactCheckTab artifacts={apiDetail?.artifacts ?? []} />}
+      {tab === 'anchors' && <AnchorCheckTab artifacts={apiDetail?.artifacts ?? []} />}
       {tab === 'config' && <ConfigTab app={app} />}
     </div>
   );
