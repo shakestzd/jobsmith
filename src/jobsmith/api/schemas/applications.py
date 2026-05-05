@@ -41,6 +41,10 @@ class ApplicationCreate(BaseModel):
 
     url: str
     slug: str | None = None
+    # When true, the launched `jobsmith apply` is invoked with --force so it
+    # restarts the pipeline from phase 1 even if prior artifacts exist for
+    # this slug. Required to re-run any application that already completed.
+    force: bool = False
 
 
 class ApplicationCreated(BaseModel):

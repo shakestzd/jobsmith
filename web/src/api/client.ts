@@ -85,9 +85,21 @@ export interface ApplicationCreated {
 /**
  * POST /api/applications — launch an apply run.
  * Returns { slug, run_id } on 201.
+ *
+ * When `force` is true, the server invokes `jobsmith apply --force`, which
+ * restarts the pipeline from phase 1 even if prior artifacts exist. Required
+ * to re-run any application whose `.apply-state/` is already complete.
  */
-export function postApplication(url: string, slug: string): Promise<ApplicationCreated> {
-  return apiPost<ApplicationCreated>('/api/applications', { url, slug });
+export function postApplication(
+  url: string,
+  slug: string,
+  options: { force?: boolean } = {},
+): Promise<ApplicationCreated> {
+  return apiPost<ApplicationCreated>('/api/applications', {
+    url,
+    slug,
+    force: options.force === true,
+  });
 }
 
 /**
