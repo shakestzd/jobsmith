@@ -703,6 +703,44 @@ describe('ApplicationDetail SSE phase wiring (feat-6e148975)', () => {
     expect(document.querySelector('.badge.accent')).toBeNull();
   });
 
+  it('header status badge transitions from "running" to "rendered" on SSE render/done (roborev job 948)', async () => {
+    // Anti-regression for roborev job 948 MEDIUM: when the final render phase
+    // completes, the badge previously stayed at "running" because `running`
+    // wasn't being flipped to false on phaseNum===3 done.
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'running',
+      phase: 'render',
+      finished_at: null,
+      run_id: 'run-sse-5',
+    });
+    render(<ApplicationDetail slug="sse-test-slug-5" back={() => {}} />);
+    await waitFor(() => expect(lastFakeEs).not.toBeNull());
+
+    // Initial running badge present.
+    await waitFor(() => {
+      const badge = document.querySelector('.badge.accent');
+      expect(badge).not.toBeNull();
+      expect(badge!.textContent).toMatch(/running/i);
+    });
+
+    // Emit phase=render, status=done.
+    await act(async () => {
+      lastFakeEs!.emit('phase', {
+        run_id: 'run-sse-5',
+        phase: 'render',
+        status: 'done',
+        started_at: '2026-05-05T10:00:00Z',
+        finished_at: '2026-05-05T10:01:00Z',
+      });
+    });
+
+    // Running badge must be gone — terminal "done" sseStatus should now win.
+    await waitFor(() => {
+      expect(document.querySelector('.badge.accent')).toBeNull();
+    });
+  });
+
   it('anti-regression: initial GET with phase=running does not show all phases as queued', async () => {
     // When the initial GET already shows status=running, the phase tracker
     // must NOT show all phases frozen at "queued".

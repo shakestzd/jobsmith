@@ -892,7 +892,11 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         if (data.status === 'done' || data.status === 'backfilled') {
           setProgress(p => ({ ...p, [phaseNum]: 100 }));
           // Only mark the whole run done when the last phase (render=3) completes.
+          // Also flip the running flag — without this, the header badge keeps
+          // showing "running" because `running ? 'running' : ...` takes
+          // precedence over sseStatus (roborev job 948 MEDIUM).
           if (phaseNum === 3) {
+            setRunning(false);
             setSseStatus('done');
           }
         } else if (data.status === 'running') {
