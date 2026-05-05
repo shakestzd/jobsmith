@@ -12,7 +12,7 @@
 // case here first and then update redactSensitive to cover it.
 
 import { describe, it, expect } from 'vitest';
-import { redactSensitive } from './client';
+import { formatDetail, redactSensitive } from './client';
 
 // Synthetic test fixtures — low-entropy strings shaped enough to exercise
 // each redaction branch. Constructed at runtime from harmless fragments so
@@ -111,5 +111,39 @@ describe('redactSensitive', () => {
     const out = redactSensitive(input);
     expect(out).toContain('?token=[redacted]&next=/y');
     expect(out).toContain('other=z');
+  });
+});
+
+// formatDetail handles the structured 404 shape introduced by S3 of
+// trk-144d42b1 (feat-eb6c99cb): {error, section?, suggestion}. Without this,
+// the master content panel rendered "[object Object]" for every missing
+// section because String({...}) yields "[object Object]".
+describe('formatDetail', () => {
+  it('returns string detail unchanged', () => {
+    expect(formatDetail('plain message', 'fallback')).toBe('plain message');
+  });
+
+  it('renders structured 404 as "<error> — <suggestion>"', () => {
+    const detail = {
+      error: 'missing_in_db',
+      section: 'work',
+      suggestion: "jobsmith db load-master  # to backfill section 'work'",
+    };
+    const out = formatDetail(detail, 'Not Found');
+    expect(out).toContain('missing_in_db');
+    expect(out).toContain('jobsmith db load-master');
+  });
+
+  it('falls back to error alone when suggestion is missing', () => {
+    expect(formatDetail({ error: 'missing_in_db' }, 'fallback')).toBe('missing_in_db');
+  });
+
+  it('uses fallback when detail is null/undefined', () => {
+    expect(formatDetail(null, 'Not Found')).toBe('Not Found');
+    expect(formatDetail(undefined, 'Not Found')).toBe('Not Found');
+  });
+
+  it('uses fallback when detail object has no recognized fields', () => {
+    expect(formatDetail({ unrelated: 'stuff' }, 'fallback')).toBe('fallback');
   });
 });
