@@ -152,7 +152,14 @@ export function Dashboard({ openApp, openNew, filter = 'all' }: DashboardProps) 
           <p>a tracked record of every <span className="mono">jobsmith apply</span> run, with rendered artifacts and review state.</p>
         </div>
         <div className="actions">
-          <button className="btn"><Icon name="folder" size={13} /> import existing</button>
+          {/*
+            "import existing" was previously rendered here but had no
+            backing endpoint (POST /api/applications/import does not exist
+            and no client-side import flow is implemented). Removed in
+            feat-aba75dae (GH#53) to avoid presenting a decorative button
+            as a working affordance. Restore once an import endpoint
+            lands.
+          */}
           <button className="btn primary" onClick={openNew}><Icon name="plus" size={13} /> new application</button>
         </div>
       </div>

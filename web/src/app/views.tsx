@@ -91,8 +91,14 @@ export function SiteView() {
               </span>
             ))}
           </div>
-          <button className="btn"><Icon name="play" size={12} /> serve</button>
-          <button className="btn primary"><Icon name="site" size={12} /> render</button>
+          {/*
+            "serve" + "render" buttons removed in feat-aba75dae (GH#53).
+            CLI commands `jobsmith site serve` / `jobsmith site render`
+            exist, but neither has a backing API endpoint, so the buttons
+            had no working effect. Run those commands from the terminal
+            for now; reintroduce here once /api/site/render and
+            /api/site/serve land.
+          */}
         </div>
       </div>
 
@@ -205,9 +211,13 @@ export function FeedbackView() {
           <p>captured edits and outcomes per slug. trains the bullet-selector and cover-drafter over time.</p>
         </div>
         <div className="actions">
-          <button className="btn"><Icon name="doc" size={13} /> export json</button>
-          <button className="btn"><Icon name="x" size={13} /> prune</button>
-          <button className="btn primary"><Icon name="plus" size={13} /> record</button>
+          {/*
+            "export json", "prune", and "record" buttons removed in
+            feat-aba75dae (GH#53). None had handlers — no client-side
+            download, no DELETE endpoint, no POST /api/feedback flow.
+            Use `jobsmith feedback record …` from the CLI for now.
+            Reintroduce here once corresponding API surface exists.
+          */}
         </div>
       </div>
 
