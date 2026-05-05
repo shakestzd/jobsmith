@@ -19,7 +19,6 @@ from jobsmith.api.auth import TOKEN_ENV_VAR, _get_expected_token
 from jobsmith.api.main import create_app
 from jobsmith.doctor import CheckResult
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
