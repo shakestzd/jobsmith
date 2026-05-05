@@ -267,6 +267,61 @@ def check_master_yaml(cwd: Optional[Path] = None) -> CheckResult:
     )
 
 
+def check_contracts_frozen() -> CheckResult:
+    """Verify specialist-contracts.yaml has a non-null ``frozen_at`` value.
+
+    - File absent: PASS (skip) — user does not use the apply pipeline.
+    - ``frozen_at`` is non-null: PASS.
+    - ``frozen_at`` is null: FAIL with remediation pointing to the file.
+    """
+    import jobsmith
+
+    try:
+        pdir = jobsmith.plugin_dir()
+    except Exception:
+        return CheckResult(
+            name="contracts_frozen",
+            ok=True,
+            message="plugin dir unavailable — skipping contracts check",
+        )
+
+    contracts_path = pdir / "agents" / "apply" / "specialist-contracts.yaml"
+    if not contracts_path.exists():
+        return CheckResult(
+            name="contracts_frozen",
+            ok=True,
+            message="specialist-contracts.yaml not found — skip (apply pipeline not used)",
+        )
+
+    try:
+        import yaml as _yaml
+        data = _yaml.safe_load(contracts_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return CheckResult(
+            name="contracts_frozen",
+            ok=False,
+            message=f"failed to read {contracts_path}: {exc}",
+            remediation=f"check the file manually: {contracts_path}",
+        )
+
+    if isinstance(data, dict) and data.get("frozen_at") is not None:
+        return CheckResult(
+            name="contracts_frozen",
+            ok=True,
+            message=f"specialist-contracts.yaml frozen_at={data['frozen_at']}",
+        )
+
+    return CheckResult(
+        name="contracts_frozen",
+        ok=False,
+        message="specialist-contracts.yaml has frozen_at: null — contracts not frozen",
+        remediation=(
+            f"set frozen_at to today's ISO date in {contracts_path} "
+            "or run `jobsmith apply <url>` once (it auto-freezes on first run)"
+        ),
+    )
+
+
 def check_python_version(min_major: int = 3, min_minor: int = 10) -> CheckResult:
     """Verify the running Python interpreter meets the minimum version requirement."""
     vi = sys.version_info
@@ -341,6 +396,7 @@ def run_all_checks(cwd: Optional[Path] = None) -> list[CheckResult]:
         check_apply_config(cwd),
         check_master_yaml(cwd),
         check_benchmarks(config_path=config_path, cwd=cwd),
+        check_contracts_frozen(),
     ]
 
 
@@ -371,6 +427,7 @@ __all__ = [
     "check_claude_auth",
     "check_apply_config",
     "check_claude_binary",
+    "check_contracts_frozen",
     "check_master_yaml",
     "check_plugin_dir_resolves",
     "check_python_version",

@@ -152,6 +152,32 @@ class MasterPayload(BaseModel):
     author: Author | None = None
 
 
+class ValidateError(BaseModel):
+    """One validation error entry returned by POST /api/master/validate."""
+
+    field: str
+    message: str
+
+
+class ValidateRequest(BaseModel):
+    """Request body for POST /api/master/validate.
+
+    All sections are optional so callers may validate a subset.
+    """
+
+    work: list[WorkEntry] = Field(default_factory=list)
+    skill: list[SkillEntry] = Field(default_factory=list)
+    education: list[EducationEntry] = Field(default_factory=list)
+    author: Author | None = None
+
+
+class ValidateResponse(BaseModel):
+    """Response body for POST /api/master/validate."""
+
+    ok: bool
+    errors: list[ValidateError] = Field(default_factory=list)
+
+
 __all__ = [
     "Author",
     "AuthorContact",
@@ -159,6 +185,9 @@ __all__ = [
     "EducationEntry",
     "MasterPayload",
     "SkillEntry",
+    "ValidateError",
+    "ValidateRequest",
+    "ValidateResponse",
     "WorkDetailDict",
     "WorkEntry",
 ]

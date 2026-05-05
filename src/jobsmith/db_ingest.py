@@ -11,7 +11,9 @@ state) → DB rows (canonical for completed phases).
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -25,6 +27,81 @@ from jobsmith._state_readers import (
 
 _BACKFILL_STATUS = "backfilled"
 _UNKNOWN_PHASE = "unknown"
+
+
+def normalize_slug(
+    slug: str,
+    *,
+    company: str | None = None,
+    role: str | None = None,
+    date: str | None = None,
+) -> str:
+    """Return a normalized slug, fixing common malformation patterns.
+
+    Handles three malformation cases:
+
+    1. **Numeric-only** — all tokens are digits (e.g. ``"12345"``).
+       Falls back to ``company-role-date`` when metadata is provided,
+       otherwise ``apply-<12-char-hash>``.
+
+    2. **Single-word** — no hyphen separator (e.g. ``"engineer"``).
+       Same fallback as numeric-only.
+
+    3. **Duplicated leading token** — the first token immediately repeats
+       (e.g. ``"linear-linear-product-engineer"`` → ``"linear-product-engineer"``).
+       De-duplication is applied iteratively until stable.
+
+    Clean slugs pass through unchanged.
+
+    Parameters
+    ----------
+    slug:
+        Raw slug string (typically a directory name from applications/).
+    company:
+        Optional company name token (already slugified or plain text).
+    role:
+        Optional role/position name token.
+    date:
+        Optional date string (e.g. ``"2026-05"``).
+
+    Returns
+    -------
+    str
+        Normalized, filesystem-safe slug.
+    """
+    # Step 1: De-duplicate leading token (iterative until stable)
+    tokens = slug.split("-")
+    while len(tokens) >= 2 and tokens[0] == tokens[1]:
+        tokens = tokens[1:]
+    slug = "-".join(tokens)
+
+    # Step 2: Classify as malformed if numeric-only or single-word
+    def _is_numeric_only(s: str) -> bool:
+        return bool(s) and all(t.isdigit() for t in s.split("-") if t)
+
+    def _is_single_word(s: str) -> bool:
+        return bool(s) and "-" not in s
+
+    is_malformed = not slug or _is_numeric_only(slug) or _is_single_word(slug)
+
+    if is_malformed:
+        if company and role:
+            # Build a clean company-role[-date] fallback
+            def _slugify(s: str) -> str:
+                s = s.lower()
+                s = re.sub(r"[^a-z0-9]+", "-", s)
+                return s.strip("-")
+
+            parts = [_slugify(company), _slugify(role)]
+            if date:
+                parts.append(date)
+            return "-".join(p for p in parts if p)
+
+        # Hash-based fallback: deterministic on the original malformed slug
+        digest = hashlib.sha256(slug.encode()).hexdigest()[:12]
+        return f"apply-{digest}"
+
+    return slug
 
 
 def _now_iso() -> str:
@@ -211,6 +288,30 @@ def _state_timestamps(state_dir: Path) -> tuple[str | None, str | None]:
     return iso, iso
 
 
+def _jd_metadata(state_dir: Path) -> tuple[str | None, str | None, str | None]:
+    """Extract (company, role, date) from jd-parsed.json for slug normalization.
+
+    Returns ``(None, None, None)`` when the file is absent or unparseable.
+    The date is the YYYY-MM of the state_dir mtime — a stable, human-readable
+    suffix to distinguish slugs that share company+role.
+    """
+    jd_path = state_dir / "jd-parsed.json"
+    if not jd_path.exists():
+        return None, None, None
+    try:
+        data = json.loads(jd_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None, None, None
+    company = data.get("company") or None
+    position = data.get("position") or None
+    try:
+        dt = datetime.fromtimestamp(state_dir.stat().st_mtime, tz=timezone.utc)
+        date = dt.strftime("%Y-%m")
+    except OSError:
+        date = None
+    return company, position, date
+
+
 def backfill_slug(
     conn: sqlite3.Connection,
     slug: str,
@@ -222,12 +323,20 @@ def backfill_slug(
     only ingested the single ``last_completed_phase``, dropping all earlier
     phases' artifacts. Roborev #921 MEDIUM.
 
+    The directory-name slug is normalized via :func:`normalize_slug` before
+    being written to the DB — rejecting numeric-only names, single-word names,
+    and de-duplicating a repeated leading token.
+
     Returns the total number of specialist_output rows inserted across all
     completed phases (0 if already backfilled).
     """
     state_dir = applications_dir / slug / ".apply-state"
     if not state_dir.is_dir():
         return 0
+
+    # Normalize the directory name before any DB writes.
+    company, role, date = _jd_metadata(state_dir)
+    slug = normalize_slug(slug, company=company, role=role, date=date)
 
     run_id = _backfill_run_id(slug)
     started_at, finished_at = _state_timestamps(state_dir)
@@ -311,4 +420,5 @@ __all__ = [
     "backfill_slug",
     "ingest_phase_outputs",
     "iter_backfillable_slugs",
+    "normalize_slug",
 ]

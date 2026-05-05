@@ -163,6 +163,44 @@ class TestExemptEndpoints:
 
 
 # ---------------------------------------------------------------------------
+# Header-or-query auth (events / SSE) — roborev job 940 fix
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyTokenOrQuery:
+    """Browser EventSource cannot set Authorization headers, so the events
+    router accepts the token via ?token= query param instead. Plain Bearer
+    header still works on the same endpoint.
+    """
+
+    def test_events_endpoint_accepts_query_token(self, client_with_token_env):
+        client, tok = client_with_token_env
+        # The events endpoint expects a slug; we don't care that it 404s
+        # on a non-existent slug — the auth check happens first. Any
+        # non-401 status proves the query-token path was accepted.
+        resp = client.get(f"/api/applications/no-such-slug/events?token={tok}")
+        assert resp.status_code != 401
+
+    def test_events_endpoint_accepts_header_token(self, client_with_token_env):
+        client, tok = client_with_token_env
+        resp = client.get(
+            "/api/applications/no-such-slug/events",
+            headers={"Authorization": f"Bearer {tok}"},
+        )
+        assert resp.status_code != 401
+
+    def test_events_endpoint_rejects_wrong_query_token(self, client_with_token_env):
+        client, _ = client_with_token_env
+        resp = client.get("/api/applications/no-such-slug/events?token=wrong")
+        assert resp.status_code == 401
+
+    def test_events_endpoint_rejects_no_token(self, client_with_token_env):
+        client, _ = client_with_token_env
+        resp = client.get("/api/applications/no-such-slug/events")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
 # Bind host defaults
 # ---------------------------------------------------------------------------
 

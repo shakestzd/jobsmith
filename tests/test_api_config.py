@@ -1,0 +1,260 @@
+"""Tests for /api/config endpoints.
+
+Coverage:
+1. GET /api/config without auth → 401
+2. GET /api/config returns config dict (mocked load_config)
+3. POST /api/config/validate with invalid body → 200 ok=false errors=[...]
+4. POST /api/config/validate with valid body → 200 ok=true errors=[]
+5. PUT /api/config with valid body → 200 and `.apply-config.yaml` is written
+6. PUT /api/config with invalid body → 422 (no file written)
+7. GET /api/config wrong token → 401
+8. PUT /api/config returns saved config on success
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+import yaml
+from fastapi.testclient import TestClient
+
+from jobsmith.api.auth import TOKEN_ENV_VAR, _get_expected_token
+from jobsmith.api.main import create_app
+from jobsmith.config import JobsmithConfig
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _clear_token_cache():
+    """Reset cached token between tests."""
+    _get_expected_token.cache_clear()
+    yield
+    _get_expected_token.cache_clear()
+
+
+TOKEN = "test-config-token-abc"
+
+
+@pytest.fixture()
+def client():
+    """TestClient with a known Bearer token set via env."""
+    with patch.dict(os.environ, {TOKEN_ENV_VAR: TOKEN}):
+        app = create_app()
+        yield TestClient(app, raise_server_exceptions=True)
+
+
+def _auth(tok: str = TOKEN) -> dict[str, str]:
+    return {"Authorization": f"Bearer {tok}"}
+
+
+_VALID_CONFIG_DATA: dict = {
+    "user": {
+        "name": "Pat Doe",
+        "email": "pat@example.com",
+    }
+}
+
+_INVALID_CONFIG_DATA: dict = {
+    "anchor_thresholds": {
+        "percent_min": 999.0,  # out of range — must be 0-100
+    }
+}
+
+
+# ---------------------------------------------------------------------------
+# Auth gate
+# ---------------------------------------------------------------------------
+
+
+def test_get_config_no_auth_returns_401(client: TestClient) -> None:
+    """Missing token → 401."""
+    resp = client.get("/api/config")
+    assert resp.status_code == 401
+
+
+def test_get_config_wrong_token_returns_401(client: TestClient) -> None:
+    """Wrong token → 401."""
+    resp = client.get("/api/config", headers=_auth("bad-token"))
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# GET /api/config
+# ---------------------------------------------------------------------------
+
+
+def test_get_config_returns_200_with_dict(client: TestClient) -> None:
+    """Authenticated GET → 200 with a JSON object."""
+    mock_config = JobsmithConfig()
+    with patch("jobsmith.api.config.load_config", return_value=mock_config):
+        resp = client.get("/api/config", headers=_auth())
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, dict)
+
+
+def test_get_config_returns_expected_fields(client: TestClient) -> None:
+    """Response includes known top-level keys from JobsmithConfig."""
+    mock_config = JobsmithConfig()
+    with patch("jobsmith.api.config.load_config", return_value=mock_config):
+        resp = client.get("/api/config", headers=_auth())
+    data = resp.json()
+    assert "user" in data
+    assert "master" in data
+    assert "voice" in data
+    assert "cover_letter" in data
+
+
+def test_get_config_returns_user_name(client: TestClient) -> None:
+    """User identity fields are forwarded from load_config output."""
+    mock_config = JobsmithConfig.model_validate({"user": {"name": "Ada Lovelace"}})
+    with patch("jobsmith.api.config.load_config", return_value=mock_config):
+        resp = client.get("/api/config", headers=_auth())
+    assert resp.json()["user"]["name"] == "Ada Lovelace"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/config/validate
+# ---------------------------------------------------------------------------
+
+
+def test_post_validate_no_auth_returns_401(client: TestClient) -> None:
+    """Missing token → 401."""
+    resp = client.post(
+        "/api/config/validate",
+        content=yaml.safe_dump(_VALID_CONFIG_DATA),
+        headers={"Content-Type": "application/x-yaml"},
+    )
+    assert resp.status_code == 401
+
+
+def test_post_validate_valid_config_returns_ok_true(client: TestClient) -> None:
+    """Valid config body → 200 ok=true errors=[]."""
+    resp = client.post(
+        "/api/config/validate",
+        content=yaml.safe_dump(_VALID_CONFIG_DATA),
+        headers={**_auth(), "Content-Type": "application/x-yaml"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["errors"] == []
+
+
+def test_post_validate_invalid_config_returns_ok_false(client: TestClient) -> None:
+    """Invalid config body → 200 ok=false with errors list."""
+    resp = client.post(
+        "/api/config/validate",
+        content=yaml.safe_dump(_INVALID_CONFIG_DATA),
+        headers={**_auth(), "Content-Type": "application/x-yaml"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert len(body["errors"]) > 0
+
+
+def test_post_validate_errors_have_field_and_message(client: TestClient) -> None:
+    """Each error object has 'field' and 'message' keys."""
+    resp = client.post(
+        "/api/config/validate",
+        content=yaml.safe_dump(_INVALID_CONFIG_DATA),
+        headers={**_auth(), "Content-Type": "application/x-yaml"},
+    )
+    error = resp.json()["errors"][0]
+    assert "field" in error
+    assert "message" in error
+
+
+def test_post_validate_json_body_accepted(client: TestClient) -> None:
+    """JSON body (superset of YAML) is also accepted."""
+    resp = client.post(
+        "/api/config/validate",
+        content=json.dumps(_VALID_CONFIG_DATA),
+        headers={**_auth(), "Content-Type": "application/json"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/config
+# ---------------------------------------------------------------------------
+
+
+def test_put_config_no_auth_returns_401(client: TestClient) -> None:
+    """Missing token → 401."""
+    resp = client.put(
+        "/api/config",
+        content=yaml.safe_dump(_VALID_CONFIG_DATA),
+        headers={"Content-Type": "application/x-yaml"},
+    )
+    assert resp.status_code == 401
+
+
+def test_put_config_valid_writes_file(client: TestClient, tmp_path: Path) -> None:
+    """PUT with valid config writes `.apply-config.yaml` to cwd."""
+    config_file = tmp_path / ".apply-config.yaml"
+    assert not config_file.exists()
+
+    with patch("jobsmith.api.config.Path") as mock_path_cls:
+        # Make Path.cwd() return tmp_path so we write to tmp_path
+        mock_path_cls.cwd.return_value = tmp_path
+        mock_path_cls.side_effect = lambda *args: Path(*args)  # passthrough for other uses
+        resp = client.put(
+            "/api/config",
+            content=yaml.safe_dump(_VALID_CONFIG_DATA),
+            headers={**_auth(), "Content-Type": "application/x-yaml"},
+        )
+
+    assert resp.status_code == 200
+    assert config_file.exists()
+
+
+def test_put_config_valid_returns_config_dict(client: TestClient, tmp_path: Path) -> None:
+    """PUT with valid config returns the saved config as JSON."""
+    with patch("jobsmith.api.config.Path") as mock_path_cls:
+        mock_path_cls.cwd.return_value = tmp_path
+        mock_path_cls.side_effect = lambda *args: Path(*args)
+        resp = client.put(
+            "/api/config",
+            content=yaml.safe_dump(_VALID_CONFIG_DATA),
+            headers={**_auth(), "Content-Type": "application/x-yaml"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, dict)
+    assert data["user"]["name"] == "Pat Doe"
+
+
+def test_put_config_invalid_returns_422(client: TestClient) -> None:
+    """PUT with invalid config → 422, no file written."""
+    resp = client.put(
+        "/api/config",
+        content=yaml.safe_dump(_INVALID_CONFIG_DATA),
+        headers={**_auth(), "Content-Type": "application/x-yaml"},
+    )
+    assert resp.status_code == 422
+
+
+def test_put_config_invalid_does_not_write_file(client: TestClient, tmp_path: Path) -> None:
+    """PUT with invalid config must NOT write any file."""
+    config_file = tmp_path / ".apply-config.yaml"
+
+    with patch("jobsmith.api.config.Path") as mock_path_cls:
+        mock_path_cls.cwd.return_value = tmp_path
+        mock_path_cls.side_effect = lambda *args: Path(*args)
+        client.put(
+            "/api/config",
+            content=yaml.safe_dump(_INVALID_CONFIG_DATA),
+            headers={**_auth(), "Content-Type": "application/x-yaml"},
+        )
+
+    assert not config_file.exists()

@@ -31,6 +31,8 @@ from rich.table import Table
 from . import __version__
 from .assemble import PACKAGE_ROOT, assemble_all, assemble_application
 from .config import CONFIG_FILENAME, find_config, load_config
+from .db import open_pipeline_db
+from .db_ingest import backfill_all, backfill_slug, iter_backfillable_slugs
 from .factcheck import check_draft
 from .guard import check_anchors, render_diff_md
 from .paths import all_master_paths, repo_root_for, resolve
@@ -446,6 +448,15 @@ def apply(
         readable=True,
         dir_okay=False,
     ),
+    slug: str | None = typer.Option(
+        None,
+        "--slug",
+        help=(
+            "Override the auto-derived slug. Used by the API when a caller "
+            "POSTs to /api/applications with an explicit slug, so the "
+            "supervisor's tracked slug matches what run_apply writes to disk."
+        ),
+    ),
 ) -> None:
     """Run the three-phase apply pipeline against a JD URL."""
     from .apply import run_apply
@@ -463,6 +474,7 @@ def apply(
             force=force,
             verbosity=verbose,
             jd_text=resolved_jd_text,
+            slug=slug,
         )
     )
 
@@ -1140,6 +1152,82 @@ def artifact_put(
     console.print(
         f"[green]wrote[/green] kind={envelope.kind} version={envelope.version}"
     )
+
+
+# ---------- db subcommand group (feat-7a787f6c) ----------
+
+
+db_app = typer.Typer(
+    name="db",
+    help="Database maintenance commands (backfill, inspect).",
+    no_args_is_help=True,
+)
+app.add_typer(db_app, name="db")
+
+@db_app.command("backfill")
+def db_backfill(
+    slug: str | None = typer.Option(
+        None,
+        "--slug",
+        help="Backfill a single application slug.",
+    ),
+    all_slugs: bool = typer.Option(
+        False,
+        "--all",
+        help="Backfill every slug under output.applications_dir.",
+    ),
+) -> None:
+    """Backfill .apply-state/ artifacts into the pipeline DB.
+
+    Three modes:
+
+    \\b
+      jobsmith db backfill               # backfill each slug returned by iter_backfillable_slugs
+      jobsmith db backfill --all         # backfill every slug under applications_dir
+      jobsmith db backfill --slug X      # backfill a single slug
+    """
+    if slug and all_slugs:
+        console.print("[red]ERROR:[/red] pass either --slug or --all, not both")
+        raise typer.Exit(code=1)
+
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        console.print(f"[red]ERROR:[/red] No {CONFIG_FILENAME} found — run `jobsmith init` first.")
+        raise typer.Exit(code=2)
+    config = load_config(config_path)
+    repo_root = repo_root_for()
+    applications_dir = resolve(config.output.applications_dir, repo_root)
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        console.print(f"[red]ERROR:[/red] Pipeline DB not found at {db_path}.")
+        raise typer.Exit(code=2)
+
+    conn = open_pipeline_db(db_path)
+    try:
+        if slug:
+            inserted = backfill_slug(conn, slug, applications_dir)
+            console.print(f"[green]backfilled[/green] {slug}: {inserted} row(s) inserted")
+        elif all_slugs:
+            results = backfill_all(conn, applications_dir)
+            total = sum(results.values())
+            console.print(
+                f"[green]backfilled {len(results)} slug(s),[/green] {total} row(s) inserted"
+            )
+            for s, n in results.items():
+                console.print(f"  {s}: {n}")
+        else:
+            slugs = iter_backfillable_slugs(applications_dir)
+            if not slugs:
+                console.print("[yellow]No backfillable slugs found.[/yellow]")
+                return
+            total = 0
+            for s in slugs:
+                n = backfill_slug(conn, s, applications_dir)
+                total += n
+                console.print(f"  {s}: {n} row(s)")
+            console.print(f"[green]done.[/green] {len(slugs)} slug(s), {total} row(s) inserted")
+    finally:
+        conn.close()
 
 
 # ---------- site subcommand group ----------

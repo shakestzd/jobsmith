@@ -24,7 +24,7 @@ import stat
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import HTTPException, Security
+from fastapi import HTTPException, Query, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 logger = logging.getLogger(__name__)
@@ -135,3 +135,29 @@ def verify_token(
             detail="Invalid token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+def verify_token_or_query(
+    credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),  # noqa: B008
+    token: str | None = Query(None),
+) -> None:
+    """Accept the Bearer token from header OR ``?token=`` query param.
+
+    Browser ``EventSource`` cannot set custom headers, so SSE endpoints
+    need to accept the token as a query parameter as well. Use this
+    dependency for routers mounted under SSE-style endpoints.
+    """
+    expected = _get_expected_token()
+    if (
+        credentials is not None
+        and credentials.scheme.lower() == "bearer"
+        and secrets.compare_digest(credentials.credentials, expected)
+    ):
+        return
+    if token is not None and secrets.compare_digest(token, expected):
+        return
+    raise HTTPException(
+        status_code=401,
+        detail="Bearer token required (header or ?token= query param)",
+        headers={"WWW-Authenticate": "Bearer"},
+    )

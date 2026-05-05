@@ -5,6 +5,7 @@ import './styles.css';
 import type { ViewName, TweakValues } from './types';
 import { useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle } from './tweaks-panel';
 import { Sidebar, Topbar } from './app/chrome';
+import { postApplication } from './api/client';
 import { Dashboard } from './app/dashboard';
 import { NewApplicationModal } from './app/new';
 import { ApplicationDetail } from './app/application';
@@ -125,9 +126,11 @@ function App() {
       {showNew && (
         <NewApplicationModal
           onClose={() => setShowNew(false)}
-          onLaunch={(slug: string) => {
+          onLaunch={(slug: string, url: string) => {
             setShowNew(false);
-            setOpenSlug(slug);
+            postApplication(url, slug)
+              .then((created) => setOpenSlug(created.slug))
+              .catch(() => setOpenSlug(slug));
           }}
         />
       )}

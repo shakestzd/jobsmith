@@ -334,6 +334,46 @@ def _run_init(target: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Auto-freeze specialist contracts (feat-385f3405)
+# ---------------------------------------------------------------------------
+
+
+def _auto_freeze_contracts(contracts_path: Path) -> None:
+    """Stamp ``frozen_at`` with today's ISO date if it is currently null.
+
+    The gather-phase system prompt checks ``frozen_at`` and emits PHASE_FAILED
+    when it is null, blocking every new user.  This function auto-freezes on
+    first apply so the pipeline proceeds without manual intervention.
+
+    Idempotent: if ``frozen_at`` is already set the file is not modified.
+    No-op if the file does not exist (non-fatal; the agent will handle it).
+    """
+    if not contracts_path.exists():
+        return
+    try:
+        import yaml as _yaml
+        raw = contracts_path.read_text(encoding="utf-8")
+        data = _yaml.safe_load(raw)
+        if not isinstance(data, dict):
+            return
+        if data.get("frozen_at") is not None:
+            return  # already frozen — leave file untouched
+        from datetime import date as _date
+        today = _date.today().isoformat()
+        # Minimal, targeted replacement: replace the first occurrence of
+        # ``frozen_at: null`` so we don't disturb the rest of the YAML
+        # (comments, ordering, whitespace).
+        if "frozen_at: null" in raw:
+            updated = raw.replace("frozen_at: null", f"frozen_at: '{today}'", 1)
+        else:
+            updated = raw.rstrip("\n") + f"\nfrozen_at: '{today}'\n"
+        contracts_path.write_text(updated, encoding="utf-8")
+        logger.info("Auto-froze specialist contracts at %s (frozen_at=%s)", contracts_path, today)
+    except Exception as exc:  # noqa: BLE001 — never abort apply on freeze failure
+        logger.warning("Could not auto-freeze contracts at %s: %s", contracts_path, exc)
+
+
+# ---------------------------------------------------------------------------
 # Phase prompt construction
 # ---------------------------------------------------------------------------
 
@@ -1322,6 +1362,12 @@ def _run_phase_iter_body(
     else:
         active_phases = list(_PHASES)
 
+    # Auto-freeze specialist contracts on first apply (feat-385f3405).
+    # Must run before the gather phase so the agent sees frozen_at non-null.
+    _auto_freeze_contracts(
+        plugin_directory / "agents" / "apply" / "specialist-contracts.yaml"
+    )
+
     for phase_name, phase_num in active_phases:
         # Check cancel before starting each phase
         if cancel_event is not None and cancel_event.is_set():
@@ -1469,6 +1515,7 @@ def run_apply(
     verbosity: int = 0,
     renderer: ApplyRenderer | None = None,
     jd_text: str | None = None,
+    slug: str | None = None,
 ) -> int:
     """Run the three-phase apply pipeline.
 
@@ -1538,7 +1585,14 @@ def run_apply(
     started_at = time.time()
     plugin_directory = get_plugin_dir()
 
-    if force:
+    if slug is not None:
+        # Caller (typically the API) supplied an explicit slug — honor it
+        # without touching the URL→slug index. The supervisor tracks runs
+        # under this slug, so files must be written under it too.
+        from_index = False
+        if force:
+            rdr.print_force_banner()
+    elif force:
         # --force restarts the pipeline but must still target the existing
         # canonical directory if we know about it; otherwise phase 1 writes
         # under the URL slug and the post-phase-1 reconcile would refuse to
@@ -1735,6 +1789,12 @@ def _run_apply_phases(
     All parameters are pre-resolved by ``run_apply``; this helper performs no
     bootstrap or slug resolution of its own.
     """
+    # Auto-freeze specialist contracts on first apply (feat-385f3405).
+    # Must run before the gather phase so the agent sees frozen_at non-null.
+    _auto_freeze_contracts(
+        plugin_directory / "agents" / "apply" / "specialist-contracts.yaml"
+    )
+
     for phase_name, phase_num in _PHASES:
         # Step 3pre: just-in-time wrapper-owned prerequisites that must run
         # regardless of whether the prior phase ran or was skipped.  Step 4/5
@@ -1831,7 +1891,9 @@ def _run_apply_phases(
                 if event.type == "phase_failed":
                     rdr.close_transcript()
                     rdr.print_error(
-                        "Aborting before subsequent phases."
+                        "Aborting before subsequent phases. "
+                        "If the error mentions contracts not frozen, run: "
+                        "jobsmith doctor  (or set frozen_at in specialist-contracts.yaml)"
                     )
                     return 3
 

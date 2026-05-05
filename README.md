@@ -75,6 +75,10 @@ jobsmith init  # writes assets/content/{work,skill,education,author}.yml stubs
 
 # Run the pipeline against a job URL
 claude /apply https://example.com/jobs/12345
+
+# On first run, jobsmith auto-freezes specialist-contracts.yaml (sets frozen_at).
+# If the gather phase fails with a "contracts not frozen" error, run:
+#   jobsmith doctor
 ```
 
 ## CLI — feedback loop

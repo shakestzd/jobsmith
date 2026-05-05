@@ -36,8 +36,11 @@ from fastapi.responses import JSONResponse
 
 from jobsmith.api.applications import router as applications_router
 from jobsmith.api.artifacts import router as artifacts_router
-from jobsmith.api.auth import verify_token
+from jobsmith.api.auth import verify_token, verify_token_or_query
+from jobsmith.api.config import router as config_router
+from jobsmith.api.doctor import router as doctor_router
 from jobsmith.api.events import router as events_router
+from jobsmith.api.feedback import router as feedback_router
 from jobsmith.api.master import router as master_router
 from jobsmith.api.snapshots import router as snapshots_router
 
@@ -86,8 +89,25 @@ def create_app() -> FastAPI:
         prefix="/api",
         dependencies=[Depends(verify_token)],
     )
+    # Events router uses the header-or-query auth dependency because browser
+    # EventSource cannot set Authorization headers (roborev job 940 finding).
     app.include_router(
         events_router,
+        prefix="/api",
+        dependencies=[Depends(verify_token_or_query)],
+    )
+    app.include_router(
+        doctor_router,
+        prefix="/api",
+        dependencies=[Depends(verify_token)],
+    )
+    app.include_router(
+        feedback_router,
+        prefix="/api",
+        dependencies=[Depends(verify_token)],
+    )
+    app.include_router(
+        config_router,
         prefix="/api",
         dependencies=[Depends(verify_token)],
     )
