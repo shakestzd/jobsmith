@@ -21,7 +21,6 @@ from fastapi.testclient import TestClient
 from jobsmith.api.applications import router as applications_router
 from jobsmith.db import open_pipeline_db
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
