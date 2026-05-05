@@ -41,10 +41,49 @@ def repo_root(tmp_path: Path) -> Path:
 
 @pytest.fixture()
 def client(repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """API client backed by master_content table seeded from work.yml fixture.
+
+    S5 (feat-484c52b5) made writes go DB-only; fixture must populate the DB.
+    """
+    from jobsmith.db import open_pipeline_db
+    from jobsmith.master_ingest import ingest_master_from_disk
+
     monkeypatch.chdir(repo_root)
+
+    db_path = repo_root / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = open_pipeline_db(db_path)
+    try:
+        ingest_master_from_disk(
+            conn,
+            content_dir=repo_root / "assets" / "content",
+            reload=True,
+        )
+    finally:
+        conn.close()
+    monkeypatch.setattr(
+        "jobsmith.api.master._get_db_path_for_master", lambda: db_path
+    )
+
     app = FastAPI()
     app.include_router(router, prefix="/api")
     return TestClient(app)
+
+
+def _read_work_from_db(repo_root: Path) -> object:
+    """Read the work blob from master_content and parse it."""
+    import yaml as _yaml
+
+    from jobsmith.db import open_pipeline_db
+
+    conn = open_pipeline_db(repo_root / "private" / "jobsmith.db")
+    try:
+        row = conn.execute(
+            "SELECT content_blob FROM master_content WHERE section = 'work'"
+        ).fetchone()
+    finally:
+        conn.close()
+    return _yaml.safe_load(row["content_blob"]) if row else None
 
 
 # ---------------------------------------------------------------------------
@@ -64,13 +103,10 @@ class TestMarkAnchorEndpoint:
     def test_mark_anchor_sets_anchor_true(
         self, client: TestClient, repo_root: Path
     ) -> None:
-        """POST .../anchor (no drop_reason) sets anchor=True on the bullet."""
-        import yaml
-
+        """POST .../anchor (no drop_reason) sets anchor=True on the bullet (DB)."""
         client.post("/api/master/work/roles/0/bullets/0/anchor", json={})
 
-        work_path = repo_root / "assets" / "content" / "work.yml"
-        data = yaml.safe_load(work_path.read_text(encoding="utf-8"))
+        data = _read_work_from_db(repo_root)
         entry = data[0]["details"][0]
         assert isinstance(entry, dict)
         assert entry["anchor"] is True
@@ -78,19 +114,28 @@ class TestMarkAnchorEndpoint:
     def test_mark_anchor_with_drop_reason_sets_anchor_false(
         self, client: TestClient, repo_root: Path
     ) -> None:
-        """POST .../anchor with drop_reason sets anchor=False and drop_when."""
-        import yaml
-
+        """POST .../anchor with drop_reason sets anchor=False and drop_when (DB)."""
         client.post(
             "/api/master/work/roles/0/bullets/0/anchor",
             json={"drop_reason": "too niche"},
         )
 
-        work_path = repo_root / "assets" / "content" / "work.yml"
-        data = yaml.safe_load(work_path.read_text(encoding="utf-8"))
+        data = _read_work_from_db(repo_root)
         entry = data[0]["details"][0]
         assert entry["anchor"] is False
         assert entry.get("drop_when") == "too niche"
+
+    def test_anchor_endpoint_does_not_modify_yaml_file(
+        self, client: TestClient, repo_root: Path
+    ) -> None:
+        """S5 contract / ultrareview bug_005: bullet ops never touch work.yml."""
+        work_path = repo_root / "assets" / "content" / "work.yml"
+        before = work_path.read_text(encoding="utf-8")
+
+        client.post("/api/master/work/roles/0/bullets/0/anchor", json={})
+
+        after = work_path.read_text(encoding="utf-8")
+        assert before == after, "anchor endpoint must not touch work.yml on disk"
 
     def test_mark_anchor_out_of_range_role_returns_404(
         self, client: TestClient
@@ -130,13 +175,10 @@ class TestAddBulletEndpoint:
     def test_add_bullet_appends_to_details(
         self, client: TestClient, repo_root: Path
     ) -> None:
-        """POST .../bullets without position appends the bullet."""
-        import yaml
-
+        """POST .../bullets without position appends the bullet (DB)."""
         client.post("/api/master/work/roles/0/bullets", json={"text": "Appended"})
 
-        work_path = repo_root / "assets" / "content" / "work.yml"
-        data = yaml.safe_load(work_path.read_text(encoding="utf-8"))
+        data = _read_work_from_db(repo_root)
         details = data[0]["details"]
         last = details[-1]
         text = last["bullet"] if isinstance(last, dict) else last
@@ -145,16 +187,13 @@ class TestAddBulletEndpoint:
     def test_add_bullet_with_position(
         self, client: TestClient, repo_root: Path
     ) -> None:
-        """POST .../bullets with position inserts at the given index."""
-        import yaml
-
+        """POST .../bullets with position inserts at the given index (DB)."""
         client.post(
             "/api/master/work/roles/0/bullets",
             json={"text": "At position 0", "position": 0},
         )
 
-        work_path = repo_root / "assets" / "content" / "work.yml"
-        data = yaml.safe_load(work_path.read_text(encoding="utf-8"))
+        data = _read_work_from_db(repo_root)
         first = data[0]["details"][0]
         text = first["bullet"] if isinstance(first, dict) else first
         assert text == "At position 0"
@@ -196,11 +235,8 @@ class TestRemoveBulletEndpoint:
     def test_remove_bullet_removes_from_details(
         self, client: TestClient, repo_root: Path
     ) -> None:
-        """DELETE removes the bullet from the details list."""
-        import yaml
-
-        work_path = repo_root / "assets" / "content" / "work.yml"
-        before = yaml.safe_load(work_path.read_text(encoding="utf-8"))
+        """DELETE removes the bullet from the details list (DB)."""
+        before = _read_work_from_db(repo_root)
         original_count = len(before[0]["details"])
 
         client.request(
@@ -209,12 +245,8 @@ class TestRemoveBulletEndpoint:
             json={"reason": "outdated"},
         )
 
-        after = yaml.safe_load(work_path.read_text(encoding="utf-8"))
-        # Either hard-deleted (count - 1) or soft-dropped (count same, entry has drop_when)
+        after = _read_work_from_db(repo_root)
         details = after[0]["details"]
-        # The original second bullet must not be present as-is
-        # (either removed or marked as drop_when)
-        # Total length either decreased OR entry has drop_when set
         removed = len(details) < original_count
         soft = any(isinstance(e, dict) and e.get("drop_when") for e in details)
         assert removed or soft, f"Bullet was neither removed nor soft-dropped. details: {details!r}"

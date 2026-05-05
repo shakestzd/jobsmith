@@ -40,9 +40,19 @@ The supervisor itself does no verbosity filtering — it streams every line.
 The SSE layer applies the user's ``verbosity`` query parameter when
 deciding whether to forward each ``log`` event to the wire.
 
+Terminal phase guard (feat-438090af)
+------------------------------------
+When the apply subprocess exits non-zero (or is SIGKILL'd), the supervisor
+reads the transcript.jsonl tail (last 50 lines) and checks whether a
+terminal phase event (status=success or status=failed) was already written.
+If absent, it synthesises a ``SynthPhaseEvent`` and broadcasts it to every
+subscriber queue before sending the end-of-stream sentinel.  This guarantees
+the SSE consumer always receives at least one terminal phase signal.
+
 Public API surface
 ------------------
-``LogLine``, ``RunHandle``, ``RunSupervisor``, ``get_supervisor``.
+``LogLine``, ``SynthPhaseEvent``, ``RunHandle``, ``RunSupervisor``,
+``get_supervisor``, ``synth_terminal_phase_failed``.
 
 The default singleton is constructed with ``max_buffered_lines=10_000``.
 Tests construct their own ``RunSupervisor(max_buffered_lines=...)`` to
@@ -52,6 +62,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
+import logging
 import os
 import signal
 import uuid
@@ -62,11 +74,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "LogLine",
+    "SynthPhaseEvent",
     "RunHandle",
     "RunSupervisor",
     "get_supervisor",
+    "synth_terminal_phase_failed",
 ]
 
 
@@ -77,6 +93,9 @@ __all__ = [
 
 StreamName = Literal["stdout", "stderr"]
 RunStatus = Literal["running", "done", "failed", "killed"]
+
+# Union of items that can appear in the supervisor stream.
+StreamItem = "LogLine | SynthPhaseEvent"
 
 
 @dataclass(frozen=True)
@@ -91,6 +110,21 @@ class LogLine:
     stream: StreamName
     line: str
     timestamp: str
+
+
+@dataclass(frozen=True)
+class SynthPhaseEvent:
+    """A synthesised terminal phase=failed event (feat-438090af).
+
+    Emitted by the supervisor when the subprocess exits non-zero without
+    having written a terminal phase event to the transcript.  The frontend's
+    phase tracker consumes this the same way it consumes a real phase event.
+    """
+
+    run_id: str
+    status: str  # always "failed"
+    last_phase: str  # last phase seen in transcript, or "unknown"
+    error_excerpt: str  # last 1-2 non-empty stderr/transcript lines
 
 
 @dataclass
@@ -121,10 +155,15 @@ class _RunRecord:
 
     handle: RunHandle
     process: asyncio.subprocess.Process | None = None
-    buffer: deque[LogLine] = field(default_factory=deque)
-    subscribers: list[asyncio.Queue[LogLine | None]] = field(default_factory=list)
+    # Buffer holds LogLine or SynthPhaseEvent items.
+    buffer: deque = field(default_factory=deque)
+    subscribers: list[asyncio.Queue] = field(default_factory=list)
     drain_tasks: list[asyncio.Task] = field(default_factory=list)
     finished_event: asyncio.Event = field(default_factory=asyncio.Event)
+    # Optional transcript path for failure synthesis (feat-438090af).
+    transcript_path: Path | None = None
+    # Stderr lines accumulated during drain for the synth excerpt.
+    _stderr_tail: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +179,82 @@ def _now_iso() -> str:
         .isoformat()
         .replace("+00:00", "Z")
     )
+
+
+_TERMINAL_STATUSES = frozenset({"success", "failed", "done"})
+# render.py emits phase events as {"type": "phase_complete"} or
+# {"type": "phase_failed"} without a "status" field — recognise both
+# shapes so the synth gate doesn't fire duplicate failures.
+# Closes roborev branch-review MEDIUM (feat-6d76bb22).
+_TERMINAL_TYPES = frozenset({"phase_complete", "phase_failed"})
+_TRANSCRIPT_TAIL_LINES = 50
+
+
+def synth_terminal_phase_failed(
+    *,
+    transcript_path: Path,
+    returncode: int,
+    last_stderr_lines: list[str],
+) -> dict | None:
+    """Return a synthesised phase=failed payload, or None.
+
+    This is a pure function (no I/O side-effects beyond reading a file):
+
+    - Returns ``None`` when *returncode* is 0 (clean exit — no synthesis needed).
+    - Returns ``None`` when the transcript already contains a terminal phase
+      event (status in {success, failed, done}) — the pipeline wrote it.
+    - Returns a ``{"status": "failed", "last_phase": ..., "error_excerpt": ...}``
+      dict otherwise.
+
+    Args:
+        transcript_path: Path to ``transcript.jsonl`` (may not exist).
+        returncode: Subprocess exit code (negative for signals, e.g. -9 for SIGKILL).
+        last_stderr_lines: Recent stderr lines for the error_excerpt.
+    """
+    # Zero exit = clean; no synthesis needed.
+    if returncode == 0:
+        return None
+
+    last_phase = "unknown"
+    has_terminal = False
+
+    tail_lines: list[str] = []
+    try:
+        if transcript_path.exists():
+            raw = transcript_path.read_text(encoding="utf-8", errors="replace")
+            all_lines = [ln for ln in raw.splitlines() if ln.strip()]
+            tail_lines = all_lines[-_TRANSCRIPT_TAIL_LINES:]
+    except OSError:
+        pass  # Missing or unreadable — treat as empty.
+
+    for raw_line in tail_lines:
+        try:
+            obj = json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        status = obj.get("status")
+        phase = obj.get("phase")
+        event_type = obj.get("type")
+        if phase:
+            last_phase = phase
+        if status in _TERMINAL_STATUSES or event_type in _TERMINAL_TYPES:
+            has_terminal = True
+            # Do not break — keep scanning so last_phase stays current.
+
+    if has_terminal:
+        return None
+
+    # Build error_excerpt from stderr tail (prefer non-empty lines).
+    excerpt_lines = [ln for ln in last_stderr_lines if ln.strip()][-2:]
+    error_excerpt = " | ".join(excerpt_lines) if excerpt_lines else ""
+
+    return {
+        "status": "failed",
+        "last_phase": last_phase,
+        "error_excerpt": error_excerpt,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -170,11 +285,23 @@ class RunSupervisor:
         slug: str,
         argv: list[str],
         cwd: Path,
+        *,
+        transcript_path: Path | None = None,
     ) -> str:
         """Spawn ``argv`` in ``cwd`` and register a new run.
 
         Returns the supervisor-assigned ``run_id``. The subprocess and its
         stdout/stderr drain tasks are started before this returns.
+
+        Args:
+            slug: Application slug (used for conflict detection).
+            argv: Command + arguments to spawn.
+            cwd: Working directory for the subprocess.
+            transcript_path: Optional path to ``transcript.jsonl`` used by the
+                terminal-phase guard (feat-438090af). When provided and the
+                subprocess exits non-zero without a terminal phase event in the
+                transcript, a :class:`SynthPhaseEvent` is broadcast to all
+                subscribers before the end-of-stream sentinel.
         """
         if not argv:
             raise ValueError("argv must not be empty")
@@ -188,7 +315,7 @@ class RunSupervisor:
             started_at=_now_iso(),
             finished_at=None,
         )
-        record = _RunRecord(handle=handle)
+        record = _RunRecord(handle=handle, transcript_path=transcript_path)
 
         # Spawn the subprocess BEFORE registering the run as active. Otherwise
         # a spawn failure (binary missing, permission denied, OOM, etc.)
@@ -264,8 +391,11 @@ class RunSupervisor:
             return None
         return run_id
 
-    async def stream(self, run_id: str) -> AsyncIterator[LogLine]:
-        """Yield ``LogLine`` objects for ``run_id`` until the run terminates.
+    async def stream(self, run_id: str) -> AsyncIterator[LogLine | SynthPhaseEvent]:
+        """Yield items for ``run_id`` until the run terminates.
+
+        Items are either :class:`LogLine` (stdout/stderr output) or
+        :class:`SynthPhaseEvent` (synthesised terminal phase on failure).
 
         Behaviour:
 
@@ -290,7 +420,7 @@ class RunSupervisor:
         # avoid a race: any line appended after we snapshot will land in
         # the queue.  We dedupe by tracking the buffer length we already
         # yielded.
-        queue: asyncio.Queue[LogLine | None] = asyncio.Queue()
+        queue: asyncio.Queue = asyncio.Queue()
         record.subscribers.append(queue)
         try:
             # Snapshot buffered lines (in arrival order).
@@ -312,10 +442,9 @@ class RunSupervisor:
                     # Producer signals end-of-stream.
                     return
                 # Skip replays already covered by the snapshot.
-                # We do this naively by reference equality on the LogLine
-                # tuple — duplicates only happen for items that were in the
-                # buffer before we registered.  An exact equality check
-                # filters them while keeping later items.
+                # We do this naively by reference equality on the item
+                # (frozen dataclass) — duplicates only happen for items
+                # that were in the buffer before we registered.
                 if item in snapshot:
                     continue
                 yield item
@@ -399,17 +528,22 @@ class RunSupervisor:
                 timestamp=_now_iso(),
             )
             self._append(record, line)
+            # Accumulate recent stderr lines for the synth excerpt (capped).
+            if stream_name == "stderr" and text.strip():
+                record._stderr_tail.append(text)
+                if len(record._stderr_tail) > 20:
+                    record._stderr_tail = record._stderr_tail[-20:]
 
-    def _append(self, record: _RunRecord, line: LogLine) -> None:
-        """Append ``line`` to the buffer (capped) and broadcast to queues."""
+    def _append(self, record: _RunRecord, item: LogLine | SynthPhaseEvent) -> None:
+        """Append ``item`` to the buffer (capped) and broadcast to queues."""
         buf = record.buffer
-        buf.append(line)
+        buf.append(item)
         # Trim from the left when over cap.
         while len(buf) > self._max_buffered_lines:
             buf.popleft()
         for q in record.subscribers:
             # Queues are unbounded; put_nowait cannot fail.
-            q.put_nowait(line)
+            q.put_nowait(item)
 
     async def _wait(self, record: _RunRecord) -> None:
         """Wait for the subprocess to exit, finalise the handle, notify subs."""
@@ -434,6 +568,31 @@ class RunSupervisor:
             record.handle.status = "done" if exit_code == 0 else "failed"
             record.handle.finished_at = _now_iso()
             self._active_by_slug.pop(record.handle.slug, None)
+
+        # Terminal-phase guard (feat-438090af): when the subprocess exits
+        # non-zero and no terminal phase event was written to the transcript,
+        # synthesise one and broadcast it before the end-of-stream sentinel.
+        if exit_code != 0 and record.transcript_path is not None:
+            try:
+                payload = synth_terminal_phase_failed(
+                    transcript_path=record.transcript_path,
+                    returncode=exit_code,
+                    last_stderr_lines=list(record._stderr_tail),
+                )
+                if payload is not None:
+                    synth = SynthPhaseEvent(
+                        run_id=record.handle.run_id,
+                        status=payload["status"],
+                        last_phase=payload["last_phase"],
+                        error_excerpt=payload["error_excerpt"],
+                    )
+                    self._append(record, synth)
+            except Exception:  # noqa: BLE001 — synth must never break the stream
+                logger.exception(
+                    "terminal phase synth failed for run_id=%r slug=%r",
+                    record.handle.run_id,
+                    record.handle.slug,
+                )
 
         # Tell every subscriber: end of stream.
         for q in record.subscribers:

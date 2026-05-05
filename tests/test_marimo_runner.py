@@ -225,6 +225,49 @@ def test_runner_ingests_specialist_outputs_on_phase_complete(
     assert ingest_calls[0]["phase"] == "gather"
 
 
+def test_runner_ingests_standalone_artifacts_on_phase_complete(
+    pipeline_db, tmp_path: Path, fixture_state_dir: Path
+):
+    """Runner calls ingest_standalone_artifacts after each phase_complete.
+
+    Regression for roborev branch-review HIGH (feat-b1a883a1): without this
+    call, JOBSMITH_DUAL_WRITE=0 (S4 default) leaves cover-letter-draft,
+    quarto-config, variables, and .agent.md snapshots out of the DB on
+    fresh runs.
+    """
+    conn, db_path = pipeline_db
+    url = "https://example.com/jobs/standalone-test"
+
+    def _fake_run_phase_iter(url_, **kwargs):
+        yield PipelineEvent(kind="phase_started", phase="render")
+        yield PipelineEvent(kind="phase_complete", phase="render")
+
+    standalone_calls = []
+
+    def _fake_standalone(conn_, *, run_id, state_dir):
+        standalone_calls.append({"run_id": run_id, "state_dir": str(state_dir)})
+        return 0
+
+    def _noop_phase_ingest(conn_, *, slug, run_id, phase, state_dir):
+        return 0
+
+    with (
+        patch("jobsmith.marimo.runner.run_phase_iter", _fake_run_phase_iter),
+        patch("jobsmith.marimo.runner.ingest_phase_outputs", _noop_phase_ingest),
+        patch(
+            "jobsmith.marimo.runner.ingest_standalone_artifacts",
+            _fake_standalone,
+        ),
+    ):
+        runner = NotebookRunner(db_path=db_path, applications_dir=tmp_path)
+        runner.start(url=url, cwd=tmp_path)
+        _drain_queue(runner.events_queue, timeout=3.0)
+
+    assert len(standalone_calls) >= 1, (
+        "ingest_standalone_artifacts must be called on phase_complete"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Test 6 — slug_changed event propagates to consumer queue
 # ---------------------------------------------------------------------------

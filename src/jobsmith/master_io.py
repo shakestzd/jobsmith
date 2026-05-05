@@ -316,6 +316,73 @@ def save_master(section: MasterSection, payload: Any, path: Path) -> None:
     _atomic_write(path, content)
 
 
+def save_master_to_blob(
+    section: MasterSection,
+    payload: Any,
+    existing_blob: str | None,
+) -> str:
+    """Validate *payload* and return a new YAML blob (S5, feat-484c52b5).
+
+    Mirrors :func:`save_master` but operates on string blobs instead of files,
+    so callers can persist the result to a DB column.  Comment preservation
+    works only when *existing_blob* is supplied (and parses to a
+    CommentedMap/CommentedSeq) — for fresh sections, the payload is dumped
+    plain.
+
+    Parameters
+    ----------
+    section:
+        Which master section this payload represents.
+    payload:
+        JSON-serialisable data (list-of-dicts for work/skill/education,
+        dict for author).
+    existing_blob:
+        Previous YAML text from the DB (or None for a fresh section).
+
+    Returns
+    -------
+    str
+        The new YAML text to persist.
+
+    Raises
+    ------
+    pydantic.ValidationError
+        When *payload* fails schema validation.
+    """
+    # Step 1: validate
+    if section in _LIST_MODELS:
+        if not isinstance(payload, list):
+            model = _LIST_MODELS[section]
+            model.model_validate(payload)  # raises
+        _validate_list_payload(section, payload)
+    else:
+        _validate_author_payload(payload)
+
+    # Step 2: load existing structure for comment-preserving merge
+    y = _make_yaml()
+    existing: Any = None
+    if existing_blob:
+        try:
+            existing = y.load(existing_blob)
+        except Exception:  # noqa: BLE001 — fall back to wholesale replace
+            existing = None
+
+    # Step 3: merge
+    if existing is not None:
+        if isinstance(existing, CommentedSeq) and isinstance(payload, list):
+            merged = _merge_commented_seq(existing, payload)
+        elif isinstance(existing, CommentedMap) and isinstance(payload, dict):
+            merged = _merge_commented_map(existing, payload)
+        else:
+            merged = payload
+    else:
+        merged = payload
+
+    buf = io.StringIO()
+    y.dump(merged, buf)
+    return buf.getvalue()
+
+
 def etag_for_section(path: Path) -> str:
     """Return a SHA-256 hex digest of *path* file content.
 
@@ -337,6 +404,128 @@ def etag_for_section(path: Path) -> str:
         return ""
     content = path.read_bytes()
     return hashlib.sha256(content).hexdigest()
+
+
+def mark_anchor_in_blob(
+    blob: str,
+    role_index: int,
+    bullet_index: int,
+    *,
+    drop_reason: str | None = None,
+    anchor_reason: str | None = None,
+) -> str:
+    """Apply :func:`mark_anchor`'s mutation to a YAML blob and return new blob.
+
+    Parallel to :func:`mark_anchor` but operates on string blobs (S5
+    DB-only contract — bullet edits go through master_content, not the
+    file).  Closes ultrareview bug_005.
+    """
+    y = _make_yaml()
+    data = y.load(blob)
+
+    if role_index >= len(data) or role_index < 0:
+        raise IndexError(f"role_index {role_index} out of range (len={len(data)})")
+
+    role = data[role_index]
+    details = role.get("details") or []
+    if bullet_index >= len(details) or bullet_index < 0:
+        raise IndexError(f"bullet_index {bullet_index} out of range (len={len(details)})")
+
+    entry = details[bullet_index]
+
+    if isinstance(entry, str):
+        new_entry = CommentedMap()
+        new_entry["bullet"] = entry
+    elif isinstance(entry, CommentedMap):
+        new_entry = entry
+    else:
+        new_entry = CommentedMap(entry)
+
+    if drop_reason is not None:
+        new_entry["anchor"] = False
+        new_entry["drop_when"] = drop_reason
+        if "anchor_reason" in new_entry:
+            del new_entry["anchor_reason"]
+    else:
+        new_entry["anchor"] = True
+        if "drop_when" in new_entry:
+            del new_entry["drop_when"]
+        if anchor_reason is not None:
+            new_entry["anchor_reason"] = anchor_reason
+
+    details[bullet_index] = new_entry
+
+    buf = io.StringIO()
+    y.dump(data, buf)
+    return buf.getvalue()
+
+
+def add_bullet_in_blob(
+    blob: str,
+    role_index: int,
+    text: str,
+    *,
+    position: int | None = None,
+) -> tuple[str, int]:
+    """Apply :func:`add_bullet`'s mutation to a YAML blob.
+
+    Returns ``(new_blob, effective_index)`` so callers can report the
+    insertion position.  Closes ultrareview bug_005.
+    """
+    y = _make_yaml()
+    data = y.load(blob)
+
+    if role_index >= len(data) or role_index < 0:
+        raise IndexError(f"role_index {role_index} out of range (len={len(data)})")
+
+    role = data[role_index]
+    details = role.get("details")
+    if details is None:
+        details = CommentedSeq()
+        role["details"] = details
+
+    if position is None:
+        details.append(text)
+        effective = len(details) - 1
+    else:
+        details.insert(position, text)
+        effective = position
+
+    buf = io.StringIO()
+    y.dump(data, buf)
+    return buf.getvalue(), effective
+
+
+def remove_bullet_in_blob(
+    blob: str,
+    role_index: int,
+    bullet_index: int,
+    *,
+    reason: str,
+) -> str:
+    """Apply :func:`remove_bullet`'s mutation to a YAML blob.  Closes bug_005."""
+    y = _make_yaml()
+    data = y.load(blob)
+
+    if role_index >= len(data) or role_index < 0:
+        raise IndexError(f"role_index {role_index} out of range (len={len(data)})")
+
+    role = data[role_index]
+    details = role.get("details") or []
+    if bullet_index >= len(details) or bullet_index < 0:
+        raise IndexError(f"bullet_index {bullet_index} out of range (len={len(details)})")
+
+    entry = details[bullet_index]
+    is_anchor_bullet = isinstance(entry, (dict, CommentedMap)) and entry.get("anchor") is True
+
+    if is_anchor_bullet:
+        entry["drop_when"] = reason
+    else:
+        del details[bullet_index]
+
+    buf = io.StringIO()
+    y.dump(data, buf)
+    return buf.getvalue()
 
 
 def mark_anchor(
@@ -555,10 +744,14 @@ def save_benchmark(text: str, path: Path) -> None:
 __all__ = [
     "MasterSection",
     "add_bullet",
+    "add_bullet_in_blob",
     "etag_for_section",
     "load_master",
     "mark_anchor",
+    "mark_anchor_in_blob",
     "remove_bullet",
+    "remove_bullet_in_blob",
     "save_benchmark",
     "save_master",
+    "save_master_to_blob",
 ]

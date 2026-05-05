@@ -23,6 +23,7 @@ Behavior contract
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
 from typing import Any, Literal
 
@@ -31,14 +32,13 @@ from fastapi import APIRouter, Body, Header, HTTPException, Response, UploadFile
 from pydantic import BaseModel, ValidationError
 
 from jobsmith.config import find_config, load_config
+from jobsmith.db import open_pipeline_db
 from jobsmith.master_io import (
     MasterSection,
-    add_bullet,
-    etag_for_section,
-    mark_anchor,
-    remove_bullet,
+    add_bullet_in_blob,
+    mark_anchor_in_blob,
+    remove_bullet_in_blob,
     save_benchmark,
-    save_master,
 )
 from jobsmith.paths import resolve
 
@@ -52,6 +52,8 @@ from .schemas.master import (
     ValidateResponse,
     WorkEntry,
 )
+
+_log = logging.getLogger(__name__)
 
 Section = Literal["work", "skill", "education", "author"]
 _SECTIONS: tuple[Section, ...] = ("work", "skill", "education", "author")
@@ -79,6 +81,50 @@ def _require_config_path() -> Path:
     return config_path
 
 
+def _get_db_path_for_master() -> Path | None:
+    """Resolve the pipeline DB path for master content reads.
+
+    Returns None when no config is found (DB path is config-derived).
+    Module-level so tests can monkeypatch it.
+    """
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        return None
+    try:
+        config = load_config(path=config_path)
+        repo_root = config_path.parent
+        return (repo_root / config.output.jobsmith_db).resolve()
+    except Exception:
+        return None
+
+
+def _db_load_section(section: str) -> str | None:
+    """Query ``master_content`` for *section*.  Returns raw YAML text or None.
+
+    Returns None when the DB path cannot be resolved, when the DB has no row
+    for the section, or when any DB error occurs.  Callers fall back to the
+    filesystem when None is returned.
+    """
+    db_path = _get_db_path_for_master()
+    if db_path is None or not db_path.exists():
+        return None
+    try:
+        conn = open_pipeline_db(db_path)
+        try:
+            row = conn.execute(
+                "SELECT content_blob FROM master_content WHERE section = ?",
+                (section,),
+            ).fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        _log.debug("master: DB read failed for section %r", section, exc_info=True)
+        return None
+    if row is None:
+        return None
+    return row["content_blob"]
+
+
 def _load_yaml_list(path: Path) -> list[dict[str, Any]]:
     """Load a YAML file that contains a list. Return [] on missing or error."""
     if not path.exists():
@@ -90,6 +136,62 @@ def _load_yaml_list(path: Path) -> list[dict[str, Any]]:
     if not isinstance(data, list):
         return []
     return [item for item in data if isinstance(item, dict)]
+
+
+def _parse_yaml_list(blob: str) -> list[dict[str, Any]]:
+    """Parse a YAML blob that contains a list.  Return [] on error."""
+    try:
+        data = yaml.safe_load(blob)
+    except yaml.YAMLError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def _parse_skill_blob(blob: str) -> list[SkillEntry]:
+    """Parse a skill YAML blob (list or dict-of-lists form)."""
+    raw = _parse_yaml_list(blob)
+    if raw:
+        return [SkillEntry.model_validate(item) for item in raw]
+    # dict-of-lists form
+    try:
+        data = yaml.safe_load(blob)
+    except yaml.YAMLError:
+        return []
+    if isinstance(data, dict):
+        entries = []
+        for key, val in data.items():
+            if isinstance(val, list):
+                entries.append(
+                    SkillEntry(
+                        title=key,
+                        description=", ".join(str(v) for v in val),
+                        details=[str(v) for v in val],
+                    )
+                )
+        return entries
+    return []
+
+
+def _parse_author_blob(blob: str) -> Author | None:
+    """Parse an author YAML blob into an Author model or None."""
+    try:
+        data = yaml.safe_load(blob)
+    except yaml.YAMLError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    author_val = data.get("author")
+    if isinstance(author_val, list) and author_val:
+        author_dict = author_val[0]
+    elif isinstance(author_val, dict):
+        author_dict = author_val
+    else:
+        return None
+    if not isinstance(author_dict, dict):
+        return None
+    return Author.model_validate(author_dict)
 
 
 def _load_work(config_path: Path) -> list[WorkEntry]:
@@ -163,65 +265,88 @@ def _load_author(config_path: Path) -> Author | None:
 # ---------------------------------------------------------------------------
 
 
+def _raise_missing_section(section: str) -> None:
+    """Raise 404 with structured body when a master section is absent from the DB."""
+    raise HTTPException(
+        status_code=404,
+        detail={
+            "error": "missing_in_db",
+            "section": section,
+            "suggestion": f"jobsmith db load-master  # to backfill section '{section}'",
+        },
+    )
+
+
+def _set_db_etag(response: Response, blob: str) -> None:
+    """Set ETag header from blob content.
+
+    Uses the full sha256 hex digest so the value matches ``etag_for_section``
+    (which the PUT handler uses to validate If-Match) when the DB row was
+    ingested from the same file bytes.
+    """
+    response.headers["ETag"] = (
+        '"' + hashlib.sha256(blob.encode("utf-8")).hexdigest() + '"'
+    )
+
+
 @router.get("/master", response_model=MasterPayload)
-def get_master() -> MasterPayload:
-    """Return all master content sections in one payload."""
-    config_path = _require_config_path()
+def get_master(response: Response) -> MasterPayload:
+    """Return all master content sections in one payload (DB-only)."""
+    sections: dict[str, Any] = {}
+    for section in _SECTIONS:
+        blob = _db_load_section(section)
+        if blob is None:
+            _raise_missing_section(section)
+        sections[section] = blob
     return MasterPayload(
-        work=_load_work(config_path),
-        skill=_load_skill(config_path),
-        education=_load_education(config_path),
-        author=_load_author(config_path),
+        work=[WorkEntry.model_validate(item) for item in _parse_yaml_list(sections["work"])],
+        skill=_parse_skill_blob(sections["skill"]),
+        education=[
+            EducationEntry.model_validate(item)
+            for item in _parse_yaml_list(sections["education"])
+        ],
+        author=_parse_author_blob(sections["author"]),
     )
 
 
 @router.get("/master/work", response_model=list[WorkEntry])
 def get_master_work(response: Response) -> list[WorkEntry]:
-    """Return the work history list from work.yml.
-
-    Includes an ``ETag`` response header (SHA-256 hex of work.yml content)
-    for concurrent-write safety.
-    """
-    config_path = _require_config_path()
-    target = _resolve_section_path(config_path, "work")
-    response.headers["ETag"] = f'"{etag_for_section(target)}"'
-    return _load_work(config_path)
+    """Return the work history list (DB-only)."""
+    blob = _db_load_section("work")
+    if blob is None:
+        _raise_missing_section("work")
+    _set_db_etag(response, blob)
+    return [WorkEntry.model_validate(item) for item in _parse_yaml_list(blob)]
 
 
 @router.get("/master/skill", response_model=list[SkillEntry])
 def get_master_skill(response: Response) -> list[SkillEntry]:
-    """Return the skill categories list from skill.yml.
-
-    Includes an ``ETag`` response header for concurrent-write safety.
-    """
-    config_path = _require_config_path()
-    target = _resolve_section_path(config_path, "skill")
-    response.headers["ETag"] = f'"{etag_for_section(target)}"'
-    return _load_skill(config_path)
+    """Return the skill categories list (DB-only)."""
+    blob = _db_load_section("skill")
+    if blob is None:
+        _raise_missing_section("skill")
+    _set_db_etag(response, blob)
+    return _parse_skill_blob(blob)
 
 
 @router.get("/master/education", response_model=list[EducationEntry])
 def get_master_education(response: Response) -> list[EducationEntry]:
-    """Return the education list from education.yml.
-
-    Includes an ``ETag`` response header for concurrent-write safety.
-    """
-    config_path = _require_config_path()
-    target = _resolve_section_path(config_path, "education")
-    response.headers["ETag"] = f'"{etag_for_section(target)}"'
-    return _load_education(config_path)
+    """Return the education list (DB-only)."""
+    blob = _db_load_section("education")
+    if blob is None:
+        _raise_missing_section("education")
+    _set_db_etag(response, blob)
+    return [EducationEntry.model_validate(item) for item in _parse_yaml_list(blob)]
 
 
 @router.get("/master/author", response_model=Author | None)
 def get_master_author(response: Response) -> Author | None:
-    """Return the author block from author.yml, or null if the file is missing.
-
-    Includes an ``ETag`` response header for concurrent-write safety.
-    """
-    config_path = _require_config_path()
-    target = _resolve_section_path(config_path, "author")
-    response.headers["ETag"] = f'"{etag_for_section(target)}"'
-    return _load_author(config_path)
+    """Return the author block (DB-only)."""
+    blob = _db_load_section("author")
+    if blob is None:
+        _raise_missing_section("author")
+    _set_db_etag(response, blob)
+    return _parse_author_blob(blob)
 
 
 # ---------------------------------------------------------------------------
@@ -458,48 +583,73 @@ def _put_section(
     if_match: str | None = None,
     response: Response | None = None,
 ) -> WriteResponse:
-    """Shared logic for PUT handler and upload handler.
+    """Validate *body* and persist it to the master_content DB table (S5).
 
-    Validates *body*, resolves the target path, delegates write to
-    ``save_master`` (ruamel.yaml round-trip), and returns WriteResponse.
+    The YAML file on disk is no longer touched by PUT — users regenerate it
+    via ``jobsmith master export`` when they want to commit a snapshot to
+    git.  Comment preservation is handled by reading the previous DB blob
+    and round-tripping through ruamel.yaml.
 
-    When *if_match* is provided, the current file ETag is compared first;
-    a mismatch raises HTTP 412 Precondition Failed without touching the file.
+    When *if_match* is provided, the current DB blob ETag is compared first;
+    a mismatch raises 412 Precondition Failed.
     """
     if section not in _SECTIONS:
         raise HTTPException(400, f"invalid section: {section!r}")
 
-    config_path = _require_config_path()
-    target = _resolve_section_path(config_path, section)
+    master_section = _SECTION_MAP[section]
+    payload = _normalise_author_payload(body) if section == "author" else body
 
-    # ETag / If-Match check
-    current_etag = etag_for_section(target)
+    existing_blob = _db_load_section(section)
+
+    # ETag / If-Match check (DB-derived)
+    current_etag = (
+        hashlib.sha256(existing_blob.encode("utf-8")).hexdigest()
+        if existing_blob is not None
+        else ""
+    )
     if if_match is not None:
-        # Strip optional surrounding quotes from the If-Match value
         client_etag = if_match.strip('"')
         if client_etag != current_etag:
             raise HTTPException(
                 412,
-                detail="Precondition Failed: ETag mismatch — file was modified since last read",
+                detail="Precondition Failed: ETag mismatch — DB blob changed since last read",
             )
 
-    master_section = _SECTION_MAP[section]
-
-    payload = _normalise_author_payload(body) if section == "author" else body
-
     try:
-        save_master(master_section, payload, target)
+        from jobsmith.master_io import save_master_to_blob
+
+        new_blob = save_master_to_blob(master_section, payload, existing_blob)
     except ValidationError as exc:
         raise HTTPException(400, f"schema validation failed: {exc.errors()[:3]}") from exc
 
-    # Attach new ETag to response headers if caller passed a Response object
-    if response is not None:
-        response.headers["ETag"] = f'"{etag_for_section(target)}"'
+    db_path = _get_db_path_for_master()
+    if db_path is None or not db_path.exists():
+        raise HTTPException(503, "pipeline DB unavailable — cannot persist section")
 
+    new_etag_short = hashlib.sha256(new_blob.encode("utf-8")).hexdigest()[:16]
+    conn = open_pipeline_db(db_path)
+    try:
+        from datetime import datetime, timezone
+
+        conn.execute(
+            "INSERT OR REPLACE INTO master_content "
+            "(section, content_blob, etag, loaded_at) VALUES (?, ?, ?, ?)",
+            (section, new_blob, new_etag_short, datetime.now(tz=timezone.utc).isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    if response is not None:
+        response.headers["ETag"] = (
+            '"' + hashlib.sha256(new_blob.encode("utf-8")).hexdigest() + '"'
+        )
+
+    # Reported path is the DB row identity; bytes_written is the new blob length.
     return WriteResponse(
         section=section,
-        path=str(target),
-        bytes_written=target.stat().st_size,
+        path=f"db:master_content:{section}",
+        bytes_written=len(new_blob.encode("utf-8")),
     )
 
 
@@ -536,9 +686,37 @@ class BulletWriteResponse(BaseModel):
     action: str
 
 
-def _require_work_path(config_path: Path) -> Path:
-    """Return the work.yml path, raising 404 if the config is missing."""
-    return _resolve_section_path(config_path, "work")
+def _load_work_blob_for_bullet_op() -> str:
+    """Return the work section blob from master_content, or 404 with backfill hint."""
+    blob = _db_load_section("work")
+    if blob is None:
+        _raise_missing_section("work")
+    return blob
+
+
+def _persist_work_blob(new_blob: str) -> None:
+    """Write *new_blob* to the master_content table for the work section.
+
+    S5 contract: writes go to DB only, never to disk.  Closes ultrareview
+    bug_005 — the bullet endpoints used to call _atomic_write to work.yml.
+    """
+    from datetime import datetime, timezone
+
+    db_path = _get_db_path_for_master()
+    if db_path is None or not db_path.exists():
+        raise HTTPException(503, "pipeline DB unavailable — cannot persist bullet edit")
+
+    etag_short = hashlib.sha256(new_blob.encode("utf-8")).hexdigest()[:16]
+    conn = open_pipeline_db(db_path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO master_content "
+            "(section, content_blob, etag, loaded_at) VALUES (?, ?, ?, ?)",
+            ("work", new_blob, etag_short, datetime.now(tz=timezone.utc).isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 @router.post(
@@ -552,21 +730,19 @@ def post_anchor_bullet(
 ) -> BulletWriteResponse:
     """Mark bullet at ``work[role_index].details[bullet_index]`` as an anchor.
 
-    When ``drop_reason`` is omitted, sets ``anchor=True``.
-    When ``drop_reason`` is provided, sets ``anchor=False`` and
-    ``drop_when=<drop_reason>``.
+    DB-only: edits the master_content row, never the YAML file (S5).
     """
-    config_path = _require_config_path()
-    work_path = _require_work_path(config_path)
+    blob = _load_work_blob_for_bullet_op()
     try:
-        mark_anchor(
-            work_path,
+        new_blob = mark_anchor_in_blob(
+            blob,
             role_index=role_index,
             bullet_index=bullet_index,
             drop_reason=body.drop_reason,
         )
     except IndexError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
+    _persist_work_blob(new_blob)
     action = "drop" if body.drop_reason is not None else "anchor"
     return BulletWriteResponse(
         role_index=role_index,
@@ -583,23 +759,18 @@ def post_add_bullet(
     role_index: int,
     body: AddBulletPayload,
 ) -> BulletWriteResponse:
-    """Append or insert a new bullet into ``work[role_index].details``."""
-    config_path = _require_config_path()
-    work_path = _require_work_path(config_path)
+    """Append or insert a new bullet (DB-only, S5)."""
+    blob = _load_work_blob_for_bullet_op()
     try:
-        add_bullet(
-            work_path,
+        new_blob, effective_index = add_bullet_in_blob(
+            blob,
             role_index=role_index,
             text=body.text,
             position=body.position,
         )
     except IndexError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
-    # Determine effective bullet_index for the response (yaml is already
-    # imported at module level — no need for a local re-import).
-    data = yaml.safe_load(work_path.read_text(encoding="utf-8"))
-    details = data[role_index].get("details", [])
-    effective_index = len(details) - 1 if body.position is None else body.position
+    _persist_work_blob(new_blob)
     return BulletWriteResponse(
         role_index=role_index,
         bullet_index=effective_index,
@@ -616,18 +787,18 @@ def delete_bullet(
     bullet_index: int,
     body: RemoveBulletPayload,
 ) -> BulletWriteResponse:
-    """Remove or soft-drop bullet at ``work[role_index].details[bullet_index]``."""
-    config_path = _require_config_path()
-    work_path = _require_work_path(config_path)
+    """Remove or soft-drop bullet (DB-only, S5)."""
+    blob = _load_work_blob_for_bullet_op()
     try:
-        remove_bullet(
-            work_path,
+        new_blob = remove_bullet_in_blob(
+            blob,
             role_index=role_index,
             bullet_index=bullet_index,
             reason=body.reason,
         )
     except IndexError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
+    _persist_work_blob(new_blob)
     return BulletWriteResponse(
         role_index=role_index,
         bullet_index=bullet_index,

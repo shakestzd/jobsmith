@@ -71,7 +71,7 @@ from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from jobsmith.api.events_poll import (
     _db_poll_once,
 )
-from jobsmith.api.supervisor import RunSupervisor, get_supervisor
+from jobsmith.api.supervisor import RunSupervisor, SynthPhaseEvent, get_supervisor
 
 logger = logging.getLogger(__name__)
 
@@ -335,12 +335,35 @@ async def _stream(
             saw_activity = False
 
             # --- Drain the supervisor log queue (non-blocking) ---
+            # Items are either LogLine (live stdout/stderr) or SynthPhaseEvent
+            # (S6 terminal-phase guard, feat-438090af).  Discriminate before
+            # accessing fields — SynthPhaseEvent has run_id/status/last_phase/
+            # error_excerpt and no .stream/.line/.timestamp.  Closes
+            # ultrareview bug_029.
             while True:
                 try:
                     item = log_queue.get_nowait()
                 except asyncio.QueueEmpty:
                     break
-                _kind, run_id, log_line = item
+                _kind, run_id, payload_obj = item
+                if isinstance(payload_obj, SynthPhaseEvent):
+                    # Include both ``phase`` (matches the canonical phase-event
+                    # shape consumed by the frontend phase tracker) and
+                    # ``last_phase`` (verbose context for failure diagnostics).
+                    # Closes roborev branch-review MEDIUM (feat-90e70f1f).
+                    yield ServerSentEvent(
+                        event="phase",
+                        data=json.dumps({
+                            "run_id": payload_obj.run_id,
+                            "phase": payload_obj.last_phase,
+                            "status": payload_obj.status,
+                            "last_phase": payload_obj.last_phase,
+                            "error_excerpt": payload_obj.error_excerpt,
+                        }),
+                    )
+                    saw_activity = True
+                    continue
+                log_line = payload_obj
                 if not _allow_log(verbosity, log_line.stream):
                     saw_activity = True  # still resets idle even if filtered
                     continue

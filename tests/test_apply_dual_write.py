@@ -147,44 +147,47 @@ class TestDualWritePhaseArtifacts:
     def test_put_called_for_each_loaded_artifact(
         self, app_dir: Path, state_dir: Path
     ):
-        """For each artifact that loads non-None, put_artifact is called once."""
+        """For each artifact that loads non-None, put_artifact is called once.
+
+        S4 (feat-9b021f76) flipped the default OFF; tests that exercise the
+        shadow-write logic must opt in via JOBSMITH_DUAL_WRITE=1.
+        """
         from jobsmith.apply import dual_write_phase_artifacts
 
         mock_client = self._make_mock_client()
         slug = "acme-swe"
         run_id = "run-001"
 
-        dual_write_phase_artifacts(
-            client=mock_client,
-            slug=slug,
-            run_id=run_id,
-            state_dir=state_dir,
-        )
+        with patch.dict(os.environ, {"JOBSMITH_DUAL_WRITE": "1"}):
+            dual_write_phase_artifacts(
+                client=mock_client,
+                slug=slug,
+                run_id=run_id,
+                state_dir=state_dir,
+            )
 
         assert mock_client.put_artifact.call_count >= 1
-        # Verify call signature: (slug, run_id, kind, output)
         for c in mock_client.put_artifact.call_args_list:
             args = c.args
             assert args[0] == slug
             assert args[1] == run_id
-            assert isinstance(args[2], str)  # kind
-            # output must be a dict (text artifacts wrapped already)
+            assert isinstance(args[2], str)
             assert isinstance(args[3], dict)
 
     def test_slug_root_kinds_are_put(self, app_dir: Path, state_dir: Path):
-        """cover-letter-draft, quarto-config, variables, manifest are PUT."""
+        """cover-letter-draft, quarto-config, variables, manifest are PUT (opt-in)."""
         from jobsmith.apply import dual_write_phase_artifacts
 
         mock_client = self._make_mock_client()
-        dual_write_phase_artifacts(
-            client=mock_client,
-            slug="acme-swe",
-            run_id="run-002",
-            state_dir=state_dir,
-        )
+        with patch.dict(os.environ, {"JOBSMITH_DUAL_WRITE": "1"}):
+            dual_write_phase_artifacts(
+                client=mock_client,
+                slug="acme-swe",
+                run_id="run-002",
+                state_dir=state_dir,
+            )
 
         put_kinds = {c.args[2] for c in mock_client.put_artifact.call_args_list}
-        # At least the slug-root kinds present in fixtures should be PUT
         assert "cover-letter-draft" in put_kinds
         assert "quarto-config" in put_kinds
         assert "variables" in put_kinds
@@ -198,8 +201,9 @@ class TestDualWritePhaseArtifacts:
         mock_client = self._make_mock_client()
         mock_client.put_artifact.side_effect = RuntimeError("network error")
 
-        with caplog.at_level(logging.WARNING, logger="jobsmith.apply"):
-            # Must not raise
+        with caplog.at_level(logging.WARNING, logger="jobsmith.apply"), patch.dict(
+            os.environ, {"JOBSMITH_DUAL_WRITE": "1"}
+        ):
             dual_write_phase_artifacts(
                 client=mock_client,
                 slug="acme-swe",
@@ -207,7 +211,6 @@ class TestDualWritePhaseArtifacts:
                 state_dir=state_dir,
             )
 
-        # At least one WARNING should have been emitted
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings) >= 1
 
@@ -235,20 +238,22 @@ class TestDualWritePhaseArtifacts:
 
 
 class TestDualWriteEnvGate:
-    """JOBSMITH_DUAL_WRITE=0 disables all PUT calls."""
+    """Default flipped to OFF in S4 of trk-144d42b1 (feat-9b021f76).
 
-    def test_dual_write_enabled_by_default(
+    JOBSMITH_DUAL_WRITE=1 is now an explicit opt-in to the legacy shadow-write
+    path; the default behaviour is no FS→DB shadow write.
+    """
+
+    def test_dual_write_disabled_by_default(
         self, app_dir: Path, state_dir: Path
     ):
-        """Without JOBSMITH_DUAL_WRITE set, dual-write proceeds."""
+        """Without JOBSMITH_DUAL_WRITE set (default), no PUTs are issued."""
         from jobsmith.apply import dual_write_phase_artifacts
 
         mock_client = MagicMock()
-        mock_client.put_artifact.return_value = MagicMock()
 
         env_without_gate = {k: v for k, v in os.environ.items() if k != "JOBSMITH_DUAL_WRITE"}
         with patch.dict(os.environ, env_without_gate, clear=True):
-            # Write a file so at least one PUT occurs
             dual_write_phase_artifacts(
                 client=mock_client,
                 slug="acme-swe",
@@ -256,13 +261,12 @@ class TestDualWriteEnvGate:
                 state_dir=state_dir,
             )
 
-        # Should have been called (files exist in app_dir fixture)
-        assert mock_client.put_artifact.call_count >= 1
+        mock_client.put_artifact.assert_not_called()
 
     def test_dual_write_disabled_when_env_zero(
         self, app_dir: Path, state_dir: Path
     ):
-        """JOBSMITH_DUAL_WRITE=0 skips all PUT calls."""
+        """JOBSMITH_DUAL_WRITE=0 (explicit) skips all PUT calls."""
         from jobsmith.apply import dual_write_phase_artifacts
 
         mock_client = MagicMock()
@@ -280,7 +284,7 @@ class TestDualWriteEnvGate:
     def test_dual_write_enabled_when_env_one(
         self, app_dir: Path, state_dir: Path
     ):
-        """JOBSMITH_DUAL_WRITE=1 (explicit) enables dual-write."""
+        """JOBSMITH_DUAL_WRITE=1 (explicit) re-enables the legacy shadow-write path."""
         from jobsmith.apply import dual_write_phase_artifacts
 
         mock_client = MagicMock()

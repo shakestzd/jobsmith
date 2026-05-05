@@ -23,6 +23,7 @@ from jobsmith._state_readers import (
     ARTIFACT_READERS,
     PHASE_SPECIALISTS,
     SPECIALIST_TO_ARTIFACT,
+    STANDALONE_ARTIFACTS,
 )
 
 _BACKFILL_STATUS = "backfilled"
@@ -224,6 +225,60 @@ def ingest_phase_outputs(
     return inserted
 
 
+def ingest_standalone_artifacts(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    state_dir: Path,
+) -> int:
+    """Ingest artifact kinds that have no specialist entry in SPECIALIST_TO_ARTIFACT.
+
+    These "standalone" artifacts (cover-letter-draft, _quarto.yml,
+    _variables.yml, .agent.md snapshots) are not produced by any tracked
+    specialist, so :func:`ingest_phase_outputs` silently skips them.  This
+    function reads them directly from :data:`STANDALONE_ARTIFACTS` using the
+    matching :data:`ARTIFACT_READERS` entry.
+
+    Idempotent via INSERT OR IGNORE on (run_id, specialist, kind). The
+    ``specialist`` column is set to the filename (e.g. ``"_quarto.yml"``)
+    since there is no specialist name for these artifacts.
+
+    Returns the number of *new* rows inserted.
+    """
+    inserted = 0
+    finished_at = _now_iso()
+
+    with conn:
+        for filename in STANDALONE_ARTIFACTS:
+            reader_entry = ARTIFACT_READERS.get(filename)
+            if reader_entry is None:
+                continue
+            kind, reader_fn = reader_entry
+
+            try:
+                data = reader_fn(state_dir)
+            except Exception:  # noqa: BLE001
+                continue
+            if data is None:
+                continue
+
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO specialist_outputs "
+                "(run_id, specialist, kind, output_json, transcript_ref, finished_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    run_id,
+                    filename,
+                    kind,
+                    _serialize_artifact(data),
+                    None,
+                    finished_at,
+                ),
+            )
+            inserted += cursor.rowcount
+    return inserted
+
+
 def _last_completed_phase(state_dir: Path) -> str:
     """Infer the last completed phase from manifest.json.
 
@@ -359,15 +414,12 @@ def backfill_slug(
     )
     conn.commit()
 
-    existing = conn.execute(
-        "SELECT COUNT(*) FROM specialist_outputs WHERE run_id=?", (run_id,)
-    ).fetchone()[0]
-    if existing:
-        return 0
-
-    # Ingest every completed phase so earlier-phase artifacts also land.
-    # When manifest is missing/legacy, fall back to the single-phase
-    # heuristic so older app dirs still backfill something.
+    # Both ingest paths use INSERT OR IGNORE on (run_id, specialist, kind),
+    # so re-running is a no-op for rows already present.  We do NOT short-circuit
+    # when specialist_outputs has rows: the standalone-artifact ingest below
+    # was added in 0.8.1 (S2, feat-b0d38439) and must run for slugs backfilled
+    # under 0.8 to pick up the 4 newly-ingestable kinds (cover-letter-draft,
+    # _quarto.yml, _variables.yml, .agent.md).  Closes ultrareview bug_003.
     phases_to_ingest = completed_phases or [last_phase]
     inserted = 0
     for phase in phases_to_ingest:
@@ -380,6 +432,9 @@ def backfill_slug(
             phase=phase,
             state_dir=state_dir,
         )
+
+    inserted += ingest_standalone_artifacts(conn, run_id=run_id, state_dir=state_dir)
+
     return inserted
 
 
@@ -419,6 +474,7 @@ __all__ = [
     "backfill_all",
     "backfill_slug",
     "ingest_phase_outputs",
+    "ingest_standalone_artifacts",
     "iter_backfillable_slugs",
     "normalize_slug",
 ]

@@ -48,13 +48,24 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Phase 1 dual-write — feat-e3d87579
+# Legacy dual-write — feat-e3d87579 (gather/draft phases shadow-wrote to DB).
+#
+# 0.8.1 (S4 of trk-144d42b1, feat-9b021f76) flipped the default off. The DB
+# is now the primary persistence target for specialist artifacts; FS state in
+# .apply-state/ is materialized on demand via the snapshot endpoint for quarto.
+# Set JOBSMITH_DUAL_WRITE=1 to re-enable the legacy shadow-write path during
+# migration of any installation that hasn't fully cut over.
 # ---------------------------------------------------------------------------
 
 
 def _dual_write_enabled() -> bool:
-    """Return True when JOBSMITH_DUAL_WRITE is unset or any value other than '0'."""
-    return os.environ.get("JOBSMITH_DUAL_WRITE", "1") != "0"
+    """Return True only when JOBSMITH_DUAL_WRITE=1 is explicitly set.
+
+    Default flipped from "1" → "0" in S4 of trk-144d42b1 (feat-9b021f76).
+    The DB ingest path is now primary; the legacy shadow-write hook only
+    runs when JOBSMITH_DUAL_WRITE=1 is opted in.
+    """
+    return os.environ.get("JOBSMITH_DUAL_WRITE", "0") == "1"
 
 
 def _build_client_if_enabled() -> JobsmithClient | None:
@@ -2007,9 +2018,19 @@ def _run_apply_phases(
         # runner's behavior so `jobsmith review <slug>` sees rows immediately
         # after `jobsmith apply <url>` (roborev #923 HIGH 2). Wrapped in
         # suppress: a single broken artifact must not abort the pipeline.
+        # Also runs ingest_standalone_artifacts so the 4 orphaned kinds
+        # (cover-letter-draft, _quarto.yml, _variables.yml, .agent.md) land
+        # in the DB on live runs — without this, JOBSMITH_DUAL_WRITE=0
+        # (S4 default) leaves them invisible until manual backfill.
+        # Closes roborev branch-review HIGH (feat-b1a883a1).
         if db_conn is not None:
             with contextlib.suppress(Exception):
-                from .db_ingest import ingest_phase_outputs as _ingest_phase_outputs
+                from .db_ingest import (
+                    ingest_phase_outputs as _ingest_phase_outputs,
+                )
+                from .db_ingest import (
+                    ingest_standalone_artifacts as _ingest_standalone_artifacts,
+                )
 
                 state_dir_for_ingest = _apply_state_dir(slug, resolved_cwd)
                 if state_dir_for_ingest is not None:
@@ -2018,6 +2039,11 @@ def _run_apply_phases(
                         slug=slug,
                         run_id=db_run_id,
                         phase=phase_name,
+                        state_dir=state_dir_for_ingest,
+                    )
+                    _ingest_standalone_artifacts(
+                        db_conn,
+                        run_id=db_run_id,
                         state_dir=state_dir_for_ingest,
                     )
 

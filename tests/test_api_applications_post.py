@@ -263,7 +263,7 @@ class TestPostApplicationsForce:
 
         captured: dict[str, list[str]] = {}
 
-        async def fake_start(self, *, slug: str, argv: list[str], cwd):
+        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None):
             captured["argv"] = argv
             return "run-force-001"
 
@@ -290,7 +290,7 @@ class TestPostApplicationsForce:
 
         captured: dict[str, list[str]] = {}
 
-        async def fake_start(self, *, slug: str, argv: list[str], cwd):
+        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None):
             captured["argv"] = argv
             return "run-force-002"
 
@@ -317,7 +317,7 @@ class TestPostApplicationsForce:
 
         captured: dict[str, list[str]] = {}
 
-        async def fake_start(self, *, slug: str, argv: list[str], cwd):
+        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None):
             captured["argv"] = argv
             return "run-force-003"
 

@@ -62,7 +62,27 @@ def repo_root(tmp_path: Path) -> Path:
 
 @pytest.fixture()
 def client(repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """API client with master_content seeded from disk (S3: DB-only reads)."""
+    from jobsmith.db import open_pipeline_db
+    from jobsmith.master_ingest import ingest_master_from_disk
+
     monkeypatch.chdir(repo_root)
+
+    # Create DB and ingest master YAMLs so GET /api/master/* can find them.
+    db_path = repo_root / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = open_pipeline_db(db_path)
+    try:
+        ingest_master_from_disk(
+            conn, content_dir=repo_root / "assets" / "content", reload=True
+        )
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        "jobsmith.api.master._get_db_path_for_master", lambda: db_path
+    )
+
     app = FastAPI()
     app.include_router(router, prefix="/api")
     return TestClient(app)

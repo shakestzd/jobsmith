@@ -190,7 +190,35 @@ ARTIFACT_READERS: dict[str, tuple[str, Any]] = {
         if (d / "manifest.json").exists()
         else None,
     ),
+    # .agent.md snapshots — immutable baselines written after each phase completes.
+    # Both live inside .apply-state/ (state_dir), not at the slug root.
+    # The kind suffix "-agent" distinguishes these from the live-editable drafts.
+    "prose-draft.agent.md": (
+        "prose-draft-agent",
+        lambda d: load_text_artifact(d, "prose-draft.agent.md"),
+    ),
+    "cover-letter-draft.agent.md": (
+        "cover-letter-draft-agent",
+        lambda d: load_text_artifact(d, "cover-letter-draft.agent.md"),
+    ),
 }
+
+#: Artifact filenames that have ARTIFACT_READERS entries but are NOT produced
+#: by any specialist tracked in SPECIALIST_TO_ARTIFACT.  These are
+#: "standalone" artifacts that live either at the slug root (app_dir) or as
+#: post-phase snapshots inside .apply-state/, and must be ingested via
+#: :func:`jobsmith.db_ingest.ingest_standalone_artifacts` during backfill.
+#:
+#: Rationale: ``ingest_phase_outputs`` only reads artifacts that are connected
+#: to a specialist via ``SPECIALIST_TO_ARTIFACT``.  Any artifact NOT in that
+#: mapping is silently skipped, causing the 0.8 audit "orphaned" finding.
+STANDALONE_ARTIFACTS: tuple[str, ...] = (
+    "cover-letter-draft.md",
+    "_quarto.yml",
+    "_variables.yml",
+    "prose-draft.agent.md",
+    "cover-letter-draft.agent.md",
+)
 
 #: Maps a specialist name (as written into manifest.json.invocations[].specialist)
 #: to the artifact filename it produces under .apply-state/. Used by
@@ -237,6 +265,7 @@ __all__ = [
     "ARTIFACT_READERS",
     "PHASE_SPECIALISTS",
     "SPECIALIST_TO_ARTIFACT",
+    "STANDALONE_ARTIFACTS",
     "load_ai_tell_report",
     "load_bullet_selection",
     "load_fit_score",

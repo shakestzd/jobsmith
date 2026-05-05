@@ -32,12 +32,27 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
+export function formatDetail(rawDetail: unknown, fallback: string): string {
+  if (rawDetail == null) return fallback;
+  if (typeof rawDetail === 'string') return rawDetail;
+  if (typeof rawDetail === 'object') {
+    // Structured 404 from S3 (feat-eb6c99cb): {error, section?, suggestion}
+    const obj = rawDetail as Record<string, unknown>;
+    const error = typeof obj.error === 'string' ? obj.error : null;
+    const suggestion = typeof obj.suggestion === 'string' ? obj.suggestion : null;
+    if (error && suggestion) return `${error} — ${suggestion}`;
+    if (error) return error;
+    if (suggestion) return suggestion;
+  }
+  return fallback;
+}
+
 async function throwIfError(res: Response): Promise<void> {
   if (!res.ok) {
     let detail = res.statusText;
     try {
       const body = await res.json();
-      if (body?.detail) detail = String(body.detail);
+      detail = formatDetail(body?.detail, detail);
     } catch {
       // ignore json parse failure
     }

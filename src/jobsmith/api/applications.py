@@ -141,6 +141,28 @@ def _resolve_supervisor(request: Request) -> RunSupervisor:
     return get_supervisor()
 
 
+def _resolve_transcript_path(slug: str, cwd: Path) -> Path | None:
+    """Return the slug's transcript.jsonl path under applications_dir.
+
+    Used by the supervisor's terminal-phase guard (S6, feat-438090af) to
+    synthesize a phase=failed SSE event when the apply subprocess dies
+    without one.  Returns None when config can't be resolved — the
+    supervisor degrades gracefully (no synth, regular log stream only).
+    """
+    try:
+        from jobsmith.config import find_config, load_config
+        from jobsmith.paths import resolve
+
+        config_path = find_config(cwd)
+        if config_path is None:
+            return None
+        config = load_config(path=config_path)
+        apps_dir = resolve(config.output.applications_dir, cwd)
+        return apps_dir / slug / ".apply-state" / "transcript.jsonl"
+    except Exception:
+        return None
+
+
 async def _launch_run(
     supervisor: RunSupervisor,
     slug: str,
@@ -152,11 +174,18 @@ async def _launch_run(
 
     When *force* is true, ``--force`` is appended so the apply pipeline
     restarts from phase 1 even if prior artifacts exist for *slug*.
+
+    Threads ``transcript_path`` through to the supervisor so the
+    terminal-phase guard (S6, feat-438090af) can synth a phase=failed
+    SSE event when the subprocess dies without emitting one.
     """
     argv = [sys.executable, "-m", "jobsmith.cli", "apply", url, "--slug", slug]
     if force:
         argv.append("--force")
-    return await supervisor.start(slug=slug, argv=argv, cwd=cwd)
+    transcript_path = _resolve_transcript_path(slug, cwd)
+    return await supervisor.start(
+        slug=slug, argv=argv, cwd=cwd, transcript_path=transcript_path
+    )
 
 
 # ---------------------------------------------------------------------------
