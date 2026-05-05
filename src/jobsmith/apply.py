@@ -48,13 +48,24 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Phase 1 dual-write — feat-e3d87579
+# Legacy dual-write — feat-e3d87579 (gather/draft phases shadow-wrote to DB).
+#
+# 0.8.1 (S4 of trk-144d42b1, feat-9b021f76) flipped the default off. The DB
+# is now the primary persistence target for specialist artifacts; FS state in
+# .apply-state/ is materialized on demand via the snapshot endpoint for quarto.
+# Set JOBSMITH_DUAL_WRITE=1 to re-enable the legacy shadow-write path during
+# migration of any installation that hasn't fully cut over.
 # ---------------------------------------------------------------------------
 
 
 def _dual_write_enabled() -> bool:
-    """Return True when JOBSMITH_DUAL_WRITE is unset or any value other than '0'."""
-    return os.environ.get("JOBSMITH_DUAL_WRITE", "1") != "0"
+    """Return True only when JOBSMITH_DUAL_WRITE=1 is explicitly set.
+
+    Default flipped from "1" → "0" in S4 of trk-144d42b1 (feat-9b021f76).
+    The DB ingest path is now primary; the legacy shadow-write hook only
+    runs when JOBSMITH_DUAL_WRITE=1 is opted in.
+    """
+    return os.environ.get("JOBSMITH_DUAL_WRITE", "0") == "1"
 
 
 def _build_client_if_enabled() -> JobsmithClient | None:
