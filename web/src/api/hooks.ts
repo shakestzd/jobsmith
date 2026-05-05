@@ -132,8 +132,19 @@ export function useApplication(slug: string): UseQueryResult<ApplicationDetail> 
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
-    if (!slug) return;
+    // Reset on every slug change so the component never renders the previous
+    // slug's data under the new slug while the new fetch is in flight
+    // (roborev job 947 HIGH). The empty-slug branch also clears state — a
+    // route that briefly drops the slug must not retain prior detail.
+    setData(undefined);
+    setError(null);
 
+    if (!slug) {
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
     const signal = { cancelled: false };
 
     fetchApplicationWithRetry(slug, signal)

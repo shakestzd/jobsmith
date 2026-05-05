@@ -174,3 +174,80 @@ describe('useApplication hook — delegates to retry logic (feat-092c5a2c)', () 
     expect(apiGet).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('useApplication hook — resets state on slug change (roborev job 947)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('clears stale data immediately when slug changes', async () => {
+    const detailA = { ...DETAIL_FIXTURE, slug: 'slug-a', url: 'https://a/' };
+    const detailB = { ...DETAIL_FIXTURE, slug: 'slug-b', url: 'https://b/' };
+
+    type ResolveFn = (value: typeof detailB) => void;
+    const pendingRef: { current: ResolveFn | null } = { current: null };
+    (apiGet as ReturnType<typeof vi.fn>).mockImplementation((path: string) => {
+      if (path.endsWith('/slug-a')) return Promise.resolve(detailA);
+      // slug-b: hold the promise so we can observe the in-flight state.
+      return new Promise<typeof detailB>((resolve) => {
+        pendingRef.current = resolve;
+      });
+    });
+
+    const { result, rerender } = renderHook(
+      ({ slug }: { slug: string }) => useApplication(slug),
+      { initialProps: { slug: 'slug-a' } },
+    );
+
+    await waitFor(() => expect(result.current.data).toEqual(detailA));
+
+    rerender({ slug: 'slug-b' });
+
+    // Immediately after the slug changes, stale data must be gone and the
+    // hook must report loading. The pending fetch for slug-b has not resolved.
+    expect(result.current.data).toBeUndefined();
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.error).toBeNull();
+
+    // Resolve the pending fetch and confirm the new slug's data lands.
+    pendingRef.current?.(detailB);
+    await waitFor(() => expect(result.current.data).toEqual(detailB));
+  });
+
+  it('clears prior error when slug changes', async () => {
+    const detailB = { ...DETAIL_FIXTURE, slug: 'slug-b' };
+    (apiGet as ReturnType<typeof vi.fn>).mockImplementation((path: string) => {
+      if (path.endsWith('/slug-a')) return Promise.reject(make401());
+      return Promise.resolve(detailB);
+    });
+
+    const { result, rerender } = renderHook(
+      ({ slug }: { slug: string }) => useApplication(slug),
+      { initialProps: { slug: 'slug-a' } },
+    );
+
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+
+    rerender({ slug: 'slug-b' });
+    // Error must be cleared on slug change, not held over from the prior slug.
+    expect(result.current.error).toBeNull();
+
+    await waitFor(() => expect(result.current.data).toEqual(detailB));
+  });
+
+  it('clears data when slug becomes empty', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue(DETAIL_FIXTURE);
+
+    const { result, rerender } = renderHook(
+      ({ slug }: { slug: string }) => useApplication(slug),
+      { initialProps: { slug: 'linear-engineer-2026-05' } },
+    );
+
+    await waitFor(() => expect(result.current.data).toEqual(DETAIL_FIXTURE));
+
+    rerender({ slug: '' });
+    expect(result.current.data).toBeUndefined();
+    expect(result.current.error).toBeNull();
+    expect(result.current.isLoading).toBe(false);
+  });
+});
