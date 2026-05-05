@@ -203,3 +203,44 @@ export interface ValidateResponse {
   ok: boolean;
   errors: string[];
 }
+
+// ── Feedback ─────────────────────────────────────────────────────────────
+
+/** One record from GET /api/feedback. */
+export interface FeedbackRecord {
+  slug: string;
+  timestamp: string;
+  kind: string;
+  before: string;
+  after: string;
+  lesson: string;
+  context: Record<string, unknown> | null;
+}
+
+// ── Doctor ───────────────────────────────────────────────────────────────
+
+/** One check from GET /api/doctor. */
+export interface DoctorCheckResult {
+  name: string;
+  status: 'pass' | 'warn' | 'fail';
+  message: string;
+}
+
+// ── Master validate ──────────────────────────────────────────────────────
+
+export interface MasterValidateError {
+  field: string;
+  message: string;
+}
+
+export interface MasterValidateResponse {
+  ok: boolean;
+  errors: MasterValidateError[];
+}
+
+export interface MasterValidateRequest {
+  work: unknown[];
+  skill: unknown[];
+  education: unknown[];
+  author: Record<string, unknown> | null;
+}

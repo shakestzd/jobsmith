@@ -5,7 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Icon, Badge } from './shared';
 import { apiPost, apiPut, JobsmithApiError } from '../api/client';
-import { useApplications, useMasterSection, useConfig } from '../api/hooks';
+import { useApplications, useMasterSection, useConfig, useFeedback, useDoctor } from '../api/hooks';
 import type { MasterAuthor, ApplicationRow, JobsmithConfig, ConfigValidateResponse, ConfigValidationError } from '../api/types';
 
 // ── SiteView ─────────────────────────────────────────────────────────────
@@ -176,25 +176,26 @@ export function SiteView() {
 
 // ── FeedbackView ─────────────────────────────────────────────────────────
 
-interface FeedbackRow {
-  slug: string;
-  date: string;
-  kind: 'edit' | 'outcome';
-  summary: string;
-  tag: string;
+/** Format an ISO timestamp as a YYYY-MM-DD date string. */
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toISOString().slice(0, 10);
 }
 
-const FEEDBACK_ROWS: FeedbackRow[] = [
-  { slug: 'anthropic-applied-ai-2026-04',       date: '2026-04-30', kind: 'edit',    summary: 'tightened cover paragraph 2; reduced from 4 sentences to 3.',               tag: 'cover'   },
-  { slug: 'vercel-platform-eng-2026-04',         date: '2026-04-30', kind: 'edit',    summary: 'swapped scheduler-migration for live-reload-dev-env; better fit.',           tag: 'bullets' },
-  { slug: 'resend-developer-experience-2026-03', date: '2026-04-12', kind: 'outcome', summary: 'phone screen scheduled.',                                                    tag: 'outcome' },
-  { slug: 'render-cli-2026-03',                  date: '2026-04-08', kind: 'outcome', summary: 'on-site invite.',                                                             tag: 'outcome' },
-  { slug: 'fly-systems-2026-03',                 date: '2026-04-02', kind: 'outcome', summary: 'rejection (no reason cited).',                                               tag: 'outcome' },
-  { slug: 'stripe-infra-2026-03',                date: '2026-04-01', kind: 'edit',    summary: 'rephrased "1.2B requests" as "billion-scale" — too specific.',               tag: 'voice'   },
-];
+/** Compose a one-line summary from a feedback record. Prefers `lesson`. */
+function feedbackSummary(r: { before: string; after: string; lesson: string }): string {
+  if (r.lesson) return r.lesson;
+  if (r.before && r.after) return `${r.before} → ${r.after}`;
+  return r.after || r.before || '';
+}
 
 export function FeedbackView() {
-  const rows = FEEDBACK_ROWS;
+  const { data: rows = [], isLoading, error } = useFeedback();
+
+  const editCount = rows.filter(r => r.kind !== 'outcome').length;
+  const outcomeCount = rows.filter(r => r.kind === 'outcome').length;
+  const slugCount = new Set(rows.map(r => r.slug)).size;
 
   return (
     <div className="content">
@@ -214,17 +215,17 @@ export function FeedbackView() {
         <div className="stat">
           <div className="label">total entries</div>
           <div className="value">{rows.length}</div>
-          <div className="delta">across 6 slugs</div>
+          <div className="delta">across {slugCount} slug{slugCount === 1 ? '' : 's'}</div>
         </div>
         <div className="stat">
           <div className="label">edits captured</div>
-          <div className="value">{rows.filter(r => r.kind === 'edit').length}</div>
-          <div className="delta">↓ 2 vs last month</div>
+          <div className="value">{editCount}</div>
+          <div className="delta"></div>
         </div>
         <div className="stat">
           <div className="label">outcomes</div>
-          <div className="value">{rows.filter(r => r.kind === 'outcome').length}</div>
-          <div className="delta up">2 advanced to interview</div>
+          <div className="value">{outcomeCount}</div>
+          <div className="delta"></div>
         </div>
       </div>
 
@@ -233,22 +234,31 @@ export function FeedbackView() {
           <h3>recent entries</h3>
           <span className="sub mono-sm">private/feedback.db</span>
         </div>
-        <table className="table">
-          <thead>
-            <tr><th>date</th><th>slug</th><th>kind</th><th>summary</th><th>tag</th></tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} className="row-clickable">
-                <td><span className="mono-sm" style={{ color: 'var(--fg-subtle)' }}>{r.date}</span></td>
-                <td><span className="slug">{r.slug}</span></td>
-                <td>{r.kind === 'outcome' ? <Badge kind="success">outcome</Badge> : <Badge kind="accent">edit</Badge>}</td>
-                <td style={{ fontSize: 13 }}>{r.summary}</td>
-                <td><Badge>{r.tag}</Badge></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {error ? (
+          <div style={{ padding: '14px 16px', color: 'var(--danger, var(--fg-muted))', fontSize: 13 }}>
+            failed to load feedback: {error.message}
+          </div>
+        ) : isLoading ? (
+          <div style={{ padding: '14px 16px', color: 'var(--fg-subtle)', fontSize: 13 }}>loading…</div>
+        ) : rows.length === 0 ? (
+          <div style={{ padding: '14px 16px', color: 'var(--fg-subtle)', fontSize: 13 }}>no feedback recorded yet.</div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr><th>date</th><th>slug</th><th>kind</th><th>summary</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={`${r.slug}-${r.timestamp}-${i}`} className="row-clickable">
+                  <td><span className="mono-sm" style={{ color: 'var(--fg-subtle)' }}>{formatDate(r.timestamp)}</span></td>
+                  <td><span className="slug">{r.slug}</span></td>
+                  <td>{r.kind === 'outcome' ? <Badge kind="success">outcome</Badge> : <Badge kind="accent">{r.kind || 'edit'}</Badge>}</td>
+                  <td style={{ fontSize: 13 }}>{feedbackSummary(r)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
@@ -256,28 +266,14 @@ export function FeedbackView() {
 
 // ── DoctorView ───────────────────────────────────────────────────────────
 
-interface DoctorCheck {
-  name: string;
-  status: 'ok' | 'warn';
-  detail: string;
+function doctorBadge(status: 'pass' | 'warn' | 'fail') {
+  if (status === 'pass') return <Badge kind="success">ok</Badge>;
+  if (status === 'warn') return <Badge kind="warn">warn</Badge>;
+  return <Badge kind="danger">fail</Badge>;
 }
 
-const DOCTOR_CHECKS: DoctorCheck[] = [
-  { name: 'claude CLI',             status: 'ok',   detail: 'v1.4.0 at /usr/local/bin/claude' },
-  { name: 'quarto',                 status: 'ok',   detail: 'v1.5.57' },
-  { name: '.apply-config.yaml',     status: 'ok',   detail: 'valid · schema v3' },
-  { name: 'master/work.yml',        status: 'ok',   detail: '38 bullets · 14 anchors marked' },
-  { name: 'master/skill.yml',       status: 'ok',   detail: '12 groups' },
-  { name: 'master/education.yml',   status: 'ok',   detail: '2 entries' },
-  { name: 'benchmark.md',           status: 'warn', detail: 'present but last edited 4 months ago' },
-  { name: 'private/jobsmith.db',    status: 'ok',   detail: 'open · 8 prior runs' },
-  { name: 'private/feedback.db',    status: 'ok',   detail: 'open · 6 entries' },
-  { name: 'plugin/system-prompts/', status: 'ok',   detail: '3 phase prompts found' },
-  { name: 'plugin/agents/',         status: 'ok',   detail: '8 specialist contracts found' },
-];
-
 export function DoctorView() {
-  const checks = DOCTOR_CHECKS;
+  const { data: checks = [], isLoading, error, refetch } = useDoctor();
 
   return (
     <div className="content">
@@ -287,28 +283,42 @@ export function DoctorView() {
           <p>preflight environment checks. the same set <span className="mono">jobsmith doctor</span> runs from the CLI.</p>
         </div>
         <div className="actions">
-          <button className="btn primary"><Icon name="play" size={12} /> re-run checks</button>
+          <button
+            className="btn primary"
+            onClick={refetch}
+            disabled={isLoading}
+          >
+            <Icon name="play" size={12} /> {isLoading ? 'running…' : 're-run checks'}
+          </button>
         </div>
       </div>
       <div className="card">
-        <table className="table">
-          <thead>
-            <tr>
-              <th style={{ width: '24%' }}>check</th>
-              <th>detail</th>
-              <th style={{ width: 120 }}>status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {checks.map(c => (
-              <tr key={c.name}>
-                <td><span className="mono-sm">{c.name}</span></td>
-                <td style={{ color: 'var(--fg-muted)', fontSize: 13 }}>{c.detail}</td>
-                <td>{c.status === 'ok' ? <Badge kind="success">ok</Badge> : <Badge kind="warn">warn</Badge>}</td>
+        {error ? (
+          <div style={{ padding: '14px 16px', color: 'var(--danger, var(--fg-muted))', fontSize: 13 }}>
+            failed to load checks: {error.message}
+          </div>
+        ) : isLoading && checks.length === 0 ? (
+          <div style={{ padding: '14px 16px', color: 'var(--fg-subtle)', fontSize: 13 }}>loading…</div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th style={{ width: '24%' }}>check</th>
+                <th>detail</th>
+                <th style={{ width: 120 }}>status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {checks.map(c => (
+                <tr key={c.name}>
+                  <td><span className="mono-sm">{c.name}</span></td>
+                  <td style={{ color: 'var(--fg-muted)', fontSize: 13 }}>{c.message}</td>
+                  <td>{doctorBadge(c.status)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
