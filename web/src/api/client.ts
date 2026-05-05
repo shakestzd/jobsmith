@@ -102,3 +102,29 @@ export function buildEventsUrl(slug: string): string {
   }
   return base;
 }
+
+/**
+ * Redact secrets from any string before it lands in the DOM, clipboard, logs,
+ * or any other user-visible surface. Catches:
+ *   - `?token=<…>` / `&token=<…>` query params (used by EventSource)
+ *   - `Bearer <…>` Authorization-header echoes
+ *   - the literal current API token (defense-in-depth, in case env-var contents
+ *     somehow get serialized into a string sent to the UI)
+ *
+ * Anything matched is replaced with a `[redacted]` placeholder. Idempotent —
+ * safe to call on already-redacted strings.
+ */
+export function redactSensitive(text: string): string {
+  let out = text.replace(/([?&]token=)[^\s&"'<>]+/gi, '$1[redacted]');
+  // Bearer credentials are typically base64 / base64url, which can include
+  // `+`, `/`, `=`, `~`, etc. Match up to the next whitespace, quote, or angle
+  // bracket — not a narrow alphanumeric class — so we never leave a trailing
+  // suffix in the rendered string. Case-insensitive to also catch `bearer …`.
+  out = out.replace(/(Bearer\s+)[^\s"'<>]+/gi, '$1[redacted]');
+  if (TOKEN && TOKEN.length >= 8) {
+    // Escape regex metacharacters in the token before matching it as a literal.
+    const escaped = TOKEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    out = out.replace(new RegExp(escaped, 'g'), '[redacted]');
+  }
+  return out;
+}
