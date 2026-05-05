@@ -1154,6 +1154,86 @@ def artifact_put(
     )
 
 
+# ---------- master subcommand group (feat-484c52b5, S5) ----------
+
+
+master_app = typer.Typer(
+    name="master",
+    help="Master content commands (export DB → YAML files).",
+    no_args_is_help=True,
+)
+app.add_typer(master_app, name="master")
+
+
+@master_app.command("export")
+def master_export(
+    section: str | None = typer.Option(
+        None,
+        "--section",
+        help="Export a single section ('work', 'skill', 'education', 'author').",
+    ),
+    all_sections: bool = typer.Option(
+        False,
+        "--all",
+        help="Export every section present in master_content.",
+    ),
+) -> None:
+    """Regenerate master YAML files on disk from the master_content DB table.
+
+    The DB is the runtime authority (S5 of trk-144d42b1, feat-484c52b5).
+    Use this command after API edits to materialise a YAML snapshot for
+    git history or quarto rendering.
+    """
+    if section and all_sections:
+        console.print("[red]ERROR:[/red] pass either --section or --all, not both")
+        raise typer.Exit(code=1)
+    if not section and not all_sections:
+        all_sections = True
+
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        console.print(f"[red]ERROR:[/red] No {CONFIG_FILENAME} found — run `jobsmith init` first.")
+        raise typer.Exit(code=2)
+    config = load_config(config_path)
+    repo_root = repo_root_for()
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        console.print(f"[red]ERROR:[/red] Pipeline DB not found at {db_path}.")
+        raise typer.Exit(code=2)
+
+    section_paths: dict[str, Path] = {
+        "work": resolve(config.master.work_yml, repo_root),
+        "skill": resolve(config.master.skill_yml, repo_root),
+        "education": resolve(config.master.education_yml, repo_root),
+        "author": resolve(config.master.author_yml, repo_root),
+    }
+    targets = [section] if section else list(section_paths.keys())
+
+    conn = open_pipeline_db(db_path)
+    try:
+        written = 0
+        for sec in targets:
+            target_path = section_paths.get(sec)
+            if target_path is None:
+                console.print(f"[yellow]skip[/yellow] unknown section: {sec!r}")
+                continue
+            row = conn.execute(
+                "SELECT content_blob FROM master_content WHERE section = ?",
+                (sec,),
+            ).fetchone()
+            if row is None:
+                console.print(f"[yellow]skip[/yellow] no DB row for section {sec!r}")
+                continue
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(row["content_blob"], encoding="utf-8")
+            written += 1
+            console.print(f"[green]exported[/green] {sec} → {target_path}")
+    finally:
+        conn.close()
+
+    console.print(f"[green]done.[/green] {written} section(s) written.")
+
+
 # ---------- db subcommand group (feat-7a787f6c) ----------
 
 

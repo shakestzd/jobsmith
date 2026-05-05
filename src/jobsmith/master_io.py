@@ -316,6 +316,73 @@ def save_master(section: MasterSection, payload: Any, path: Path) -> None:
     _atomic_write(path, content)
 
 
+def save_master_to_blob(
+    section: MasterSection,
+    payload: Any,
+    existing_blob: str | None,
+) -> str:
+    """Validate *payload* and return a new YAML blob (S5, feat-484c52b5).
+
+    Mirrors :func:`save_master` but operates on string blobs instead of files,
+    so callers can persist the result to a DB column.  Comment preservation
+    works only when *existing_blob* is supplied (and parses to a
+    CommentedMap/CommentedSeq) — for fresh sections, the payload is dumped
+    plain.
+
+    Parameters
+    ----------
+    section:
+        Which master section this payload represents.
+    payload:
+        JSON-serialisable data (list-of-dicts for work/skill/education,
+        dict for author).
+    existing_blob:
+        Previous YAML text from the DB (or None for a fresh section).
+
+    Returns
+    -------
+    str
+        The new YAML text to persist.
+
+    Raises
+    ------
+    pydantic.ValidationError
+        When *payload* fails schema validation.
+    """
+    # Step 1: validate
+    if section in _LIST_MODELS:
+        if not isinstance(payload, list):
+            model = _LIST_MODELS[section]
+            model.model_validate(payload)  # raises
+        _validate_list_payload(section, payload)
+    else:
+        _validate_author_payload(payload)
+
+    # Step 2: load existing structure for comment-preserving merge
+    y = _make_yaml()
+    existing: Any = None
+    if existing_blob:
+        try:
+            existing = y.load(existing_blob)
+        except Exception:  # noqa: BLE001 — fall back to wholesale replace
+            existing = None
+
+    # Step 3: merge
+    if existing is not None:
+        if isinstance(existing, CommentedSeq) and isinstance(payload, list):
+            merged = _merge_commented_seq(existing, payload)
+        elif isinstance(existing, CommentedMap) and isinstance(payload, dict):
+            merged = _merge_commented_map(existing, payload)
+        else:
+            merged = payload
+    else:
+        merged = payload
+
+    buf = io.StringIO()
+    y.dump(merged, buf)
+    return buf.getvalue()
+
+
 def etag_for_section(path: Path) -> str:
     """Return a SHA-256 hex digest of *path* file content.
 
@@ -561,4 +628,5 @@ __all__ = [
     "remove_bullet",
     "save_benchmark",
     "save_master",
+    "save_master_to_blob",
 ]

@@ -36,11 +36,9 @@ from jobsmith.db import open_pipeline_db
 from jobsmith.master_io import (
     MasterSection,
     add_bullet,
-    etag_for_section,
     mark_anchor,
     remove_bullet,
     save_benchmark,
-    save_master,
 )
 from jobsmith.paths import resolve
 
@@ -585,48 +583,73 @@ def _put_section(
     if_match: str | None = None,
     response: Response | None = None,
 ) -> WriteResponse:
-    """Shared logic for PUT handler and upload handler.
+    """Validate *body* and persist it to the master_content DB table (S5).
 
-    Validates *body*, resolves the target path, delegates write to
-    ``save_master`` (ruamel.yaml round-trip), and returns WriteResponse.
+    The YAML file on disk is no longer touched by PUT — users regenerate it
+    via ``jobsmith master export`` when they want to commit a snapshot to
+    git.  Comment preservation is handled by reading the previous DB blob
+    and round-tripping through ruamel.yaml.
 
-    When *if_match* is provided, the current file ETag is compared first;
-    a mismatch raises HTTP 412 Precondition Failed without touching the file.
+    When *if_match* is provided, the current DB blob ETag is compared first;
+    a mismatch raises 412 Precondition Failed.
     """
     if section not in _SECTIONS:
         raise HTTPException(400, f"invalid section: {section!r}")
 
-    config_path = _require_config_path()
-    target = _resolve_section_path(config_path, section)
+    master_section = _SECTION_MAP[section]
+    payload = _normalise_author_payload(body) if section == "author" else body
 
-    # ETag / If-Match check
-    current_etag = etag_for_section(target)
+    existing_blob = _db_load_section(section)
+
+    # ETag / If-Match check (DB-derived)
+    current_etag = (
+        hashlib.sha256(existing_blob.encode("utf-8")).hexdigest()
+        if existing_blob is not None
+        else ""
+    )
     if if_match is not None:
-        # Strip optional surrounding quotes from the If-Match value
         client_etag = if_match.strip('"')
         if client_etag != current_etag:
             raise HTTPException(
                 412,
-                detail="Precondition Failed: ETag mismatch — file was modified since last read",
+                detail="Precondition Failed: ETag mismatch — DB blob changed since last read",
             )
 
-    master_section = _SECTION_MAP[section]
-
-    payload = _normalise_author_payload(body) if section == "author" else body
-
     try:
-        save_master(master_section, payload, target)
+        from jobsmith.master_io import save_master_to_blob
+
+        new_blob = save_master_to_blob(master_section, payload, existing_blob)
     except ValidationError as exc:
         raise HTTPException(400, f"schema validation failed: {exc.errors()[:3]}") from exc
 
-    # Attach new ETag to response headers if caller passed a Response object
-    if response is not None:
-        response.headers["ETag"] = f'"{etag_for_section(target)}"'
+    db_path = _get_db_path_for_master()
+    if db_path is None or not db_path.exists():
+        raise HTTPException(503, "pipeline DB unavailable — cannot persist section")
 
+    new_etag_short = hashlib.sha256(new_blob.encode("utf-8")).hexdigest()[:16]
+    conn = open_pipeline_db(db_path)
+    try:
+        from datetime import datetime, timezone
+
+        conn.execute(
+            "INSERT OR REPLACE INTO master_content "
+            "(section, content_blob, etag, loaded_at) VALUES (?, ?, ?, ?)",
+            (section, new_blob, new_etag_short, datetime.now(tz=timezone.utc).isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    if response is not None:
+        response.headers["ETag"] = (
+            '"' + hashlib.sha256(new_blob.encode("utf-8")).hexdigest() + '"'
+        )
+
+    # Reported path is the DB row identity; bytes_written is the new blob length.
     return WriteResponse(
         section=section,
-        path=str(target),
-        bytes_written=target.stat().st_size,
+        path=f"db:master_content:{section}",
+        bytes_written=len(new_blob.encode("utf-8")),
     )
 
 
