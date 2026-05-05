@@ -140,6 +140,12 @@ export interface ApplicationArtifact {
 
 export interface ApplicationDetail extends ApplicationRow {
   artifacts: ApplicationArtifact[];
+  /**
+   * Job posting URL extracted from the jd-parsed artifact by the backend
+   * (feat-bb81c3ce). Preferred over the legacy `url` field on ApplicationRow.
+   * Null when the jd-parsed artifact is absent or lacks the field.
+   */
+  apply_url?: string | null;
 }
 
 // ── Write responses ──────────────────────────────────────────────────────

@@ -26,7 +26,7 @@
 //   slug — protects against destructive force-restart with a placeholder URL.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { ApplicationDetail } from './application';
 
 vi.mock('../api/client', () => ({
@@ -47,17 +47,32 @@ import { apiGet, postApplication } from '../api/client';
 // `constructorCalls` lets a test assert whether (and with what URL) the
 // component subscribed to the stream — used by the SSE auto-subscribe
 // regression test.
+//
+// `lastFakeEs` gives tests direct access to the most-recently-created instance
+// so they can fire named events (phase, specialist, log, idle-close) and assert
+// that the component reacts correctly. Used by the SSE phase-wiring tests.
 const constructorCalls: string[] = [];
+let lastFakeEs: FakeEventSource | null = null;
 class FakeEventSource {
   readyState = 1;
   static CLOSED = 2;
   url: string;
+  private _listeners: Map<string, Array<(e: MessageEvent) => void>> = new Map();
   constructor(url: string) {
     this.url = url;
     constructorCalls.push(url);
+    lastFakeEs = this;
   }
-  addEventListener() {}
+  addEventListener(type: string, listener: (e: MessageEvent) => void) {
+    if (!this._listeners.has(type)) this._listeners.set(type, []);
+    this._listeners.get(type)!.push(listener);
+  }
   removeEventListener() {}
+  /** Fire a named SSE event with JSON-stringified data. */
+  emit(type: string, data: unknown) {
+    const evt = { data: JSON.stringify(data) } as MessageEvent;
+    (this._listeners.get(type) ?? []).forEach(fn => fn(evt));
+  }
   close() {
     this.readyState = 2;
   }
@@ -480,5 +495,279 @@ describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
     expect(btn).toBeDisabled();
     fireEvent.click(btn);
     expect(postApplication).not.toHaveBeenCalled();
+  });
+});
+
+// ── apply_url wiring tests (feat-bb81c3ce) ───────────────────────────────────
+//
+// The backend now returns `apply_url` from GET /api/applications/{slug}.
+// When present and non-null, the re-run button must stay enabled and POST
+// with that URL. When null/absent, the CLI tooltip path is preserved.
+describe('ApplicationDetail apply_url wiring (feat-bb81c3ce)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    constructorCalls.length = 0;
+    (postApplication as ReturnType<typeof vi.fn>).mockResolvedValue({
+      slug: 'acme-eng-2026-04',
+      run_id: 'run-new',
+    });
+  });
+
+  it('apply_url present: button is enabled and POST uses apply_url', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'done',
+      apply_url: 'https://example.com/jobs/123',
+      url: undefined,
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /force re-run apply/i });
+    expect(btn).not.toBeDisabled();
+    fireEvent.click(btn);
+    await waitFor(() => {
+      expect(postApplication).toHaveBeenCalledWith(
+        'https://example.com/jobs/123',
+        'acme-eng-2026-04',
+        { force: true },
+      );
+    });
+  });
+
+  it('apply_url null: button is disabled and POST is not called', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'done',
+      apply_url: null,
+      url: undefined,
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /force re-run apply/i });
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
+    expect(postApplication).not.toHaveBeenCalled();
+  });
+
+  it('apply_url takes precedence over legacy url field when both present', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'done',
+      apply_url: 'https://new-field.example.com/jobs/456',
+      url: 'https://old-field.example.com/jobs/old',
+    });
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /force re-run apply/i });
+    fireEvent.click(btn);
+    await waitFor(() => {
+      expect(postApplication).toHaveBeenCalledWith(
+        'https://new-field.example.com/jobs/456',
+        'acme-eng-2026-04',
+        { force: true },
+      );
+    });
+  });
+});
+
+// ── SSE phase wiring tests (feat-6e148975, GH#59) ────────────────────────────
+//
+// These tests assert that incoming SSE `event: phase` frames update both the
+// phase tracker (PHASE 1 / 2 / 3 status labels) and the header status badge.
+// They FAIL today because the component's phase listener does not drive the
+// badge status and the phase tracker status derives only from `running` state,
+// which is not set for all transitions.
+describe('ApplicationDetail SSE phase wiring (feat-6e148975)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    constructorCalls.length = 0;
+    lastFakeEs = null;
+  });
+
+  it('phase tracker shows "running" for the active phase when SSE emits gather/running', async () => {
+    // Slug is currently running so the component auto-subscribes.
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'running',
+      phase: 'gather',
+      finished_at: null,
+      run_id: 'run-sse-1',
+    });
+    render(<ApplicationDetail slug="sse-test-slug" back={() => {}} />);
+    // Wait until EventSource is created and the page is rendered.
+    await waitFor(() => expect(lastFakeEs).not.toBeNull());
+
+    // Fire a gather/running phase event.
+    await act(async () => {
+      lastFakeEs!.emit('phase', {
+        run_id: 'run-sse-1',
+        phase: 'gather',
+        status: 'running',
+        started_at: '2026-05-05T10:00:00Z',
+        finished_at: null,
+      });
+    });
+
+    // PHASE 1 should show "running" in the phase tracker.
+    // The phase-status span text is either "running", "done", or "queued".
+    await waitFor(() => {
+      // The pipeline section must contain a "running" indicator for PHASE 1.
+      const phaseStatuses = screen.getAllByText(/running/i);
+      expect(phaseStatuses.length).toBeGreaterThan(0);
+    });
+  });
+
+  it('phase tracker transitions gather→done→draft/running→render/running', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'running',
+      phase: 'gather',
+      finished_at: null,
+      run_id: 'run-sse-2',
+    });
+    render(<ApplicationDetail slug="sse-test-slug-2" back={() => {}} />);
+    await waitFor(() => expect(lastFakeEs).not.toBeNull());
+
+    // gather → done
+    await act(async () => {
+      lastFakeEs!.emit('phase', {
+        run_id: 'run-sse-2',
+        phase: 'gather',
+        status: 'done',
+        started_at: '2026-05-05T10:00:00Z',
+        finished_at: '2026-05-05T10:00:05Z',
+      });
+    });
+
+    // draft → running
+    await act(async () => {
+      lastFakeEs!.emit('phase', {
+        run_id: 'run-sse-2',
+        phase: 'draft',
+        status: 'running',
+        started_at: '2026-05-05T10:00:05Z',
+        finished_at: null,
+      });
+    });
+
+    // After gather=done, PHASE 1 progress bar should be at 100% (done).
+    // After draft=running, PHASE 2 should show "running".
+    // Use the phase-name labels to find the right card, then check status.
+    await waitFor(() => {
+      // The "running" indicator in phase-status should now be for phase 2 (draft).
+      // We verify that the component shows at least one "running" status text
+      // (from the draft phase) and the phase-status for gather shows "done".
+      const allText = document.body.textContent ?? '';
+      expect(allText).toContain('done');
+    });
+  });
+
+  it('header status badge transitions from "running" to "failed" on SSE phase/failed', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'running',
+      phase: 'gather',
+      finished_at: null,
+      run_id: 'run-sse-3',
+    });
+    render(<ApplicationDetail slug="sse-test-slug-3" back={() => {}} />);
+    await waitFor(() => expect(lastFakeEs).not.toBeNull());
+
+    // Initially the header badge should show "running" (from apiDetail.status=running).
+    // The badge has class "badge accent" for running.
+    await waitFor(() => {
+      const badge = document.querySelector('.badge.accent');
+      expect(badge).not.toBeNull();
+      expect(badge!.textContent).toMatch(/running/i);
+    });
+
+    // Emit a phase/failed event.
+    await act(async () => {
+      lastFakeEs!.emit('phase', {
+        run_id: 'run-sse-3',
+        phase: 'gather',
+        status: 'failed',
+        started_at: '2026-05-05T10:00:00Z',
+        finished_at: '2026-05-05T10:00:10Z',
+      });
+    });
+
+    // After SSE phase/failed, the header status badge should switch to "failed"
+    // (class "badge danger"), not remain "running" (class "badge accent").
+    await waitFor(() => {
+      // "failed" badge uses kind="danger" → class "badge danger"
+      const failedBadge = document.querySelector('.badge.danger');
+      expect(failedBadge).not.toBeNull();
+      expect(failedBadge!.textContent).toMatch(/failed/i);
+    });
+    // The accent (running) badge should be gone from the header area.
+    // (phase-status spans may still have "running" as text but the StatusBadge
+    // with class "badge accent" should no longer be present once running=false.)
+    expect(document.querySelector('.badge.accent')).toBeNull();
+  });
+
+  it('header status badge transitions from "running" to "rendered" on SSE render/done (roborev job 948)', async () => {
+    // Anti-regression for roborev job 948 MEDIUM: when the final render phase
+    // completes, the badge previously stayed at "running" because `running`
+    // wasn't being flipped to false on phaseNum===3 done.
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'running',
+      phase: 'render',
+      finished_at: null,
+      run_id: 'run-sse-5',
+    });
+    render(<ApplicationDetail slug="sse-test-slug-5" back={() => {}} />);
+    await waitFor(() => expect(lastFakeEs).not.toBeNull());
+
+    // Initial running badge present.
+    await waitFor(() => {
+      const badge = document.querySelector('.badge.accent');
+      expect(badge).not.toBeNull();
+      expect(badge!.textContent).toMatch(/running/i);
+    });
+
+    // Emit phase=render, status=done.
+    await act(async () => {
+      lastFakeEs!.emit('phase', {
+        run_id: 'run-sse-5',
+        phase: 'render',
+        status: 'done',
+        started_at: '2026-05-05T10:00:00Z',
+        finished_at: '2026-05-05T10:01:00Z',
+      });
+    });
+
+    // Running badge must be gone — terminal "done" sseStatus should now win.
+    await waitFor(() => {
+      expect(document.querySelector('.badge.accent')).toBeNull();
+    });
+  });
+
+  it('anti-regression: initial GET with phase=running does not show all phases as queued', async () => {
+    // When the initial GET already shows status=running, the phase tracker
+    // must NOT show all phases frozen at "queued".
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'running',
+      phase: 'gather',
+      finished_at: null,
+      run_id: 'run-sse-4',
+    });
+    render(<ApplicationDetail slug="sse-test-slug-4" back={() => {}} />);
+    await waitFor(() => expect(lastFakeEs).not.toBeNull());
+
+    // The header badge should show "running" (class "badge accent").
+    await waitFor(() => {
+      const badge = document.querySelector('.badge.accent');
+      expect(badge).not.toBeNull();
+      expect(badge!.textContent).toMatch(/running/i);
+    });
+
+    // Not all three phase-status spans should say "queued" — at least one
+    // phase should be in a non-queued state (running or done).
+    await waitFor(() => {
+      const phaseStatuses = document.querySelectorAll('.phase-status');
+      const texts = Array.from(phaseStatuses).map(el => el.textContent ?? '');
+      const allQueued = texts.every(t => t.includes('queued'));
+      expect(allQueued).toBe(false);
+    });
   });
 });

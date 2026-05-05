@@ -6,6 +6,8 @@
 // Exports:
 //   useApplications    — GET /api/applications → ApplicationRow[]
 //   useApplication     — GET /api/applications/{slug} → ApplicationDetail
+//                        Retries on 404 up to 5 times (200ms × attempt backoff)
+//                        to survive the POST→GET race after modal-launched runs.
 //   useMasterSection   — GET /api/master/{section} → section data
 
 import { useCallback, useEffect, useState } from 'react';
@@ -72,8 +74,97 @@ export function useApplications(): UseQueryResult<ApplicationRow[]> {
   return useFetch<ApplicationRow[]>('/api/applications');
 }
 
+// Maximum number of 404-specific retries after the initial request.
+// After POST /api/applications returns 201, the detail endpoint may return 404
+// for up to ~1-2s while the server persists the new run. We retry rather than
+// surface an error immediately (feat-092c5a2c, GH#60).
+const APPLICATION_404_MAX_RETRIES = 5;
+// Initial retry delay in ms. Each retry multiplies by its attempt index:
+// attempt 1 → 200ms, 2 → 400ms, 3 → 600ms, 4 → 800ms, 5 → 1000ms.
+const APPLICATION_404_RETRY_MS = 200;
+
+/**
+ * Fetch a single ApplicationDetail with automatic 404 retry.
+ *
+ * Exported for unit-testing the retry logic in isolation.
+ * The `delayMs` parameter overrides the per-attempt delay; pass 0 in tests.
+ */
+export async function fetchApplicationWithRetry(
+  slug: string,
+  signal: { cancelled: boolean },
+  delayMs: number = APPLICATION_404_RETRY_MS,
+): Promise<ApplicationDetail> {
+  const path = `/api/applications/${encodeURIComponent(slug)}`;
+  let lastErr: Error | null = null;
+
+  for (let attempt = 0; attempt <= APPLICATION_404_MAX_RETRIES; attempt += 1) {
+    if (signal.cancelled) throw new Error('cancelled');
+
+    if (attempt > 0) {
+      // Linear backoff: delayMs × attempt.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, delayMs * attempt);
+      });
+      if (signal.cancelled) throw new Error('cancelled');
+    }
+
+    try {
+      return await apiGet<ApplicationDetail>(path);
+    } catch (err: unknown) {
+      if (signal.cancelled) throw new Error('cancelled');
+      // Only retry on 404 — all other status codes surface immediately.
+      if (err instanceof JobsmithApiError && err.status === 404) {
+        lastErr = err;
+        // Continue to next attempt.
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  // All retries exhausted — re-throw the last 404 error.
+  throw lastErr ?? new Error('Not Found');
+}
+
 export function useApplication(slug: string): UseQueryResult<ApplicationDetail> {
-  return useFetch<ApplicationDetail>(slug ? `/api/applications/${encodeURIComponent(slug)}` : null);
+  const [data, setData] = useState<ApplicationDetail | undefined>(undefined);
+  const [isLoading, setIsLoading] = useState<boolean>(Boolean(slug));
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    // Reset on every slug change so the component never renders the previous
+    // slug's data under the new slug while the new fetch is in flight
+    // (roborev job 947 HIGH). The empty-slug branch also clears state — a
+    // route that briefly drops the slug must not retain prior detail.
+    setData(undefined);
+    setError(null);
+
+    if (!slug) {
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    const signal = { cancelled: false };
+
+    fetchApplicationWithRetry(slug, signal)
+      .then((result) => {
+        if (!signal.cancelled) {
+          setData(result);
+          setIsLoading(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!signal.cancelled) {
+          setError(err instanceof Error ? err : new Error(String(err)));
+          setIsLoading(false);
+        }
+      });
+
+    return () => { signal.cancelled = true; };
+  }, [slug]);
+
+  return { data, isLoading, error };
 }
 
 // ── Master sections ──────────────────────────────────────────────────────

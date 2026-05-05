@@ -1422,39 +1422,51 @@ def _run_phase_iter_body(
 
         # Step 3f: stream events from headless
         phase_succeeded = False
-        for event in headless.run_phase(
-            phase=phase_name,
-            session_id=session_id,
-            prompt=prompt_text,
-            plugin_dir=plugin_directory,
-            system_prompt=system_prompt,
-            resume=resume,
-            cwd=resolved_cwd,
-            max_turns=_PHASE_MAX_TURNS[phase_name],
-            cancel_event=cancel_event,
-        ):
-            if event.type == "phase_complete":
-                phase_succeeded = True
-                break
-            if event.type == "phase_failed":
-                yield PipelineEvent(
-                    kind="phase_failed",
-                    phase=phase_name,
-                    payload={"error": event.error},
-                )
-                return
-            if event.type == "error":
-                yield PipelineEvent(
-                    kind="phase_failed",
-                    phase=phase_name,
-                    payload={"error": event.error},
-                )
-                return
+        try:
+            for event in headless.run_phase(
+                phase=phase_name,
+                session_id=session_id,
+                prompt=prompt_text,
+                plugin_dir=plugin_directory,
+                system_prompt=system_prompt,
+                resume=resume,
+                cwd=resolved_cwd,
+                max_turns=_PHASE_MAX_TURNS[phase_name],
+                cancel_event=cancel_event,
+            ):
+                if event.type == "phase_complete":
+                    phase_succeeded = True
+                    break
+                if event.type == "phase_failed":
+                    yield PipelineEvent(
+                        kind="phase_failed",
+                        phase=phase_name,
+                        payload={"error": event.error},
+                    )
+                    return
+                if event.type == "error":
+                    yield PipelineEvent(
+                        kind="phase_failed",
+                        phase=phase_name,
+                        payload={"error": event.error},
+                    )
+                    return
 
-            # Stop draining if cancelled mid-phase
-            if cancel_event is not None and cancel_event.is_set():
-                yield PipelineEvent(kind="cancelled", phase=phase_name)
-                return
+                # Stop draining if cancelled mid-phase
+                if cancel_event is not None and cancel_event.is_set():
+                    yield PipelineEvent(kind="cancelled", phase=phase_name)
+                    return
+        except Exception as exc:  # noqa: BLE001
+            # Uncaught exception from headless.run_phase (subprocess crash,
+            # OOM, SDK bug, etc.).  Surface it as a terminal phase_failed
+            # event so SSE consumers see a clear error marker instead of
+            # a silent stream end (bug-84db2d3c / GitHub #61).
+            yield PipelineEvent(
+                kind="phase_failed",
+                phase=phase_name,
+                payload={"error": f"{type(exc).__name__}: {exc}"},
+            )
+            return
 
         if not phase_succeeded:
             yield PipelineEvent(
