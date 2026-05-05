@@ -42,7 +42,7 @@ from jobsmith.db import (
     insert_apply_run,
     open_pipeline_db,
 )
-from jobsmith.db_ingest import ingest_phase_outputs
+from jobsmith.db_ingest import ingest_phase_outputs, ingest_standalone_artifacts
 
 if TYPE_CHECKING:
     pass
@@ -341,6 +341,10 @@ class NotebookRunner:
                     # Post-phase ingest after each phase_complete.
                     # Ingest failure must not abort the pipeline — a single
                     # broken artifact should not lose the rest of the run.
+                    # Also ingest standalone artifacts (cover-letter-draft,
+                    # _quarto.yml, _variables.yml, .agent.md) so they reach
+                    # the DB on live runs under JOBSMITH_DUAL_WRITE=0.
+                    # Closes roborev branch-review HIGH (feat-b1a883a1).
                     if event.kind == "phase_complete":
                         state_dir = (
                             self.applications_dir / slug / ".apply-state"
@@ -351,6 +355,11 @@ class NotebookRunner:
                                 slug=slug,
                                 run_id=run_id,
                                 phase=event.phase,
+                                state_dir=state_dir,
+                            )
+                            ingest_standalone_artifacts(
+                                conn,
+                                run_id=run_id,
                                 state_dir=state_dir,
                             )
                         # For single-phase re-runs: stop after the target phase

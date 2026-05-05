@@ -2018,9 +2018,19 @@ def _run_apply_phases(
         # runner's behavior so `jobsmith review <slug>` sees rows immediately
         # after `jobsmith apply <url>` (roborev #923 HIGH 2). Wrapped in
         # suppress: a single broken artifact must not abort the pipeline.
+        # Also runs ingest_standalone_artifacts so the 4 orphaned kinds
+        # (cover-letter-draft, _quarto.yml, _variables.yml, .agent.md) land
+        # in the DB on live runs — without this, JOBSMITH_DUAL_WRITE=0
+        # (S4 default) leaves them invisible until manual backfill.
+        # Closes roborev branch-review HIGH (feat-b1a883a1).
         if db_conn is not None:
             with contextlib.suppress(Exception):
-                from .db_ingest import ingest_phase_outputs as _ingest_phase_outputs
+                from .db_ingest import (
+                    ingest_phase_outputs as _ingest_phase_outputs,
+                )
+                from .db_ingest import (
+                    ingest_standalone_artifacts as _ingest_standalone_artifacts,
+                )
 
                 state_dir_for_ingest = _apply_state_dir(slug, resolved_cwd)
                 if state_dir_for_ingest is not None:
@@ -2029,6 +2039,11 @@ def _run_apply_phases(
                         slug=slug,
                         run_id=db_run_id,
                         phase=phase_name,
+                        state_dir=state_dir_for_ingest,
+                    )
+                    _ingest_standalone_artifacts(
+                        db_conn,
+                        run_id=db_run_id,
                         state_dir=state_dir_for_ingest,
                     )
 
