@@ -267,99 +267,88 @@ def _load_author(config_path: Path) -> Author | None:
 # ---------------------------------------------------------------------------
 
 
+def _raise_missing_section(section: str) -> None:
+    """Raise 404 with structured body when a master section is absent from the DB."""
+    raise HTTPException(
+        status_code=404,
+        detail={
+            "error": "missing_in_db",
+            "section": section,
+            "suggestion": f"jobsmith db load-master  # to backfill section '{section}'",
+        },
+    )
+
+
+def _set_db_etag(response: Response, blob: str) -> None:
+    """Set ETag header from blob content.
+
+    Uses the full sha256 hex digest so the value matches ``etag_for_section``
+    (which the PUT handler uses to validate If-Match) when the DB row was
+    ingested from the same file bytes.
+    """
+    response.headers["ETag"] = (
+        '"' + hashlib.sha256(blob.encode("utf-8")).hexdigest() + '"'
+    )
+
+
 @router.get("/master", response_model=MasterPayload)
-def get_master() -> MasterPayload:
-    """Return all master content sections in one payload."""
-    config_path = _require_config_path()
+def get_master(response: Response) -> MasterPayload:
+    """Return all master content sections in one payload (DB-only)."""
+    sections: dict[str, Any] = {}
+    for section in _SECTIONS:
+        blob = _db_load_section(section)
+        if blob is None:
+            _raise_missing_section(section)
+        sections[section] = blob
     return MasterPayload(
-        work=_load_work(config_path),
-        skill=_load_skill(config_path),
-        education=_load_education(config_path),
-        author=_load_author(config_path),
+        work=[WorkEntry.model_validate(item) for item in _parse_yaml_list(sections["work"])],
+        skill=_parse_skill_blob(sections["skill"]),
+        education=[
+            EducationEntry.model_validate(item)
+            for item in _parse_yaml_list(sections["education"])
+        ],
+        author=_parse_author_blob(sections["author"]),
     )
 
 
 @router.get("/master/work", response_model=list[WorkEntry])
 def get_master_work(response: Response) -> list[WorkEntry]:
-    """Return the work history list.
-
-    DB-first: queries ``master_content`` for the 'work' row; falls back to
-    reading ``work.yml`` from disk when the DB has no entry.
-
-    Includes an ``ETag`` response header for concurrent-write safety.
-    """
-    db_blob = _db_load_section("work")
-    if db_blob is not None:
-        etag = hashlib.sha256(db_blob.encode("utf-8")).hexdigest()[:16]
-        response.headers["ETag"] = f'"{etag}"'
-        raw = _parse_yaml_list(db_blob)
-        return [WorkEntry.model_validate(item) for item in raw]
-    # FS fallback — _fs_fallback_load pattern (S3 will remove this)
-    config_path = _require_config_path()
-    target = _resolve_section_path(config_path, "work")
-    response.headers["ETag"] = f'"{etag_for_section(target)}"'
-    return _load_work(config_path)
+    """Return the work history list (DB-only)."""
+    blob = _db_load_section("work")
+    if blob is None:
+        _raise_missing_section("work")
+    _set_db_etag(response, blob)
+    return [WorkEntry.model_validate(item) for item in _parse_yaml_list(blob)]
 
 
 @router.get("/master/skill", response_model=list[SkillEntry])
 def get_master_skill(response: Response) -> list[SkillEntry]:
-    """Return the skill categories list.
-
-    DB-first: queries ``master_content`` for the 'skill' row; falls back to
-    reading ``skill.yml`` from disk when the DB has no entry.
-
-    Includes an ``ETag`` response header for concurrent-write safety.
-    """
-    db_blob = _db_load_section("skill")
-    if db_blob is not None:
-        etag = hashlib.sha256(db_blob.encode("utf-8")).hexdigest()[:16]
-        response.headers["ETag"] = f'"{etag}"'
-        return _parse_skill_blob(db_blob)
-    config_path = _require_config_path()
-    target = _resolve_section_path(config_path, "skill")
-    response.headers["ETag"] = f'"{etag_for_section(target)}"'
-    return _load_skill(config_path)
+    """Return the skill categories list (DB-only)."""
+    blob = _db_load_section("skill")
+    if blob is None:
+        _raise_missing_section("skill")
+    _set_db_etag(response, blob)
+    return _parse_skill_blob(blob)
 
 
 @router.get("/master/education", response_model=list[EducationEntry])
 def get_master_education(response: Response) -> list[EducationEntry]:
-    """Return the education list.
-
-    DB-first: queries ``master_content`` for the 'education' row; falls back
-    to reading ``education.yml`` from disk when the DB has no entry.
-
-    Includes an ``ETag`` response header for concurrent-write safety.
-    """
-    db_blob = _db_load_section("education")
-    if db_blob is not None:
-        etag = hashlib.sha256(db_blob.encode("utf-8")).hexdigest()[:16]
-        response.headers["ETag"] = f'"{etag}"'
-        raw = _parse_yaml_list(db_blob)
-        return [EducationEntry.model_validate(item) for item in raw]
-    config_path = _require_config_path()
-    target = _resolve_section_path(config_path, "education")
-    response.headers["ETag"] = f'"{etag_for_section(target)}"'
-    return _load_education(config_path)
+    """Return the education list (DB-only)."""
+    blob = _db_load_section("education")
+    if blob is None:
+        _raise_missing_section("education")
+    _set_db_etag(response, blob)
+    return [EducationEntry.model_validate(item) for item in _parse_yaml_list(blob)]
 
 
 @router.get("/master/author", response_model=Author | None)
 def get_master_author(response: Response) -> Author | None:
-    """Return the author block, or null if missing.
-
-    DB-first: queries ``master_content`` for the 'author' row; falls back
-    to reading ``author.yml`` from disk when the DB has no entry.
-
-    Includes an ``ETag`` response header for concurrent-write safety.
-    """
-    db_blob = _db_load_section("author")
-    if db_blob is not None:
-        etag = hashlib.sha256(db_blob.encode("utf-8")).hexdigest()[:16]
-        response.headers["ETag"] = f'"{etag}"'
-        return _parse_author_blob(db_blob)
-    config_path = _require_config_path()
-    target = _resolve_section_path(config_path, "author")
-    response.headers["ETag"] = f'"{etag_for_section(target)}"'
-    return _load_author(config_path)
+    """Return the author block (DB-only)."""
+    blob = _db_load_section("author")
+    if blob is None:
+        _raise_missing_section("author")
+    _set_db_etag(response, blob)
+    return _parse_author_blob(blob)
 
 
 # ---------------------------------------------------------------------------

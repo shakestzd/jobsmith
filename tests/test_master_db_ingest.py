@@ -336,10 +336,9 @@ class TestMasterApiDbRead:
         titles = [entry["title"] for entry in data]
         assert "Senior Data Engineer" in titles
 
-    def test_get_section_falls_back_to_fs_when_db_empty(self, repo_root):
-        """GET /api/master/work falls back to FS when DB has no row for section."""
+    def test_get_section_returns_404_when_db_empty(self, repo_root):
+        """GET /api/master/work returns structured 404 when DB has no row (S3, feat-eb6c99cb)."""
         db_path = repo_root / "private" / "jobsmith.db"
-        # DB is empty (open but no master_content rows)
         conn = open_pipeline_db(db_path)
         conn.close()
 
@@ -355,10 +354,10 @@ class TestMasterApiDbRead:
         ):
             resp = client.get("/api/master/work")
 
-        # FS fallback: should still return 200 with valid data
-        assert resp.status_code == 200
-        data = resp.json()
-        assert isinstance(data, list)
+        assert resp.status_code == 404
+        body = resp.json()
+        assert body["detail"]["error"] == "missing_in_db"
+        assert "jobsmith db load-master" in body["detail"]["suggestion"]
 
 
 # ---------------------------------------------------------------------------
