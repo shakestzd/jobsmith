@@ -14,6 +14,8 @@ vi.mock('../api/client', () => ({
   apiGet: vi.fn(),
   apiPost: vi.fn(),
   apiPut: vi.fn(),
+  apiGetWithMeta: vi.fn(),
+  formatDetail: vi.fn((_raw: unknown, fallback: string) => fallback),
   JobsmithApiError: class JobsmithApiError extends Error {
     status = 500;
   },
@@ -21,6 +23,13 @@ vi.mock('../api/client', () => ({
 
 vi.mock('../api/hooks', () => ({
   useMasterSection: vi.fn(() => ({ data: undefined, isLoading: false, error: null })),
+  useMasterSectionWithMeta: vi.fn(() => ({
+    data: undefined,
+    etag: null,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
   JobsmithApiError: class JobsmithApiError extends Error {
     status = 500;
   },

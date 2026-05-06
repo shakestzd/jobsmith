@@ -62,6 +62,7 @@ def _resolve_section_paths(content_dir: Path) -> list[tuple[str, Path]]:
         ("skill", content_dir / "skill.yml"),
         ("education", content_dir / "education.yml"),
         ("author", content_dir / "author.yml"),
+        ("benchmark", content_dir / "benchmark.md"),
     ]
 
 
@@ -192,28 +193,31 @@ def _resolve_section_paths_from_config_or_default(
 
     Falls back to ``<repo_root>/assets/content/<section>.yml`` when no config
     is found or config parsing fails (the warning log makes the cause
-    visible to operators).
+    visible to operators). Benchmark uses a ``.md`` extension instead of
+    ``.yml`` and is always pinned to ``assets/content/benchmark.md``.
     """
     config_path = find_config(repo_root)
     default_dir = repo_root / "assets" / "content"
+
+    def _defaults() -> dict[str, Path]:
+        out = {section: default_dir / f"{section}.yml" for section, _ in _SECTION_CONFIG_ATTRS}
+        out["benchmark"] = default_dir / "benchmark.md"
+        return out
+
     if config_path is None:
-        return {
-            section: default_dir / f"{section}.yml"
-            for section, _ in _SECTION_CONFIG_ATTRS
-        }
+        return _defaults()
     try:
         config = load_config(path=config_path)
-        return _resolve_section_paths_from_config(config, repo_root)
+        paths = _resolve_section_paths_from_config(config, repo_root)
+        paths["benchmark"] = default_dir / "benchmark.md"
+        return paths
     except Exception:
         _log.warning(
             "master_ingest: could not parse config — falling back to canonical filenames in %s",
             default_dir,
             exc_info=True,
         )
-        return {
-            section: default_dir / f"{section}.yml"
-            for section, _ in _SECTION_CONFIG_ATTRS
-        }
+        return _defaults()
 
 
 __all__ = [

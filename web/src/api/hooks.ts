@@ -4,14 +4,15 @@
 // Re-fetching on mount is intentional — no cache invalidation is in scope here.
 //
 // Exports:
-//   useApplications    — GET /api/applications → ApplicationRow[]
-//   useApplication     — GET /api/applications/{slug} → ApplicationDetail
-//                        Retries on 404 up to 5 times (200ms × attempt backoff)
-//                        to survive the POST→GET race after modal-launched runs.
-//   useMasterSection   — GET /api/master/{section} → section data
+//   useApplications          — GET /api/applications → ApplicationRow[]
+//   useApplication           — GET /api/applications/{slug} → ApplicationDetail
+//                              Retries on 404 up to 5 times (200ms × attempt backoff)
+//                              to survive the POST→GET race after modal-launched runs.
+//   useMasterSection         — GET /api/master/{section} → section data
+//   useMasterSectionWithMeta — GET /api/master/{section} → { data, etag, isLoading, error, refetch }
 
 import { useCallback, useEffect, useState } from 'react';
-import { apiGet, JobsmithApiError } from './client';
+import { apiGet, apiGetWithMeta, JobsmithApiError } from './client';
 import type {
   ApplicationRow,
   ApplicationDetail,
@@ -179,6 +180,70 @@ export function useMasterSection<K extends keyof MasterSectionData>(
   section: K,
 ): UseQueryResult<MasterSectionData[K]> {
   return useFetch<MasterSectionData[K]>(`/api/master/${section}`);
+}
+
+// ── Master sections with ETag metadata ──────────────────────────────────
+
+interface UseQueryWithMetaResult<T> {
+  data: T | undefined;
+  etag: string | null;
+  isLoading: boolean;
+  error: Error | null;
+  refetch: () => void;
+}
+
+/**
+ * Like useMasterSection but also exposes `etag` and `refetch`.
+ * Used by SkillTab / EducationTab / AuthorTab / BenchmarkTab for ETag-based PUT round-trips.
+ * Do NOT modify useMasterSection — it has 6+ callers.
+ */
+export function useMasterSectionWithMeta(
+  section: 'skill',
+): UseQueryWithMetaResult<MasterSkillGroup[]>;
+export function useMasterSectionWithMeta(
+  section: 'education',
+): UseQueryWithMetaResult<MasterEducationEntry[]>;
+export function useMasterSectionWithMeta(
+  section: 'author',
+): UseQueryWithMetaResult<MasterAuthor | null>;
+export function useMasterSectionWithMeta(
+  section: 'benchmark',
+): UseQueryWithMetaResult<MasterBenchmark>;
+export function useMasterSectionWithMeta(
+  section: 'work',
+): UseQueryWithMetaResult<MasterSectionData['work']>;
+export function useMasterSectionWithMeta<K extends keyof MasterSectionData>(
+  section: K,
+): UseQueryWithMetaResult<MasterSectionData[K]> {
+  const [tick, setTick] = useState(0);
+  const [data, setData] = useState<MasterSectionData[K] | undefined>(undefined);
+  const [etag, setEtag] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+    apiGetWithMeta<MasterSectionData[K]>(`/api/master/${section}`)
+      .then(({ data: result, etag: newEtag }) => {
+        if (!cancelled) {
+          setData(result);
+          setEtag(newEtag);
+          setIsLoading(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err : new Error(String(err)));
+          setIsLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [section, tick]);
+
+  const refetch = useCallback(() => setTick((t) => t + 1), []);
+  return { data, etag, isLoading, error, refetch };
 }
 
 // ── Config ───────────────────────────────────────────────────────────────

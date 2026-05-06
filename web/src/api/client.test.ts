@@ -11,8 +11,8 @@
 // If a future change adds a new shape that leaks the token, add the failing
 // case here first and then update redactSensitive to cover it.
 
-import { describe, it, expect } from 'vitest';
-import { formatDetail, redactSensitive } from './client';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { formatDetail, redactSensitive, apiPut, apiGetWithMeta, apiDelete, JobsmithApiError } from './client';
 
 // Synthetic test fixtures — low-entropy strings shaped enough to exercise
 // each redaction branch. Constructed at runtime from harmless fragments so
@@ -111,6 +111,150 @@ describe('redactSensitive', () => {
     const out = redactSensitive(input);
     expect(out).toContain('?token=[redacted]&next=/y');
     expect(out).toContain('other=z');
+  });
+});
+
+// ── apiPut with ifMatch / headers options ────────────────────────────────
+//
+// Tests for feat-472494ac: apiPut accepts optional { ifMatch, headers } and
+// attaches an If-Match header (with double-quotes stripped) when ifMatch is set.
+
+// Helper: capture the RequestInit passed to each fetch call.
+function capturedInit(fetchMock: ReturnType<typeof vi.fn>): RequestInit {
+  return fetchMock.mock.calls[0][1] as RequestInit;
+}
+
+describe('apiPut (ifMatch / headers options)', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('strips surrounding double-quotes from ifMatch and attaches If-Match header', async () => {
+    await apiPut('/test', { x: 1 }, { ifMatch: '"abc123"' });
+    const headers = capturedInit(fetchMock).headers as Record<string, string>;
+    expect(headers['If-Match']).toBe('abc123');
+  });
+
+  it('attaches If-Match header when ifMatch has no surrounding quotes', async () => {
+    await apiPut('/test', { x: 1 }, { ifMatch: 'abc123' });
+    const headers = capturedInit(fetchMock).headers as Record<string, string>;
+    expect(headers['If-Match']).toBe('abc123');
+  });
+
+  it('works unchanged when no options are passed (back-compat)', async () => {
+    await apiPut('/test', { x: 1 });
+    const headers = capturedInit(fetchMock).headers as Record<string, string>;
+    expect(headers['If-Match']).toBeUndefined();
+  });
+
+  it('sends both If-Match and extra headers when options.headers is provided', async () => {
+    await apiPut('/test', { x: 1 }, { ifMatch: '"abc123"', headers: { 'X-Foo': 'bar' } });
+    const headers = capturedInit(fetchMock).headers as Record<string, string>;
+    expect(headers['If-Match']).toBe('abc123');
+    expect(headers['X-Foo']).toBe('bar');
+  });
+});
+
+// ── apiGetWithMeta ────────────────────────────────────────────────────────
+
+describe('apiGetWithMeta', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('returns { data, etag, status } with etag from ETag response header', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ name: 'Alice' }), {
+        status: 200,
+        headers: { ETag: '"etag-value-001"' },
+      }),
+    );
+    const result = await apiGetWithMeta<{ name: string }>('/some/path');
+    expect(result.data).toEqual({ name: 'Alice' });
+    expect(result.etag).toBe('"etag-value-001"');
+    expect(result.status).toBe(200);
+  });
+
+  it('returns etag as null when ETag header is absent', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ name: 'Bob' }), { status: 200 }),
+    );
+    const result = await apiGetWithMeta<{ name: string }>('/some/path');
+    expect(result.etag).toBeNull();
+  });
+
+  it('throws JobsmithApiError on non-2xx response', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'not found' }), { status: 404, statusText: 'Not Found' }),
+    );
+    await expect(apiGetWithMeta('/missing')).rejects.toBeInstanceOf(JobsmithApiError);
+  });
+});
+
+// ── apiDelete ─────────────────────────────────────────────────────────────
+
+describe('apiDelete', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ deleted: true }), { status: 200 }),
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('issues DELETE with no body when called without body argument', async () => {
+    await apiDelete('/resource/1');
+    const init = capturedInit(fetchMock);
+    expect(init.method).toBe('DELETE');
+    expect(init.body).toBeUndefined();
+  });
+
+  it('issues DELETE with JSON body and Content-Type when body is provided', async () => {
+    await apiDelete('/resource/1', { reason: 'test' });
+    const init = capturedInit(fetchMock);
+    expect(init.method).toBe('DELETE');
+    expect(init.body).toBe(JSON.stringify({ reason: 'test' }));
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Content-Type']).toBe('application/json');
+  });
+
+  it('returns parsed JSON response', async () => {
+    const result = await apiDelete<{ deleted: boolean }>('/resource/1');
+    expect(result).toEqual({ deleted: true });
+  });
+
+  it('throws JobsmithApiError on non-2xx response', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'forbidden' }), { status: 403, statusText: 'Forbidden' }),
+    );
+    await expect(apiDelete('/resource/1')).rejects.toBeInstanceOf(JobsmithApiError);
   });
 });
 

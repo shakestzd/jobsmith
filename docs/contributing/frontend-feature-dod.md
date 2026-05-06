@@ -36,8 +36,10 @@ import { MyComponent } from './my-component';
 
 vi.mock('../api/client', () => ({
   apiGet: vi.fn(),
+  apiGetWithMeta: vi.fn(),
   apiPost: vi.fn(),
   apiPut: vi.fn(),
+  apiDelete: vi.fn(),
   postApplication: vi.fn(),
   buildEventsUrl: vi.fn(),
   JobsmithApiError: class JobsmithApiError extends Error { status = 500; },

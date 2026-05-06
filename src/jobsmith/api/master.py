@@ -38,7 +38,6 @@ from jobsmith.master_io import (
     add_bullet_in_blob,
     mark_anchor_in_blob,
     remove_bullet_in_blob,
-    save_benchmark,
 )
 from jobsmith.paths import resolve
 
@@ -513,19 +512,55 @@ def _content_version(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _benchmark_load_text(config_path: Path) -> str:
+    """Return current benchmark text, preferring DB over disk.
+
+    DB-as-source-of-truth: read ``master_content`` row for section
+    ``'benchmark'``. Fall back to ``assets/content/benchmark.md`` only when
+    the DB has no row (fresh project before first ingest). Returns ``""``
+    when neither source has content.
+    """
+    db_text = _db_load_section("benchmark")
+    if db_text is not None:
+        return db_text
+    path = _benchmark_path(config_path)
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+    return ""
+
+
+def _benchmark_save_db(text: str) -> None:
+    """Upsert the benchmark text into ``master_content``. Raises 503 on no DB."""
+    db_path = _get_db_path_for_master()
+    if db_path is None or not db_path.exists():
+        raise HTTPException(503, "pipeline DB unavailable — cannot persist benchmark")
+    etag_short = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    conn = open_pipeline_db(db_path)
+    try:
+        from datetime import datetime, timezone
+
+        conn.execute(
+            "INSERT OR REPLACE INTO master_content "
+            "(section, content_blob, etag, loaded_at) VALUES (?, ?, ?, ?)",
+            ("benchmark", text, etag_short, datetime.now(tz=timezone.utc).isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 @router.get("/master/benchmark", response_model=BenchmarkResponse)
 def get_benchmark(response: Response) -> BenchmarkResponse:
-    """Return the raw text + version of benchmark.md.
+    """Return the current benchmark text + version, DB-preferred.
 
-    Returns ``{text: '', version: ''}`` when the file is absent (not a 404)
-    so the frontend can show an empty editor rather than an error page.
+    Returns ``{text: '', version: ''}`` when neither the DB row nor the
+    file exist, so the frontend can show an empty editor.
     """
     config_path = _require_config_path()
-    path = _benchmark_path(config_path)
-    if not path.exists():
+    text = _benchmark_load_text(config_path)
+    if not text:
         response.headers["ETag"] = '""'
         return BenchmarkResponse(text="", version="")
-    text = path.read_text(encoding="utf-8")
     version = _content_version(text)
     response.headers["ETag"] = f'"{version}"'
     return BenchmarkResponse(text=text, version=version)
@@ -537,18 +572,21 @@ def put_benchmark(
     response: Response,
     if_match: str | None = Header(default=None, alias="If-Match"),  # noqa: B008
 ) -> BenchmarkResponse:
-    """Atomically replace benchmark.md with *body.text*.
+    """Persist *body.text* as the new benchmark in the DB only (S5 contract).
+
+    DB-only: the ``master_content`` row for section ``'benchmark'`` is
+    upserted. The ``benchmark.md`` file on disk is NOT touched — run
+    ``jobsmith master export`` to materialise a YAML/MD snapshot.
 
     Concurrent-write guard: clients SHOULD send ``If-Match: "<version>"``
-    where ``<version>`` is the SHA-256 hex of the file content from the
-    most recent GET. A mismatch returns 412 Precondition Failed. The
-    header is optional for backwards compatibility — omitting it accepts
-    last-writer-wins, matching the existing master-section semantics.
+    where ``<version>`` is the SHA-256 hex of the current benchmark text
+    from the most recent GET. A mismatch returns 412 Precondition Failed.
+    The header is optional for backwards compatibility — omitting it
+    accepts last-writer-wins.
     """
     config_path = _require_config_path()
-    path = _benchmark_path(config_path)
     if if_match is not None:
-        current_text = path.read_text(encoding="utf-8") if path.exists() else ""
+        current_text = _benchmark_load_text(config_path)
         current_version = _content_version(current_text) if current_text else ""
         # Strip surrounding double-quotes that conform to the HTTP ETag spec.
         sent = if_match.strip().strip('"')
@@ -560,7 +598,7 @@ def put_benchmark(
                     f"current is {current_version!r}"
                 ),
             )
-    save_benchmark(body.text, path)
+    _benchmark_save_db(body.text)
     new_version = _content_version(body.text)
     response.headers["ETag"] = f'"{new_version}"'
     return BenchmarkResponse(text=body.text, version=new_version)

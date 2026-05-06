@@ -169,11 +169,19 @@ async def _launch_run(
     url: str,
     cwd: Path,
     force: bool = False,
+    jd_text: str | None = None,
 ) -> str:
     """Build the apply argv and call supervisor.start(). Returns run_id.
 
     When *force* is true, ``--force`` is appended so the apply pipeline
     restarts from phase 1 even if prior artifacts exist for *slug*.
+
+    When *jd_text* is non-empty, write it to a temp file and append
+    ``--jd-text-file <path>`` so the pipeline uses pasted text instead of
+    fetching the URL (bug-1c800e09 — needed for JS-rendered ATS portals).
+    The temp file lives under ``applications/{slug}/.apply-state/`` so it
+    survives the lifetime of the run and is cleaned up alongside other
+    apply-state artifacts.
 
     Threads ``transcript_path`` through to the supervisor so the
     terminal-phase guard (S6, feat-438090af) can synth a phase=failed
@@ -182,6 +190,33 @@ async def _launch_run(
     argv = [sys.executable, "-m", "jobsmith.cli", "apply", url, "--slug", slug]
     if force:
         argv.append("--force")
+    if jd_text:
+        # Persist pasted JD next to the run so it is reproducible.
+        try:
+            from jobsmith.config import find_config, load_config
+            from jobsmith.paths import resolve as _resolve
+
+            config_path = find_config(cwd)
+            if config_path is not None:
+                config = load_config(path=config_path)
+                apps_dir = _resolve(config.output.applications_dir, cwd)
+            else:
+                apps_dir = cwd / "private" / "applications"
+            jd_dir = apps_dir / slug / ".apply-state"
+            jd_dir.mkdir(parents=True, exist_ok=True)
+            jd_path = jd_dir / "jd-pasted.txt"
+            jd_path.write_text(jd_text, encoding="utf-8")
+            argv.extend(["--jd-text-file", str(jd_path)])
+        except Exception:
+            # Fall back to a tempfile if writing under the run dir fails.
+            import tempfile
+
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", prefix=f"jd-{slug}-", delete=False, encoding="utf-8"
+            )
+            tmp.write(jd_text)
+            tmp.close()
+            argv.extend(["--jd-text-file", tmp.name])
     transcript_path = _resolve_transcript_path(slug, cwd)
     return await supervisor.start(
         slug=slug, argv=argv, cwd=cwd, transcript_path=transcript_path
@@ -275,7 +310,9 @@ async def create_application(
         )
 
     cwd = Path.cwd()
-    run_id = await _launch_run(supervisor, slug, body.url, cwd, force=body.force)
+    run_id = await _launch_run(
+        supervisor, slug, body.url, cwd, force=body.force, jd_text=body.jd_text
+    )
 
     return ApplicationCreated(slug=slug, run_id=run_id)
 

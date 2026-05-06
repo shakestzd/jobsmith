@@ -9,7 +9,7 @@
 // adapters live in ./master/adapters.ts; no reverse mapping is attempted
 // from form-shape back to API shape in this slice.
 
-import { type KeyboardEvent, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { type KeyboardEvent, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, forwardRef } from 'react';
 import type { SampleBullet } from '../types';
 import { Icon, Badge, SAMPLE_BULLETS } from './shared';
 import { SkillForm } from './master/SkillForm';
@@ -17,19 +17,39 @@ import { EducationForm } from './master/EducationForm';
 import { AuthorForm } from './master/AuthorForm';
 import { BenchmarkEditor } from './master/BenchmarkEditor';
 import type { Skill, EducationEntry, Author } from './master/schemas';
-import { useMasterSection } from '../api/hooks';
-import { JobsmithApiError, apiGet, apiPost } from '../api/client';
+import { useMasterSectionWithMeta } from '../api/hooks';
+import { JobsmithApiError, apiGet, apiGetWithMeta, apiPost, apiPut, apiDelete, formatDetail } from '../api/client';
 import type { MasterWorkRole, MasterValidateResponse } from '../api/types';
 import {
   apiAuthorToForm,
   apiEducationToForm,
   apiSkillsToForm,
   apiWorkToRoles,
+  formToApiSkills,
+  formToApiEducation,
+  formToApiAuthor,
 } from './master/adapters';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
 type MasterTab = 'work' | 'skill' | 'education' | 'author' | 'benchmark';
+
+/**
+ * Imperative handle exposed by each dirty-aware tab so MasterContent can
+ * request a save before switching away (feat-815279db).
+ */
+interface TabHandle {
+  /** Attempt to save the tab's current state. Returns true on success. */
+  requestSave: () => Promise<boolean>;
+}
+
+/** Save state for ETag-backed sections (skill / education / author). */
+type SaveState =
+  | { kind: 'idle' }
+  | { kind: 'saving' }
+  | { kind: 'saved' }          // transient 2s pill
+  | { kind: 'conflict'; newEtag: string | null }  // 412 — local edits preserved
+  | { kind: 'missing'; suggestion: string };      // 404 missing_in_db
 
 // ── Internal helpers ─────────────────────────────────────────────────────
 
@@ -95,13 +115,213 @@ function SectionPane({
   return <>{children}</>;
 }
 
+// ── SaveBar ──────────────────────────────────────────────────────────────
+
+/**
+ * Renders the save button + status pills + conflict/missing banners
+ * for an ETag-backed tab (Skill, Education, Author).
+ */
+function SaveBar({
+  isDirty,
+  saveState,
+  onSave,
+  onDiscard,
+  onOverwrite,
+  onCopyCode,
+  codeToCopy,
+}: {
+  isDirty: boolean;
+  saveState: SaveState;
+  onSave: () => void;
+  onDiscard: () => void;
+  onOverwrite: () => void;
+  onCopyCode: (code: string) => void;
+  codeToCopy?: string;
+}) {
+  const isSaving = saveState.kind === 'saving';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button
+          className="btn primary"
+          onClick={onSave}
+          disabled={!isDirty || isSaving}
+        >
+          {isSaving ? 'saving…' : 'save'}
+        </button>
+        {saveState.kind === 'saved' && (
+          <span
+            className="pill active"
+            role="status"
+            style={{ fontSize: 12 }}
+          >
+            saved
+          </span>
+        )}
+      </div>
+
+      {saveState.kind === 'conflict' && (
+        <div
+          className="card"
+          role="alert"
+          style={{ padding: '10px 14px', fontSize: 13, color: 'var(--danger, var(--fg-muted))' }}
+        >
+          <div style={{ marginBottom: 6 }}>
+            section changed elsewhere — refresh to see latest
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={onDiscard}>
+              discard local + refresh
+            </button>
+            <button className="btn ghost" onClick={onOverwrite}>
+              overwrite anyway
+            </button>
+          </div>
+        </div>
+      )}
+
+      {saveState.kind === 'missing' && codeToCopy !== undefined && (
+        <div
+          className="card"
+          role="alert"
+          style={{ padding: '10px 14px', fontSize: 13 }}
+        >
+          <div style={{ marginBottom: 6, color: 'var(--fg-muted)' }}>
+            {saveState.suggestion}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <code style={{ fontSize: 12, padding: '2px 6px', background: 'var(--bg-sunk)', borderRadius: 'var(--radius)', flex: 1 }}>
+              {codeToCopy}
+            </code>
+            <button
+              className="btn ghost sm"
+              onClick={() => onCopyCode(codeToCopy)}
+            >
+              copy
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── BulletEditor ─────────────────────────────────────────────────────────
+// feat-c41539d5: per-bullet ops (mark anchor / drop anchor / add / remove)
+// wired to /api/master/work/roles/{i}/bullets/{j}/anchor, .../bullets, and
+// DELETE .../bullets/{j}. All mutations are immediate (no Save button) and
+// trigger a work-section refetch on success.
 
 interface BulletEditorProps {
   role: MasterWorkRole | null;
+  roleIndex: number;
+  refetch: () => void;
 }
 
-function BulletEditor({ role }: BulletEditorProps) {
+/** Inline modal overlay — no window.confirm / window.prompt. */
+function BulletModal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(0,0,0,0.45)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="card"
+        style={{ padding: 20, minWidth: 340, maxWidth: 480, position: 'relative' }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <strong style={{ fontSize: 14 }}>{title}</strong>
+          <button className="btn ghost sm" onClick={onClose} aria-label="close">×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Three-action guard dialog shown when the user tries to leave a dirty tab.
+ * feat-815279db: custom AlertDialog — no window.confirm.
+ */
+function UnsavedGuardDialog({
+  onSaveAndSwitch,
+  onDiscardAndSwitch,
+  onCancel,
+  isSaving,
+}: {
+  onSaveAndSwitch: () => void;
+  onDiscardAndSwitch: () => void;
+  onCancel: () => void;
+  isSaving: boolean;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Unsaved changes"
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1100,
+        background: 'rgba(0,0,0,0.45)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      <div
+        className="card"
+        style={{ padding: 24, minWidth: 340, maxWidth: 460, position: 'relative' }}
+      >
+        <div style={{ marginBottom: 12 }}>
+          <strong style={{ fontSize: 14, display: 'block', marginBottom: 6 }}>
+            Unsaved changes
+          </strong>
+          <p style={{ fontSize: 13, color: 'var(--fg-muted)', margin: 0 }}>
+            You have unsaved edits on this tab. What would you like to do?
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            className="btn primary"
+            onClick={onSaveAndSwitch}
+            disabled={isSaving}
+          >
+            {isSaving ? 'saving…' : 'Save & switch'}
+          </button>
+          <button
+            className="btn"
+            onClick={onDiscardAndSwitch}
+            disabled={isSaving}
+          >
+            Discard & switch
+          </button>
+          <button
+            className="btn ghost"
+            onClick={onCancel}
+            disabled={isSaving}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BulletEditor({ role, roleIndex, refetch }: BulletEditorProps) {
   // Convert API bullet shape (string | { bullet, anchor, ... }) into the
   // local SampleBullet shape used by the existing presentational subtree.
   const initial = useMemo<SampleBullet[]>(() => {
@@ -122,12 +342,100 @@ function BulletEditor({ role }: BulletEditorProps) {
   // Re-seed when the selected role changes upstream.
   useEffect(() => setBullets(initial), [initial]);
 
+  // Mutation in-flight guard: prevents concurrent rapid-click races.
+  const [mutating, setMutating] = useState(false);
+
+  // Add bullet inline form.
+  const [showAdd, setShowAdd] = useState(false);
+  const [addText, setAddText] = useState('');
+  const [addPosition, setAddPosition] = useState<number | ''>('');
+  const [addError, setAddError] = useState('');
+
+  // Drop anchor modal (fires with a drop_reason).
+  const [dropModal, setDropModal] = useState<{ bulletIndex: number } | null>(null);
+  const [dropReason, setDropReason] = useState('');
+  const [dropError, setDropError] = useState('');
+
+  // Remove bullet modal (fires with a reason).
+  const [removeModal, setRemoveModal] = useState<{ bulletIndex: number } | null>(null);
+  const [removeReason, setRemoveReason] = useState('');
+  const [removeError, setRemoveError] = useState('');
+
   const anchorCount = bullets.filter(b => b.anchor).length;
-  // The local `toggle(id)` helper that flipped anchor state in setBullets
-  // was removed alongside the per-bullet pill controls in feat-aba75dae —
-  // the toggle never persisted (no PUT to /api/master/work) so the UI lied
-  // about saved state. Anchor flags are now read-only on this overview;
-  // the dedicated Mark Anchors page is the entrypoint for editing them.
+
+  const handleMarkAnchor = useCallback(async (bulletIndex: number) => {
+    setMutating(true);
+    try {
+      await apiPost(`/api/master/work/roles/${roleIndex}/bullets/${bulletIndex}/anchor`, {});
+      refetch();
+    } finally {
+      setMutating(false);
+    }
+  }, [roleIndex, refetch]);
+
+  const handleDropAnchor = useCallback(async () => {
+    if (!dropModal) return;
+    if (!dropReason.trim()) {
+      setDropError('drop reason is required');
+      return;
+    }
+    setMutating(true);
+    try {
+      await apiPost(
+        `/api/master/work/roles/${roleIndex}/bullets/${dropModal.bulletIndex}/anchor`,
+        { drop_reason: dropReason.trim() },
+      );
+      refetch();
+      setDropModal(null);
+      setDropReason('');
+      setDropError('');
+    } finally {
+      setMutating(false);
+    }
+  }, [dropModal, dropReason, roleIndex, refetch]);
+
+  const handleAddBullet = useCallback(async () => {
+    if (!addText.trim()) {
+      setAddError('bullet text is required');
+      return;
+    }
+    setMutating(true);
+    try {
+      const position = addPosition === '' ? undefined : Number(addPosition);
+      await apiPost(`/api/master/work/roles/${roleIndex}/bullets`, {
+        text: addText.trim(),
+        ...(position !== undefined ? { position } : {}),
+      });
+      refetch();
+      setShowAdd(false);
+      setAddText('');
+      setAddPosition('');
+      setAddError('');
+    } finally {
+      setMutating(false);
+    }
+  }, [addText, addPosition, roleIndex, refetch]);
+
+  const handleRemoveBullet = useCallback(async () => {
+    if (!removeModal) return;
+    if (!removeReason.trim()) {
+      setRemoveError('reason is required');
+      return;
+    }
+    setMutating(true);
+    try {
+      await apiDelete(
+        `/api/master/work/roles/${roleIndex}/bullets/${removeModal.bulletIndex}`,
+        { reason: removeReason.trim() },
+      );
+      refetch();
+      setRemoveModal(null);
+      setRemoveReason('');
+      setRemoveError('');
+    } finally {
+      setMutating(false);
+    }
+  }, [removeModal, removeReason, roleIndex, refetch]);
 
   if (!role) {
     return (
@@ -138,58 +446,165 @@ function BulletEditor({ role }: BulletEditorProps) {
   }
 
   return (
-    <div className="card">
-      <div className="card-h">
-        <h3>{role.title}{role.location ? ` · ${role.location}` : ''}</h3>
-        <span className="sub">{role.date ?? ''} · {bullets.length} {plural(bullets.length, 'bullet')}</span>
-        <div className="right">
-          <Badge kind="accent">{anchorCount} anchors</Badge>
-          {/*
-            "add bullet" + "save" buttons removed in feat-aba75dae (GH#53).
-            Both were decorative — there is no inline-edit/persist flow on
-            this page. To add a bullet, edit master/work.yml directly. A
-            future feature can re-introduce these once a PUT-section
-            round-trip with optimistic locking lands (feat-6999e552).
-          */}
+    <>
+      <div className="card">
+        <div className="card-h">
+          <h3>{role.title}{role.location ? ` · ${role.location}` : ''}</h3>
+          <span className="sub">{role.date ?? ''} · {bullets.length} {plural(bullets.length, 'bullet')}</span>
+          <div className="right">
+            <Badge kind="accent">{anchorCount} anchors</Badge>
+          </div>
         </div>
-      </div>
-      <div style={{ padding: '10px 14px 8px', fontSize: 12, color: 'var(--fg-muted)', borderBottom: '1px solid var(--border)' }}>
-        <Icon name="flag" size={11} style={{ verticalAlign: 'middle', color: 'var(--accent)' }} />{' '}
-        anchors are bullets <b style={{ color: 'var(--fg)' }}>jobsmith</b> must preserve in every draft (or document a drop-reason).
-      </div>
-      <div>
-        {bullets.map((b, i) => (
-          <div key={b.id} className={`bullet-row ${b.anchor ? 'is-anchor' : ''}`}>
-            <span className="b-num">{String(i + 1).padStart(2, '0')}</span>
-            <div>
-              <div className="b-text">{b.text}</div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                {/*
-                  Per-bullet pill controls (mark anchor / edit / drop reason…)
-                  removed in feat-aba75dae (GH#53). The previous "mark anchor"
-                  pill toggled local React state only and did not persist via
-                  PUT /api/master/work, which made the UI lie about saved
-                  state. To set anchor flags, use the dedicated Mark Anchors
-                  page (left sidebar) which writes via the comment-preserving
-                  mark-anchors flow.
-                */}
-                {b.anchor && <span className="pill active">⚑ anchor</span>}
+        <div style={{ padding: '10px 14px 8px', fontSize: 12, color: 'var(--fg-muted)', borderBottom: '1px solid var(--border)' }}>
+          <Icon name="flag" size={11} style={{ verticalAlign: 'middle', color: 'var(--accent)' }} />{' '}
+          anchors are bullets <b style={{ color: 'var(--fg)' }}>jobsmith</b> must preserve in every draft (or document a drop-reason).
+        </div>
+
+        {/* + add bullet */}
+        <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)' }}>
+          {!showAdd ? (
+            <button
+              className="btn ghost sm"
+              disabled={mutating}
+              onClick={() => setShowAdd(true)}
+            >
+              + add bullet
+            </button>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <textarea
+                value={addText}
+                onChange={(e) => { setAddText(e.target.value); setAddError(''); }}
+                placeholder="bullet text…"
+                rows={2}
+                style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: 13 }}
+              />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <label style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
+                  position (blank = append):{' '}
+                  <input
+                    type="number"
+                    value={addPosition}
+                    onChange={(e) => setAddPosition(e.target.value === '' ? '' : Number(e.target.value))}
+                    style={{ width: 60, marginLeft: 4 }}
+                    min={0}
+                  />
+                </label>
+                <button className="btn primary sm" disabled={mutating} onClick={() => void handleAddBullet()}>
+                  {mutating ? 'saving…' : 'add'}
+                </button>
+                <button className="btn ghost sm" onClick={() => { setShowAdd(false); setAddText(''); setAddPosition(''); setAddError(''); }}>
+                  cancel
+                </button>
+              </div>
+              {addError && <div style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>{addError}</div>}
+            </div>
+          )}
+        </div>
+
+        <div>
+          {bullets.map((b, i) => (
+            <div key={b.id} className={`bullet-row ${b.anchor ? 'is-anchor' : ''}`}>
+              <span className="b-num">{String(i + 1).padStart(2, '0')}</span>
+              <div>
+                <div className="b-text">{b.text}</div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                  {b.anchor ? (
+                    <>
+                      <span className="pill active">⚑ anchor</span>
+                      <button
+                        className="pill"
+                        disabled={mutating}
+                        style={{ cursor: mutating ? 'not-allowed' : 'pointer', background: 'none', border: '1px solid var(--border)', borderRadius: 12, padding: '1px 8px', fontSize: 11 }}
+                        onClick={() => { setDropModal({ bulletIndex: i }); setDropReason(''); setDropError(''); }}
+                      >
+                        drop
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="pill"
+                      disabled={mutating}
+                      style={{ cursor: mutating ? 'not-allowed' : 'pointer', background: 'none', border: '1px solid var(--border)', borderRadius: 12, padding: '1px 8px', fontSize: 11 }}
+                      onClick={() => void handleMarkAnchor(i)}
+                    >
+                      mark anchor
+                    </button>
+                  )}
+                  <button
+                    className="btn ghost sm"
+                    disabled={mutating}
+                    style={{ fontSize: 11, color: 'var(--fg-muted)' }}
+                    onClick={() => { setRemoveModal({ bulletIndex: i }); setRemoveReason(''); setRemoveError(''); }}
+                  >
+                    remove
+                  </button>
+                </div>
+              </div>
+              <div className="b-actions">
+                <button className="btn ghost sm"><Icon name="chevd" size={11} /></button>
               </div>
             </div>
-            <div className="b-actions">
-              <button className="btn ghost sm"><Icon name="chevd" size={11} /></button>
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
-    </div>
+
+      {/* Drop anchor modal */}
+      {dropModal && (
+        <BulletModal title="drop anchor" onClose={() => setDropModal(null)}>
+          <div style={{ fontSize: 13, color: 'var(--fg-muted)', marginBottom: 10 }}>
+            document why this bullet is being un-anchored:
+          </div>
+          <textarea
+            value={dropReason}
+            onChange={(e) => { setDropReason(e.target.value); setDropError(''); }}
+            placeholder="drop reason…"
+            rows={3}
+            style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: 13, marginBottom: 8 }}
+            autoFocus
+          />
+          {dropError && <div style={{ fontSize: 12, color: 'var(--danger, #c0392b)', marginBottom: 8 }}>{dropError}</div>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn primary" disabled={mutating} onClick={() => void handleDropAnchor()}>
+              {mutating ? 'saving…' : 'drop anchor'}
+            </button>
+            <button className="btn ghost" onClick={() => setDropModal(null)}>cancel</button>
+          </div>
+        </BulletModal>
+      )}
+
+      {/* Remove bullet modal */}
+      {removeModal && (
+        <BulletModal title="remove bullet" onClose={() => setRemoveModal(null)}>
+          <div style={{ fontSize: 13, color: 'var(--fg-muted)', marginBottom: 10 }}>
+            provide a reason for removing this bullet:
+          </div>
+          <textarea
+            value={removeReason}
+            onChange={(e) => { setRemoveReason(e.target.value); setRemoveError(''); }}
+            placeholder="reason…"
+            rows={3}
+            style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: 13, marginBottom: 8 }}
+            autoFocus
+          />
+          {removeError && <div style={{ fontSize: 12, color: 'var(--danger, #c0392b)', marginBottom: 8 }}>{removeError}</div>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn primary" disabled={mutating} onClick={() => void handleRemoveBullet()}>
+              {mutating ? 'saving…' : 'remove'}
+            </button>
+            <button className="btn ghost" onClick={() => setRemoveModal(null)}>cancel</button>
+          </div>
+        </BulletModal>
+      )}
+    </>
   );
 }
 
 // ── WorkEditor ───────────────────────────────────────────────────────────
 
 function WorkEditor() {
-  const { data, isLoading, error } = useMasterSection('work');
+  // useMasterSectionWithMeta gives us refetch to trigger after bullet mutations.
+  const { data, isLoading, error, refetch } = useMasterSectionWithMeta('work');
   const roles: MasterWorkRole[] = useMemo(() => apiWorkToRoles(data), [data]);
   const [openIdx, setOpenIdx] = useState<number>(0);
   // Reset selection when roles change upstream (e.g., refetch).
@@ -232,7 +647,7 @@ function WorkEditor() {
             */}
           </div>
 
-          <BulletEditor role={roles[openIdx] ?? null} />
+          <BulletEditor role={roles[openIdx] ?? null} roleIndex={openIdx} refetch={refetch} />
         </div>
       )}
     </SectionPane>
@@ -241,58 +656,354 @@ function WorkEditor() {
 
 // ── Per-tab wrappers (skill / education / author / benchmark) ────────────
 
-function SkillTab() {
-  const { data, isLoading, error } = useMasterSection('skill');
+interface DirtyTabProps {
+  onDirtyChange: (isDirty: boolean) => void;
+}
+
+const SkillTab = forwardRef<TabHandle, DirtyTabProps>(function SkillTab({ onDirtyChange }, ref) {
+  const { data, etag, isLoading, error, refetch } = useMasterSectionWithMeta('skill');
   const apiSkills = useMemo(() => apiSkillsToForm(data ?? null), [data]);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Hydrate from API on mount and whenever upstream data changes.
   useEffect(() => setSkills(apiSkills), [apiSkills]);
+
+  const isDirty = useMemo(
+    () => JSON.stringify(skills) !== JSON.stringify(apiSkills),
+    [skills, apiSkills],
+  );
+
+  // Notify parent of dirty state changes.
+  useEffect(() => { onDirtyChange(isDirty); }, [isDirty, onDirtyChange]);
+
+  const doSave = useCallback(async (ifMatchOverride?: string | null): Promise<boolean> => {
+    // Returns true on a successful PUT (200), false on 412/404/network/etc.
+    // The unsaved-changes guard relies on this return value to decide whether
+    // it is safe to switch tabs — the prior void return led to silent edit
+    // loss on Save & switch when the PUT failed. (roborev job 950 HIGH)
+    setSaveState({ kind: 'saving' });
+    const effectiveEtag = ifMatchOverride !== undefined ? ifMatchOverride : etag;
+    try {
+      await apiPut('/api/master/skill', formToApiSkills(skills), {
+        ifMatch: effectiveEtag ?? undefined,
+      });
+      refetch();
+      setSaveState({ kind: 'saved' });
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSaveState({ kind: 'idle' }), 2000);
+      return true;
+    } catch (err) {
+      if (err instanceof JobsmithApiError && err.status === 412) {
+        // Capture new ETag from 412 response if available (backend may include it).
+        setSaveState({ kind: 'conflict', newEtag: null });
+      } else if (err instanceof JobsmithApiError && err.status === 404) {
+        const suggestion = formatDetail(null, 'jobsmith db load-master  # to backfill skill');
+        setSaveState({ kind: 'missing', suggestion });
+      } else {
+        setSaveState({ kind: 'idle' });
+      }
+      return false;
+    }
+  }, [etag, skills, refetch]);
+
+  // Expose requestSave so MasterContent can trigger a save before tab switch.
+  useImperativeHandle(ref, () => ({
+    requestSave: async () => {
+      if (!isDirty) return true;
+      // doSave returns false on any non-2xx outcome (412 conflict, 404
+      // missing, network error). Propagate that so the guard keeps the
+      // user on the dirty tab instead of unmounting the editor.
+      return doSave();
+    },
+  }), [isDirty, doSave]);
+
+  const handleDiscard = useCallback(() => {
+    setSaveState({ kind: 'idle' });
+    refetch();
+  }, [refetch]);
+
+  const handleOverwrite = useCallback(() => {
+    // Re-PUT with no If-Match (force overwrite).
+    void doSave(null);
+  }, [doSave]);
+
+  const missing404 = saveState.kind === 'missing';
+  const suggestion404 = missing404 ? saveState.suggestion : '';
+
   return (
     <SectionPane isLoading={isLoading} error={error as Error | null}>
-      {/* save round-trip lossy — see feat-6999e552 for ETag/concurrent-write semantics */}
+      <SaveBar
+        isDirty={isDirty}
+        saveState={saveState}
+        onSave={() => void doSave()}
+        onDiscard={handleDiscard}
+        onOverwrite={handleOverwrite}
+        onCopyCode={(code) => void navigator.clipboard.writeText(code)}
+        codeToCopy={missing404 ? suggestion404 : undefined}
+      />
       <SkillForm skills={skills} onChange={setSkills} />
     </SectionPane>
   );
-}
+});
 
-function EducationTab() {
-  const { data, isLoading, error } = useMasterSection('education');
+const EducationTab = forwardRef<TabHandle, DirtyTabProps>(function EducationTab({ onDirtyChange }, ref) {
+  const { data, etag, isLoading, error, refetch } = useMasterSectionWithMeta('education');
   const apiEdu = useMemo(() => apiEducationToForm(data ?? null), [data]);
   const [education, setEducation] = useState<EducationEntry[]>([]);
+  const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => setEducation(apiEdu), [apiEdu]);
+
+  const isDirty = useMemo(
+    () => JSON.stringify(education) !== JSON.stringify(apiEdu),
+    [education, apiEdu],
+  );
+
+  // Notify parent of dirty state changes.
+  useEffect(() => { onDirtyChange(isDirty); }, [isDirty, onDirtyChange]);
+
+  const doSave = useCallback(async (ifMatchOverride?: string | null): Promise<boolean> => {
+    // Returns true on success, false on 412/404/network. roborev job 950.
+    setSaveState({ kind: 'saving' });
+    const effectiveEtag = ifMatchOverride !== undefined ? ifMatchOverride : etag;
+    try {
+      await apiPut('/api/master/education', formToApiEducation(education), {
+        ifMatch: effectiveEtag ?? undefined,
+      });
+      refetch();
+      setSaveState({ kind: 'saved' });
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSaveState({ kind: 'idle' }), 2000);
+      return true;
+    } catch (err) {
+      if (err instanceof JobsmithApiError && err.status === 412) {
+        setSaveState({ kind: 'conflict', newEtag: null });
+      } else if (err instanceof JobsmithApiError && err.status === 404) {
+        const suggestion = formatDetail(null, 'jobsmith db load-master  # to backfill education');
+        setSaveState({ kind: 'missing', suggestion });
+      } else {
+        setSaveState({ kind: 'idle' });
+      }
+      return false;
+    }
+  }, [etag, education, refetch]);
+
+  // Expose requestSave for MasterContent guard. Propagates doSave's success
+  // boolean so a failed Save & switch keeps the user on the dirty tab.
+  useImperativeHandle(ref, () => ({
+    requestSave: async () => {
+      if (!isDirty) return true;
+      return doSave();
+    },
+  }), [isDirty, doSave]);
+
+  const handleDiscard = useCallback(() => {
+    setSaveState({ kind: 'idle' });
+    refetch();
+  }, [refetch]);
+
+  const handleOverwrite = useCallback(() => {
+    void doSave(null);
+  }, [doSave]);
+
+  const missing404 = saveState.kind === 'missing';
+  const suggestion404 = missing404 ? saveState.suggestion : '';
+
   return (
     <SectionPane isLoading={isLoading} error={error as Error | null}>
-      {/* save round-trip lossy — see feat-6999e552 */}
+      <SaveBar
+        isDirty={isDirty}
+        saveState={saveState}
+        onSave={() => void doSave()}
+        onDiscard={handleDiscard}
+        onOverwrite={handleOverwrite}
+        onCopyCode={(code) => void navigator.clipboard.writeText(code)}
+        codeToCopy={missing404 ? suggestion404 : undefined}
+      />
       <EducationForm education={education} onChange={setEducation} />
     </SectionPane>
   );
-}
+});
 
-function AuthorTab() {
-  const { data, isLoading, error } = useMasterSection('author');
+const AuthorTab = forwardRef<TabHandle, DirtyTabProps>(function AuthorTab({ onDirtyChange }, ref) {
+  const { data, etag, isLoading, error, refetch } = useMasterSectionWithMeta('author');
   const apiAuthor = useMemo(() => apiAuthorToForm(data ?? null), [data]);
+  // Capture raw API extras for pass-through on save.
+  const rawExtras = useMemo<Record<string, unknown>>(() => {
+    if (!data) return {};
+    // Strip the fields we re-map from author; pass everything else through.
+    const { name: _n, email: _e, phone: _p, address: _a, position: _pos,
+      profession: _pr, firstname: _f, lastname: _l, contacts: _c, ...rest } = data as Record<string, unknown>;
+    return rest;
+  }, [data]);
+
   const [author, setAuthor] = useState<Author>(apiAuthor);
+  const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => setAuthor(apiAuthor), [apiAuthor]);
+
+  const isDirty = useMemo(
+    () => JSON.stringify(author) !== JSON.stringify(apiAuthor),
+    [author, apiAuthor],
+  );
+
+  // Notify parent of dirty state changes.
+  useEffect(() => { onDirtyChange(isDirty); }, [isDirty, onDirtyChange]);
+
+  const doSave = useCallback(async (ifMatchOverride?: string | null): Promise<boolean> => {
+    // Returns true on success, false on 412/404/network. roborev job 950.
+    setSaveState({ kind: 'saving' });
+    const effectiveEtag = ifMatchOverride !== undefined ? ifMatchOverride : etag;
+    try {
+      await apiPut('/api/master/author', formToApiAuthor(author, rawExtras), {
+        ifMatch: effectiveEtag ?? undefined,
+      });
+      refetch();
+      setSaveState({ kind: 'saved' });
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSaveState({ kind: 'idle' }), 2000);
+      return true;
+    } catch (err) {
+      if (err instanceof JobsmithApiError && err.status === 412) {
+        setSaveState({ kind: 'conflict', newEtag: null });
+      } else if (err instanceof JobsmithApiError && err.status === 404) {
+        const suggestion = formatDetail(null, 'jobsmith db load-master  # to backfill author');
+        setSaveState({ kind: 'missing', suggestion });
+      } else {
+        setSaveState({ kind: 'idle' });
+      }
+      return false;
+    }
+  }, [etag, author, rawExtras, refetch]);
+
+  // Expose requestSave for MasterContent guard. Propagates doSave's success
+  // boolean so a failed Save & switch keeps the user on the dirty tab.
+  useImperativeHandle(ref, () => ({
+    requestSave: async () => {
+      if (!isDirty) return true;
+      return doSave();
+    },
+  }), [isDirty, doSave]);
+
+  const handleDiscard = useCallback(() => {
+    setSaveState({ kind: 'idle' });
+    refetch();
+  }, [refetch]);
+
+  const handleOverwrite = useCallback(() => {
+    void doSave(null);
+  }, [doSave]);
+
+  const missing404 = saveState.kind === 'missing';
+  const suggestion404 = missing404 ? saveState.suggestion : '';
+
   return (
     <SectionPane isLoading={isLoading} error={error as Error | null}>
-      {/* save round-trip lossy — see feat-6999e552 */}
+      <SaveBar
+        isDirty={isDirty}
+        saveState={saveState}
+        onSave={() => void doSave()}
+        onDiscard={handleDiscard}
+        onOverwrite={handleOverwrite}
+        onCopyCode={(code) => void navigator.clipboard.writeText(code)}
+        codeToCopy={missing404 ? suggestion404 : undefined}
+      />
       <AuthorForm author={author} onChange={setAuthor} />
     </SectionPane>
   );
-}
+});
 
-function BenchmarkTab() {
-  const { data, isLoading, error } = useMasterSection('benchmark');
+const BenchmarkTab = forwardRef<TabHandle, DirtyTabProps>(function BenchmarkTab({ onDirtyChange }, ref) {
+  const { data, etag, isLoading, error, refetch } = useMasterSectionWithMeta('benchmark');
   const initial = data?.text ?? '';
   const [text, setText] = useState<string>(initial);
+  const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Hydrate from API on mount and whenever upstream data changes.
   useEffect(() => setText(initial), [initial]);
+
+  const isDirty = text !== initial;
+
+  // Notify parent of dirty state changes.
+  useEffect(() => { onDirtyChange(isDirty); }, [isDirty, onDirtyChange]);
+
+  const doSave = useCallback(async (ifMatchOverride?: string | null): Promise<boolean> => {
+    // Returns true on success, false on 412/404/network. roborev job 950.
+    setSaveState({ kind: 'saving' });
+    const effectiveEtag = ifMatchOverride !== undefined ? ifMatchOverride : etag;
+    try {
+      await apiPut('/api/master/benchmark', { text }, {
+        ifMatch: effectiveEtag ?? undefined,
+      });
+      refetch();
+      setSaveState({ kind: 'saved' });
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSaveState({ kind: 'idle' }), 2000);
+      return true;
+    } catch (err) {
+      if (err instanceof JobsmithApiError && err.status === 412) {
+        setSaveState({ kind: 'conflict', newEtag: null });
+      } else if (err instanceof JobsmithApiError && err.status === 404) {
+        const suggestion = 'jobsmith db load-master  # to backfill benchmark';
+        setSaveState({ kind: 'missing', suggestion });
+      } else {
+        setSaveState({ kind: 'idle' });
+      }
+      return false;
+    }
+  }, [etag, text, refetch]);
+
+  // Expose requestSave for MasterContent guard. Propagates doSave's success
+  // boolean so a failed Save & switch keeps the user on the dirty tab.
+  useImperativeHandle(ref, () => ({
+    requestSave: async () => {
+      if (!isDirty) return true;
+      return doSave();
+    },
+  }), [isDirty, doSave]);
+
+  const handleDiscard = useCallback(() => {
+    setSaveState({ kind: 'idle' });
+    refetch();
+  }, [refetch]);
+
+  // Overwrite-anyway: re-fetch the current server version so the PUT carries a
+  // valid If-Match and the server can detect a further race between refetch and
+  // the second PUT. Falls back to force-overwrite (no If-Match) if refetch fails.
+  const handleOverwrite = useCallback(async () => {
+    try {
+      const { etag: freshEtag } = await apiGetWithMeta<{ text: string; version: string }>(
+        '/api/master/benchmark',
+      );
+      await doSave(freshEtag);
+    } catch {
+      await doSave(null);
+    }
+  }, [doSave]);
+
+  const missing404 = saveState.kind === 'missing';
+  const suggestion404 = missing404 ? saveState.suggestion : '';
+
   return (
     <SectionPane isLoading={isLoading} error={error as Error | null}>
-      {/* save round-trip lossy — see feat-6999e552 */}
+      <SaveBar
+        isDirty={isDirty}
+        saveState={saveState}
+        onSave={() => void doSave()}
+        onDiscard={handleDiscard}
+        onOverwrite={() => void handleOverwrite()}
+        onCopyCode={(code) => void navigator.clipboard.writeText(code)}
+        codeToCopy={missing404 ? suggestion404 : undefined}
+      />
       <BenchmarkEditor text={text} onChange={setText} />
     </SectionPane>
   );
-}
+});
 
 // ── Exported components ──────────────────────────────────────────────────
 
@@ -305,6 +1016,102 @@ export function MasterContent() {
     | { kind: 'errors'; errors: { field: string; message: string }[] }
     | { kind: 'failure'; message: string }
   >({ kind: 'idle' });
+
+  // ── Unsaved-changes guard (feat-815279db) ──────────────────────────────
+
+  /** Tracks which tab currently has unsaved edits. */
+  const [dirtyTabs, setDirtyTabs] = useState<Partial<Record<MasterTab, boolean>>>({});
+
+  /**
+   * Pending navigation request: the tab the user wants to switch to while the
+   * current tab is dirty. Cleared by resolving the guard dialog.
+   */
+  const [pendingTab, setPendingTab] = useState<MasterTab | null>(null);
+  const [guardSaving, setGuardSaving] = useState(false);
+
+  // Imperative refs so MasterContent can call requestSave() on the active tab.
+  const skillRef = useRef<TabHandle>(null);
+  const educationRef = useRef<TabHandle>(null);
+  const authorRef = useRef<TabHandle>(null);
+  const benchmarkRef = useRef<TabHandle>(null);
+
+  const tabRefMap: Partial<Record<MasterTab, React.RefObject<TabHandle | null>>> = {
+    skill: skillRef,
+    education: educationRef,
+    author: authorRef,
+    benchmark: benchmarkRef,
+  };
+
+  const isCurrentTabDirty = Boolean(dirtyTabs[tab]);
+
+  const handleDirtyChange = useCallback((changedTab: MasterTab, isDirty: boolean) => {
+    setDirtyTabs(prev => ({ ...prev, [changedTab]: isDirty }));
+  }, []);
+
+  /** Called when the user clicks a tab. Shows guard if current tab is dirty. */
+  const handleTabClick = useCallback((targetTab: MasterTab) => {
+    if (targetTab === tab) return;
+    if (dirtyTabs[tab]) {
+      setPendingTab(targetTab);
+    } else {
+      setTab(targetTab);
+    }
+  }, [tab, dirtyTabs]);
+
+  /** Guard: Save & switch — trigger active tab's save, then switch. */
+  const handleGuardSaveAndSwitch = useCallback(async () => {
+    if (!pendingTab) return;
+    const tabRef = tabRefMap[tab];
+    if (!tabRef?.current) {
+      // No ref (e.g. 'work' tab has no save handle) — just switch.
+      setTab(pendingTab);
+      setPendingTab(null);
+      return;
+    }
+    setGuardSaving(true);
+    try {
+      const ok = await tabRef.current.requestSave();
+      if (ok) {
+        setTab(pendingTab);
+        setPendingTab(null);
+      }
+      // If save failed, stay on current tab with dialog dismissed (save errors
+      // are shown in the tab's own SaveBar).
+    } finally {
+      setGuardSaving(false);
+      setPendingTab(null);
+    }
+  }, [pendingTab, tab, tabRefMap]);
+
+  /** Guard: Discard & switch — clear dirty flag and switch. */
+  const handleGuardDiscardAndSwitch = useCallback(() => {
+    if (!pendingTab) return;
+    setDirtyTabs(prev => ({ ...prev, [tab]: false }));
+    setTab(pendingTab);
+    setPendingTab(null);
+  }, [pendingTab, tab]);
+
+  /** Guard: Cancel — stay on current tab. */
+  const handleGuardCancel = useCallback(() => {
+    setPendingTab(null);
+  }, []);
+
+  // ── beforeunload guard ─────────────────────────────────────────────────
+
+  const anyDirty = Object.values(dirtyTabs).some(Boolean);
+
+  useEffect(() => {
+    if (!anyDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Modern browsers ignore the custom message but require returnValue to be set.
+      e.returnValue = 'You have unsaved changes. Leave anyway?';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [anyDirty]);
+
+  // ── Validate ───────────────────────────────────────────────────────────
 
   const handleValidate = async () => {
     setValidateState({ kind: 'running' });
@@ -335,6 +1142,12 @@ export function MasterContent() {
   };
 
   const isValidating = validateState.kind === 'running';
+
+  // Stable onDirtyChange callbacks per tab (avoid recreating on every render).
+  const onSkillDirty = useCallback((d: boolean) => handleDirtyChange('skill', d), [handleDirtyChange]);
+  const onEducationDirty = useCallback((d: boolean) => handleDirtyChange('education', d), [handleDirtyChange]);
+  const onAuthorDirty = useCallback((d: boolean) => handleDirtyChange('author', d), [handleDirtyChange]);
+  const onBenchmarkDirty = useCallback((d: boolean) => handleDirtyChange('benchmark', d), [handleDirtyChange]);
 
   return (
     <div className="content">
@@ -396,7 +1209,7 @@ export function MasterContent() {
           <div
             key={id}
             className={`tab ${tab === id ? 'active' : ''}`}
-            onClick={() => setTab(id)}
+            onClick={() => handleTabClick(id)}
           >
             {label} <span className="tab-count">{sub}</span>
           </div>
@@ -404,10 +1217,20 @@ export function MasterContent() {
       </div>
 
       {tab === 'work' && <WorkEditor />}
-      {tab === 'skill' && <SkillTab />}
-      {tab === 'education' && <EducationTab />}
-      {tab === 'author' && <AuthorTab />}
-      {tab === 'benchmark' && <BenchmarkTab />}
+      {tab === 'skill' && <SkillTab ref={skillRef} onDirtyChange={onSkillDirty} />}
+      {tab === 'education' && <EducationTab ref={educationRef} onDirtyChange={onEducationDirty} />}
+      {tab === 'author' && <AuthorTab ref={authorRef} onDirtyChange={onAuthorDirty} />}
+      {tab === 'benchmark' && <BenchmarkTab ref={benchmarkRef} onDirtyChange={onBenchmarkDirty} />}
+
+      {/* Unsaved-changes guard dialog (feat-815279db) */}
+      {pendingTab !== null && isCurrentTabDirty && (
+        <UnsavedGuardDialog
+          onSaveAndSwitch={() => void handleGuardSaveAndSwitch()}
+          onDiscardAndSwitch={handleGuardDiscardAndSwitch}
+          onCancel={handleGuardCancel}
+          isSaving={guardSaving}
+        />
+      )}
     </div>
   );
 }
