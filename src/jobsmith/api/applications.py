@@ -175,39 +175,10 @@ async def _launch_run(
     When *force* is true, ``--force`` is appended so the apply pipeline
     restarts from phase 1 even if prior artifacts exist for *slug*.
 
-    Materialises the master_content DB rows to disk YAML before spawning
-    the apply subprocess (bug-3d335f93). The specialist agents read master
-    YAMLs from disk via Read tool calls; without this materialise step,
-    UI edits saved to the DB would not be visible to the pipeline until
-    the user manually ran ``jobsmith master export``. This is the
-    pragmatic fix for the resume story; longer-term, the specialists
-    should read master content from the DB directly.
-
     Threads ``transcript_path`` through to the supervisor so the
     terminal-phase guard (S6, feat-438090af) can synth a phase=failed
     SSE event when the subprocess dies without emitting one.
     """
-    # Materialise master_content -> disk YAML so specialists see the latest.
-    try:
-        from jobsmith.config import find_config, load_config
-        from jobsmith.master_ingest import export_master_to_disk
-        from jobsmith.paths import resolve as _resolve
-
-        config_path = find_config(cwd)
-        if config_path is not None:
-            config = load_config(path=config_path)
-            db_path = (cwd / config.output.jobsmith_db).resolve()
-            section_paths: dict[str, Path] = {
-                "work": _resolve(config.master.work_yml, cwd),
-                "skill": _resolve(config.master.skill_yml, cwd),
-                "education": _resolve(config.master.education_yml, cwd),
-                "author": _resolve(config.master.author_yml, cwd),
-                "benchmark": cwd / "assets" / "content" / "benchmark.md",
-            }
-            export_master_to_disk(db_path, section_paths=section_paths)
-    except Exception:  # noqa: BLE001 — materialise failure must not block apply.
-        pass
-
     argv = [sys.executable, "-m", "jobsmith.cli", "apply", url, "--slug", slug]
     if force:
         argv.append("--force")

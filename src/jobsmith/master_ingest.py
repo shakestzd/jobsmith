@@ -147,42 +147,6 @@ def ingest_master_from_disk(
     return written
 
 
-def export_master_to_disk(
-    db_path: Path,
-    *,
-    section_paths: dict[str, Path],
-) -> int:
-    """Materialise ``master_content`` rows to disk YAML files.
-
-    Headless companion to the ``jobsmith master export`` CLI command, used
-    by the API supervisor to keep disk-resident master content in sync
-    with the DB before launching ``jobsmith apply`` (bug-3d335f93).
-
-    Returns the number of sections written. Sections without a DB row
-    are silently skipped; the disk file (if any) is left untouched.
-    """
-    if not db_path.exists():
-        return 0
-    written = 0
-    conn = open_pipeline_db(db_path)
-    try:
-        for section, target_path in section_paths.items():
-            row = conn.execute(
-                "SELECT content_blob FROM master_content WHERE section = ?",
-                (section,),
-            ).fetchone()
-            if row is None:
-                continue
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            target_path.write_text(row["content_blob"], encoding="utf-8")
-            written += 1
-    finally:
-        conn.close()
-    if written:
-        _log.info("Materialised %d master section(s) from DB to disk", written)
-    return written
-
-
 def ensure_master_loaded(
     db_path: Path,
     *,
