@@ -1588,6 +1588,7 @@ def run_apply(
     renderer: ApplyRenderer | None = None,
     jd_text: str | None = None,
     slug: str | None = None,
+    run_id: str | None = None,
 ) -> int:
     """Run the three-phase apply pipeline.
 
@@ -1739,7 +1740,13 @@ def run_apply(
     # the row's status in the wrapper finally-block. Wrapped in suppress so a
     # missing/locked DB never aborts the apply pipeline itself — DB writes are
     # canonical for review but secondary to the pipeline's primary work.
-    db_run_id = str(uuid.uuid4())
+    # Roborev job 955 HIGH: when the API supervisor launches this
+    # subprocess it generates its own run_id (used to filter the
+    # apply_state_log tailer). If the subprocess minted a different
+    # uuid4, the supervisor's tailer would see zero rows. Accept the
+    # caller-supplied run_id and only fall back to a fresh uuid4 when
+    # invoked directly from a terminal.
+    db_run_id = run_id or str(uuid.uuid4())
     db_phase_label = "unknown"  # full pipeline; matches marimo runner convention
     db_started_at_iso = _db_now_iso()
     db_conn = _open_pipeline_db_for_run(resolved_cwd)

@@ -1356,12 +1356,19 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
       </div>
 
       <div className="pipeline" style={{ marginBottom: 20 }}>
-        {PHASES.map((p, i) => {
-          const pr = progress[p.num];
+        {(() => {
           const firstIncomplete = ([1, 2, 3] as const).findIndex(n => progress[n] < 100);
-          // bug-8ade6f70: when SSE reports a terminal failure, the phase that
-          // didn't complete is failed — not still 'running' or 'queued'.
-          const isStuckPhase = sseStatus === 'failed' && i === firstIncomplete;
+          return PHASES.map((p, i) => {
+          const pr = progress[p.num];
+          // bug-8ade6f70 + roborev job 955 MEDIUM: pin the failed-phase
+          // marker on the SSE failure payload's phase number rather than
+          // ``firstIncomplete``. If a draft/render failure follows a
+          // missed/truncated completion event for the prior phase, the
+          // earlier ``firstIncomplete`` heuristic would mis-paint the
+          // already-finished phase as failed. ``failedPhaseNum`` is the
+          // authoritative source.
+          const isStuckPhase =
+            sseStatus === 'failed' && failedPhaseNum === p.num;
           const status: PhaseStatus = pr >= 100
             ? 'done'
             : (isStuckPhase
@@ -1386,7 +1393,8 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
               ]}
             />
           );
-        })}
+          });
+        })()}
       </div>
 
       <div className="tabs">

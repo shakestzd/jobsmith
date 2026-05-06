@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import sys
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -184,6 +185,14 @@ async def _launch_run(
     # raise ``click.Abort`` and the whole pipeline would exit non-zero
     # immediately after phase 1 completes (trk-60217f9f live-test surfaced
     # this — the UI said --yes but the supervisor never propagated it).
+    #
+    # ``--run-id`` is mandatory when the supervisor's transcript tailer is
+    # active (db_path != None). The tailer filters apply_state_log by
+    # ``handle.run_id`` from migration 006; without sharing that id with
+    # the subprocess, the renderer would tag rows with its own uuid4 and
+    # the tailer would see zero structured transcript events (closes
+    # roborev job 955 HIGH).
+    run_id = uuid.uuid4().hex
     argv = [
         sys.executable,
         "-m",
@@ -193,6 +202,8 @@ async def _launch_run(
         "--slug",
         slug,
         "--yes",
+        "--run-id",
+        run_id,
     ]
     if force:
         argv.append("--force")
@@ -204,6 +215,7 @@ async def _launch_run(
         cwd=cwd,
         transcript_path=transcript_path,
         db_path=db_path,
+        run_id=run_id,
     )
 
 

@@ -513,7 +513,7 @@ def test_cli_apply_yes_flag(tmp_path: Path, monkeypatch) -> None:
 
     captured: dict = {}
 
-    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None):
+    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None, run_id=None):
         captured["url"] = url
         captured["skip_confirm"] = skip_confirm
         captured["force"] = force
@@ -542,7 +542,7 @@ def test_cli_apply_force_flag(tmp_path: Path, monkeypatch) -> None:
     runner = CliRunner()
     captured: dict = {}
 
-    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None):
+    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None, run_id=None):
         captured["force"] = force
         return 0
 
@@ -568,7 +568,7 @@ def test_cli_apply_jd_text_flag_passes_through(tmp_path: Path, monkeypatch) -> N
     captured: dict = {}
 
     def fake_run_apply(
-        url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None
+        url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None, run_id=None
     ):
         captured["jd_text"] = jd_text
         return 0
@@ -603,7 +603,7 @@ def test_cli_apply_jd_text_file_flag_reads_contents(tmp_path: Path, monkeypatch)
     captured: dict = {}
 
     def fake_run_apply(
-        url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None
+        url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None, run_id=None
     ):
         captured["jd_text"] = jd_text
         return 0
@@ -633,7 +633,7 @@ def test_cli_apply_jd_text_file_wins_over_jd_text(tmp_path: Path, monkeypatch) -
     captured: dict = {}
 
     def fake_run_apply(
-        url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None
+        url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None, run_id=None
     ):
         captured["jd_text"] = jd_text
         return 0
@@ -661,7 +661,7 @@ def test_cli_apply_without_yes_default_confirm_false(tmp_path: Path, monkeypatch
 
     captured: dict = {}
 
-    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None):
+    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None, run_id=None):
         captured["skip_confirm"] = skip_confirm
         return 0
 

@@ -332,6 +332,7 @@ class RunSupervisor:
         *,
         transcript_path: Path | None = None,
         db_path: Path | None = None,
+        run_id: str | None = None,
     ) -> str:
         """Spawn ``argv`` in ``cwd`` and register a new run.
 
@@ -347,11 +348,20 @@ class RunSupervisor:
                 subprocess exits non-zero without a terminal phase event in the
                 transcript, a :class:`SynthPhaseEvent` is broadcast to all
                 subscribers before the end-of-stream sentinel.
+            run_id: Optional caller-supplied run identifier. When provided,
+                the subprocess MUST be invoked with the same id (e.g. via
+                ``--run-id``) so the apply_state_log tailer's run_id filter
+                matches the rows the renderer writes. ``_launch_run`` mints
+                one and threads it through both layers (closes roborev job
+                955 HIGH). If omitted the supervisor mints a fresh hex
+                uuid — useful for direct callers that do not write to
+                apply_state_log.
         """
         if not argv:
             raise ValueError("argv must not be empty")
 
-        run_id = uuid.uuid4().hex
+        if run_id is None:
+            run_id = uuid.uuid4().hex
         handle = RunHandle(
             run_id=run_id,
             slug=slug,

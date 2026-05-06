@@ -457,6 +457,17 @@ def apply(
             "supervisor's tracked slug matches what run_apply writes to disk."
         ),
     ),
+    run_id: str | None = typer.Option(
+        None,
+        "--run-id",
+        help=(
+            "Override the auto-generated apply_runs / apply_state_log run "
+            "discriminator. The API supervisor passes its own run_id here so "
+            "its transcript tailer (filters apply_state_log by run_id) sees "
+            "rows this subprocess writes. Terminal users normally omit this "
+            "and the wrapper mints a fresh uuid4."
+        ),
+    ),
 ) -> None:
     """Run the three-phase apply pipeline against a JD URL."""
     from .apply import run_apply
@@ -475,6 +486,7 @@ def apply(
             verbosity=verbose,
             jd_text=resolved_jd_text,
             slug=slug,
+            run_id=run_id,
         )
     )
 
