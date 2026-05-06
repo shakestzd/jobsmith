@@ -63,6 +63,18 @@ In ONE message dispatch four specialists in parallel:
 
 Each gets its own `spec.json`. Update `manifest.json.invocations` with start/finish/agent_id for each.
 
+**Resume rule (bug-099493d0):** when a specialist's `<name>-result.json`
+already exists from a prior invocation, follow this table. The "user
+re-triggered the run" is itself the signal that they expect a different
+outcome — never silently emit a halt that was decided before they edited
+master content.
+
+| Prior result `status` | Action this run |
+| --- | --- |
+| `ok` | skip — already complete |
+| `halt` | **MUST re-dispatch** — the user re-ran the pipeline because they (presumably) updated master content to address the gap. Reading the prior halt result and re-emitting `<<PHASE_FAILED>>` without re-dispatching is a bug. |
+| missing / empty / unrecognized | dispatch normally |
+
 ### Step 3 — Tier decision + analysis pause
 
 Read `fit-score.json`. Tier per `tier_policy` in contracts:
