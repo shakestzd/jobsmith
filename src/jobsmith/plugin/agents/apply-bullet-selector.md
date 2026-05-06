@@ -17,9 +17,24 @@ You are the bullet selector. You shape what the user's resume foregrounds — wi
 
 Read `.apply-state/spec.json`:
 - `inputs.jd_parsed`, `inputs.fit_score`
-- `inputs.master_work_yml` = `assets/content/work.yml` (READ-ONLY)
-- `inputs.master_skill_yml` = `assets/content/skill.yml` (READ-ONLY)
 - `inputs.gap_resolutions` = `.apply-state/gap-resolutions.md` (may not exist on first call)
+
+**Master content (READ-ONLY) — fetch via the DB, NOT from disk YAML files (bug-3d335f93):**
+
+Use the Bash tool to dump master sections from the canonical DB:
+```bash
+jobsmith db dump-master --section work    # equivalent to reading master/work.yml
+jobsmith db dump-master --section skill   # equivalent to reading master/skill.yml
+```
+
+The DB (`master_content` table) is the single source of truth per the
+0.8.1 S5 contract. Disk YAML files (`assets/content/*.yml`) are merely
+materialised snapshots from `jobsmith master export` and may be stale
+relative to user edits made via the web UI. Always query the DB.
+
+If the dump command exits non-zero (e.g. no row, missing config), halt
+with a clear `<<PHASE_FAILED: gather: master-fetch-failed: <reason>>>`
+marker — do NOT silently fall back to reading disk YAML.
 
 From the Paths block (Slice C wiring):
 - `master.projects_yml` — raw projects.yml (READ-ONLY) when configured. Absent key means the user has no projects.yml.
@@ -46,7 +61,7 @@ When in doubt, KEEP the anchor. Re-rank it lower if the JD doesn't reward it, bu
 
 ## Steps
 
-1. Read master `work.yml`. Identify all anchor bullets. Record their IDs/text in your working notes.
+1. Fetch master `work` from the DB via `Bash("jobsmith db dump-master --section work")`. Identify all anchor bullets. Record their IDs/text in your working notes.
 2. Read `jd-parsed.json` (top_keywords, must_haves, nice_to_haves) and `fit-score.json` (matched_evidence, concerns).
 3. Read `gap-resolutions.md` if it exists — the user's answers from a prior inquiry cycle constrain selection.
 4. For each position in master work.yml, build a selection:

@@ -1354,6 +1354,69 @@ def db_load_master(
         console.print(f"[green]Loaded[/green] {delta} new master section(s) ({after} total).")
 
 
+@db_app.command("dump-master")
+def db_dump_master(
+    section: str = typer.Option(
+        ...,
+        "--section",
+        help="Section to dump: 'work', 'skill', 'education', 'author', or 'benchmark'.",
+    ),
+) -> None:
+    """Print the master_content blob for *section* to stdout.
+
+    Used by apply-pipeline specialists to read master content from the DB
+    instead of from disk YAML files (bug-3d335f93). The DB is the
+    canonical source of truth for master content per the 0.8.1 S5
+    contract; this command is the read interface for tools (Bash) that
+    cannot speak SQL directly.
+
+    Output is the raw blob as stored in master_content.content_blob —
+    YAML for {work,skill,education,author}, markdown for benchmark.
+    Exit code 0 on success, 2 on missing config / DB / row.
+
+    Stderr carries human-readable errors so stdout stays parseable.
+    """
+    valid_sections = {"work", "skill", "education", "author", "benchmark"}
+    if section not in valid_sections:
+        typer.echo(
+            f"ERROR: unknown section {section!r} (expected one of {sorted(valid_sections)})",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        typer.echo(
+            f"ERROR: No {CONFIG_FILENAME} found — run `jobsmith init` first.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    config = load_config(config_path)
+    repo_root = repo_root_for()
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        typer.echo(f"ERROR: Pipeline DB not found at {db_path}.", err=True)
+        raise typer.Exit(code=2)
+
+    conn = open_pipeline_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT content_blob FROM master_content WHERE section = ?",
+            (section,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        typer.echo(
+            f"ERROR: no master_content row for section {section!r}. "
+            "Run `jobsmith db load-master` to seed from disk.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    # Print blob to stdout WITHOUT rich formatting — callers parse this.
+    typer.echo(row["content_blob"], nl=False)
+
+
 @db_app.command("migrate-slugs")
 def db_migrate_slugs() -> None:
     """One-shot: rewrite pre-existing malformed slugs in apply_runs.

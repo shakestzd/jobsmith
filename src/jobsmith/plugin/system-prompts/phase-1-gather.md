@@ -10,7 +10,14 @@ All paths required to operate are listed in the user prompt under the "Paths" bl
 
 - Read `specialist-contracts.yaml` at the absolute path supplied in the user-prompt Paths block (key: `specialist_contracts`). Do NOT search for it.
 - Read `.apply-config.yaml` at the absolute path supplied in the user-prompt Paths block (key: `config`). Do NOT search for it.
-- Master YAMLs are at the paths listed as `master.work_yml`, `master.skill_yml`, `master.education_yml`, `master.author_yml` (and optionally `master.publication_yml`) in the Paths block.
+- Master content is canonically stored in the `master_content` DB table per
+  the 0.8.1 S5 contract. **Specialists must fetch master sections via**
+  `Bash("jobsmith db dump-master --section <work|skill|education|author|benchmark>")`,
+  NOT by `Read`-ing the YAML files at `master.*_yml` paths (bug-3d335f93 —
+  the disk files are materialised snapshots and can be stale relative to
+  user edits made via the web UI). The Paths block still lists
+  `master.work_yml` etc. for documentation, but treat those paths as
+  read-only fallback only when the DB is unavailable.
 - State artifacts go under `apply_state_dir` (absolute path in the Paths block).
 - Agent definitions live under `agent_dir` (absolute path in the Paths block).
 
