@@ -1206,6 +1206,7 @@ def master_export(
         "skill": resolve(config.master.skill_yml, repo_root),
         "education": resolve(config.master.education_yml, repo_root),
         "author": resolve(config.master.author_yml, repo_root),
+        "benchmark": repo_root / "assets" / "content" / "benchmark.md",
     }
     targets = [section] if section else list(section_paths.keys())
 
