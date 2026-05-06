@@ -375,14 +375,21 @@ interface PipelineTabProps {
   phase: number;
   progress: ProgressMap;
   /**
-   * SSE-derived terminal status. When 'failed', the active phase's
+   * SSE-derived terminal status. When 'failed', the *failedPhaseNum*'s
    * specialists render as 'failed' rather than perpetually 'running'
    * (bug-8ade6f70). 'done' / 'rendered' map to 100% completion.
    */
   sseStatus: AppStatus | null;
+  /**
+   * Phase number that received the failure (1=gather, 2=draft, 3=render).
+   * Only that phase's specialists render as 'failed'; queued specialists
+   * for downstream phases remain 'queued'. Null when no failure pinned
+   * yet (closes roborev job 953 LOW).
+   */
+  failedPhaseNum: 1 | 2 | 3 | null;
 }
 
-function PipelineTab({ events, running, phase, progress, sseStatus }: PipelineTabProps) {
+function PipelineTab({ events, running, phase, progress, sseStatus, failedPhaseNum }: PipelineTabProps) {
   const logRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (logRef.current) {
@@ -431,7 +438,14 @@ function PipelineTab({ events, running, phase, progress, sseStatus }: PipelineTa
               // bug-8ade6f70: when the SSE stream reports a terminal failure
               // and the active phase did not complete, the specialists in
               // that phase are NOT still running — render them as 'failed'.
-              const phaseFailed = sseStatus === 'failed' && !phaseDone;
+              // Only the phase the SSE failure pinned to renders as
+              // failed — queued downstream phases stay 'queued' so a
+              // gather failure does not mis-paint the draft + render
+              // specialists (closes roborev job 953 LOW).
+              const phaseFailed =
+                sseStatus === 'failed'
+                && !phaseDone
+                && failedPhaseNum === phaseNum;
               const iconName: IconName = phaseDone ? 'check' : (phaseFailed ? 'x' : 'dot');
               const iconColor = phaseDone
                 ? 'var(--success)'
@@ -1045,6 +1059,11 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   // a phase event with status=failed arrives over the stream. Null means no SSE
   // terminal event has been received yet; fall back to app.status in that case.
   const [sseStatus, setSseStatus] = useState<AppStatus | null>(null);
+  // Phase number (1=gather, 2=draft, 3=render) that the SSE failure event
+  // pinned the failure to. Used by PipelineTab so a gather failure does not
+  // mis-render the queued draft + render specialists as "failed" (closes
+  // roborev job 953 LOW). Null when no failure has been observed yet.
+  const [failedPhaseNum, setFailedPhaseNum] = useState<1 | 2 | 3 | null>(null);
 
   // Ref to hold the active EventSource so we can close it on cancel/unmount.
   const esRef = useRef<EventSource | null>(null);
@@ -1083,6 +1102,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         } else if (data.status === 'failed') {
           setRunning(false);
           setSseStatus('failed');
+          setFailedPhaseNum(phaseNum as 1 | 2 | 3);
         }
         // Add a log entry for the phase event.
         const msg = `&lt;&lt;PHASE&gt;&gt; ${data.phase} status=${data.status}`;
@@ -1181,6 +1201,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     setProgress({ 1: 0, 2: 0, 3: 0 });
     setActivePhase(1);
     setSseStatus(null);
+    setFailedPhaseNum(null);
     setEvents([{ ts: now(), lvl: 'info', msg: `<span class="dim">apply</span> start <span class="dim">slug=</span>${slug}` }]);
     setRunning(true);
 
@@ -1374,7 +1395,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         ))}
       </div>
 
-      {tab === 'pipeline' && <PipelineTab events={events} running={running} phase={activePhase} progress={progress} sseStatus={sseStatus} />}
+      {tab === 'pipeline' && <PipelineTab events={events} running={running} phase={activePhase} progress={progress} sseStatus={sseStatus} failedPhaseNum={failedPhaseNum} />}
       {tab === 'artifacts' && <ArtifactsTab artifacts={apiDetail?.artifacts ?? []} />}
       {tab === 'factcheck' && <FactCheckTab artifacts={apiDetail?.artifacts ?? []} />}
       {tab === 'anchors' && <AnchorCheckTab artifacts={apiDetail?.artifacts ?? []} />}

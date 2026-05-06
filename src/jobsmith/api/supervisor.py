@@ -761,12 +761,22 @@ class RunSupervisor:
         try:
             from ..db import open_pipeline_db, read_state_log
 
+            # roborev job 953 MEDIUM — tail by row-id only, not slug.
+            # The orchestrator's ``jobsmith db rekey-slug`` step moves
+            # apply_state_log rows from the URL-derived launch slug
+            # ``record.slug`` to the canonical company-position slug as
+            # soon as ``apply-jd-parser`` finishes; a slug-pinned filter
+            # would silently drop every transcript event written after
+            # rekey (i.e. most of gather + all of draft + render). The
+            # ``_log_last_id`` cursor is unique per supervisor run and
+            # the project DB is single-tenant, so polling without a
+            # slug filter cannot cross-pollute concurrent runs.
             while True:
                 try:
                     conn = open_pipeline_db(db_path)
                     try:
                         rows = read_state_log(
-                            conn, slug=slug, after_id=record._log_last_id
+                            conn, after_id=record._log_last_id
                         )
                     finally:
                         conn.close()
@@ -797,7 +807,7 @@ class RunSupervisor:
                         conn = open_pipeline_db(db_path)
                         try:
                             final_rows = read_state_log(
-                                conn, slug=slug, after_id=record._log_last_id
+                                conn, after_id=record._log_last_id
                             )
                         finally:
                             conn.close()

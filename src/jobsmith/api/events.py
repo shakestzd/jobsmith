@@ -393,8 +393,12 @@ async def _stream(
                             or transcript_payload.get("name")
                             or ""
                         )
+                        # Use ``done`` (not ``success``) for completion so
+                        # the frontend phase tracker recognises it: the UI
+                        # gates phase advance on ``status in {done, backfilled}``
+                        # (closes roborev job 953 MEDIUM).
                         status = (
-                            "success"
+                            "done"
                             if transcript_type == "phase_complete"
                             else "failed"
                         )

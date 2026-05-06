@@ -189,18 +189,37 @@ def append_state_log(
 
 
 def read_state_log(
-    conn: sqlite3.Connection, *, slug: str, after_id: int = 0
+    conn: sqlite3.Connection,
+    *,
+    slug: str | None = None,
+    after_id: int = 0,
 ) -> list[tuple[int, str, str]]:
-    """Return ``(id, ts, payload)`` rows for *slug* with ``id > after_id``.
+    """Return ``(id, ts, payload)`` rows with ``id > after_id``.
+
+    When *slug* is provided, results are filtered to that slug. When *slug*
+    is ``None``, every row in the table after the cursor is returned —
+    used by the supervisor's tailer when the orchestrator's
+    ``rekey-slug`` step moves rows from the launch slug to the canonical
+    slug mid-run; a slug-pinned filter would silently drop every event
+    written under the new slug. The supervisor's ``_log_last_id`` cursor
+    is run-unique so cross-run pollution is bounded by the per-process
+    single-run-per-cwd model.
 
     The supervisor's tailer calls this in a loop with the highest ``id``
     seen so far so each row is forwarded exactly once.
     """
-    rows = conn.execute(
-        "SELECT id, ts, payload FROM apply_state_log "
-        "WHERE slug = ? AND id > ? ORDER BY id",
-        (slug, after_id),
-    ).fetchall()
+    if slug is None:
+        rows = conn.execute(
+            "SELECT id, ts, payload FROM apply_state_log "
+            "WHERE id > ? ORDER BY id",
+            (after_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, ts, payload FROM apply_state_log "
+            "WHERE slug = ? AND id > ? ORDER BY id",
+            (slug, after_id),
+        ).fetchall()
     return [(int(row["id"]), row["ts"], row["payload"]) for row in rows]
 
 
