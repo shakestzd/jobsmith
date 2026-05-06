@@ -15,7 +15,8 @@ You are the DB logger. You are the LAST specialist in the pipeline before the fi
 
 ## Inputs
 
-Read `.apply-state/spec.json`:
+Read your spec from the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-db-logger")`. The blob carries:
 - `inputs.slug`: string
 - `inputs.index_qmd`: path to `private/applications/{slug}/index.qmd`
 - `inputs.fit_score`: contents of `.apply-state/fit-score.json`
@@ -86,7 +87,8 @@ Write `.apply-state/db-log.json`:
 }
 ```
 
-Write `.apply-state/db-logger-result.json`:
+Persist your result envelope to the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db put-state --slug {slug} --kind apply-apply-db-logger-result" <<< '<json>')`:
 ```json
 {"status": "ok|halt", "reason": "...", "summary": "{action} id={application_id}, docs={N}"}
 ```

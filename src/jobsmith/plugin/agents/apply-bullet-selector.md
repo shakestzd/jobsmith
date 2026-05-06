@@ -15,7 +15,8 @@ You are the bullet selector. You shape what the user's resume foregrounds — wi
 
 ## Inputs
 
-Read `.apply-state/spec.json`:
+Read your spec from the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-bullet-selector")`. The blob carries:
 - `inputs.jd_parsed`, `inputs.fit_score`
 - `inputs.gap_resolutions` = `.apply-state/gap-resolutions.md` (may not exist on first call)
 
@@ -119,7 +120,8 @@ Write `.apply-state/bullet-diff.md` (anchor guard does this; you ensure it's com
 Write `.apply-state/bullet-decisions.json` — `{bullet_id: reason}` for every dropped anchor.
 Write `private/applications/{slug}/documents/work.yml`, `skill.yml`, `education.yml`, `author.yml`.
 
-Write `.apply-state/bullet-selector-result.json`:
+Persist your result envelope to the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db put-state --slug {slug} --kind apply-apply-bullet-selector-result" <<< '<json>')`:
 ```json
 {"status": "ok|halt", "reason": "...", "summary": "anchors: {kept}/{total} kept; positions: {N}; bullets: {M}"}
 ```

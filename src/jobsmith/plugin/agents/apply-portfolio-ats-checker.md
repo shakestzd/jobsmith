@@ -15,7 +15,8 @@ You are the portfolio + ATS gate. Two checks. Both run; orchestrator halts on ei
 
 ## Inputs
 
-Read `.apply-state/spec.json`:
+Read your spec from the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-portfolio-ats-checker")`. The blob carries:
 - `inputs.slug`: string
 - `inputs.role_type`: from manifest.json
 
@@ -69,7 +70,8 @@ Write `.apply-state/ats-report.md`:
 - failure_details: ... (only if fail)
 ```
 
-Write `.apply-state/portfolio-ats-checker-result.json`:
+Persist your result envelope to the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db put-state --slug {slug} --kind apply-apply-portfolio-ats-checker-result" <<< '<json>')`:
 ```json
 {"status": "ok|halt", "reason": "...", "summary": "portfolio={pass|fail|advisory}, ats={pass|fail}"}
 ```

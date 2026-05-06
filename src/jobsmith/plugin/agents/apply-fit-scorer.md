@@ -15,8 +15,9 @@ You are the conversational fit-scorer wrapper. The CORE scorer at `.claude/agent
 
 ## Inputs
 
-Read `.apply-state/spec.json`:
-- `inputs.jd_parsed`: contents of `.apply-state/jd-parsed.json`
+Read your spec from the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-fit-scorer")`. The blob carries:
+- `inputs.jd_parsed`: parsed JD blob — read via `Bash("jobsmith db get-state --slug {slug} --kind jd-parsed")` (falls back to disk `.apply-state/jd-parsed.json` if the DB row is absent during the migration window)
 - `inputs.profile_path`: usually `private/capacity/profile.yaml`
 - `inputs.fast_path_scores`: morning-sourcing fast-path scores or null
 
@@ -47,7 +48,8 @@ Always query the DB; do NOT fall back to `Read("assets/content/*.yml")`.
 
 ## Output
 
-Write `.apply-state/fit-score.json`:
+Persist `fit-score` to the DB (and a transitional disk copy until Pass 5):
+`Bash("jobsmith db put-state --slug {slug} --kind fit-score" <<< '<json>')`, then `Write(.apply-state/fit-score.json, '<same json>')`:
 ```json
 {
   "specialty": "<from core scorer>",
@@ -62,9 +64,10 @@ Write `.apply-state/fit-score.json`:
 }
 ```
 
-Update `.apply-state/manifest.json` with `fit_score` and `tier` (derived: `score >= 0.70 → fast`, else `deep`; orchestrator may override via flag).
+The orchestrator owns the manifest (kind=`manifest`). Do NOT write `manifest.json` directly. Return `fit_score` and `tier` (derived: `score >= 0.70 → fast`, else `deep`; orchestrator may override via flag) in your result envelope so the orchestrator can record them.
 
-Write `.apply-state/fit-scorer-result.json`:
+Persist your result envelope to the DB:
+`Bash("jobsmith db put-state --slug {slug} --kind apply-fit-scorer-result" <<< '<json>')`:
 ```json
 {"status": "ok", "summary": "fit={score} ({tier}), specialty={specialty}, blockers={N}"}
 ```

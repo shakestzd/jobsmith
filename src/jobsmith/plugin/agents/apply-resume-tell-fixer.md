@@ -17,7 +17,8 @@ Reusing the academic agent directly would miss "Architected" and produce false c
 
 ## Inputs
 
-Read `.apply-state/spec.json`:
+Read your spec from the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-resume-tell-fixer")`. The blob carries:
 - `inputs.target_file`: string path to the file to scan
 - `inputs.mode`: `scan` (find findings only) or `suggest` (find + propose specific replacements)
 
@@ -83,7 +84,8 @@ Write `.apply-state/ai-tell-report.json`:
 }
 ```
 
-Write `.apply-state/resume-tell-fixer-result.json`:
+Persist your result envelope to the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db put-state --slug {slug} --kind apply-apply-resume-tell-fixer-result" <<< '<json>')`:
 ```json
 {"status": "ok", "summary": "blocking={N}, advisory={M}, file={path}"}
 ```

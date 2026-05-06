@@ -15,7 +15,8 @@ You are the visual layout reviewer. You catch what mechanical checks can't — o
 
 ## Inputs
 
-Read `.apply-state/spec.json`:
+Read your spec from the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-visual-layout-reviewer")`. The blob carries:
 - `inputs.slug`: string
 - `inputs.resume_pdf`: path to PDF
 - `inputs.resume_qmd`, `inputs.work_yml`: source files
@@ -131,7 +132,8 @@ Write `.apply-state/layout-report.md`:
 - decision: pass | re-render | halt
 ```
 
-Write `.apply-state/visual-layout-reviewer-result.json`:
+Persist your result envelope to the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db put-state --slug {slug} --kind apply-apply-visual-layout-reviewer-result" <<< '<json>')`:
 ```json
 {"status": "ok|halt", "decision": "pass|re-render|halt", "summary": "iter={iter}, issues={N}, applied={M}"}
 ```

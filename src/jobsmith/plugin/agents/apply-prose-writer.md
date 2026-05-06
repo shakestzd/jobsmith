@@ -15,7 +15,8 @@ You are the prose writer. Bullet-selector already chose what to surface; you sha
 
 ## Inputs
 
-Read `.apply-state/spec.json`:
+Read your spec from the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-prose-writer")`. The blob carries:
 - `inputs.jd_parsed`, `inputs.fit_score`, `inputs.bullet_selection`
 - `inputs.gap_resolutions` (if exists — the user's answers from inquiry)
 - `inputs.master_yamls` = work.yml, skill.yml, education.yml, author.yml, publication.yml (ALL READ-ONLY)
@@ -115,7 +116,8 @@ If `feedback_dir` is null/missing or no records match, proceed without lessons. 
 
 Updates `private/applications/{slug}/documents/work.yml` (keep YAML structure intact; only the rephrased bullet text changes).
 
-`.apply-state/prose-writer-result.json`:
+Persist your result envelope to the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db put-state --slug {slug} --kind apply-prose-writer-result" <<< '<json>')`:
 ```json
 {"status": "ok|halt", "reason": "...", "summary": "summary {N} words; bullets rewritten {M}/{total}"}
 ```
