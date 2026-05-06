@@ -57,13 +57,15 @@ Persist the spec for `apply-jd-parser` into the DB:
 Dispatch via the Task tool with `subagent_type="apply-jd-parser"` and a prompt that points the specialist at slug `_pending` for spec lookup (the specialist resolves its spec via `jobsmith db get-state --slug _pending --kind spec-apply-jd-parser`).
 
 After it writes `jd-parsed.json`:
-- Derive slug = `{company-slug}-{position-slug}` (lowercase, hyphenated).
-- Create `applications/{slug}/.apply-state/` and move `_pending` artifacts in.
-- Create `applications/{slug}/documents/` with `_extensions` symlink: `(cd applications/{slug}/documents && ln -sf ../../../../templates/extensions/_extensions _extensions)`.
-- Re-key any `_pending` DB rows under the canonical slug:
-  `Bash("jobsmith db get-state --slug _pending --kind spec-apply-jd-parser | jobsmith db put-state --slug {slug} --kind spec-apply-jd-parser")`. Repeat for any other `_pending` kinds. Then `jobsmith db reset-state --slug _pending --yes` to clear the staging slug.
-- Initialize the manifest in the DB:
-  `Bash("jobsmith db put-state --slug {slug} --kind manifest" <<< '{"run_id":"…","slug":"{slug}","started_at":"…","role_type":"…","invocations":[]}')`.
+- Derive `CANONICAL_SLUG = {company-slug}-{position-slug}` (lowercase, hyphenated).
+- The wrapper started this run with a `STARTING_SLUG` extracted from the URL or any prior URL-index entry; the `apply_state_dir` path in your Paths block ends in `<STARTING_SLUG>/.apply-state`. Read `STARTING_SLUG = basename(dirname(apply_state_dir))`.
+- **CRITICAL slug rekey (trk-60217f9f, fixes phase-2 resume mismatch).** When `STARTING_SLUG != CANONICAL_SLUG`, atomically move every DB row written so far onto the canonical slug; without this, ``apply.py:_load_manifest`` and ``db_ingest._load_manifest`` look under `CANONICAL_SLUG` and find nothing because the orchestrator wrote under `STARTING_SLUG`:
+  `Bash("jobsmith db rekey-slug --from {STARTING_SLUG} --to {CANONICAL_SLUG}")`
+  This wraps both ``apply_state`` and ``apply_state_log`` in one transaction. Idempotent when slugs match (no-op).
+- Create `applications/{CANONICAL_SLUG}/.apply-state/` and move any `STARTING_SLUG` on-disk artifacts in (jd-parsed.json, voice-profile.json, session-id, transcript.jsonl).
+- Create `applications/{CANONICAL_SLUG}/documents/` with `_extensions` symlink. The Quarto extension bundle lives at `shared/extensions/_extensions` (project root); link relatively so the four `..` segments climb out of `applications/{CANONICAL_SLUG}/documents/` back to the repo root: `(cd applications/{CANONICAL_SLUG}/documents && ln -sf ../../../../shared/extensions/_extensions _extensions)`. If `shared/extensions/_extensions` is missing, halt with `<<PHASE_FAILED: gather: shared/extensions/_extensions not found — Quarto extension bundle is required for render>>` rather than skipping the symlink.
+- Initialize the manifest in the DB under the canonical slug:
+  `Bash("jobsmith db put-state --slug {CANONICAL_SLUG} --kind manifest" <<< '{"run_id":"…","slug":"{CANONICAL_SLUG}","started_at":"…","role_type":"…","invocations":[]}')`.
 
 ### Step 2 — Fan-out (parallel)
 

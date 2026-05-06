@@ -204,6 +204,54 @@ def read_state_log(
     return [(int(row["id"]), row["ts"], row["payload"]) for row in rows]
 
 
+def rekey_slug(
+    conn: sqlite3.Connection, *, from_slug: str, to_slug: str
+) -> tuple[int, int]:
+    """Atomically move every ``apply_state`` and ``apply_state_log`` row from
+    *from_slug* to *to_slug*. Returns ``(state_rows_moved, log_rows_moved)``.
+
+    Used by the orchestrator after the JD parser derives the canonical slug
+    (e.g. ``job-boards-7445224-2026-05`` → ``reddit-senior-analytics-engineer``)
+    so subsequent reads under the canonical slug — including ``_phase_completed``
+    in apply.py and ``ingest_phase_outputs`` in db_ingest — find the manifest,
+    specs, and result envelopes the orchestrator already wrote (trk-60217f9f).
+
+    On a primary-key collision (target slug already has the same kind) the
+    target row wins and the source row is discarded; the caller is expected
+    to invoke this exactly once at the slug-derivation point. Idempotent
+    when ``from_slug == to_slug``: no-op, returns (0, 0).
+    """
+    if from_slug == to_slug:
+        return (0, 0)
+    with conn:  # implicit transaction so a partial move can roll back
+        n_state = conn.execute(
+            "SELECT COUNT(*) FROM apply_state WHERE slug = ?", (from_slug,)
+        ).fetchone()[0]
+        n_log = conn.execute(
+            "SELECT COUNT(*) FROM apply_state_log WHERE slug = ?", (from_slug,)
+        ).fetchone()[0]
+        # Move rows one kind at a time so a target collision falls back to
+        # "keep target, discard source" rather than aborting the whole move.
+        rows = conn.execute(
+            "SELECT kind, content_blob, updated_at FROM apply_state "
+            "WHERE slug = ?",
+            (from_slug,),
+        ).fetchall()
+        for row in rows:
+            conn.execute(
+                "INSERT OR IGNORE INTO apply_state "
+                "(slug, kind, content_blob, updated_at) VALUES (?, ?, ?, ?)",
+                (to_slug, row["kind"], row["content_blob"], row["updated_at"]),
+            )
+        conn.execute("DELETE FROM apply_state WHERE slug = ?", (from_slug,))
+        # Log rows have no PK collision risk (id is autoincrement).
+        conn.execute(
+            "UPDATE apply_state_log SET slug = ? WHERE slug = ?",
+            (to_slug, from_slug),
+        )
+    return (int(n_state), int(n_log))
+
+
 def reset_state(conn: sqlite3.Connection, *, slug: str) -> tuple[int, int]:
     """Delete every ``apply_state`` and ``apply_state_log`` row for *slug*.
 

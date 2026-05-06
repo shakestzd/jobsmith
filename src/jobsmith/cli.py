@@ -1584,6 +1584,47 @@ def db_reset_state(
     typer.echo(f"Reset state for slug={slug}: {n_state} state row(s), {n_log} log row(s).")
 
 
+@db_app.command("rekey-slug")
+def db_rekey_slug(
+    from_slug: str = typer.Option(..., "--from", help="Source slug to drain."),
+    to_slug: str = typer.Option(..., "--to", help="Destination slug."),
+) -> None:
+    """Atomically move apply_state + apply_state_log rows between slugs (trk-60217f9f).
+
+    Used by the orchestrator after the JD parser derives the canonical
+    company-position slug to migrate every DB row written under the
+    starting slug (URL-derived fallback, ``_pending``, etc.) onto the
+    canonical slug. Wraps :func:`jobsmith.db.rekey_slug` so the move is
+    one transaction; either every row lands or none do.
+
+    Equivalent to ``rm -rf applications/{old}/.apply-state &&
+    mv applications/{old}/.apply-state applications/{new}/.apply-state``
+    before pipeline state moved into the DB.
+    """
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        typer.echo(f"ERROR: No {CONFIG_FILENAME} found.", err=True)
+        raise typer.Exit(code=2)
+    config = load_config(config_path)
+    repo_root = repo_root_for()
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        typer.echo(f"ERROR: Pipeline DB not found at {db_path}.", err=True)
+        raise typer.Exit(code=2)
+
+    from jobsmith.db import rekey_slug as _rekey_slug
+
+    conn = open_pipeline_db(db_path)
+    try:
+        n_state, n_log = _rekey_slug(conn, from_slug=from_slug, to_slug=to_slug)
+    finally:
+        conn.close()
+    typer.echo(
+        f"Rekeyed slug={from_slug!r} → {to_slug!r}: "
+        f"{n_state} apply_state row(s), {n_log} apply_state_log row(s)."
+    )
+
+
 @db_app.command("migrate-slugs")
 def db_migrate_slugs() -> None:
     """One-shot: rewrite pre-existing malformed slugs in apply_runs.

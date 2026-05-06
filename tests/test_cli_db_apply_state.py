@@ -199,3 +199,108 @@ class TestMigrationApplied:
             conn.close()
         assert "apply_state" in tables
         assert "apply_state_log" in tables
+
+
+# ---------------------------------------------------------------------------
+# trk-60217f9f post-merge fix — rekey_slug
+# ---------------------------------------------------------------------------
+
+
+class TestRekeySlug:
+    def test_rekey_moves_state_and_log_rows(self, tmp_path: Path) -> None:
+        """rekey_slug atomically moves apply_state + apply_state_log rows."""
+        from jobsmith.db import (
+            append_state_log,
+            list_state,
+            put_state,
+            read_state_log,
+            rekey_slug,
+        )
+
+        db_path = tmp_path / "jobsmith.db"
+        conn = open_pipeline_db(db_path)
+        try:
+            put_state(conn, slug="url-slug", kind="manifest", content_blob='{"a":1}')
+            put_state(
+                conn, slug="url-slug", kind="spec-apply-jd-parser", content_blob='{"x":1}'
+            )
+            append_state_log(conn, slug="url-slug", payload='{"event":"a"}')
+            append_state_log(conn, slug="url-slug", payload='{"event":"b"}')
+
+            n_state, n_log = rekey_slug(
+                conn, from_slug="url-slug", to_slug="canonical-slug"
+            )
+
+            assert (n_state, n_log) == (2, 2)
+            assert list_state(conn, slug="url-slug") == []
+            kinds_after = sorted(k for k, _ in list_state(conn, slug="canonical-slug"))
+            assert kinds_after == ["manifest", "spec-apply-jd-parser"]
+            log_rows = read_state_log(conn, slug="canonical-slug", after_id=0)
+            assert [r[2] for r in log_rows] == ['{"event":"a"}', '{"event":"b"}']
+            assert read_state_log(conn, slug="url-slug", after_id=0) == []
+        finally:
+            conn.close()
+
+    def test_rekey_noop_when_slugs_match(self, tmp_path: Path) -> None:
+        """Idempotent when from == to."""
+        from jobsmith.db import put_state, rekey_slug
+
+        db_path = tmp_path / "jobsmith.db"
+        conn = open_pipeline_db(db_path)
+        try:
+            put_state(conn, slug="same", kind="manifest", content_blob='{"a":1}')
+            assert rekey_slug(conn, from_slug="same", to_slug="same") == (0, 0)
+        finally:
+            conn.close()
+
+    def test_rekey_collision_keeps_target(self, tmp_path: Path) -> None:
+        """When the target already has the same kind, the target row wins."""
+        from jobsmith.db import get_state, put_state, rekey_slug
+
+        db_path = tmp_path / "jobsmith.db"
+        conn = open_pipeline_db(db_path)
+        try:
+            put_state(conn, slug="src", kind="manifest", content_blob='{"src":1}')
+            put_state(conn, slug="dst", kind="manifest", content_blob='{"dst":1}')
+
+            rekey_slug(conn, from_slug="src", to_slug="dst")
+
+            assert get_state(conn, slug="src", kind="manifest") is None
+            assert get_state(conn, slug="dst", kind="manifest") == '{"dst":1}'
+        finally:
+            conn.close()
+
+    def test_cli_rekey_slug_command(
+        self, tmp_path: Path, runner: CliRunner
+    ) -> None:
+        """`jobsmith db rekey-slug --from X --to Y` reports the move counts."""
+        import os
+
+        from jobsmith.db import get_state, put_state
+
+        _seed_project(tmp_path)
+        db_path = tmp_path / "private" / "jobsmith.db"
+        conn = open_pipeline_db(db_path)
+        try:
+            put_state(conn, slug="from-slug", kind="manifest", content_blob='{"x":1}')
+        finally:
+            conn.close()
+
+        cwd_orig = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            result = runner.invoke(
+                cli_app,
+                ["db", "rekey-slug", "--from", "from-slug", "--to", "to-slug"],
+            )
+        finally:
+            os.chdir(cwd_orig)
+        assert result.exit_code == 0, result.output
+        assert "Rekeyed slug='from-slug' → 'to-slug'" in result.output
+
+        conn = open_pipeline_db(db_path)
+        try:
+            assert get_state(conn, slug="to-slug", kind="manifest") == '{"x":1}'
+            assert get_state(conn, slug="from-slug", kind="manifest") is None
+        finally:
+            conn.close()
