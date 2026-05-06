@@ -66,6 +66,7 @@ import json
 import logging
 import os
 import signal
+import sqlite3
 import uuid
 from collections import deque
 from collections.abc import AsyncIterator
@@ -187,7 +188,20 @@ class _RunRecord:
     # Stderr lines accumulated during drain for the synth excerpt.
     _stderr_tail: list[str] = field(default_factory=list)
     # Transcript tail position (bytes consumed). The tailer resumes from here.
+    # Used by the legacy file-based path; DB-based polling uses
+    # ``_log_last_id`` instead (trk-60217f9f Pass 4).
     _transcript_offset: int = 0
+    # apply_state_log row-id cursor — the highest id forwarded so far. The
+    # tailer reads rows with ``id > _log_last_id`` each poll, advancing the
+    # cursor on success. Initialized to 0 so a fresh run picks up every
+    # event (including the phase-boundary marker written at open_transcript).
+    _log_last_id: int = 0
+    # Slug + DB path resolved at launch time. When both are present the
+    # tailer prefers the DB path (Pass 4); when either is None it falls
+    # back to the file-based path (Pass 4 dual-write keeps both populated
+    # in normal flow, but tests and sidecar contexts may set only one).
+    slug: str | None = None
+    db_path: Path | None = None
     # Set by _wait the moment the subprocess exits (BEFORE awaiting drain
     # tasks). The transcript tailer uses this — not handle.status — to
     # decide when to do its final read pass and return. Without this, the
@@ -317,6 +331,7 @@ class RunSupervisor:
         cwd: Path,
         *,
         transcript_path: Path | None = None,
+        db_path: Path | None = None,
     ) -> str:
         """Spawn ``argv`` in ``cwd`` and register a new run.
 
@@ -345,7 +360,12 @@ class RunSupervisor:
             started_at=_now_iso(),
             finished_at=None,
         )
-        record = _RunRecord(handle=handle, transcript_path=transcript_path)
+        record = _RunRecord(
+            handle=handle,
+            transcript_path=transcript_path,
+            slug=slug,
+            db_path=db_path,
+        )
 
         # Spawn the subprocess BEFORE registering the run as active. Otherwise
         # a spawn failure (binary missing, permission denied, OOM, etc.)
@@ -399,9 +419,18 @@ class RunSupervisor:
             )
         )
         # bug-0e13706c: tail transcript.jsonl and forward each new event as
-        # a structured TranscriptEvent over SSE. Without this the rich
-        # tool_call/tool_result events the renderer writes only land on disk.
-        if transcript_path is not None:
+        # a structured TranscriptEvent over SSE. trk-60217f9f Pass 4 prefers
+        # the apply_state_log DB tail when a db_path is supplied (and falls
+        # back to the file when not). Both paths receive the same payloads
+        # because render.py dual-writes during the migration window.
+        if db_path is not None and slug:
+            record.drain_tasks.append(
+                asyncio.create_task(
+                    self._tail_state_log(record),
+                    name=f"supervisor-transcript-{run_id}",
+                )
+            )
+        elif transcript_path is not None:
             record.drain_tasks.append(
                 asyncio.create_task(
                     self._tail_transcript(record),
@@ -685,6 +714,94 @@ class RunSupervisor:
         except Exception:  # noqa: BLE001 — tailer failures must not break SSE.
             logger.exception(
                 "transcript tailer crashed for run_id=%r slug=%r",
+                record.handle.run_id,
+                record.handle.slug,
+            )
+
+    async def _tail_state_log(self, record: _RunRecord) -> None:
+        """Poll ``apply_state_log`` for *record.slug* and emit each new row.
+
+        DB-backed counterpart to :meth:`_tail_transcript` (trk-60217f9f Pass
+        4). The renderer dual-writes every transcript record into
+        ``apply_state_log`` — this tailer reads rows with ``id > _log_last_id``
+        every 100 ms, advances the cursor on success, and stops once the
+        subprocess has exited and a final settle-pass returns no new rows.
+
+        The deadlock fix from bug-0e13706c is preserved: the tailer watches
+        ``_subprocess_exited`` (not ``handle.status``) so ``_wait`` does not
+        block on a status flip that depends on this task completing.
+        """
+        slug = record.slug
+        db_path = record.db_path
+        if not slug or db_path is None:
+            return
+        try:
+            from ..db import open_pipeline_db, read_state_log
+
+            while True:
+                try:
+                    conn = open_pipeline_db(db_path)
+                    try:
+                        rows = read_state_log(
+                            conn, slug=slug, after_id=record._log_last_id
+                        )
+                    finally:
+                        conn.close()
+                except sqlite3.Error:
+                    rows = []
+
+                for row_id, _ts, payload_str in rows:
+                    try:
+                        payload = json.loads(payload_str)
+                    except json.JSONDecodeError:
+                        record._log_last_id = max(record._log_last_id, row_id)
+                        continue
+                    if not isinstance(payload, dict):
+                        record._log_last_id = max(record._log_last_id, row_id)
+                        continue
+                    self._append(
+                        record,
+                        TranscriptEvent(
+                            run_id=record.handle.run_id, payload=payload
+                        ),
+                    )
+                    record._log_last_id = max(record._log_last_id, row_id)
+
+                # Termination gate (mirror of _tail_transcript).
+                if record._subprocess_exited.is_set():
+                    await asyncio.sleep(0.15)
+                    try:
+                        conn = open_pipeline_db(db_path)
+                        try:
+                            final_rows = read_state_log(
+                                conn, slug=slug, after_id=record._log_last_id
+                            )
+                        finally:
+                            conn.close()
+                    except sqlite3.Error:
+                        final_rows = []
+                    for row_id, _ts, payload_str in final_rows:
+                        try:
+                            payload = json.loads(payload_str)
+                        except json.JSONDecodeError:
+                            record._log_last_id = max(record._log_last_id, row_id)
+                            continue
+                        if not isinstance(payload, dict):
+                            record._log_last_id = max(record._log_last_id, row_id)
+                            continue
+                        self._append(
+                            record,
+                            TranscriptEvent(
+                                run_id=record.handle.run_id, payload=payload
+                            ),
+                        )
+                        record._log_last_id = max(record._log_last_id, row_id)
+                    return
+
+                await asyncio.sleep(0.1)
+        except Exception:  # noqa: BLE001 — tailer failures must not break SSE.
+            logger.exception(
+                "apply_state_log tailer crashed for run_id=%r slug=%r",
                 record.handle.run_id,
                 record.handle.slug,
             )

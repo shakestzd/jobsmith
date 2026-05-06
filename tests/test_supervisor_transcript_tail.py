@@ -242,3 +242,90 @@ class TestTranscriptTail:
         items = await _drain_stream_until_finished(supervisor, run_id)
         transcripts = [i for i in items if isinstance(i, TranscriptEvent)]
         assert transcripts == []
+
+
+# ---------------------------------------------------------------------------
+# trk-60217f9f Pass 4 — DB-backed transcript tailer
+# ---------------------------------------------------------------------------
+
+
+def test_append_state_log_round_trip(tmp_path):
+    """append_state_log + read_state_log emit the same payloads in id order."""
+    from jobsmith.db import append_state_log, open_pipeline_db, read_state_log
+
+    db_path = tmp_path / "jobsmith.db"
+    conn = open_pipeline_db(db_path)
+    try:
+        id1 = append_state_log(conn, slug="acme", payload='{"event":"a"}')
+        id2 = append_state_log(conn, slug="acme", payload='{"event":"b"}')
+        id3 = append_state_log(conn, slug="other", payload='{"event":"x"}')
+        rows = read_state_log(conn, slug="acme", after_id=0)
+    finally:
+        conn.close()
+
+    assert id1 < id2 < id3, "row ids must be monotonic"
+    assert [(r[0], r[2]) for r in rows] == [
+        (id1, '{"event":"a"}'),
+        (id2, '{"event":"b"}'),
+    ], "filter by slug, exclude rows for other slugs"
+
+
+def test_read_state_log_after_id_skips_already_seen(tmp_path):
+    """after_id cursor advances correctly: only newer rows return."""
+    from jobsmith.db import append_state_log, open_pipeline_db, read_state_log
+
+    db_path = tmp_path / "jobsmith.db"
+    conn = open_pipeline_db(db_path)
+    try:
+        id1 = append_state_log(conn, slug="acme", payload='{"n":1}')
+        id2 = append_state_log(conn, slug="acme", payload='{"n":2}')
+        first = read_state_log(conn, slug="acme", after_id=0)
+        # Cursor at id1 → only id2 should come back next.
+        second = read_state_log(conn, slug="acme", after_id=id1)
+        # Cursor at id2 → no more rows.
+        third = read_state_log(conn, slug="acme", after_id=id2)
+    finally:
+        conn.close()
+
+    assert [r[0] for r in first] == [id1, id2]
+    assert [r[0] for r in second] == [id2]
+    assert third == []
+
+
+def test_render_dual_writes_transcript_and_state_log(tmp_path):
+    """ApplyRenderer.open_transcript with slug+db_path mirrors records to apply_state_log."""
+    import io
+    from jobsmith.db import open_pipeline_db, read_state_log
+    from jobsmith.render import ApplyRenderer
+    from rich.console import Console
+
+    db_path = tmp_path / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True)
+    open_pipeline_db(db_path).close()  # materialize schema
+
+    transcript_path = tmp_path / "applications" / "acme" / ".apply-state" / "transcript.jsonl"
+    rdr = ApplyRenderer(
+        yes=True,
+        console=Console(file=io.StringIO(), force_terminal=False, no_color=True, width=120),
+    )
+
+    rdr.open_transcript(transcript_path, "gather", slug="acme", db_path=db_path)
+    rdr._write_transcript({"type": "tool_use", "name": "Read"})
+    rdr._write_transcript({"type": "tool_result", "ok": True})
+    rdr.close_transcript()
+
+    # Disk file got the boundary + both records.
+    lines = transcript_path.read_text().strip().splitlines()
+    assert len(lines) == 3, f"expected boundary + 2 records, got {len(lines)}: {lines!r}"
+
+    # apply_state_log got the same three (boundary marker + 2 records).
+    conn = open_pipeline_db(db_path)
+    try:
+        rows = read_state_log(conn, slug="acme", after_id=0)
+    finally:
+        conn.close()
+    payloads = [json.loads(r[2]) for r in rows]
+    assert len(payloads) == 3, f"expected 3 DB rows, got {len(payloads)}"
+    assert payloads[0] == {"_phase_boundary": "gather", "ts": payloads[0]["ts"]}
+    assert payloads[1]["type"] == "tool_use"
+    assert payloads[2]["type"] == "tool_result"

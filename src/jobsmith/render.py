@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
@@ -252,6 +253,12 @@ class ApplyRenderer:
         # Transcript file handle (append-only, opened per phase)
         self._transcript_fh: TextIO | None = None
         self._transcript_path: Path | None = None
+        # trk-60217f9f Pass 4: every transcript record also lands in
+        # apply_state_log so the supervisor can tail by row id instead of
+        # file offset (Pass 5 removes the disk file). Set by
+        # ``open_transcript`` when a slug + cwd are passed; None otherwise.
+        self._transcript_slug: str | None = None
+        self._transcript_db_path: Path | None = None
 
     # ------------------------------------------------------------------
     # Public lifecycle
@@ -286,7 +293,14 @@ class ApplyRenderer:
             self._progress = None
             self._progress_task_id = None
 
-    def open_transcript(self, transcript_path: Path, phase_name: str) -> None:
+    def open_transcript(
+        self,
+        transcript_path: Path,
+        phase_name: str,
+        *,
+        slug: str | None = None,
+        db_path: Path | None = None,
+    ) -> None:
         """Open the transcript JSONL file for append and write a phase boundary marker.
 
         Parameters
@@ -295,14 +309,22 @@ class ApplyRenderer:
             Absolute path to the transcript.jsonl file.
         phase_name:
             Current phase name (used in the boundary marker).
+        slug, db_path:
+            When both are provided, every transcript record is also appended
+            to ``apply_state_log`` (trk-60217f9f Pass 4). Disk + DB run in
+            parallel during the migration window so existing tailers (file
+            offset) and new tailers (DB row id) see identical streams.
         """
         transcript_path.parent.mkdir(parents=True, exist_ok=True)
         self._transcript_path = transcript_path
         self._transcript_fh = transcript_path.open("a", encoding="utf-8")
-        # Write phase boundary marker
+        self._transcript_slug = slug
+        self._transcript_db_path = db_path
+        # Write phase boundary marker (disk + DB)
         marker = {"_phase_boundary": phase_name, "ts": _now_iso()}
         self._transcript_fh.write(json.dumps(marker) + "\n")
         self._transcript_fh.flush()
+        self._append_state_log(marker)
 
     def close_transcript(self) -> None:
         """Flush and close the transcript file handle."""
@@ -314,9 +336,35 @@ class ApplyRenderer:
                 pass
             self._transcript_fh = None
             self._transcript_path = None
+        self._transcript_slug = None
+        self._transcript_db_path = None
+
+    def _append_state_log(self, record: dict) -> None:
+        """Mirror *record* into ``apply_state_log`` (best-effort, never raises).
+
+        Pass 4 dual-write. When the renderer was opened without a slug + DB
+        path (CLI-only contexts, tests) this is a no-op. The disk file
+        remains the canonical store until Pass 5 removes it.
+        """
+        slug = self._transcript_slug
+        db_path = self._transcript_db_path
+        if slug is None or db_path is None:
+            return
+        try:
+            from .db import append_state_log, open_pipeline_db
+
+            conn = open_pipeline_db(db_path)
+            try:
+                append_state_log(conn, slug=slug, payload=json.dumps(record))
+            finally:
+                conn.close()
+        except (OSError, sqlite3.Error):
+            # Never let a DB hiccup break the pipeline — disk is the
+            # source of truth for the duration of the Pass 4 migration.
+            pass
 
     def _write_transcript(self, record: dict) -> None:
-        """Append a JSON record to the transcript file (best-effort, never raises)."""
+        """Append a JSON record to the transcript file + apply_state_log."""
         if self._transcript_fh is None:
             return
         try:
@@ -324,6 +372,7 @@ class ApplyRenderer:
             self._transcript_fh.flush()
         except OSError:
             pass
+        self._append_state_log(record)
 
     def update_status(self, text: str) -> None:
         """Update the rolling spinner status line (quiet mode only)."""

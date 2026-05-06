@@ -1919,7 +1919,15 @@ def _run_apply_phases(
         state_dir_for_transcript = _apply_state_dir(slug, resolved_cwd)
         if state_dir_for_transcript is not None:
             transcript_path = state_dir_for_transcript / "transcript.jsonl"
-            rdr.open_transcript(transcript_path, phase_name)
+            # trk-60217f9f Pass 4: dual-write to apply_state_log so the
+            # supervisor can tail by row id. Disk file remains canonical
+            # until Pass 5.
+            rdr.open_transcript(
+                transcript_path,
+                phase_name,
+                slug=slug,
+                db_path=_pipeline_db_path(resolved_cwd),
+            )
 
         # Step 3f: stream events
         phase_succeeded = False

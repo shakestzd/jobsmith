@@ -170,6 +170,40 @@ def list_state(
     return [(row["kind"], row["updated_at"]) for row in rows]
 
 
+def append_state_log(
+    conn: sqlite3.Connection, *, slug: str, payload: str
+) -> int:
+    """Append one event row to ``apply_state_log`` and return its rowid.
+
+    Replaces the per-line append into ``.apply-state/transcript.jsonl``
+    (trk-60217f9f Pass 4). The supervisor's transcript tailer polls this
+    table by ``id`` cursor instead of byte offset, so each row is delivered
+    exactly once even across reconnects.
+    """
+    cursor = conn.execute(
+        "INSERT INTO apply_state_log (slug, ts, payload) VALUES (?, ?, ?)",
+        (slug, datetime.now(tz=timezone.utc).isoformat(), payload),
+    )
+    conn.commit()
+    return int(cursor.lastrowid or 0)
+
+
+def read_state_log(
+    conn: sqlite3.Connection, *, slug: str, after_id: int = 0
+) -> list[tuple[int, str, str]]:
+    """Return ``(id, ts, payload)`` rows for *slug* with ``id > after_id``.
+
+    The supervisor's tailer calls this in a loop with the highest ``id``
+    seen so far so each row is forwarded exactly once.
+    """
+    rows = conn.execute(
+        "SELECT id, ts, payload FROM apply_state_log "
+        "WHERE slug = ? AND id > ? ORDER BY id",
+        (slug, after_id),
+    ).fetchall()
+    return [(int(row["id"]), row["ts"], row["payload"]) for row in rows]
+
+
 def reset_state(conn: sqlite3.Connection, *, slug: str) -> tuple[int, int]:
     """Delete every ``apply_state`` and ``apply_state_log`` row for *slug*.
 
