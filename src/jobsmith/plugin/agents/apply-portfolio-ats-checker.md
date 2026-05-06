@@ -71,7 +71,7 @@ Write `.apply-state/ats-report.md`:
 ```
 
 Persist your result envelope to the DB (trk-60217f9f Pass 3):
-`Bash("jobsmith db put-state --slug {slug} --kind apply-apply-portfolio-ats-checker-result" <<< '<json>')`:
+`Bash("jobsmith db put-state --slug {slug} --kind apply-portfolio-ats-checker-result" <<< '<json>')`:
 ```json
 {"status": "ok|halt", "reason": "...", "summary": "portfolio={pass|fail|advisory}, ats={pass|fail}"}
 ```

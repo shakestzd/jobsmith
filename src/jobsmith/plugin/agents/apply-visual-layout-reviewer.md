@@ -133,7 +133,7 @@ Write `.apply-state/layout-report.md`:
 ```
 
 Persist your result envelope to the DB (trk-60217f9f Pass 3):
-`Bash("jobsmith db put-state --slug {slug} --kind apply-apply-visual-layout-reviewer-result" <<< '<json>')`:
+`Bash("jobsmith db put-state --slug {slug} --kind apply-visual-layout-reviewer-result" <<< '<json>')`:
 ```json
 {"status": "ok|halt", "decision": "pass|re-render|halt", "summary": "iter={iter}, issues={N}, applied={M}"}
 ```

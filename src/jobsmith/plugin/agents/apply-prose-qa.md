@@ -45,7 +45,7 @@ Write `.apply-state/ai-tell-report.json`:
 ```
 
 Persist your result envelope to the DB (trk-60217f9f Pass 3):
-`Bash("jobsmith db put-state --slug {slug} --kind apply-apply-prose-qa-result" <<< '<json>')`:
+`Bash("jobsmith db put-state --slug {slug} --kind apply-prose-qa-result" <<< '<json>')`:
 ```json
 {"status": "ok|halt", "decision": "pass|revise|halt", "summary": "iter={iteration}, blocking={N}, advisory={M}"}
 ```

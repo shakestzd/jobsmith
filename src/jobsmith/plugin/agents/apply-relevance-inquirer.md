@@ -56,7 +56,7 @@ Update `.apply-state/bullet-decisions.json` for each affected anchor:
 ```
 
 Persist your result envelope to the DB (trk-60217f9f Pass 3):
-`Bash("jobsmith db put-state --slug {slug} --kind apply-apply-relevance-inquirer-result" <<< '<json>')`:
+`Bash("jobsmith db put-state --slug {slug} --kind apply-relevance-inquirer-result" <<< '<json>')`:
 ```json
 {"status": "ok", "summary": "{N} questions emitted", "questions_count": N}
 ```

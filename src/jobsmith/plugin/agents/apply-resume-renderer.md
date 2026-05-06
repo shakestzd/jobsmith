@@ -56,7 +56,7 @@ Write `.apply-state/render-log.json`:
 ```
 
 Persist your result envelope to the DB (trk-60217f9f Pass 3):
-`Bash("jobsmith db put-state --slug {slug} --kind apply-apply-resume-renderer-result" <<< '<json>')`:
+`Bash("jobsmith db put-state --slug {slug} --kind apply-resume-renderer-result" <<< '<json>')`:
 ```json
 {"status": "ok|halt", "reason": "...", "summary": "rendered={success}, pages={N}"}
 ```

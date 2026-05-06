@@ -95,7 +95,7 @@ If `jd_parsed.company` is empty or missing:
 ## Output JSON
 
 Persist your result envelope to the DB (trk-60217f9f Pass 3):
-`Bash("jobsmith db put-state --slug {slug} --kind apply-apply-company-research-result" <<< '<json>')`:
+`Bash("jobsmith db put-state --slug {slug} --kind apply-company-research-result" <<< '<json>')`:
 ```json
 {
   "status": "ok | halt",

@@ -121,7 +121,7 @@ Write `.apply-state/bullet-decisions.json` — `{bullet_id: reason}` for every d
 Write `private/applications/{slug}/documents/work.yml`, `skill.yml`, `education.yml`, `author.yml`.
 
 Persist your result envelope to the DB (trk-60217f9f Pass 3):
-`Bash("jobsmith db put-state --slug {slug} --kind apply-apply-bullet-selector-result" <<< '<json>')`:
+`Bash("jobsmith db put-state --slug {slug} --kind apply-bullet-selector-result" <<< '<json>')`:
 ```json
 {"status": "ok|halt", "reason": "...", "summary": "anchors: {kept}/{total} kept; positions: {N}; bullets: {M}"}
 ```

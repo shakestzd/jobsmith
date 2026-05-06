@@ -88,7 +88,7 @@ Write `.apply-state/db-log.json`:
 ```
 
 Persist your result envelope to the DB (trk-60217f9f Pass 3):
-`Bash("jobsmith db put-state --slug {slug} --kind apply-apply-db-logger-result" <<< '<json>')`:
+`Bash("jobsmith db put-state --slug {slug} --kind apply-db-logger-result" <<< '<json>')`:
 ```json
 {"status": "ok|halt", "reason": "...", "summary": "{action} id={application_id}, docs={N}"}
 ```

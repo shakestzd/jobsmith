@@ -208,11 +208,18 @@ async def _launch_run(
 
 
 def _resolve_db_path(cwd: Path) -> Path | None:
-    """Return ``<cwd>/<config.output.jobsmith_db>`` or ``None`` on failure.
+    """Return the pipeline DB absolute path, or ``None`` on config miss.
 
     Threaded into ``supervisor.start`` so the new ``_tail_state_log``
     (trk-60217f9f Pass 4) can poll apply_state_log by row id instead of
     file offset. ``None`` falls back to the legacy file-tail path.
+
+    Resolves ``config.output.jobsmith_db`` relative to ``config_path.parent``
+    (the project root that ``find_config`` walked up to), not relative to
+    the supervisor's ``cwd`` — otherwise an API started from a subdirectory
+    would create or tail a DB at ``<subdir>/private/jobsmith.db`` while
+    ``apply.py:_pipeline_db_path`` writes to ``<project_root>/private/jobsmith.db``,
+    silently splitting the slug's apply_state_log between two files.
     """
     try:
         from jobsmith.config import find_config, load_config
@@ -221,7 +228,7 @@ def _resolve_db_path(cwd: Path) -> Path | None:
         if config_path is None:
             return None
         config = load_config(config_path)
-        return (cwd / config.output.jobsmith_db).resolve()
+        return (config_path.parent / config.output.jobsmith_db).resolve()
     except Exception:
         return None
 

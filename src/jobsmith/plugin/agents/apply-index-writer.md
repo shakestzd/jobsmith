@@ -101,7 +101,7 @@ next-action: "Review resume and submit application"
 ```
 
 Persist your result envelope to the DB (trk-60217f9f Pass 3):
-`Bash("jobsmith db put-state --slug {slug} --kind apply-apply-index-writer-result" <<< '<json>')`:
+`Bash("jobsmith db put-state --slug {slug} --kind apply-index-writer-result" <<< '<json>')`:
 ```json
 {"status": "ok", "summary": "index.qmd written, must_haves={N}, nice_to_haves={M}"}
 ```
