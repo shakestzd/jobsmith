@@ -15,7 +15,7 @@ You are the JD parser for the user's /apply pipeline. You convert raw job text i
 
 ## Inputs
 Read your spec from the pipeline DB (trk-60217f9f Pass 3):
-`Bash("jobsmith db get-state --slug _pending --kind spec-apply-jd-parser")` (the orchestrator passes the slug — usually `_pending` until the canonical slug is derived). Parse the JSON blob:
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-jd-parser")` where `{slug}` is the slug the orchestrator passed in your dispatch prompt — the URL-derived starting slug. (Pre-roborev-job-954 builds wrote to `_pending`; that path strands the row outside the rekey-slug atomic move and is no longer used.) Parse the JSON blob:
 - `inputs.jd_url`: URL or null
 - `inputs.jd_text`: raw text or null
 - `inputs.explicit_company`: optional override slug

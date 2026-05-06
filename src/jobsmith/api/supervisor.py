@@ -360,10 +360,14 @@ class RunSupervisor:
             started_at=_now_iso(),
             finished_at=None,
         )
-        # trk-60217f9f Pass 4 + roborev MEDIUM (job 951): initialise the
-        # apply_state_log cursor at the current max(id) for this slug so a
-        # rerun does not replay history. The first row this run writes will
-        # have id > log_last_id and will be forwarded exactly once.
+        # trk-60217f9f Pass 4 + roborev job 951 MEDIUM + job 954 HIGH:
+        # initialise the cursor at the GLOBAL ``MAX(id)`` (not per-slug)
+        # because the tailer now filters by ``run_id`` (migration 006);
+        # a per-slug seed is unnecessary and would let stale rows from
+        # other slugs in the same DB sneak past the cursor on the first
+        # poll. With the run_id filter in place the only rows that match
+        # are those this very run will write, so seeding at global max
+        # gives us "anything written from now on for this run".
         log_last_id = 0
         if db_path is not None and db_path.exists():
             try:
@@ -372,9 +376,7 @@ class RunSupervisor:
                 _conn = open_pipeline_db(db_path)
                 try:
                     row = _conn.execute(
-                        "SELECT COALESCE(MAX(id), 0) FROM apply_state_log "
-                        "WHERE slug = ?",
-                        (slug,),
+                        "SELECT COALESCE(MAX(id), 0) FROM apply_state_log"
                     ).fetchone()
                     log_last_id = int(row[0]) if row else 0
                 finally:
@@ -761,22 +763,28 @@ class RunSupervisor:
         try:
             from ..db import open_pipeline_db, read_state_log
 
-            # roborev job 953 MEDIUM — tail by row-id only, not slug.
+            # roborev job 954 HIGH — tail by run_id, not slug.
             # The orchestrator's ``jobsmith db rekey-slug`` step moves
-            # apply_state_log rows from the URL-derived launch slug
-            # ``record.slug`` to the canonical company-position slug as
-            # soon as ``apply-jd-parser`` finishes; a slug-pinned filter
-            # would silently drop every transcript event written after
-            # rekey (i.e. most of gather + all of draft + render). The
-            # ``_log_last_id`` cursor is unique per supervisor run and
-            # the project DB is single-tenant, so polling without a
-            # slug filter cannot cross-pollute concurrent runs.
+            # apply_state_log rows from the launch slug to the canonical
+            # slug mid-run, so a slug-pinned filter would silently drop
+            # every transcript event written after rekey. Job 953's
+            # slug-agnostic poll fixed that but exposed a worse failure:
+            # historical rows from prior runs (and concurrent runs in
+            # other projects) leaked into the current SSE stream — and a
+            # promoted phase_complete from a stale row could mark the
+            # current run done. Migration 006 added ``run_id`` to
+            # apply_state_log; render.py threads ``handle.run_id`` into
+            # every write, so the tailer can filter cleanly without
+            # caring about slug.
+            run_id = record.handle.run_id
             while True:
                 try:
                     conn = open_pipeline_db(db_path)
                     try:
                         rows = read_state_log(
-                            conn, after_id=record._log_last_id
+                            conn,
+                            run_id=run_id,
+                            after_id=record._log_last_id,
                         )
                     finally:
                         conn.close()
@@ -807,7 +815,9 @@ class RunSupervisor:
                         conn = open_pipeline_db(db_path)
                         try:
                             final_rows = read_state_log(
-                                conn, after_id=record._log_last_id
+                                conn,
+                                run_id=run_id,
+                                after_id=record._log_last_id,
                             )
                         finally:
                             conn.close()

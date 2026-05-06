@@ -52,6 +52,7 @@ _PIPELINE_MIGRATIONS = [
     ("003_artifact_versioning", _MIGRATIONS_DIR / "003_artifact_versioning.sql"),
     ("004_master_content", _MIGRATIONS_DIR / "004_master_content.sql"),
     ("005_apply_state", _MIGRATIONS_DIR / "005_apply_state.sql"),
+    ("006_apply_state_log_run_id", _MIGRATIONS_DIR / "006_apply_state_log_run_id.sql"),
 ]
 _REVIEW_MIGRATIONS = [
     ("001_review_schema", _MIGRATIONS_DIR / "001_review_schema.sql"),
@@ -171,7 +172,11 @@ def list_state(
 
 
 def append_state_log(
-    conn: sqlite3.Connection, *, slug: str, payload: str
+    conn: sqlite3.Connection,
+    *,
+    slug: str,
+    payload: str,
+    run_id: str | None = None,
 ) -> int:
     """Append one event row to ``apply_state_log`` and return its rowid.
 
@@ -179,10 +184,15 @@ def append_state_log(
     (trk-60217f9f Pass 4). The supervisor's transcript tailer polls this
     table by ``id`` cursor instead of byte offset, so each row is delivered
     exactly once even across reconnects.
+
+    *run_id* (optional, NULL for legacy callers) is the per-supervisor-run
+    discriminator the tailer filters on (migration 006). New writes from
+    the apply pipeline always populate it.
     """
     cursor = conn.execute(
-        "INSERT INTO apply_state_log (slug, ts, payload) VALUES (?, ?, ?)",
-        (slug, datetime.now(tz=timezone.utc).isoformat(), payload),
+        "INSERT INTO apply_state_log (slug, ts, payload, run_id) "
+        "VALUES (?, ?, ?, ?)",
+        (slug, datetime.now(tz=timezone.utc).isoformat(), payload, run_id),
     )
     conn.commit()
     return int(cursor.lastrowid or 0)
@@ -192,34 +202,41 @@ def read_state_log(
     conn: sqlite3.Connection,
     *,
     slug: str | None = None,
+    run_id: str | None = None,
     after_id: int = 0,
 ) -> list[tuple[int, str, str]]:
     """Return ``(id, ts, payload)`` rows with ``id > after_id``.
 
-    When *slug* is provided, results are filtered to that slug. When *slug*
-    is ``None``, every row in the table after the cursor is returned —
-    used by the supervisor's tailer when the orchestrator's
-    ``rekey-slug`` step moves rows from the launch slug to the canonical
-    slug mid-run; a slug-pinned filter would silently drop every event
-    written under the new slug. The supervisor's ``_log_last_id`` cursor
-    is run-unique so cross-run pollution is bounded by the per-process
-    single-run-per-cwd model.
+    Discriminators (apply in this order of preference):
+
+    - *run_id* — the per-supervisor-run identifier (migration 006). When
+      provided, only rows with matching ``run_id`` are returned. This is
+      the supervisor's tailer path: ``run_id`` survives the orchestrator's
+      ``rekey-slug`` step (which only mutates ``slug``) so the tailer
+      keeps streaming through canonical-slug rekeys without mixing
+      concurrent runs or replaying historical rows from prior
+      applications (closes roborev job 954 HIGH).
+    - *slug* — legacy filter for callers that have not yet adopted
+      ``run_id`` (e.g. tools inspecting a single application).
+    - both — intersection (rare; mostly tests).
+    - neither — every row after the cursor (debug only).
 
     The supervisor's tailer calls this in a loop with the highest ``id``
     seen so far so each row is forwarded exactly once.
     """
-    if slug is None:
-        rows = conn.execute(
-            "SELECT id, ts, payload FROM apply_state_log "
-            "WHERE id > ? ORDER BY id",
-            (after_id,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT id, ts, payload FROM apply_state_log "
-            "WHERE slug = ? AND id > ? ORDER BY id",
-            (slug, after_id),
-        ).fetchall()
+    where = ["id > ?"]
+    params: list[object] = [after_id]
+    if run_id is not None:
+        where.append("run_id = ?")
+        params.append(run_id)
+    if slug is not None:
+        where.append("slug = ?")
+        params.append(slug)
+    sql = (
+        "SELECT id, ts, payload FROM apply_state_log "
+        f"WHERE {' AND '.join(where)} ORDER BY id"
+    )
+    rows = conn.execute(sql, tuple(params)).fetchall()
     return [(int(row["id"]), row["ts"], row["payload"]) for row in rows]
 
 

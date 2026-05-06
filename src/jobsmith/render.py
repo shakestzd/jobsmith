@@ -259,6 +259,12 @@ class ApplyRenderer:
         # ``open_transcript`` when a slug + cwd are passed; None otherwise.
         self._transcript_slug: str | None = None
         self._transcript_db_path: Path | None = None
+        # Roborev job 954 HIGH (migration 006): supervisor's tailer
+        # filters by ``run_id`` so cross-run pollution and historical
+        # row replay are bounded. Renderer carries the run_id from
+        # ``apply.py`` through ``open_transcript`` and writes it on
+        # every ``apply_state_log`` row.
+        self._transcript_run_id: str | None = None
 
     # ------------------------------------------------------------------
     # Public lifecycle
@@ -300,6 +306,7 @@ class ApplyRenderer:
         *,
         slug: str | None = None,
         db_path: Path | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Open the transcript JSONL file for append and write a phase boundary marker.
 
@@ -320,6 +327,7 @@ class ApplyRenderer:
         self._transcript_fh = transcript_path.open("a", encoding="utf-8")
         self._transcript_slug = slug
         self._transcript_db_path = db_path
+        self._transcript_run_id = run_id
         # Write phase boundary marker (disk + DB)
         marker = {"_phase_boundary": phase_name, "ts": _now_iso()}
         self._transcript_fh.write(json.dumps(marker) + "\n")
@@ -338,6 +346,7 @@ class ApplyRenderer:
             self._transcript_path = None
         self._transcript_slug = None
         self._transcript_db_path = None
+        self._transcript_run_id = None
 
     def _append_state_log(self, record: dict) -> None:
         """Mirror *record* into ``apply_state_log`` (best-effort, never raises).
@@ -355,7 +364,12 @@ class ApplyRenderer:
 
             conn = open_pipeline_db(db_path)
             try:
-                append_state_log(conn, slug=slug, payload=json.dumps(record))
+                append_state_log(
+                    conn,
+                    slug=slug,
+                    payload=json.dumps(record),
+                    run_id=self._transcript_run_id,
+                )
             finally:
                 conn.close()
         except (OSError, sqlite3.Error):

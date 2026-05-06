@@ -1947,6 +1947,7 @@ def _run_apply_phases(
                 phase_name,
                 slug=slug,
                 db_path=_pipeline_db_path(resolved_cwd),
+                run_id=db_run_id,
             )
 
         # Step 3f: stream events

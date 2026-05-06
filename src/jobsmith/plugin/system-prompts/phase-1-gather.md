@@ -52,16 +52,18 @@ Do NOT invoke: apply-prose-writer, apply-prose-qa, apply-resume-renderer, apply-
 
 ### Step 1 — Dispatch apply-jd-parser (sequential)
 
+The wrapper started this run under a `STARTING_SLUG` (URL-derived; the basename of `apply_state_dir` from your Paths block). Use that slug for every DB write in this step — the rekey step in the next block atomically moves all rows under `STARTING_SLUG` onto `CANONICAL_SLUG` once the parser derives it. Do NOT write to `_pending`: that slug is never re-keyed and would strand `jd-parsed` and the parser result envelope outside of every canonical-slug reader (closes roborev job 954 HIGH).
+
 Persist the spec for `apply-jd-parser` into the DB:
-`Bash("jobsmith db put-state --slug _pending --kind spec-apply-jd-parser" <<< '{"specialist":"apply-jd-parser","inputs":{"jd_url":"…","jd_text":"…","explicit_company":"…"}}')`.
-Dispatch via the Task tool with `subagent_type="apply-jd-parser"` and a prompt that points the specialist at slug `_pending` for spec lookup (the specialist resolves its spec via `jobsmith db get-state --slug _pending --kind spec-apply-jd-parser`).
+`Bash("jobsmith db put-state --slug {STARTING_SLUG} --kind spec-apply-jd-parser" <<< '{"specialist":"apply-jd-parser","inputs":{"jd_url":"…","jd_text":"…","explicit_company":"…"}}')`.
+Dispatch via the Task tool with `subagent_type="apply-jd-parser"` and a prompt that points the specialist at `STARTING_SLUG` for spec lookup (the specialist resolves its spec via `jobsmith db get-state --slug {STARTING_SLUG} --kind spec-apply-jd-parser` and writes its `jd-parsed` + `apply-jd-parser-result` envelopes under the same slug).
 
 After it writes `jd-parsed.json`:
 - Derive `CANONICAL_SLUG = {company-slug}-{position-slug}` (lowercase, hyphenated).
 - The wrapper started this run with a `STARTING_SLUG` extracted from the URL or any prior URL-index entry; the `apply_state_dir` path in your Paths block ends in `<STARTING_SLUG>/.apply-state`. Read `STARTING_SLUG = basename(dirname(apply_state_dir))`.
 - **CRITICAL slug rekey (trk-60217f9f, fixes phase-2 resume mismatch).** When `STARTING_SLUG != CANONICAL_SLUG`, atomically move every DB row written so far onto the canonical slug; without this, ``apply.py:_load_manifest`` and ``db_ingest._load_manifest`` look under `CANONICAL_SLUG` and find nothing because the orchestrator wrote under `STARTING_SLUG`:
   `Bash("jobsmith db rekey-slug --from {STARTING_SLUG} --to {CANONICAL_SLUG}")`
-  This wraps both ``apply_state`` and ``apply_state_log`` in one transaction. Idempotent when slugs match (no-op).
+  This wraps every ``apply_state`` and ``apply_state_log`` row under `STARTING_SLUG` (including the JD parser's `spec-apply-jd-parser`, `jd-parsed`, and `apply-jd-parser-result`) into one transaction. Idempotent when slugs match (no-op).
 - Create `applications/{CANONICAL_SLUG}/.apply-state/` and move any `STARTING_SLUG` on-disk artifacts in (jd-parsed.json, voice-profile.json, session-id, transcript.jsonl).
 - Create `applications/{CANONICAL_SLUG}/documents/` with `_extensions` symlink. The Quarto extension bundle lives at `shared/extensions/_extensions` (project root); link relatively so the four `..` segments climb out of `applications/{CANONICAL_SLUG}/documents/` back to the repo root: `(cd applications/{CANONICAL_SLUG}/documents && ln -sf ../../../../shared/extensions/_extensions _extensions)`. If `shared/extensions/_extensions` is missing, halt with `<<PHASE_FAILED: gather: shared/extensions/_extensions not found — Quarto extension bundle is required for render>>` rather than skipping the symlink.
 - Initialize the manifest in the DB under the canonical slug:
