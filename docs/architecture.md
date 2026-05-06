@@ -2,7 +2,35 @@
 
 ## Core principle: gather once, render many
 
-Every application produces structured state in `private/applications/{slug}/.apply-state/`. That state is the **single source of truth**. Every artifact — the resume PDF, the cover letter PDF, the careerfair.io workflow review document, the per-application portfolio page, the LinkedIn outreach snippets — is a **rendering** of that state.
+Every application produces structured state in two places: the
+``apply_state`` and ``apply_state_log`` tables in the pipeline DB
+(``private/jobsmith.db``) and the on-disk directory
+``private/applications/{slug}/.apply-state/``. That state is the **single
+source of truth**. Every artifact — the resume PDF, the cover letter PDF,
+the careerfair.io workflow review document, the per-application portfolio
+page, the LinkedIn outreach snippets — is a **rendering** of that state.
+
+### Where each kind lives (trk-60217f9f, 0.8.4)
+
+| Kind | Location | Owner |
+|---|---|---|
+| ``manifest`` | ``apply_state`` row, ``kind=manifest`` | Orchestrator (Pass 2) |
+| ``spec-<specialist>`` | ``apply_state`` row, ``kind=spec-<name>`` | Orchestrator (Pass 2) |
+| ``apply-<specialist>-result`` | ``apply_state`` row | Specialist (Pass 3) |
+| Agent transcript | ``apply_state_log`` rows | Renderer dual-writes; supervisor tails by row id (Pass 4) |
+| ``jd-parsed.json``, ``fit-score.json``, ``bullet-selection.json``, ``hm-snippet.md``, ``company-research.md``, ``prose-draft.md``, ``cover-letter-draft.md``, etc. | ``applications/{slug}/.apply-state/`` on disk | Specialist content (migration follow-up) |
+
+The pipeline DB is read with ``jobsmith db get-state --slug <s> --kind <k>``
+and written with ``jobsmith db put-state``; ``jobsmith db list-state --slug <s>``
+prints every kind currently persisted. ``jobsmith db reset-state --slug <s>``
+wipes both ``apply_state`` and ``apply_state_log`` for a clean re-run —
+equivalent to the prior ``rm -rf applications/{slug}/.apply-state/`` for
+the orchestrator-managed kinds.
+
+Specialist content artifacts (the table's last row) still live on disk so
+``jobsmith assemble`` and the review readers in ``_state_readers.py``
+continue to function. Migrating each content kind to ``apply_state`` rows
+is a follow-up tracked separately from this 0.8.4 cut.
 
 ```
         ┌──────────────────────────────────┐

@@ -9,8 +9,28 @@ Public API
   per phase completion (gather→draft→render). Consumers observe phase-granular
   events; per-specialist granularity is deferred to slice 8.
 - :func:`run_apply` — orchestrate all three phases with confirm gates and
-  per-phase resume from completed work (via ``manifest.json`` + URL index).
-  Internally drives ``run_phase_iter()`` and discards events for the CLI path.
+  per-phase resume from completed work. Internally drives
+  ``run_phase_iter()`` and discards events for the CLI path.
+
+Pipeline state — DB vs disk (trk-60217f9f, 0.8.4)
+-------------------------------------------------
+The ``apply_state`` and ``apply_state_log`` tables are the source of truth
+for orchestrator-managed state and the agent transcript:
+
+- ``kind=manifest`` — orchestrator's per-slug run manifest (Pass 2).
+- ``kind=spec-<specialist>`` — per-specialist input envelopes (Pass 2).
+- ``kind=apply-<specialist>-result`` — per-specialist result envelopes (Pass 3).
+- ``apply_state_log`` rows — agent transcript stream, polled by the
+  supervisor's ``_tail_state_log`` (Pass 4).
+
+Specialist content artifacts (``jd-parsed.json``, ``fit-score.json``,
+``bullet-selection.json``, ``prose-draft.md`` etc.) remain on disk under
+``applications/{slug}/.apply-state/`` so that ``assemble.py`` and the
+review readers in ``_state_readers.py`` continue to function. Migrating
+each content kind to ``apply_state`` rows is tracked as follow-up after
+this track lands; the specialist prompts already write the result
+envelope to the DB (Pass 3) which is what the orchestrator and reviewers
+need for resume + UI surfacing.
 """
 
 from __future__ import annotations
