@@ -37,6 +37,7 @@ from . import plugin_dir as get_plugin_dir
 from ._state_readers import ARTIFACT_READERS
 from .benchmarks import resolve_benchmark_or_fallback
 from .config import CONFIG_FILENAME, find_config, load_config
+from .db import get_state, open_pipeline_db
 from .guard import check_anchors
 from .paths import resolve
 from .render import ApplyRenderer
@@ -861,7 +862,7 @@ def _get_or_create_session_id(application_dir: Path, cwd: Path) -> str:
     if session_file.exists():
         stored = session_file.read_text(encoding="utf-8").strip()
         if stored:
-            manifest = _load_manifest(application_dir)
+            manifest = _load_manifest(application_dir, cwd)
             if _phase_completed(manifest, "gather"):
                 # Gather succeeded — the session ID is legitimately reusable
                 # for phase-2/3 --resume; return it unchanged.
@@ -1100,18 +1101,46 @@ def _record_url_mapping(url: str, canonical_slug: str, cwd: Path) -> None:
     _save_url_index(cwd, index)
 
 
-def _load_manifest(app_dir: Path) -> dict | None:
-    """Read ``app_dir/.apply-state/manifest.json``. Returns None on missing/malformed."""
-    manifest_path = app_dir / ".apply-state" / "manifest.json"
-    if not manifest_path.exists():
+def _pipeline_db_path(cwd: Path) -> Path | None:
+    """Resolve the pipeline DB absolute path under *cwd*.
+
+    Returns ``None`` if config cannot be located. Does NOT verify the file
+    exists — callers handle the "DB not yet created" case via ``get_state``
+    which transparently materializes the schema.
+    """
+    config_path = find_config(cwd)
+    if config_path is None:
+        return None
+    config = load_config(config_path)
+    repo_root = config_path.parent
+    return (repo_root / config.output.jobsmith_db).resolve()
+
+
+def _load_manifest(app_dir: Path, cwd: Path) -> dict | None:
+    """Read the manifest blob for ``app_dir.name`` from ``apply_state`` (DB).
+
+    Replaces the prior ``app_dir/.apply-state/manifest.json`` disk read
+    (trk-60217f9f Pass 2). The DB row is the source of truth — when callers
+    pass an *app_dir* the slug is taken from ``app_dir.name``. Returns
+    ``None`` on missing config, missing row, or malformed JSON so callers
+    fall through to the "rerun from scratch" branch unchanged.
+    """
+    db_path = _pipeline_db_path(cwd)
+    if db_path is None or not db_path.exists():
+        return None
+    slug = app_dir.name
+    conn = open_pipeline_db(db_path)
+    try:
+        blob = get_state(conn, slug=slug, kind="manifest")
+    finally:
+        conn.close()
+    if not blob:
         return None
     try:
-        data = json.loads(manifest_path.read_text())
-        if isinstance(data, dict):
-            return data
-    except (json.JSONDecodeError, OSError):
-        pass
-    return None
+        data = json.loads(blob)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _phase_completed(manifest: dict | None, phase_name: str) -> bool:
@@ -1350,7 +1379,7 @@ def _run_phase_iter_body(
     # Step 3: phase-completion gating
     apps_dir = _applications_dir(resolved_cwd)
     app_dir = apps_dir / slug if apps_dir is not None else None
-    manifest = None if force or app_dir is None else _load_manifest(app_dir)
+    manifest = None if force or app_dir is None else _load_manifest(app_dir, resolved_cwd)
 
     session_id = headless.deterministic_session_id(slug)
 
@@ -1638,7 +1667,7 @@ def run_apply(
     # malformed JSON, or missing invocations all fall through to "rerun".
     apps_dir = _applications_dir(resolved_cwd)
     app_dir = apps_dir / slug if apps_dir is not None else None
-    manifest = None if force or app_dir is None else _load_manifest(app_dir)
+    manifest = None if force or app_dir is None else _load_manifest(app_dir, resolved_cwd)
 
     # Compute (or create) the session ID from the persisted per-application
     # file.  This replaces the old uuid5-based deterministic_session_id so

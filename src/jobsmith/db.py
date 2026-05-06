@@ -115,6 +115,78 @@ def open_review_db(slug: str, review_dir: Path) -> sqlite3.Connection:
     return _open_db(review_dir / f"{slug}.db", _REVIEW_MIGRATIONS)
 
 
+# ---------------------------------------------------------------------------
+# apply_state helpers (trk-60217f9f / 0.8.4 — pipeline state DB-backed)
+# ---------------------------------------------------------------------------
+#
+# Python-API counterparts to the ``jobsmith db get-state / put-state /
+# list-state / reset-state`` CLI commands. apply.py uses these directly to
+# avoid subprocess overhead; orchestrator + specialist agents use the CLI.
+# Both paths target the same ``apply_state`` row set, so disk vs DB is no
+# longer a question — the DB is the source of truth.
+
+
+def put_state(
+    conn: sqlite3.Connection,
+    *,
+    slug: str,
+    kind: str,
+    content_blob: str,
+) -> None:
+    """Upsert ``(slug, kind) -> content_blob`` into ``apply_state``.
+
+    Replaces ``Write(applications/{slug}/.apply-state/{kind}.json, ...)``.
+    """
+    conn.execute(
+        "INSERT OR REPLACE INTO apply_state (slug, kind, content_blob, updated_at) "
+        "VALUES (?, ?, ?, ?)",
+        (slug, kind, content_blob, datetime.now(tz=timezone.utc).isoformat()),
+    )
+    conn.commit()
+
+
+def get_state(
+    conn: sqlite3.Connection, *, slug: str, kind: str
+) -> str | None:
+    """Return the ``content_blob`` for ``(slug, kind)`` or ``None`` if missing.
+
+    Replaces ``Read(applications/{slug}/.apply-state/{kind}.json)``.
+    """
+    row = conn.execute(
+        "SELECT content_blob FROM apply_state WHERE slug = ? AND kind = ?",
+        (slug, kind),
+    ).fetchone()
+    return None if row is None else row["content_blob"]
+
+
+def list_state(
+    conn: sqlite3.Connection, *, slug: str
+) -> list[tuple[str, str]]:
+    """List ``(kind, updated_at)`` pairs for *slug*, alphabetical by kind."""
+    rows = conn.execute(
+        "SELECT kind, updated_at FROM apply_state WHERE slug = ? ORDER BY kind",
+        (slug,),
+    ).fetchall()
+    return [(row["kind"], row["updated_at"]) for row in rows]
+
+
+def reset_state(conn: sqlite3.Connection, *, slug: str) -> tuple[int, int]:
+    """Delete every ``apply_state`` and ``apply_state_log`` row for *slug*.
+
+    Returns ``(state_rows_deleted, log_rows_deleted)``. Idempotent.
+    """
+    n_state = conn.execute(
+        "SELECT COUNT(*) FROM apply_state WHERE slug = ?", (slug,)
+    ).fetchone()[0]
+    n_log = conn.execute(
+        "SELECT COUNT(*) FROM apply_state_log WHERE slug = ?", (slug,)
+    ).fetchone()[0]
+    conn.execute("DELETE FROM apply_state WHERE slug = ?", (slug,))
+    conn.execute("DELETE FROM apply_state_log WHERE slug = ?", (slug,))
+    conn.commit()
+    return (n_state, n_log)
+
+
 def insert_apply_run(
     conn: sqlite3.Connection,
     *,

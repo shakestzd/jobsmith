@@ -52,13 +52,18 @@ Do NOT invoke: apply-prose-writer, apply-prose-qa, apply-resume-renderer, apply-
 
 ### Step 1 — Dispatch apply-jd-parser (sequential)
 
-Write `applications/_pending/.apply-state/spec.json` with `{specialist: "apply-jd-parser", inputs: {jd_url, jd_text, explicit_company: slug_override}}`. Dispatch via the Task tool with `subagent_type="apply-jd-parser"` and a prompt that points the specialist at the spec.json path.
+Persist the spec for `apply-jd-parser` into the DB:
+`Bash("jobsmith db put-state --slug _pending --kind spec-apply-jd-parser" <<< '{"specialist":"apply-jd-parser","inputs":{"jd_url":"…","jd_text":"…","explicit_company":"…"}}')`.
+Dispatch via the Task tool with `subagent_type="apply-jd-parser"` and a prompt that points the specialist at slug `_pending` for spec lookup (the specialist resolves its spec via `jobsmith db get-state --slug _pending --kind spec-apply-jd-parser`).
 
 After it writes `jd-parsed.json`:
 - Derive slug = `{company-slug}-{position-slug}` (lowercase, hyphenated).
 - Create `applications/{slug}/.apply-state/` and move `_pending` artifacts in.
 - Create `applications/{slug}/documents/` with `_extensions` symlink: `(cd applications/{slug}/documents && ln -sf ../../../../templates/extensions/_extensions _extensions)`.
-- Initialize `manifest.json` with `{run_id, slug, started_at, role_type, invocations: []}`.
+- Re-key any `_pending` DB rows under the canonical slug:
+  `Bash("jobsmith db get-state --slug _pending --kind spec-apply-jd-parser | jobsmith db put-state --slug {slug} --kind spec-apply-jd-parser")`. Repeat for any other `_pending` kinds. Then `jobsmith db reset-state --slug _pending --yes` to clear the staging slug.
+- Initialize the manifest in the DB:
+  `Bash("jobsmith db put-state --slug {slug} --kind manifest" <<< '{"run_id":"…","slug":"{slug}","started_at":"…","role_type":"…","invocations":[]}')`.
 
 ### Step 2 — Fan-out (parallel)
 
@@ -68,10 +73,12 @@ In ONE message dispatch four specialists in parallel:
 - `apply-bullet-selector` (writes `bullet-selection.json`, `bullet-diff.md`, tailored YAMLs in `documents/`)
 - `apply-company-research` (writes `company-research.md` — uses `private/companies/<slug>.md` cache; writes a callout-warning sentinel if WebFetch fails)
 
-Each gets its own `spec.json`. Update `manifest.json.invocations` with start/finish/agent_id for each.
+Each specialist gets its own DB-backed spec keyed by `spec-<specialist-name>`:
+`Bash("jobsmith db put-state --slug {slug} --kind spec-apply-fit-scorer" <<< '<json>')` (and similarly for `spec-apply-hm-enricher`, `spec-apply-bullet-selector`, `spec-apply-company-research`). Update the manifest's `invocations[]` with start/finish/agent_id for each by reading `manifest`, mutating in place, and writing back: `jobsmith db get-state --slug {slug} --kind manifest | <edit JSON> | jobsmith db put-state --slug {slug} --kind manifest`.
 
-**Resume rule (bug-099493d0):** when a specialist's `<name>-result.json`
-already exists from a prior invocation, follow this table. The "user
+**Resume rule (bug-099493d0):** when a specialist's prior result envelope is
+already present in the DB at `kind=apply-<name>-result` (read with
+`jobsmith db get-state --slug {slug} --kind apply-<name>-result`), follow this table. The "user
 re-triggered the run" is itself the signal that they expect a different
 outcome — never silently emit a halt that was decided before they edited
 master content.
@@ -89,7 +96,7 @@ Read `fit-score.json`. Tier per `tier_policy` in contracts:
 - `--deep` flag → `deep`
 - Otherwise: `score >= 0.70` → `fast`, else `deep`
 
-Phase 1 treats fast and deep identically (slice 9 deferred). Record tier in `manifest.json`.
+Phase 1 treats fast and deep identically (slice 9 deferred). Record tier in the manifest (read-modify-write the `manifest` kind via `jobsmith db get-state` / `put-state`).
 
 PAUSE and present to the user:
 1. Role type + fit table (from fit-score.json `must_have_table`)
@@ -102,10 +109,15 @@ Ask: "Proceed?" — then emit the phase-complete marker and STOP. Do not wait fo
 
 ## Artifacts to write
 
-Before emitting the phase-complete marker, the following MUST exist under `applications/{slug}/.apply-state/`:
+Before emitting the phase-complete marker the following artifacts MUST be present.
+
+DB-backed (queryable via `jobsmith db list-state --slug {slug}`; the manifest is the orchestrator's responsibility, every other kind is a specialist responsibility — Pass 3 of trk-60217f9f migrates the specialists):
+
+- `manifest` — initialized in Step 1, updated in Step 2 and Step 3 (orchestrator)
+
+On-disk under `applications/{slug}/.apply-state/` (specialist outputs; Pass 3 will move these to DB rows of the same name):
 
 - `jd-parsed.json` — produced by apply-jd-parser
-- `manifest.json` — initialized in Step 1, updated in Step 2 and Step 3
 - `fit-score.json` — produced by apply-fit-scorer
 - `hm-snippet.md` — produced by apply-hm-enricher
 - `bullet-selection.json` — produced by apply-bullet-selector
@@ -122,7 +134,7 @@ You are running phase 1 (gather) ONLY. Phase 2 (draft) owns prose-draft.md, pros
 
 When all five phase-1 specialists (jd-parser, fit-scorer, hm-enricher, bullet-selector, company-research) have written their result files AND you have presented the Step 3 analysis pause, your phase is OVER. Execute these three steps in this exact order, then stop:
 
-1. **Append manifest entries.** Open `<applications-dir>/<slug>/.apply-state/manifest.json` and ensure `invocations[]` contains one entry per specialist dispatched (apply-jd-parser, apply-fit-scorer, apply-hm-enricher, apply-bullet-selector, apply-company-research), each with `{"specialist": "<name>", "status": "ok", "started_at": "<iso8601>", "finished_at": "<iso8601>", "agent_id": "<headless agent_id>", "retry_count": 0, "notes": "<brief>"}`.
+1. **Append manifest entries.** Read the manifest via `Bash("jobsmith db get-state --slug {slug} --kind manifest")`, ensure `invocations[]` contains one entry per specialist dispatched (apply-jd-parser, apply-fit-scorer, apply-hm-enricher, apply-bullet-selector, apply-company-research), each with `{"specialist": "<name>", "status": "ok", "started_at": "<iso8601>", "finished_at": "<iso8601>", "agent_id": "<headless agent_id>", "retry_count": 0, "notes": "<brief>"}`, and write it back: `Bash("jobsmith db put-state --slug {slug} --kind manifest" <<< '<updated json>')`.
 2. **Emit the marker.** Output exactly: `<<PHASE_COMPLETE: gather>>` on its own line.
 3. **Stop.** Do not call any more tools. Do not narrate next steps. Do not wait for the user's "Proceed?" answer — the Python caller handles resumption.
 

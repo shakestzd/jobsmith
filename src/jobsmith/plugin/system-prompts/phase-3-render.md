@@ -23,11 +23,10 @@ The following artifacts MUST already exist at paths under `apply_state_dir` (see
 - `applications/{slug}/.apply-state/bullet-selection.json` — from phase 1
 - `applications/{slug}/.apply-state/prose-draft.md` — from phase 2
 - `applications/{slug}/.apply-state/ai-tell-report.json` — from phase 2
-- `applications/{slug}/.apply-state/manifest.json` — initialized by phase 1
 - `applications/{slug}/documents/resume.qmd` — written by phase 2
 - `applications/{slug}/documents/work.yml` — written by phase 2
 
-Read `manifest.json` to recover `run_id`, `slug`, `tier`, and `started_at` before starting any dispatch.
+The `manifest` lives in the DB (kind=`manifest`), not on disk. Recover `run_id`, `slug`, `tier`, and `started_at` with `Bash("jobsmith db get-state --slug {slug} --kind manifest")` before starting any dispatch.
 
 ## Allowed agents / tools
 
@@ -44,29 +43,26 @@ Do NOT invoke: apply-jd-parser, apply-fit-scorer, apply-hm-enricher, apply-bulle
 
 ## Step-by-step instructions
 
-### Spec.json wiring (applies to every dispatch in this phase)
+### Spec wiring (applies to every dispatch in this phase)
 
-Before each Task-tool dispatch, write a per-invocation `spec.json` to
-`<applications-dir>/<slug>/.apply-state/spec.json` carrying the inputs the
-specialist needs. Read `manifest.json` once for `role_type`. Pull benchmark
-+ feedback paths from the Paths block. Both groups are optional — when a
-key is absent from the Paths block (no benchmark configured / no feedback
-yet), omit it from `inputs` rather than passing an empty string.
+Before each Task-tool dispatch, persist a per-specialist spec into the DB:
+`Bash("jobsmith db put-state --slug {slug} --kind spec-<specialist-name>" <<< '<json>')`.
+Read the manifest once via `Bash("jobsmith db get-state --slug {slug} --kind manifest")`
+for `role_type`. Pull benchmark + feedback paths from the Paths block. Both
+groups are optional — when a key is absent from the Paths block (no benchmark
+configured / no feedback yet), omit it from `inputs` rather than passing an
+empty string.
 
-**`spec.json` is a single shared file.** A specialist reads it as the very
-first action; if a second dispatch overwrites the file before the first
-specialist has read it, that specialist gets the wrong inputs. Therefore
-**you MUST serialize all dispatches in this phase**:
+**Per-specialist spec kinds remove the prior shared-`spec.json` race.** Each
+spec lives at its own DB row keyed by `spec-<specialist>`, so two dispatches
+can never overwrite the same blob. Specialists read their inputs with
+`jobsmith db get-state --slug {slug} --kind spec-<their-name>` as their first
+action.
 
-1. Write `spec.json` for specialist A.
-2. Dispatch A; **wait for A's result file** (`<specialist>-result.json`)
-   to appear in `.apply-state/` before continuing.
-3. Then write `spec.json` for specialist B and dispatch B.
-
-This applies to Step 7 and Step 8 too — **do not run them in parallel**,
-even though their work is otherwise independent. The serialization cost
-is small relative to specialist runtime, and it eliminates the
-spec.json race condition entirely.
+You may still serialize Step 7 and Step 8 dispatches when their *outputs*
+have ordering constraints (e.g. apply-visual-layout-reviewer reads the PDF
+produced by apply-resume-renderer). The DB-backed spec wiring removes only
+the *input* race; output dependencies still apply.
 
 Per-specialist `inputs` to include:
 
@@ -90,17 +86,16 @@ Per-specialist `inputs` to include:
 
 2. Dispatch `apply-portfolio-ats-checker`. If either check fails, halt with the specific structural issue.
 
-3. Dispatch `apply-visual-layout-reviewer` (write spec.json with `benchmark_resume_pdf` from the Paths block first). If it proposes fixes, apply them, re-run `apply-resume-renderer`, re-run reviewer. Max 2 re-render iterations. On third failure: halt and surface PNG + issues.
+3. Dispatch `apply-visual-layout-reviewer` (persist `spec-apply-visual-layout-reviewer` with `benchmark_resume_pdf` from the Paths block first). If it proposes fixes, apply them, re-run `apply-resume-renderer`, re-run reviewer. Max 2 re-render iterations. On third failure: halt and surface PNG + issues.
 
-Update `manifest.json.invocations` with start/finish/agent_id for each dispatch.
+Update the DB-backed manifest's `invocations[]` with start/finish/agent_id for each dispatch (read-modify-write the `manifest` kind via `jobsmith db get-state` / `put-state`).
 
 ### Step 8 — Cover letter (sequential after Step 7)
 
-Run **after** Step 7's reviewer loop converges, not in parallel — the
-shared `spec.json` cannot service two specialists at once (see "Spec.json
-wiring" above).
+Run **after** Step 7's reviewer loop converges, not in parallel — Step 8
+depends on Step 7's resume.pdf to fact-check claims against.
 
-Write `spec.json` for `apply-cover-letter-writer` with `benchmark_cover_letter_md`, `feedback_dir`, and `role_type` populated from the Paths block + manifest (omit absent keys), then dispatch. Skip only if `jd-parsed.json` says portal explicitly forbids cover letters. The fact-check gate is the writer's responsibility (blocking).
+Persist `spec-apply-cover-letter-writer` to the DB with `benchmark_cover_letter_md`, `feedback_dir`, and `role_type` populated from the Paths block + manifest (omit absent keys), then dispatch. Skip only if `jd-parsed.json` says portal explicitly forbids cover letters. The fact-check gate is the writer's responsibility (blocking).
 
 ### Step 9 — Index + DB
 
@@ -111,7 +106,7 @@ Write `spec.json` for `apply-cover-letter-writer` with `benchmark_cover_letter_m
 ### Step 10 — Final report
 
 After Step 9 completes, show the user:
-1. Wall-clock time (from `started_at` in manifest.json to now). If fast path > 20 min, log a warning to `manifest.json`.
+1. Wall-clock time (from `started_at` in the DB-backed `manifest` to now). If fast path > 20 min, append a warning to the manifest's `notes[]` (read-modify-write via `jobsmith db get-state`/`put-state` on `kind=manifest`).
 2. File paths: resume.pdf, cover-letter-draft.md, index.qmd.
 3. Anchor preservation summary: `{kept}/{total}` anchors retained.
 4. AI-tell gate: passed in N iterations (read from ai-tell-report.json).
@@ -136,7 +131,7 @@ You are running phase 3 (render) ONLY. Phases 1 and 2 are complete. You MUST NOT
 
 When resume.pdf exists, cover-letter-draft.md exists (or portal forbids cover letters), index.qmd exists, AND `jobsmith assemble <slug>` has succeeded, your phase is OVER. Execute these three steps in this exact order, then stop:
 
-1. **Append manifest entries.** Open `<applications-dir>/<slug>/.apply-state/manifest.json` and APPEND entries to `invocations[]` for each specialist dispatched in this phase (apply-resume-renderer, apply-cover-letter-writer, apply-index-writer, and optionally apply-portfolio-ats-checker, apply-visual-layout-reviewer, apply-db-logger), each with `{"specialist": "<name>", "status": "ok", "started_at": "<iso8601>", "finished_at": "<iso8601>", "agent_id": "<headless agent_id>", "retry_count": <N>, "notes": "<brief>"}`.
+1. **Append manifest entries.** Read the manifest via `Bash("jobsmith db get-state --slug {slug} --kind manifest")`, APPEND entries to `invocations[]` for each specialist dispatched in this phase (apply-resume-renderer, apply-cover-letter-writer, apply-index-writer, and optionally apply-portfolio-ats-checker, apply-visual-layout-reviewer, apply-db-logger), each with `{"specialist": "<name>", "status": "ok", "started_at": "<iso8601>", "finished_at": "<iso8601>", "agent_id": "<headless agent_id>", "retry_count": <N>, "notes": "<brief>"}`, then write it back via `Bash("jobsmith db put-state --slug {slug} --kind manifest" <<< '<updated json>')`.
 2. **Emit the marker.** Output exactly: `<<PHASE_COMPLETE: render>>` on its own line.
 3. **Stop.** Do not call any more tools. Do not narrate next steps.
 
@@ -153,4 +148,4 @@ When resume.pdf exists, cover-letter-draft.md exists (or portal forbids cover le
 - If `apply-visual-layout-reviewer` fails after 2 re-render iterations → halt, surface the PNG + issues, **then emit** `<<PHASE_FAILED: render: visual-layout-reviewer-halted: <one-line reason>>>`. Do NOT emit the phase-complete marker.
 - If `jobsmith assemble` fails → halt, surface the error, **then emit** `<<PHASE_FAILED: render: assemble-failed: <one-line reason>>>`. Do NOT emit the phase-complete marker.
 - On any halt: print halt reason + relevant state file paths AND emit the `<<PHASE_FAILED: render: ...>>` marker on its own line so the supervisor can push a structured `phase_failed` event to the web UI (bug-0489bff3). A specialist returning `status=halt` is the signal — do not infer halts from silence.
-- If `apply-db-logger` fails → log a warning in `manifest.json` but do NOT halt and do NOT suppress the phase-complete marker; the assemble + index.qmd success is the gate.
+- If `apply-db-logger` fails → log a warning in the DB-backed `manifest` (read-modify-write `kind=manifest`) but do NOT halt and do NOT suppress the phase-complete marker; the assemble + index.qmd success is the gate.

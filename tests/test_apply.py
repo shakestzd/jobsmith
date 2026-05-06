@@ -2693,13 +2693,26 @@ def _write_manifest(
     *,
     completed_specialists: list[str],
 ) -> None:
-    """Write a minimal manifest.json with the listed specialists marked status=ok."""
+    """Write a minimal manifest blob to ``apply_state`` (DB-backed, trk-60217f9f).
+
+    Resolves slug + cwd from the conventional layout
+    ``<cwd>/private/applications/<slug>/.apply-state`` so existing call
+    sites do not need to thread extra arguments. The manifest row is
+    upserted into the pipeline DB at ``<cwd>/private/jobsmith.db`` (default
+    config path); a stub disk file is also written so any code still in the
+    pre-Pass-3 transition window does not crash on missing-file checks
+    (Pass 5 removes that fallback entirely).
+    """
     import json
 
+    from jobsmith.db import open_pipeline_db, put_state
+
     apply_state.mkdir(parents=True, exist_ok=True)
+    slug = apply_state.parent.name
+    cwd = apply_state.parent.parent.parent.parent
     manifest = {
         "run_id": "00000000-0000-0000-0000-000000000000",
-        "slug": "acme-ml-engineer",
+        "slug": slug,
         "started_at": "2026-01-01T00:00:00Z",
         "role_type": "ai-engineer",
         "tier": "fast",
@@ -2707,7 +2720,17 @@ def _write_manifest(
             {"specialist": s, "status": "ok"} for s in completed_specialists
         ],
     }
-    (apply_state / "manifest.json").write_text(json.dumps(manifest))
+    blob = json.dumps(manifest)
+
+    db_path = cwd / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(conn, slug=slug, kind="manifest", content_blob=blob)
+    finally:
+        conn.close()
+
+    (apply_state / "manifest.json").write_text(blob)
 
 
 _PHASE_1_SPECIALISTS = [
@@ -3637,15 +3660,24 @@ def test_get_or_create_session_id_resumable_when_gather_complete(
 ) -> None:
     """If gather is marked complete in the manifest, return the persisted ID
     even when the orphan .jsonl is present (legitimate --resume scenario)."""
-    app_dir = tmp_path / "acme-corp-engineer"
+    from jobsmith.db import open_pipeline_db, put_state
+
     cwd = tmp_path / "project"
+    cwd.mkdir(parents=True)
+    (cwd / ".apply-config.yaml").write_text(
+        "output:\n"
+        "  jobsmith_db: private/jobsmith.db\n"
+        "  applications_dir: private/applications\n",
+        encoding="utf-8",
+    )
+    app_dir = cwd / "private" / "applications" / "acme-corp-engineer"
     persisted_id = str(uuid.uuid4())
 
     state_dir = app_dir / ".apply-state"
     state_dir.mkdir(parents=True)
     (state_dir / "session-id").write_text(persisted_id, encoding="utf-8")
 
-    # Write a manifest that marks all gather specialists as complete.
+    # Write a DB-backed manifest that marks all gather specialists complete.
     manifest = {
         "invocations": [
             {"specialist": "apply-jd-parser", "status": "ok"},
@@ -3655,7 +3687,18 @@ def test_get_or_create_session_id_resumable_when_gather_complete(
             {"specialist": "apply-company-research", "status": "ok"},
         ]
     }
-    (state_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    db_path = cwd / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(
+            conn,
+            slug="acme-corp-engineer",
+            kind="manifest",
+            content_blob=json.dumps(manifest),
+        )
+    finally:
+        conn.close()
 
     # Also create the orphan file (should be ignored when gather is done).
     encoded_cwd = str(cwd).replace("/", "-")
@@ -3812,3 +3855,121 @@ def test_auto_freeze_is_idempotent(
     assert updated["frozen_at"] == "2025-01-15", (
         "existing frozen_at must not be overwritten"
     )
+
+
+# ---------------------------------------------------------------------------
+# trk-60217f9f Pass 2 — DB-backed _load_manifest
+# ---------------------------------------------------------------------------
+
+
+def _seed_apply_config(cwd: Path) -> Path:
+    """Write a minimal .apply-config.yaml under *cwd* and return the DB path."""
+    cwd.mkdir(parents=True, exist_ok=True)
+    (cwd / ".apply-config.yaml").write_text(
+        "output:\n"
+        "  jobsmith_db: private/jobsmith.db\n"
+        "  applications_dir: private/applications\n",
+        encoding="utf-8",
+    )
+    db_path = cwd / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return db_path
+
+
+def test_load_manifest_reads_from_db_not_disk(tmp_path: Path) -> None:
+    """_load_manifest reads the manifest blob from apply_state, not the file."""
+    from jobsmith.apply import _load_manifest
+    from jobsmith.db import open_pipeline_db, put_state
+
+    db_path = _seed_apply_config(tmp_path)
+    slug = "acme-ml-engineer"
+    app_dir = tmp_path / "private" / "applications" / slug
+    app_dir.mkdir(parents=True)
+    # Disk file deliberately absent — DB row is the source of truth.
+
+    manifest = {
+        "run_id": "run-1",
+        "slug": slug,
+        "invocations": [{"specialist": "apply-jd-parser", "status": "ok"}],
+    }
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(conn, slug=slug, kind="manifest", content_blob=json.dumps(manifest))
+    finally:
+        conn.close()
+
+    result = _load_manifest(app_dir, tmp_path)
+    assert result == manifest
+
+
+def test_load_manifest_returns_none_when_db_row_absent(tmp_path: Path) -> None:
+    """No DB row → None (callers re-run from scratch)."""
+    from jobsmith.apply import _load_manifest
+
+    _seed_apply_config(tmp_path)
+    app_dir = tmp_path / "private" / "applications" / "no-such-slug"
+    app_dir.mkdir(parents=True)
+
+    assert _load_manifest(app_dir, tmp_path) is None
+
+
+def test_load_manifest_returns_none_when_blob_malformed(tmp_path: Path) -> None:
+    """Malformed JSON in the DB row → None (callers re-run, no crash)."""
+    from jobsmith.apply import _load_manifest
+    from jobsmith.db import open_pipeline_db, put_state
+
+    db_path = _seed_apply_config(tmp_path)
+    slug = "acme-corp"
+    app_dir = tmp_path / "private" / "applications" / slug
+    app_dir.mkdir(parents=True)
+
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(conn, slug=slug, kind="manifest", content_blob="{not valid json")
+    finally:
+        conn.close()
+
+    assert _load_manifest(app_dir, tmp_path) is None
+
+
+def test_load_manifest_returns_none_when_no_config(tmp_path: Path) -> None:
+    """No .apply-config.yaml under cwd → None (graceful fallthrough)."""
+    from jobsmith.apply import _load_manifest
+
+    app_dir = tmp_path / "private" / "applications" / "acme"
+    app_dir.mkdir(parents=True)
+
+    assert _load_manifest(app_dir, tmp_path) is None
+
+
+def test_phase_completed_with_db_backed_manifest(tmp_path: Path) -> None:
+    """_phase_completed integrates with DB-backed _load_manifest end-to-end."""
+    from jobsmith.apply import _load_manifest, _phase_completed
+    from jobsmith.db import open_pipeline_db, put_state
+
+    db_path = _seed_apply_config(tmp_path)
+    slug = "acme-ml-engineer"
+    app_dir = tmp_path / "private" / "applications" / slug
+    app_dir.mkdir(parents=True)
+
+    manifest = {
+        "invocations": [
+            {"specialist": s, "status": "ok"}
+            for s in (
+                "apply-jd-parser",
+                "apply-fit-scorer",
+                "apply-hm-enricher",
+                "apply-bullet-selector",
+                "apply-company-research",
+            )
+        ]
+    }
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(conn, slug=slug, kind="manifest", content_blob=json.dumps(manifest))
+    finally:
+        conn.close()
+
+    loaded = _load_manifest(app_dir, tmp_path)
+    assert _phase_completed(loaded, "gather") is True
+    assert _phase_completed(loaded, "draft") is False
