@@ -360,11 +360,34 @@ class RunSupervisor:
             started_at=_now_iso(),
             finished_at=None,
         )
+        # trk-60217f9f Pass 4 + roborev MEDIUM (job 951): initialise the
+        # apply_state_log cursor at the current max(id) for this slug so a
+        # rerun does not replay history. The first row this run writes will
+        # have id > log_last_id and will be forwarded exactly once.
+        log_last_id = 0
+        if db_path is not None and db_path.exists():
+            try:
+                from ..db import open_pipeline_db
+
+                _conn = open_pipeline_db(db_path)
+                try:
+                    row = _conn.execute(
+                        "SELECT COALESCE(MAX(id), 0) FROM apply_state_log "
+                        "WHERE slug = ?",
+                        (slug,),
+                    ).fetchone()
+                    log_last_id = int(row[0]) if row else 0
+                finally:
+                    _conn.close()
+            except sqlite3.Error:
+                log_last_id = 0
+
         record = _RunRecord(
             handle=handle,
             transcript_path=transcript_path,
             slug=slug,
             db_path=db_path,
+            _log_last_id=log_last_id,
         )
 
         # Spawn the subprocess BEFORE registering the run as active. Otherwise
