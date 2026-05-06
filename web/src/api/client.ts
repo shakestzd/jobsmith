@@ -147,13 +147,19 @@ export interface ApplicationCreated {
 export function postApplication(
   url: string,
   slug: string,
-  options: { force?: boolean } = {},
+  options: { force?: boolean; jdText?: string } = {},
 ): Promise<ApplicationCreated> {
-  return apiPost<ApplicationCreated>('/api/applications', {
+  // bug-1c800e09: when paste-text mode is active, send jd_text so the backend
+  // skips URL fetching (required for JS-rendered ATS portals like Eightfold).
+  const body: Record<string, unknown> = {
     url,
     slug,
     force: options.force === true,
-  });
+  };
+  if (options.jdText && options.jdText.trim() !== '') {
+    body.jd_text = options.jdText;
+  }
+  return apiPost<ApplicationCreated>('/api/applications', body);
 }
 
 /**

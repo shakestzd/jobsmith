@@ -126,9 +126,9 @@ function App() {
       {showNew && (
         <NewApplicationModal
           onClose={() => setShowNew(false)}
-          onLaunch={(slug: string, url: string) => {
+          onLaunch={(slug: string, url: string, jdText?: string) => {
             setShowNew(false);
-            postApplication(url, slug)
+            postApplication(url, slug, { jdText })
               .then((created) => setOpenSlug(created.slug))
               .catch(() => setOpenSlug(slug));
           }}

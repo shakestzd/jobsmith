@@ -86,9 +86,46 @@ describe('NewApplicationModal', () => {
     expect(applyBtn).toHaveAttribute('type', 'submit');
     fireEvent.click(applyBtn);
     expect(onLaunch).toHaveBeenCalledTimes(1);
-    // first arg: locally-derived slug; second arg: the raw job URL
+    // first arg: locally-derived slug; second arg: the raw job URL;
+    // third arg (jdText): undefined when "fetch from url" is the active mode
     expect(onLaunch.mock.calls[0][0]).toMatch(/linear-product-engineer/);
     expect(onLaunch.mock.calls[0][1]).toMatch(/^https?:\/\//);
+    expect(onLaunch.mock.calls[0][2]).toBeUndefined();
+  });
+
+  // bug-1c800e09: paste-text mode must propagate jdText to onLaunch so the
+  // backend can pass --jd-text-file instead of trying to fetch the URL.
+  it('paste-text mode forwards pasted JD text as jdText to onLaunch', () => {
+    const onLaunch = vi.fn();
+    render(<NewApplicationModal onClose={vi.fn()} onLaunch={onLaunch} />);
+
+    // activate paste mode
+    fireEvent.click(screen.getByText(/paste text/i));
+
+    // type into the now-visible textarea
+    const ta = screen.getByPlaceholderText(/paste the full job description/i);
+    fireEvent.change(ta, { target: { value: 'Senior Data Engineer at TestCo' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /review/i }));
+    fireEvent.click(screen.getByRole('button', { name: /apply/i }));
+
+    expect(onLaunch).toHaveBeenCalledTimes(1);
+    expect(onLaunch.mock.calls[0][2]).toBe('Senior Data Engineer at TestCo');
+  });
+
+  it('switching back from paste to fetch mode clears jdText from onLaunch payload', () => {
+    const onLaunch = vi.fn();
+    render(<NewApplicationModal onClose={vi.fn()} onLaunch={onLaunch} />);
+
+    fireEvent.click(screen.getByText(/paste text/i));
+    const ta = screen.getByPlaceholderText(/paste the full job description/i);
+    fireEvent.change(ta, { target: { value: 'should not survive mode switch' } });
+    fireEvent.click(screen.getByText(/fetch from url/i));
+
+    fireEvent.click(screen.getByRole('button', { name: /review/i }));
+    fireEvent.click(screen.getByRole('button', { name: /apply/i }));
+
+    expect(onLaunch.mock.calls[0][2]).toBeUndefined();
   });
 
   it('pressing Enter in the URL field does not trigger cancel', () => {

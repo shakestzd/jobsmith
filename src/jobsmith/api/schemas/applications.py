@@ -48,6 +48,11 @@ class ApplicationCreate(BaseModel):
     # restarts the pipeline from phase 1 even if prior artifacts exist for
     # this slug. Required to re-run any application that already completed.
     force: bool = False
+    # Pasted job-description text (frontend "paste text" mode). When non-empty
+    # the supervisor writes it to a temp file and passes --jd-text-file so the
+    # apply pipeline uses it instead of fetching ``url`` (needed for JS-rendered
+    # ATS portals like Microsoft Eightfold). bug-1c800e09.
+    jd_text: str | None = None
 
 
 class ApplicationCreated(BaseModel):

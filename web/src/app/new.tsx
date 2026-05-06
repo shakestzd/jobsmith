@@ -15,11 +15,12 @@ export interface NewApplicationModalProps {
   onClose: () => void;
   /**
    * Called when the user confirms the application launch.
-   * Receives the locally-derived slug and the raw job URL so the caller
-   * can hand both to `postApplication(url, slug)` and then navigate to
-   * the server-assigned slug.
+   * Receives the locally-derived slug, the raw job URL, and (when the
+   * "paste text" source mode is active) the pasted JD text. Callers pass
+   * jdText through to `postApplication(url, slug, { jdText })` so the
+   * backend skips URL fetching for JS-rendered ATS portals (bug-1c800e09).
    */
-  onLaunch: (slug: string, url: string) => void;
+  onLaunch: (slug: string, url: string, jdText?: string) => void;
 }
 
 // ── Internal types ───────────────────────────────────────────────────────────
@@ -213,7 +214,7 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
           <button type="button" className="btn ghost" onClick={onClose}>cancel</button>
           {step === 1
             ? <button type="button" className="btn primary" onClick={() => setStep(2)}>review →</button>
-            : <button type="submit" className="btn primary" onClick={() => onLaunch(slug, url)}><Icon name="play" size={12} /> apply</button>
+            : <button type="submit" className="btn primary" onClick={() => onLaunch(slug, url, jdMode === 'paste' ? jdText : undefined)}><Icon name="play" size={12} /> apply</button>
           }
         </div>
       </div>

@@ -333,6 +333,95 @@ class TestPostApplicationsForce:
 
 
 # ---------------------------------------------------------------------------
+# 6b. jd_text propagates to --jd-text-file (bug-1c800e09)
+# ---------------------------------------------------------------------------
+
+
+class TestPostApplicationsJdText:
+    """The new-application form's "paste text" mode must reach the apply
+    pipeline as ``--jd-text-file <path>``. Prior to bug-1c800e09 the form
+    posted only ``url`` and the pipeline tried (and failed) to fetch JS-
+    rendered ATS portals like Microsoft Eightfold.
+    """
+
+    def test_jd_text_appends_jd_text_file_to_argv(self, client: TestClient) -> None:
+        """When body.jd_text is set, --jd-text-file <path> is in argv and the
+        pasted text is on disk at <path>."""
+        from jobsmith.api import applications as apps_mod
+
+        captured: dict[str, list[str]] = {}
+
+        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None):
+            captured["argv"] = argv
+            return "run-paste-001"
+
+        pasted = "Senior Data Engineer at TestCo\n\nResponsibilities: own data."
+        with patch.object(apps_mod.RunSupervisor, "start", new=fake_start):
+            resp = client.post(
+                "/api/applications",
+                json={
+                    "url": "https://js-rendered.example.com/jobs/eng",
+                    "slug": "paste-slug",
+                    "jd_text": pasted,
+                },
+                headers=_auth_header(),
+            )
+
+        assert resp.status_code == 201, resp.text
+        argv = captured["argv"]
+        assert "--jd-text-file" in argv, f"--jd-text-file missing from argv: {argv!r}"
+        idx = argv.index("--jd-text-file")
+        jd_path = Path(argv[idx + 1])
+        assert jd_path.exists(), f"jd-text-file path does not exist: {jd_path}"
+        assert jd_path.read_text(encoding="utf-8") == pasted
+
+    def test_jd_text_omitted_no_jd_text_file_in_argv(self, client: TestClient) -> None:
+        """When jd_text is absent, --jd-text-file is NOT in argv (URL fetched)."""
+        from jobsmith.api import applications as apps_mod
+
+        captured: dict[str, list[str]] = {}
+
+        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None):
+            captured["argv"] = argv
+            return "run-fetch-001"
+
+        with patch.object(apps_mod.RunSupervisor, "start", new=fake_start):
+            resp = client.post(
+                "/api/applications",
+                json={"url": "https://example.com/jobs/eng", "slug": "fetch-slug"},
+                headers=_auth_header(),
+            )
+
+        assert resp.status_code == 201, resp.text
+        assert "--jd-text-file" not in captured["argv"]
+
+    def test_jd_text_empty_string_treated_as_omitted(self, client: TestClient) -> None:
+        """An empty jd_text string (e.g., user toggled paste mode but typed nothing)
+        must NOT add --jd-text-file (else apply would read a zero-byte file)."""
+        from jobsmith.api import applications as apps_mod
+
+        captured: dict[str, list[str]] = {}
+
+        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None):
+            captured["argv"] = argv
+            return "run-empty-001"
+
+        with patch.object(apps_mod.RunSupervisor, "start", new=fake_start):
+            resp = client.post(
+                "/api/applications",
+                json={
+                    "url": "https://example.com/jobs/eng",
+                    "slug": "empty-paste",
+                    "jd_text": "",
+                },
+                headers=_auth_header(),
+            )
+
+        assert resp.status_code == 201, resp.text
+        assert "--jd-text-file" not in captured["argv"]
+
+
+# ---------------------------------------------------------------------------
 # 6. _launch_run argv parses against the live CLI (roborev job 940 fix)
 # ---------------------------------------------------------------------------
 
