@@ -741,6 +741,54 @@ describe('ApplicationDetail SSE phase wiring (feat-6e148975)', () => {
     });
   });
 
+  // bug-8ade6f70: when the SSE stream emits phase=...,status=failed, the UI
+  // must show the stuck phase as "failed" — not perpetually "running" — and
+  // the specialists in that phase must drop out of "running" too.
+  it('phase tracker shows "failed" status when SSE emits gather/failed', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'running',
+      phase: 'gather',
+      finished_at: null,
+      run_id: 'run-sse-fail-1',
+    });
+    render(<ApplicationDetail slug="sse-test-fail-1" back={() => {}} />);
+    await waitFor(() => expect(lastFakeEs).not.toBeNull());
+
+    // Pipeline starts with gather/running.
+    await act(async () => {
+      lastFakeEs!.emit('phase', {
+        run_id: 'run-sse-fail-1',
+        phase: 'gather',
+        status: 'running',
+        started_at: '2026-05-05T10:00:00Z',
+        finished_at: null,
+      });
+    });
+
+    // Then a terminal failure arrives (synth_terminal_phase_failed payload).
+    await act(async () => {
+      lastFakeEs!.emit('phase', {
+        run_id: 'run-sse-fail-1',
+        phase: 'gather',
+        status: 'failed',
+        last_phase: 'gather',
+        error_excerpt: 'apply-bullet-selector halted',
+        started_at: '2026-05-05T10:00:00Z',
+        finished_at: '2026-05-05T10:08:00Z',
+      });
+    });
+
+    // Phase tracker for PHASE 1 must show "failed" (and not "running").
+    await waitFor(() => {
+      const phaseStatuses = document.querySelectorAll('.phase-status');
+      const texts = Array.from(phaseStatuses).map(el => el.textContent ?? '');
+      expect(texts.some(t => /failed/i.test(t))).toBe(true);
+      // The first phase must NOT be reporting "running".
+      expect(/running/i.test(texts[0] ?? '')).toBe(false);
+    });
+  });
+
   it('anti-regression: initial GET with phase=running does not show all phases as queued', async () => {
     // When the initial GET already shows status=running, the phase tracker
     // must NOT show all phases frozen at "queued".

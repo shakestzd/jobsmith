@@ -28,7 +28,7 @@ export interface ApplicationDetailProps {
 
 // ── Phase-related helpers ────────────────────────────────────────────────────
 
-type PhaseStatus = 'done' | 'running' | 'queued';
+type PhaseStatus = 'done' | 'running' | 'queued' | 'failed';
 
 interface PhaseSpec {
   num: 1 | 2 | 3;
@@ -180,6 +180,7 @@ function PhaseCard({ num, name, blurb, status, progress, onClick, active, meta }
           {status === 'running' && <><span className="spin" /> running</>}
           {status === 'done' && <><Icon name="check" size={12} className="check" style={{ color: 'var(--success)' }} /> done</>}
           {status === 'queued' && <>queued</>}
+          {status === 'failed' && <><Icon name="x" size={12} style={{ color: 'var(--danger, #e55)' }} /> failed</>}
         </span>
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--fg-muted)', marginBottom: 8 }}>{blurb}</div>
@@ -200,9 +201,15 @@ interface PipelineTabProps {
   running: boolean;
   phase: number;
   progress: ProgressMap;
+  /**
+   * SSE-derived terminal status. When 'failed', the active phase's
+   * specialists render as 'failed' rather than perpetually 'running'
+   * (bug-8ade6f70). 'done' / 'rendered' map to 100% completion.
+   */
+  sseStatus: AppStatus | null;
 }
 
-function PipelineTab({ events, running, phase, progress }: PipelineTabProps) {
+function PipelineTab({ events, running, phase, progress, sseStatus }: PipelineTabProps) {
   const logRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (logRef.current) {
@@ -254,20 +261,22 @@ function PipelineTab({ events, running, phase, progress }: PipelineTabProps) {
             {phaseSpec.specs.map(s => {
               const pct = phaseDone ? 100 : Math.min(100, progress[phaseNum] * (1 + Math.random() * 0.4));
               void pct; // computed but used only implicitly via done/running/queued label
-              const iconName: IconName = phaseDone ? 'check' : 'dot';
+              // bug-8ade6f70: when the SSE stream reports a terminal failure
+              // and the active phase did not complete, the specialists in
+              // that phase are NOT still running — render them as 'failed'.
+              const phaseFailed = sseStatus === 'failed' && !phaseDone;
+              const iconName: IconName = phaseDone ? 'check' : (phaseFailed ? 'x' : 'dot');
+              const iconColor = phaseDone
+                ? 'var(--success)'
+                : (phaseFailed ? 'var(--danger, #e55)' : 'var(--accent)');
+              const label = phaseDone
+                ? `${(Math.random() * 1.5 + 0.4).toFixed(1)}s`
+                : (phaseFailed ? 'failed' : (progress[phaseNum] > 0 ? 'running' : 'queued'));
               return (
                 <div key={s} style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Icon
-                    name={iconName}
-                    size={12}
-                    style={{ color: phaseDone ? 'var(--success)' : 'var(--accent)' }}
-                  />
+                  <Icon name={iconName} size={12} style={{ color: iconColor }} />
                   <span className="mono-sm" style={{ flex: 1 }}>{s}</span>
-                  <span className="mono-sm" style={{ color: 'var(--fg-subtle)' }}>
-                    {phaseDone
-                      ? `${(Math.random() * 1.5 + 0.4).toFixed(1)}s`
-                      : (progress[phaseNum] > 0 ? 'running' : 'queued')}
-                  </span>
+                  <span className="mono-sm" style={{ color: 'var(--fg-subtle)' }}>{label}</span>
                 </div>
               );
             })}
@@ -1147,9 +1156,14 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         {PHASES.map((p, i) => {
           const pr = progress[p.num];
           const firstIncomplete = ([1, 2, 3] as const).findIndex(n => progress[n] < 100);
+          // bug-8ade6f70: when SSE reports a terminal failure, the phase that
+          // didn't complete is failed — not still 'running' or 'queued'.
+          const isStuckPhase = sseStatus === 'failed' && i === firstIncomplete;
           const status: PhaseStatus = pr >= 100
             ? 'done'
-            : (running && i === firstIncomplete ? 'running' : 'queued');
+            : (isStuckPhase
+              ? 'failed'
+              : (running && i === firstIncomplete ? 'running' : 'queued'));
           return (
             <PhaseCard
               key={p.num}
@@ -1178,7 +1192,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         ))}
       </div>
 
-      {tab === 'pipeline' && <PipelineTab events={events} running={running} phase={activePhase} progress={progress} />}
+      {tab === 'pipeline' && <PipelineTab events={events} running={running} phase={activePhase} progress={progress} sseStatus={sseStatus} />}
       {tab === 'artifacts' && <ArtifactsTab artifacts={apiDetail?.artifacts ?? []} />}
       {tab === 'factcheck' && <FactCheckTab artifacts={apiDetail?.artifacts ?? []} />}
       {tab === 'anchors' && <AnchorCheckTab artifacts={apiDetail?.artifacts ?? []} />}
