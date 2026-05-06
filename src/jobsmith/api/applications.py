@@ -179,13 +179,51 @@ async def _launch_run(
     terminal-phase guard (S6, feat-438090af) can synth a phase=failed
     SSE event when the subprocess dies without emitting one.
     """
-    argv = [sys.executable, "-m", "jobsmith.cli", "apply", url, "--slug", slug]
+    # ``--yes`` is mandatory under the supervisor: the subprocess has stdin
+    # wired to /dev/null, so the inter-phase ``click.confirm`` gate would
+    # raise ``click.Abort`` and the whole pipeline would exit non-zero
+    # immediately after phase 1 completes (trk-60217f9f live-test surfaced
+    # this — the UI said --yes but the supervisor never propagated it).
+    argv = [
+        sys.executable,
+        "-m",
+        "jobsmith.cli",
+        "apply",
+        url,
+        "--slug",
+        slug,
+        "--yes",
+    ]
     if force:
         argv.append("--force")
     transcript_path = _resolve_transcript_path(slug, cwd)
+    db_path = _resolve_db_path(cwd)
     return await supervisor.start(
-        slug=slug, argv=argv, cwd=cwd, transcript_path=transcript_path
+        slug=slug,
+        argv=argv,
+        cwd=cwd,
+        transcript_path=transcript_path,
+        db_path=db_path,
     )
+
+
+def _resolve_db_path(cwd: Path) -> Path | None:
+    """Return ``<cwd>/<config.output.jobsmith_db>`` or ``None`` on failure.
+
+    Threaded into ``supervisor.start`` so the new ``_tail_state_log``
+    (trk-60217f9f Pass 4) can poll apply_state_log by row id instead of
+    file offset. ``None`` falls back to the legacy file-tail path.
+    """
+    try:
+        from jobsmith.config import find_config, load_config
+
+        config_path = find_config(cwd)
+        if config_path is None:
+            return None
+        config = load_config(config_path)
+        return (cwd / config.output.jobsmith_db).resolve()
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
