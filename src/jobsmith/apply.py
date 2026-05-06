@@ -185,35 +185,13 @@ _PHASE_MAX_TURNS: dict[str, int] = {
 
 # ---------------------------------------------------------------------------
 # PipelineEvent — phase-granular events from run_phase_iter()
+#
+# Canonical home: jobsmith.core.events (trk-ad6d8227 Slice 1). Re-exported
+# here so existing imports of ``jobsmith.apply.PipelineEvent`` keep working
+# until callers migrate.
 # ---------------------------------------------------------------------------
 
-
-@dataclass
-class PipelineEvent:
-    """A phase-granular event emitted by :func:`run_phase_iter`.
-
-    Attributes
-    ----------
-    kind:
-        Event kind. One of:
-        - ``"phase_started"``  — phase loop entered.
-        - ``"phase_complete"`` — phase emitted ``<<PHASE_COMPLETE>>``.
-        - ``"phase_failed"``   — phase emitted ``<<PHASE_FAILED>>``.
-        - ``"slug_changed"``   — canonical slug differs from starting slug
-          after gather reconciliation.
-        - ``"guard_failed"``   — ``_run_step45_orchestration`` returned non-zero.
-        - ``"cancelled"``      — generator stopped because ``cancel_event`` was set.
-    phase:
-        Phase name at time of event (``"gather"``, ``"draft"``, ``"render"``).
-    payload:
-        Kind-specific data dict. ``"slug_changed"`` carries
-        ``{"old_slug": ..., "new_slug": ...}``; ``"guard_failed"`` carries
-        ``{"rc": ...}``; others are ``{}``.
-    """
-
-    kind: str
-    phase: str
-    payload: dict = field(default_factory=dict)
+from jobsmith.core.events import PipelineEvent  # noqa: E402,F401
 
 
 # ---------------------------------------------------------------------------
