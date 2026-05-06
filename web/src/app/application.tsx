@@ -37,24 +37,40 @@ interface PhaseSpec {
   specs: string[];
 }
 
+// Specialist names mirror the canonical PHASE_SPECIALISTS map in
+// src/jobsmith/_state_readers.py. Keep these two in sync — divergence
+// surfaces as "specialist X failed" panel rows for specialists the
+// orchestrator never actually dispatched.
 const PHASES: PhaseSpec[] = [
   {
     num: 1,
     name: 'gather',
-    blurb: 'parse JD, score anchors, build spec.json',
-    specs: ['apply-jd-parser', 'apply-anchor-scorer', 'apply-spec-builder'],
+    blurb: 'parse JD, score fit, dispatch gather specialists',
+    specs: [
+      'apply-jd-parser',
+      'apply-fit-scorer',
+      'apply-hm-enricher',
+      'apply-bullet-selector',
+      'apply-company-research',
+    ],
   },
   {
     num: 2,
     name: 'draft',
-    blurb: 'select bullets, draft cover, fact-check',
-    specs: ['apply-bullet-selector', 'apply-cover-drafter', 'apply-factchecker'],
+    blurb: 'prose-writer + prose-qa loop until pass',
+    specs: ['apply-prose-writer', 'apply-prose-qa'],
   },
   {
     num: 3,
     name: 'render',
-    blurb: 'assemble _variables.yml, quarto render',
-    specs: ['apply-assembler', 'apply-renderer'],
+    blurb: 'render resume + cover letter + index, ATS check',
+    specs: [
+      'apply-resume-renderer',
+      'apply-portfolio-ats-checker',
+      'apply-visual-layout-reviewer',
+      'apply-cover-letter-writer',
+      'apply-index-writer',
+    ],
   },
 ];
 
