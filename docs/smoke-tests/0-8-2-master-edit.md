@@ -106,29 +106,45 @@ work        found: ['SMOKE-0-8-2: bullet added via UI to verify wire-up.']
 All four UI-driven edits persisted to the `master_content` table. This is
 the direct evidence that the wire-up writes to the DB.
 
-## Full-pipeline attempt (out-of-scope follow-up)
+## Full-pipeline end-to-end (DB-as-source-of-truth proof)
 
-Tried running `jobsmith apply` from the new-application form to verify
-the apply pipeline reads master content from the DB end-to-end. Three
-attempts failed before phase 1 could surface master content into spec.json:
+After fixing `bug-96d070f7` and `bug-1c800e09`, ran `jobsmith apply`
+from the new-application form against
+`https://job-boards.greenhouse.io/reddit/jobs/7445224` (a static
+Greenhouse JD). Slug: `job-boards-7445224-2026-05`.
 
-1. Run 1 — `specialist-contracts.yaml` had `frozen_at: null` (auto-freeze
-   didn't run for this install path). Manually froze it.
-2. Run 2 — Microsoft Eightfold portal is JS-rendered; WebFetch returned no
-   usable JD. The CLI has `--jd-text` for this; the form has a "paste text"
-   mode.
-3. Run 3 — Switched to "paste text" mode, pasted a fabricated Microsoft
-   data-engineer JD. Backend received `jd_url` (the still-populated URL
-   field) and `jd_text: null` — the form's paste-text radio doesn't actually
-   suppress the URL submission.
+**SMOKE markers found in agent outputs**, proving the apply pipeline
+reads master content from the DB (not from disk YAML):
 
-Filed as `bug-1c800e09` (form regression, not 0.8.2 scope). End-to-end
-apply-pipeline validation is deferred until that lands.
+```
+$ grep -oE '(Programming-SMOKE-0-8-2|Northeastern University \(SMOKE\)|Pat Doe \(SMOKE\)|SMOKE-0-8-2: bullet[^"]*)' transcript.jsonl | sort -u
+Northeastern University (SMOKE)
+Pat Doe (SMOKE)
+Programming-SMOKE-0-8-2
+SMOKE-0-8-2: bullet added via UI to verify wire-up.
+```
+
+The bullet-selector specialist explicitly logged the SMOKE-edited bullet
+in `bullet-decisions.json`:
+
+```json
+"pos1-b6": "Dropped SMOKE test artifact — plaintext 'SMOKE-0-8-2: bullet
+  added via UI to verify wire-up.' is not a real resume bullet and
+  carries no metric."
+```
+
+YAML files on disk remained at the post-export SHA-256 throughout the
+apply run — the pipeline read from the DB, not from disk. ✓
 
 ## Sign-off
 
 - [x] All 5 PUT/POST flows returned 2xx
-- [ ] Pre-state and mid-state SHA-256 match — **4 of 5; benchmark.md regressed (bug-96d070f7)**
+- [x] Pre-state and mid-state SHA-256 match for all sections
+      (benchmark regression `bug-96d070f7` fixed)
 - [x] Post-export YAML SHA-256 differs (export regenerates files)
 - [x] `git diff` shows only intentional edits + preserved comments
-- [x] DB confirmed as source-of-truth: all 4 UI edits persisted in `master_content` table
+- [x] DB confirmed as source-of-truth: all 4 UI edits persisted in
+      `master_content` table
+- [x] **End-to-end pipeline confirms DB read**: SMOKE markers from the DB
+      reached the apply specialist agents (Reddit Greenhouse JD run);
+      YAML on disk untouched by the pipeline.
