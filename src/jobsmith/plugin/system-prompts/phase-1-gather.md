@@ -65,7 +65,20 @@ After it writes `jd-parsed.json`:
   `Bash("jobsmith db rekey-slug --from {STARTING_SLUG} --to {CANONICAL_SLUG}")`
   This wraps every ``apply_state`` and ``apply_state_log`` row under `STARTING_SLUG` (including the JD parser's `spec-apply-jd-parser`, `jd-parsed`, and `apply-jd-parser-result`) into one transaction. Idempotent when slugs match (no-op).
 - Create `applications/{CANONICAL_SLUG}/.apply-state/` and move any `STARTING_SLUG` on-disk artifacts in (jd-parsed.json, voice-profile.json, session-id, transcript.jsonl).
-- Create `applications/{CANONICAL_SLUG}/documents/` with `_extensions` symlink. The Quarto extension bundle lives at `shared/extensions/_extensions` (project root); link relatively so the four `..` segments climb out of `applications/{CANONICAL_SLUG}/documents/` back to the repo root: `(cd applications/{CANONICAL_SLUG}/documents && ln -sf ../../../../shared/extensions/_extensions _extensions)`. If `shared/extensions/_extensions` is missing, halt with `<<PHASE_FAILED: gather: shared/extensions/_extensions not found — Quarto extension bundle is required for render>>` rather than skipping the symlink.
+- Create `applications/{CANONICAL_SLUG}/documents/` with the `_extensions` symlink Quarto needs for the render phase. Probe these paths IN ORDER and pick the FIRST one that exists as a real directory (resolve symlinks):
+  1. `shared/extensions/_extensions` (current convention)
+  2. `templates/extensions/_extensions` (legacy convention)
+
+  Use `Bash` (`test -d` resolves symlinks):
+  ```bash
+  for cand in shared/extensions/_extensions templates/extensions/_extensions; do
+    if [ -d "$cand" ]; then EXT_TARGET="$cand"; break; fi
+  done
+  ```
+  Then create the relative symlink so the four `..` segments climb out of `applications/{CANONICAL_SLUG}/documents/` back to the repo root:
+  `(cd applications/{CANONICAL_SLUG}/documents && ln -sf "../../../../$EXT_TARGET" _extensions)`.
+
+  If neither path resolves to a real directory, log a warning to the manifest's `notes[]` and continue — the gather phase does not need the extension bundle. The render phase will halt later if it actually requires it. Do NOT halt gather here.
 - Initialize the manifest in the DB under the canonical slug:
   `Bash("jobsmith db put-state --slug {CANONICAL_SLUG} --kind manifest" <<< '{"run_id":"…","slug":"{CANONICAL_SLUG}","started_at":"…","role_type":"…","invocations":[]}')`.
 

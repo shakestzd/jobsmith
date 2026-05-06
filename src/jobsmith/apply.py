@@ -2052,6 +2052,7 @@ def _run_apply_phases(
         # (URL-derived) slug as if it were canonical.  Step 4/5 runs before
         # phase 2 (in Step 3pre above) regardless of how gather got "done".
         if phase_name == "gather":
+            pre_reconcile_slug = slug
             new_slug, reconciled = _reconcile_canonical_slug(
                 slug, resolved_cwd, started_at
             )
@@ -2073,6 +2074,29 @@ def _run_apply_phases(
             # final UPDATE in run_apply's finally-block records the correct
             # application directory (roborev #923 HIGH 2).
             db_slug_ref[0] = slug
+
+            # Roborev job 956 MEDIUM: catch any apply_state_log row the
+            # renderer wrote between the orchestrator's mid-phase
+            # ``rekey-slug`` and the gather event-loop close (the
+            # renderer's ``_transcript_slug`` is captured at
+            # ``open_transcript`` time and is the URL-derived starting
+            # slug for phase 1; transcript rows after rekey continue
+            # tagging that slug). Re-rekey idempotently from the old
+            # slug to the canonical one so apply_state and apply_state_log
+            # are fully consolidated under a single slug per run; subsequent
+            # ``jobsmith db list-state --slug`` and ``reset-state --slug``
+            # operations cover everything.
+            if (
+                reconciled
+                and pre_reconcile_slug != slug
+                and db_conn is not None
+            ):
+                with contextlib.suppress(Exception):
+                    from .db import rekey_slug as _rekey_slug
+
+                    _rekey_slug(
+                        db_conn, from_slug=pre_reconcile_slug, to_slug=slug
+                    )
 
             # Render per-phase summary panel before the confirm gate
             state_dir = _apply_state_dir(slug, resolved_cwd)
