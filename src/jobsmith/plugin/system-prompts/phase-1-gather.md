@@ -117,7 +117,7 @@ When all five phase-1 specialists (jd-parser, fit-scorer, hm-enricher, bullet-se
 ## Failure mode
 
 - If `specialist-contracts.yaml` has `frozen_at: null` → emit `<<PHASE_FAILED: gather: Contracts not frozen; freeze specialist-contracts.yaml before running apply.>>` and stop immediately. Do NOT emit the phase-complete marker.
-- If any Step 2 specialist returns `status=halt` → surface the halt reason and the relevant state files to the user. Do NOT emit the phase-complete marker.
+- If any Step 2 specialist returns `status=halt` → surface the halt reason and the relevant state files to the user, **then emit** `<<PHASE_FAILED: gather: <agent>-halted: <one-line reason>>>` on its own line and stop. (Without this marker the supervisor cannot push a structured `phase_failed` event to the web UI — see bug-0489bff3. Phase 2's draft.md already follows this pattern.) Do NOT emit the phase-complete marker.
 - If apply-company-research fails WebFetch → it writes a callout-warning sentinel to `company-research.md`. This is NOT a halt; continue to Step 3 normally.
 - If apply-hm-enricher detects no HM → it writes a sentinel `detected=no` to `hm-snippet.md`. This is NOT a halt; continue to Step 3 normally and report "HM: not detected" in the analysis pause output.
 - Present the Step 3 analysis pause output, then emit `<<PHASE_COMPLETE: gather>>` and STOP regardless of dealbreakers — the human decision to proceed happens in the Python caller after reading the marker.

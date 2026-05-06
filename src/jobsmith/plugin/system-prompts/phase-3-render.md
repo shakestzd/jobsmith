@@ -148,9 +148,9 @@ When resume.pdf exists, cover-letter-draft.md exists (or portal forbids cover le
 
 ## Failure mode
 
-- If `apply-resume-renderer` fails on retry → halt and surface `render-log.json`. Do NOT emit the phase-complete marker.
-- If `apply-portfolio-ats-checker` returns a structural failure → halt with the specific issue. Do NOT emit the phase-complete marker.
-- If `apply-visual-layout-reviewer` fails after 2 re-render iterations → halt and surface the PNG + issues. Do NOT emit the phase-complete marker.
-- If `jobsmith assemble` fails → halt and surface the error. Do NOT emit the phase-complete marker.
-- On any halt: print halt reason + relevant state file paths, wait for the user's decision. A specialist returning `status=halt` is the signal — do not infer halts from silence.
+- If `apply-resume-renderer` fails on retry → halt, surface `render-log.json`, **then emit** `<<PHASE_FAILED: render: resume-renderer-halted: <one-line reason>>>` on its own line. Do NOT emit the phase-complete marker.
+- If `apply-portfolio-ats-checker` returns a structural failure → halt with the specific issue, **then emit** `<<PHASE_FAILED: render: portfolio-ats-checker-halted: <one-line reason>>>`. Do NOT emit the phase-complete marker.
+- If `apply-visual-layout-reviewer` fails after 2 re-render iterations → halt, surface the PNG + issues, **then emit** `<<PHASE_FAILED: render: visual-layout-reviewer-halted: <one-line reason>>>`. Do NOT emit the phase-complete marker.
+- If `jobsmith assemble` fails → halt, surface the error, **then emit** `<<PHASE_FAILED: render: assemble-failed: <one-line reason>>>`. Do NOT emit the phase-complete marker.
+- On any halt: print halt reason + relevant state file paths AND emit the `<<PHASE_FAILED: render: ...>>` marker on its own line so the supervisor can push a structured `phase_failed` event to the web UI (bug-0489bff3). A specialist returning `status=halt` is the signal — do not infer halts from silence.
 - If `apply-db-logger` fails → log a warning in `manifest.json` but do NOT halt and do NOT suppress the phase-complete marker; the assemble + index.qmd success is the gate.
