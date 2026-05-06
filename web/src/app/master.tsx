@@ -678,7 +678,11 @@ const SkillTab = forwardRef<TabHandle, DirtyTabProps>(function SkillTab({ onDirt
   // Notify parent of dirty state changes.
   useEffect(() => { onDirtyChange(isDirty); }, [isDirty, onDirtyChange]);
 
-  const doSave = useCallback(async (ifMatchOverride?: string | null) => {
+  const doSave = useCallback(async (ifMatchOverride?: string | null): Promise<boolean> => {
+    // Returns true on a successful PUT (200), false on 412/404/network/etc.
+    // The unsaved-changes guard relies on this return value to decide whether
+    // it is safe to switch tabs — the prior void return led to silent edit
+    // loss on Save & switch when the PUT failed. (roborev job 950 HIGH)
     setSaveState({ kind: 'saving' });
     const effectiveEtag = ifMatchOverride !== undefined ? ifMatchOverride : etag;
     try {
@@ -689,6 +693,7 @@ const SkillTab = forwardRef<TabHandle, DirtyTabProps>(function SkillTab({ onDirt
       setSaveState({ kind: 'saved' });
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
       savedTimerRef.current = setTimeout(() => setSaveState({ kind: 'idle' }), 2000);
+      return true;
     } catch (err) {
       if (err instanceof JobsmithApiError && err.status === 412) {
         // Capture new ETag from 412 response if available (backend may include it).
@@ -699,6 +704,7 @@ const SkillTab = forwardRef<TabHandle, DirtyTabProps>(function SkillTab({ onDirt
       } else {
         setSaveState({ kind: 'idle' });
       }
+      return false;
     }
   }, [etag, skills, refetch]);
 
@@ -706,12 +712,10 @@ const SkillTab = forwardRef<TabHandle, DirtyTabProps>(function SkillTab({ onDirt
   useImperativeHandle(ref, () => ({
     requestSave: async () => {
       if (!isDirty) return true;
-      try {
-        await doSave();
-        return true;
-      } catch {
-        return false;
-      }
+      // doSave returns false on any non-2xx outcome (412 conflict, 404
+      // missing, network error). Propagate that so the guard keeps the
+      // user on the dirty tab instead of unmounting the editor.
+      return doSave();
     },
   }), [isDirty, doSave]);
 
@@ -761,7 +765,8 @@ const EducationTab = forwardRef<TabHandle, DirtyTabProps>(function EducationTab(
   // Notify parent of dirty state changes.
   useEffect(() => { onDirtyChange(isDirty); }, [isDirty, onDirtyChange]);
 
-  const doSave = useCallback(async (ifMatchOverride?: string | null) => {
+  const doSave = useCallback(async (ifMatchOverride?: string | null): Promise<boolean> => {
+    // Returns true on success, false on 412/404/network. roborev job 950.
     setSaveState({ kind: 'saving' });
     const effectiveEtag = ifMatchOverride !== undefined ? ifMatchOverride : etag;
     try {
@@ -772,6 +777,7 @@ const EducationTab = forwardRef<TabHandle, DirtyTabProps>(function EducationTab(
       setSaveState({ kind: 'saved' });
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
       savedTimerRef.current = setTimeout(() => setSaveState({ kind: 'idle' }), 2000);
+      return true;
     } catch (err) {
       if (err instanceof JobsmithApiError && err.status === 412) {
         setSaveState({ kind: 'conflict', newEtag: null });
@@ -781,19 +787,16 @@ const EducationTab = forwardRef<TabHandle, DirtyTabProps>(function EducationTab(
       } else {
         setSaveState({ kind: 'idle' });
       }
+      return false;
     }
   }, [etag, education, refetch]);
 
-  // Expose requestSave for MasterContent guard.
+  // Expose requestSave for MasterContent guard. Propagates doSave's success
+  // boolean so a failed Save & switch keeps the user on the dirty tab.
   useImperativeHandle(ref, () => ({
     requestSave: async () => {
       if (!isDirty) return true;
-      try {
-        await doSave();
-        return true;
-      } catch {
-        return false;
-      }
+      return doSave();
     },
   }), [isDirty, doSave]);
 
@@ -851,7 +854,8 @@ const AuthorTab = forwardRef<TabHandle, DirtyTabProps>(function AuthorTab({ onDi
   // Notify parent of dirty state changes.
   useEffect(() => { onDirtyChange(isDirty); }, [isDirty, onDirtyChange]);
 
-  const doSave = useCallback(async (ifMatchOverride?: string | null) => {
+  const doSave = useCallback(async (ifMatchOverride?: string | null): Promise<boolean> => {
+    // Returns true on success, false on 412/404/network. roborev job 950.
     setSaveState({ kind: 'saving' });
     const effectiveEtag = ifMatchOverride !== undefined ? ifMatchOverride : etag;
     try {
@@ -862,6 +866,7 @@ const AuthorTab = forwardRef<TabHandle, DirtyTabProps>(function AuthorTab({ onDi
       setSaveState({ kind: 'saved' });
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
       savedTimerRef.current = setTimeout(() => setSaveState({ kind: 'idle' }), 2000);
+      return true;
     } catch (err) {
       if (err instanceof JobsmithApiError && err.status === 412) {
         setSaveState({ kind: 'conflict', newEtag: null });
@@ -871,19 +876,16 @@ const AuthorTab = forwardRef<TabHandle, DirtyTabProps>(function AuthorTab({ onDi
       } else {
         setSaveState({ kind: 'idle' });
       }
+      return false;
     }
   }, [etag, author, rawExtras, refetch]);
 
-  // Expose requestSave for MasterContent guard.
+  // Expose requestSave for MasterContent guard. Propagates doSave's success
+  // boolean so a failed Save & switch keeps the user on the dirty tab.
   useImperativeHandle(ref, () => ({
     requestSave: async () => {
       if (!isDirty) return true;
-      try {
-        await doSave();
-        return true;
-      } catch {
-        return false;
-      }
+      return doSave();
     },
   }), [isDirty, doSave]);
 
@@ -930,7 +932,8 @@ const BenchmarkTab = forwardRef<TabHandle, DirtyTabProps>(function BenchmarkTab(
   // Notify parent of dirty state changes.
   useEffect(() => { onDirtyChange(isDirty); }, [isDirty, onDirtyChange]);
 
-  const doSave = useCallback(async (ifMatchOverride?: string | null) => {
+  const doSave = useCallback(async (ifMatchOverride?: string | null): Promise<boolean> => {
+    // Returns true on success, false on 412/404/network. roborev job 950.
     setSaveState({ kind: 'saving' });
     const effectiveEtag = ifMatchOverride !== undefined ? ifMatchOverride : etag;
     try {
@@ -941,6 +944,7 @@ const BenchmarkTab = forwardRef<TabHandle, DirtyTabProps>(function BenchmarkTab(
       setSaveState({ kind: 'saved' });
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
       savedTimerRef.current = setTimeout(() => setSaveState({ kind: 'idle' }), 2000);
+      return true;
     } catch (err) {
       if (err instanceof JobsmithApiError && err.status === 412) {
         setSaveState({ kind: 'conflict', newEtag: null });
@@ -950,19 +954,16 @@ const BenchmarkTab = forwardRef<TabHandle, DirtyTabProps>(function BenchmarkTab(
       } else {
         setSaveState({ kind: 'idle' });
       }
+      return false;
     }
   }, [etag, text, refetch]);
 
-  // Expose requestSave for MasterContent guard.
+  // Expose requestSave for MasterContent guard. Propagates doSave's success
+  // boolean so a failed Save & switch keeps the user on the dirty tab.
   useImperativeHandle(ref, () => ({
     requestSave: async () => {
       if (!isDirty) return true;
-      try {
-        await doSave();
-        return true;
-      } catch {
-        return false;
-      }
+      return doSave();
     },
   }), [isDirty, doSave]);
 

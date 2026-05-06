@@ -272,6 +272,57 @@ describe('Unsaved-changes guard — tab switch (feat-815279db)', () => {
     });
   });
 
+  // ── (d2) Save & switch on FAILED save stays on dirty tab (roborev job 950) ─
+
+  it('(d2) "Save & switch" with a 412 conflict stays on Skill tab; edits preserved', async () => {
+    // Regression: prior to roborev job 950 fix, doSave swallowed errors and
+    // requestSave always returned true — so the guard would unmount the
+    // dirty editor on a failed PUT, discarding the user's edits. Now the
+    // guard MUST keep the user on the dirty tab when the PUT fails.
+    const refetchSkill = vi.fn();
+    setupSectionMock({
+      skill: { data: SKILL_DATA, etag: '"etag-skill"', refetch: refetchSkill },
+      education: { data: EDUCATION_DATA, etag: '"etag-edu"', refetch: vi.fn() },
+    });
+
+    const conflictErr = new MockApiError('Precondition Failed', 412);
+    (apiPut as ReturnType<typeof vi.fn>).mockRejectedValue(conflictErr);
+
+    render(<MasterContent />);
+    fireEvent.click(screen.getByText(/skill\.yml/i));
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Python, TypeScript')).toBeInTheDocument();
+    });
+
+    // Make dirty.
+    fireEvent.change(screen.getByDisplayValue('Python, TypeScript'), {
+      target: { value: 'Python, TypeScript, Go' },
+    });
+
+    // Attempt nav to Education → guard dialog appears.
+    fireEvent.click(screen.getByText(/education\.yml/i));
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    // Click Save & switch — but the PUT will 412.
+    fireEvent.click(screen.getByRole('button', { name: /save & switch/i }));
+
+    // PUT was attempted.
+    await waitFor(() => {
+      expect(apiPut).toHaveBeenCalled();
+    });
+
+    // CRITICAL: the user's edits MUST still be visible — i.e. we are still
+    // on the Skill tab. Education's content (with its grep token) MUST NOT
+    // have rendered (which would imply the editor was unmounted).
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Python, TypeScript, Go')).toBeInTheDocument();
+    });
+    expect(screen.queryByDisplayValue(/Northeastern/i)).toBeNull();
+  });
+
   // ── (e) window.beforeunload fires when any tab is dirty ─────────────────
 
   it('(e) editing Skill then firing beforeunload sets returnValue to non-empty string', async () => {
