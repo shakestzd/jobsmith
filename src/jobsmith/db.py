@@ -51,6 +51,7 @@ _PIPELINE_MIGRATIONS = [
     ("001_initial_schema", _MIGRATIONS_DIR / "001_initial_schema.sql"),
     ("003_artifact_versioning", _MIGRATIONS_DIR / "003_artifact_versioning.sql"),
     ("004_master_content", _MIGRATIONS_DIR / "004_master_content.sql"),
+    ("005_apply_state", _MIGRATIONS_DIR / "005_apply_state.sql"),
 ]
 _REVIEW_MIGRATIONS = [
     ("001_review_schema", _MIGRATIONS_DIR / "001_review_schema.sql"),
