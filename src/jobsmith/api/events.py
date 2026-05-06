@@ -71,7 +71,12 @@ from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from jobsmith.api.events_poll import (
     _db_poll_once,
 )
-from jobsmith.api.supervisor import RunSupervisor, SynthPhaseEvent, get_supervisor
+from jobsmith.api.supervisor import (
+    RunSupervisor,
+    SynthPhaseEvent,
+    TranscriptEvent,
+    get_supervisor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -359,6 +364,20 @@ async def _stream(
                             "status": payload_obj.status,
                             "last_phase": payload_obj.last_phase,
                             "error_excerpt": payload_obj.error_excerpt,
+                        }),
+                    )
+                    saw_activity = True
+                    continue
+                if isinstance(payload_obj, TranscriptEvent):
+                    # Structured agent event tailed from transcript.jsonl
+                    # (bug-0e13706c). Forwarded as-is — the UI consumes
+                    # ``payload['type']`` (tool_call/tool_result/text) and
+                    # ``payload['_phase_boundary']`` for boundary markers.
+                    yield ServerSentEvent(
+                        event="transcript",
+                        data=json.dumps({
+                            "run_id": payload_obj.run_id,
+                            "payload": payload_obj.payload,
                         }),
                     )
                     saw_activity = True

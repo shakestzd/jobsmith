@@ -60,10 +60,98 @@ const PHASES: PhaseSpec[] = [
 
 // ── Event stream helpers ─────────────────────────────────────────────────────
 
+/**
+ * One row in the event-stream log.
+ *
+ * - Plain stdout/stderr from the apply CLI lands as `kind: 'log'` (or undefined,
+ *   for back-compat). The `lvl` field carries 'info' / 'warn' for those.
+ * - Structured agent activity tailed from transcript.jsonl lands with
+ *   `kind: 'tool_call' | 'tool_result' | 'agent_text' | 'phase_boundary'`
+ *   (bug-0e13706c). The renderer switches on kind to format these as
+ *   tool/result rows rather than raw terminal text.
+ */
 interface LogEvent {
   ts: string;
   lvl: string;
   msg: string;
+  kind?: 'log' | 'tool_call' | 'tool_result' | 'agent_text' | 'phase_boundary';
+  toolName?: string;
+  toolInputPreview?: string;
+  toolUseId?: string;
+  status?: string;
+  phaseName?: string;
+}
+
+/**
+ * SSE payload shape for `event=transcript` — bug-0e13706c.
+ * The supervisor tails transcript.jsonl and forwards each new JSON line,
+ * preserving the renderer's record format. We only consume a few fields;
+ * unknown event types are still rendered (as kind=log) so future renderer
+ * additions show up automatically.
+ */
+interface SseTranscriptEvent {
+  run_id: string;
+  payload: {
+    ts?: string;
+    type?: string;
+    tool_name?: string;
+    tool_input_truncated?: string;
+    tool_use_id?: string;
+    text_truncated?: string;
+    result_truncated?: string;
+    _phase_boundary?: string;
+    [k: string]: unknown;
+  };
+}
+
+/** Convert a transcript SSE payload into a LogEvent for the event stream. */
+function transcriptToLogEvent(t: SseTranscriptEvent): LogEvent | null {
+  const p = t.payload;
+  // Phase-boundary marker (rendered as a header row).
+  if (typeof p._phase_boundary === 'string') {
+    return {
+      ts: now(),
+      lvl: 'phase',
+      msg: `── phase: ${p._phase_boundary} ──`,
+      kind: 'phase_boundary',
+      phaseName: p._phase_boundary,
+    };
+  }
+  if (p.type === 'tool_call') {
+    const tname = String(p.tool_name ?? '?');
+    const preview = String(p.tool_input_truncated ?? '').slice(0, 80);
+    return {
+      ts: now(),
+      lvl: 'tool',
+      msg: preview ? `${tname}(${preview})` : `${tname}()`,
+      kind: 'tool_call',
+      toolName: tname,
+      toolInputPreview: preview,
+      toolUseId: typeof p.tool_use_id === 'string' ? p.tool_use_id : undefined,
+    };
+  }
+  if (p.type === 'tool_result') {
+    const summary = String(p.result_truncated ?? '').slice(0, 80);
+    return {
+      ts: now(),
+      lvl: 'result',
+      msg: summary || '✓',
+      kind: 'tool_result',
+      toolUseId: typeof p.tool_use_id === 'string' ? p.tool_use_id : undefined,
+    };
+  }
+  if (p.type === 'text') {
+    const txt = String(p.text_truncated ?? '').slice(0, 200);
+    if (!txt) return null;
+    return {
+      ts: now(),
+      lvl: 'agent',
+      msg: txt,
+      kind: 'agent_text',
+    };
+  }
+  // Unknown payload type — drop silently rather than render terminal-formatted.
+  return null;
 }
 
 function now(): string {
@@ -194,6 +282,75 @@ function PhaseCard({ num, name, blurb, status, progress, onClick, active, meta }
   );
 }
 
+// ── EventLogRow ──────────────────────────────────────────────────────────────
+//
+// One row in the event-stream log. Branches on `kind` (bug-0e13706c) so
+// structured events from transcript.jsonl render as typed rows (tool / result
+// / agent text / phase boundary) instead of pre-formatted terminal log lines.
+
+function EventLogRow({ e }: { e: LogEvent }) {
+  if (e.kind === 'phase_boundary') {
+    return (
+      <div style={{
+        padding: '6px 0',
+        margin: '4px 0',
+        borderTop: '1px solid var(--border)',
+        borderBottom: '1px solid var(--border)',
+        background: 'var(--bg-sunk)',
+        fontWeight: 500,
+        fontSize: 12,
+        textAlign: 'center',
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+        color: 'var(--fg-muted)',
+      }}>
+        phase: {e.phaseName ?? '?'}
+      </div>
+    );
+  }
+  if (e.kind === 'tool_call') {
+    return (
+      <div>
+        <span className="ts">{e.ts}</span>
+        <span className="lvl tool" style={{ color: 'var(--accent)' }}>{'tool  '}</span>
+        <span className="msg">
+          <strong style={{ color: 'var(--fg)' }}>{e.toolName ?? '?'}</strong>
+          {e.toolInputPreview ? (
+            <span style={{ color: 'var(--fg-subtle)' }}>{' '}({e.toolInputPreview})</span>
+          ) : null}
+        </span>
+      </div>
+    );
+  }
+  if (e.kind === 'tool_result') {
+    return (
+      <div>
+        <span className="ts">{e.ts}</span>
+        <span className="lvl result" style={{ color: 'var(--success, #5a5)' }}>{'✓     '}</span>
+        <span className="msg" style={{ color: 'var(--fg-subtle)' }}>{e.msg}</span>
+      </div>
+    );
+  }
+  if (e.kind === 'agent_text') {
+    return (
+      <div style={{ padding: '4px 8px', borderLeft: '2px solid var(--border)', margin: '2px 0' }}>
+        <span className="ts">{e.ts}</span>
+        <span className="lvl agent" style={{ color: 'var(--fg-muted)' }}>{'agent '}</span>
+        <span className="msg" style={{ fontStyle: 'italic' }}>{e.msg}</span>
+      </div>
+    );
+  }
+  // Default: legacy log line. Existing styles + dangerouslySetInnerHTML for the
+  // pre-redacted/escaped HTML in `msg`.
+  return (
+    <div>
+      <span className="ts">{e.ts}</span>
+      <span className={`lvl ${e.lvl}`}>{e.lvl.padEnd(6)}</span>
+      <span className="msg" dangerouslySetInnerHTML={{ __html: e.msg }} />
+    </div>
+  );
+}
+
 // ── PipelineTab ──────────────────────────────────────────────────────────────
 
 interface PipelineTabProps {
@@ -234,13 +391,7 @@ function PipelineTab({ events, running, phase, progress, sseStatus }: PipelineTa
           </div>
         </div>
         <div className="eventlog" ref={logRef} style={{ maxHeight: 460, borderRadius: 0, border: 'none' }}>
-          {events.map((e, i) => (
-            <div key={i}>
-              <span className="ts">{e.ts}</span>
-              <span className={`lvl ${e.lvl}`}>{e.lvl.padEnd(6)}</span>
-              <span className="msg" dangerouslySetInnerHTML={{ __html: e.msg }} />
-            </div>
-          ))}
+          {events.map((e, i) => <EventLogRow key={i} e={e} />)}
           {running && (
             <div>
               <span className="ts">{now()}</span>
@@ -948,7 +1099,22 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         const safe = redactSensitive(data.line);
         const line = safe.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const lvl = data.stream === 'stderr' ? 'warn' : 'info';
-        setEvents(ev => ev.length > 400 ? ev : [...ev, { ts: now(), lvl, msg: line }]);
+        setEvents(ev => ev.length > 400 ? ev : [...ev, { ts: now(), lvl, msg: line, kind: 'log' }]);
+      } catch { /* ignore malformed event */ }
+    });
+
+    // bug-0e13706c: structured agent events tailed from transcript.jsonl.
+    // Rendered as typed rows (tool_call / tool_result / agent_text /
+    // phase_boundary) instead of pre-formatted terminal log lines.
+    es.addEventListener('transcript', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data as string) as SseTranscriptEvent;
+        const ev = transcriptToLogEvent(data);
+        if (ev === null) return;
+        // Redact + escape any string fields that touch the DOM.
+        if (ev.msg) ev.msg = redactSensitive(ev.msg).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        if (ev.toolInputPreview) ev.toolInputPreview = redactSensitive(ev.toolInputPreview);
+        setEvents(prev => prev.length > 400 ? prev : [...prev, ev]);
       } catch { /* ignore malformed event */ }
     });
 

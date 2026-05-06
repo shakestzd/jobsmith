@@ -79,6 +79,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "LogLine",
     "SynthPhaseEvent",
+    "TranscriptEvent",
     "RunHandle",
     "RunSupervisor",
     "get_supervisor",
@@ -95,7 +96,7 @@ StreamName = Literal["stdout", "stderr"]
 RunStatus = Literal["running", "done", "failed", "killed"]
 
 # Union of items that can appear in the supervisor stream.
-StreamItem = "LogLine | SynthPhaseEvent"
+StreamItem = "LogLine | SynthPhaseEvent | TranscriptEvent"
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,26 @@ class LogLine:
     stream: StreamName
     line: str
     timestamp: str
+
+
+@dataclass(frozen=True)
+class TranscriptEvent:
+    """A structured event tailed from the apply pipeline's transcript.jsonl.
+
+    The renderer in ``jobsmith.render`` writes every agent event
+    (``tool_call``, ``tool_result``, ``text``, phase boundary markers) to
+    ``transcript.jsonl`` directly, bypassing stdout. The supervisor tails
+    the file and emits each new line as a TranscriptEvent so the SSE pump
+    can forward structured agent activity to the UI without parsing
+    terminal-formatted log lines (bug-0e13706c).
+
+    ``payload`` is the raw decoded JSON object, exactly as the renderer
+    wrote it. Consumers are expected to switch on ``payload['type']`` (or
+    ``payload['_phase_boundary']`` for boundary markers).
+    """
+
+    run_id: str
+    payload: dict
 
 
 @dataclass(frozen=True)
@@ -155,15 +176,24 @@ class _RunRecord:
 
     handle: RunHandle
     process: asyncio.subprocess.Process | None = None
-    # Buffer holds LogLine or SynthPhaseEvent items.
+    # Buffer holds LogLine, SynthPhaseEvent, or TranscriptEvent items.
     buffer: deque = field(default_factory=deque)
     subscribers: list[asyncio.Queue] = field(default_factory=list)
     drain_tasks: list[asyncio.Task] = field(default_factory=list)
     finished_event: asyncio.Event = field(default_factory=asyncio.Event)
-    # Optional transcript path for failure synthesis (feat-438090af).
+    # Optional transcript path for failure synthesis (feat-438090af) and
+    # structured event tailing (bug-0e13706c).
     transcript_path: Path | None = None
     # Stderr lines accumulated during drain for the synth excerpt.
     _stderr_tail: list[str] = field(default_factory=list)
+    # Transcript tail position (bytes consumed). The tailer resumes from here.
+    _transcript_offset: int = 0
+    # Set by _wait the moment the subprocess exits (BEFORE awaiting drain
+    # tasks). The transcript tailer uses this — not handle.status — to
+    # decide when to do its final read pass and return. Without this, the
+    # tailer would deadlock against _wait, which awaits the tailer before
+    # flipping handle.status.
+    _subprocess_exited: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +398,16 @@ class RunSupervisor:
                 name=f"supervisor-wait-{run_id}",
             )
         )
+        # bug-0e13706c: tail transcript.jsonl and forward each new event as
+        # a structured TranscriptEvent over SSE. Without this the rich
+        # tool_call/tool_result events the renderer writes only land on disk.
+        if transcript_path is not None:
+            record.drain_tasks.append(
+                asyncio.create_task(
+                    self._tail_transcript(record),
+                    name=f"supervisor-transcript-{run_id}",
+                )
+            )
 
         return run_id
 
@@ -391,11 +431,13 @@ class RunSupervisor:
             return None
         return run_id
 
-    async def stream(self, run_id: str) -> AsyncIterator[LogLine | SynthPhaseEvent]:
+    async def stream(self, run_id: str) -> AsyncIterator[LogLine | SynthPhaseEvent | TranscriptEvent]:
         """Yield items for ``run_id`` until the run terminates.
 
-        Items are either :class:`LogLine` (stdout/stderr output) or
-        :class:`SynthPhaseEvent` (synthesised terminal phase on failure).
+        Items are :class:`LogLine` (stdout/stderr output),
+        :class:`SynthPhaseEvent` (synthesised terminal phase on failure),
+        or :class:`TranscriptEvent` (structured event tailed from
+        transcript.jsonl — bug-0e13706c).
 
         Behaviour:
 
@@ -534,7 +576,120 @@ class RunSupervisor:
                 if len(record._stderr_tail) > 20:
                     record._stderr_tail = record._stderr_tail[-20:]
 
-    def _append(self, record: _RunRecord, item: LogLine | SynthPhaseEvent) -> None:
+    async def _tail_transcript(self, record: _RunRecord) -> None:
+        """Poll *record.transcript_path* and emit each new JSON line as a TranscriptEvent.
+
+        The renderer writes events incrementally with a flush after each
+        record (``render.py:_write_transcript``). This tailer:
+
+        - Polls every 100 ms for file growth (no inotify; the file may not
+          exist yet when the subprocess starts).
+        - Reads from the persisted byte offset (resumable across restarts —
+          though restarts are not supported today, the bookkeeping is cheap).
+        - Splits at newlines, ignores trailing partial lines (the next poll
+          will pick them up once the renderer flushes the newline).
+        - Decodes each line as JSON; non-JSON lines are dropped silently
+          (defensive: prevents one corrupt line from killing the stream).
+        - Stops when the run is no longer ``running`` and the file has no
+          more bytes after the offset.
+
+        Failures here must NEVER break the SSE stream — the loop is wrapped
+        in a try/except that logs and exits cleanly.
+        """
+        path = record.transcript_path
+        if path is None:
+            return
+        try:
+            while True:
+                exists = path.exists()
+                if exists:
+                    try:
+                        with path.open("rb") as fh:
+                            fh.seek(record._transcript_offset)
+                            chunk = fh.read()
+                            new_offset = record._transcript_offset + len(chunk)
+                    except OSError:
+                        chunk = b""
+                        new_offset = record._transcript_offset
+
+                    if chunk:
+                        # Defer offset advance until we've parsed a complete
+                        # line. If the last line is partial, leave its bytes
+                        # in the file (don't advance offset past them).
+                        text = chunk.decode("utf-8", errors="replace")
+                        complete, _, partial = text.rpartition("\n")
+                        consumed_bytes = len(chunk) - len(partial.encode("utf-8"))
+                        record._transcript_offset += consumed_bytes
+                        if complete:
+                            for raw_line in complete.splitlines():
+                                line = raw_line.strip()
+                                if not line:
+                                    continue
+                                try:
+                                    payload = json.loads(line)
+                                except json.JSONDecodeError:
+                                    continue
+                                if not isinstance(payload, dict):
+                                    continue
+                                self._append(
+                                    record,
+                                    TranscriptEvent(
+                                        run_id=record.handle.run_id,
+                                        payload=payload,
+                                    ),
+                                )
+                        # If we read but parsed nothing AND the run finished,
+                        # exit on next iteration via the gate below.
+
+                # Termination gate: once the subprocess has exited, do one
+                # final settle-pass and stop. Any partial line still in the
+                # file is abandoned (no newline = renderer never wrote it).
+                # We watch _subprocess_exited rather than handle.status because
+                # _wait awaits this tailer before flipping the status — using
+                # status here would deadlock.
+                if record._subprocess_exited.is_set():
+                    # Brief grace so a final renderer flush can land.
+                    await asyncio.sleep(0.15)
+                    # Re-read once more for any tail bytes that arrived during sleep.
+                    try:
+                        if path.exists():
+                            with path.open("rb") as fh:
+                                fh.seek(record._transcript_offset)
+                                final_chunk = fh.read()
+                            if final_chunk:
+                                final_text = final_chunk.decode("utf-8", errors="replace")
+                                final_complete, _, _ = final_text.rpartition("\n")
+                                if final_complete:
+                                    for raw_line in final_complete.splitlines():
+                                        line = raw_line.strip()
+                                        if not line:
+                                            continue
+                                        try:
+                                            payload = json.loads(line)
+                                        except json.JSONDecodeError:
+                                            continue
+                                        if not isinstance(payload, dict):
+                                            continue
+                                        self._append(
+                                            record,
+                                            TranscriptEvent(
+                                                run_id=record.handle.run_id,
+                                                payload=payload,
+                                            ),
+                                        )
+                    except OSError:
+                        pass
+                    return
+
+                await asyncio.sleep(0.1)
+        except Exception:  # noqa: BLE001 — tailer failures must not break SSE.
+            logger.exception(
+                "transcript tailer crashed for run_id=%r slug=%r",
+                record.handle.run_id,
+                record.handle.slug,
+            )
+
+    def _append(self, record: _RunRecord, item: LogLine | SynthPhaseEvent | TranscriptEvent) -> None:
         """Append ``item`` to the buffer (capped) and broadcast to queues."""
         buf = record.buffer
         buf.append(item)
@@ -552,6 +707,11 @@ class RunSupervisor:
             return
 
         exit_code = await process.wait()
+        # Signal the transcript tailer that it can do its final read pass.
+        # MUST happen BEFORE awaiting drain_tasks (otherwise the tailer would
+        # block forever on a status flip that doesn't happen until after the
+        # tailer exits — bug-0e13706c integration deadlock).
+        record._subprocess_exited.set()
 
         # Drain coroutines may still be flushing the last few bytes.  Wait
         # for them so the buffer is complete before we mark the handle as

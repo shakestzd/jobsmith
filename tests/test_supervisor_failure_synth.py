@@ -351,7 +351,9 @@ class TestSupervisorSynthIntegration:
         async for item in supervisor.stream(run_id):
             if isinstance(item, SynthPhaseEvent):
                 synth_events.append(item)
-            else:
+            elif hasattr(item, "line"):
+                # bug-0e13706c: stream may also contain TranscriptEvent items
+                # which don't have ``line``; only collect LogLine entries.
                 log_lines.append(item)
 
         assert synth_events, "Expected SynthPhaseEvent in stream"

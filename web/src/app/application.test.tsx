@@ -819,3 +819,95 @@ describe('ApplicationDetail SSE phase wiring (feat-6e148975)', () => {
     });
   });
 });
+
+// bug-0e13706c: structured transcript events arrive on event=transcript and
+// render as typed rows (tool_call / tool_result / agent_text / phase_boundary)
+// instead of pre-formatted terminal log lines.
+describe('ApplicationDetail SSE transcript wiring (bug-0e13706c)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    constructorCalls.length = 0;
+    lastFakeEs = null;
+  });
+
+  it('renders tool_call as a structured row with tool name', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'running',
+      phase: 'gather',
+      finished_at: null,
+      run_id: 'run-tx-1',
+    });
+    render(<ApplicationDetail slug="tx-1" back={() => {}} />);
+    await waitFor(() => expect(lastFakeEs).not.toBeNull());
+
+    await act(async () => {
+      lastFakeEs!.emit('transcript', {
+        run_id: 'run-tx-1',
+        payload: {
+          type: 'tool_call',
+          tool_name: 'Read',
+          tool_input_truncated: '{"file_path":"jd.html"}',
+          tool_use_id: 'u-1',
+        },
+      });
+    });
+
+    // Tool name appears as bold; the lvl column shows "tool" not "warn"/"info".
+    await waitFor(() => {
+      expect(screen.getByText('Read')).toBeInTheDocument();
+    });
+  });
+
+  it('renders phase_boundary as a divider row', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'running',
+      phase: 'gather',
+      finished_at: null,
+      run_id: 'run-tx-2',
+    });
+    render(<ApplicationDetail slug="tx-2" back={() => {}} />);
+    await waitFor(() => expect(lastFakeEs).not.toBeNull());
+
+    await act(async () => {
+      lastFakeEs!.emit('transcript', {
+        run_id: 'run-tx-2',
+        payload: { _phase_boundary: 'gather', ts: '2026-05-06T10:00:00Z' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/phase: gather/i)).toBeInTheDocument();
+    });
+  });
+
+  it('does not render unknown payload types as terminal log lines', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'running',
+      phase: 'gather',
+      finished_at: null,
+      run_id: 'run-tx-3',
+    });
+    render(<ApplicationDetail slug="tx-3" back={() => {}} />);
+    await waitFor(() => expect(lastFakeEs).not.toBeNull());
+
+    // Get baseline event-row count.
+    const baseline = document.querySelectorAll('.eventlog > div').length;
+
+    // Unknown payload — tailer would forward but transcriptToLogEvent drops.
+    await act(async () => {
+      lastFakeEs!.emit('transcript', {
+        run_id: 'run-tx-3',
+        payload: { type: 'totally-unknown', whatever: 'stuff' },
+      });
+    });
+
+    // Row count should NOT have grown.
+    await waitFor(() => {
+      const after = document.querySelectorAll('.eventlog > div').length;
+      expect(after).toBe(baseline);
+    });
+  });
+});
