@@ -46,9 +46,11 @@ export type AppStatus =
 
 /**
  * Pipeline phase index (0-based). The design uses three primary phases
- * — gather (0), draft (1), render (2) — plus a "queued" zero-state.
+ * — gather (1), draft (2), render (3) — plus a "queued" zero-state (0).
+ * null means the API returned an unrecognised phase string (e.g. 'unknown');
+ * consumers treat null as "no known phase" and leave phase cards queued.
  */
-export type AppPhase = 0 | 1 | 2 | 3;
+export type AppPhase = 0 | 1 | 2 | 3 | null;
 
 export interface SampleApp {
   slug: string;

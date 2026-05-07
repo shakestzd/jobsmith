@@ -911,3 +911,112 @@ describe('ApplicationDetail SSE transcript wiring (bug-0e13706c)', () => {
     });
   });
 });
+
+// ── bug-300fb9ad: fromApi unknown→1 fallback mis-attributes failed phase ──────
+//
+// When the API returns phase='unknown' (the full-pipeline marker written by
+// apply.py:_run_apply._db_phase_label), fromApi must NOT fall back to phase 1.
+// The fix: fromApi returns null for unknown phase strings; AppPhase widens to
+// include null; deriveProgress treats null as "no known phase" and leaves all
+// phase cards in their default (queued) state rather than falsely painting
+// phase 1 as failed.
+describe('ApplicationDetail fromApi unknown-phase fix (bug-300fb9ad)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    constructorCalls.length = 0;
+    lastFakeEs = null;
+  });
+
+  // Test 1: failed app with phase='unknown' — NO phase card should show "failed"
+  it('failed app with phase="unknown": no phase card is marked failed (queued cards stay queued)', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'failed',
+      phase: 'unknown',
+      finished_at: '2026-05-01T10:00:00Z',
+      run_id: 'run-bug-300fb9ad-1',
+    });
+    render(<ApplicationDetail slug="failed-unknown-phase" back={() => {}} />);
+    await waitFor(() => {
+      // Wait for the API data to load (loading spinner gone, page rendered)
+      expect(screen.queryByText(/loading/i)).toBeNull();
+    });
+
+    // The overall badge should still say "failed" (bug is about phase cards, not the badge)
+    const allText = document.body.textContent ?? '';
+    expect(allText).toMatch(/failed/i);
+
+    // NO phase card (.phase-status span) should show "failed" for unknown phase
+    const phaseStatuses = document.querySelectorAll('.phase-status');
+    const texts = Array.from(phaseStatuses).map(el => el.textContent ?? '');
+    expect(texts.some(t => /failed/i.test(t))).toBe(false);
+  });
+
+  // Test 2: failed app with phase='gather' — phase 1 card IS marked failed
+  it('failed app with phase="gather": phase 1 card is marked failed', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'failed',
+      phase: 'gather',
+      finished_at: '2026-05-01T10:00:00Z',
+      run_id: 'run-bug-300fb9ad-2',
+    });
+    render(<ApplicationDetail slug="failed-gather-phase" back={() => {}} />);
+    await waitFor(() => {
+      expect(screen.queryByText(/loading/i)).toBeNull();
+    });
+
+    // Phase 1 card should show "failed"
+    const phaseStatuses = document.querySelectorAll('.phase-status');
+    const texts = Array.from(phaseStatuses).map(el => el.textContent ?? '');
+    expect(texts.some(t => /failed/i.test(t))).toBe(true);
+    // Only the first phase should be failed; downstream phases queued
+    expect(/failed/i.test(texts[0] ?? '')).toBe(true);
+    expect(/failed/i.test(texts[1] ?? '')).toBe(false);
+    expect(/failed/i.test(texts[2] ?? '')).toBe(false);
+  });
+
+  // Test 3: failed app with phase='draft' — phase 2 card IS marked failed
+  it('failed app with phase="draft": phase 2 card is marked failed (regression check)', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'failed',
+      phase: 'draft',
+      finished_at: '2026-05-01T10:00:00Z',
+      run_id: 'run-bug-300fb9ad-3',
+    });
+    render(<ApplicationDetail slug="failed-draft-phase" back={() => {}} />);
+    await waitFor(() => {
+      expect(screen.queryByText(/loading/i)).toBeNull();
+    });
+
+    // Phase 2 card should show "failed"; phase 1 done; phase 3 queued
+    const phaseStatuses = document.querySelectorAll('.phase-status');
+    const texts = Array.from(phaseStatuses).map(el => el.textContent ?? '');
+    expect(/failed/i.test(texts[1] ?? '')).toBe(true);
+    expect(/failed/i.test(texts[0] ?? '')).toBe(false);
+    expect(/failed/i.test(texts[2] ?? '')).toBe(false);
+  });
+
+  // Test 4: failed app with phase='render' — phase 3 card IS marked failed
+  it('failed app with phase="render": phase 3 card is marked failed (regression check)', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'failed',
+      phase: 'render',
+      finished_at: '2026-05-01T10:00:00Z',
+      run_id: 'run-bug-300fb9ad-4',
+    });
+    render(<ApplicationDetail slug="failed-render-phase" back={() => {}} />);
+    await waitFor(() => {
+      expect(screen.queryByText(/loading/i)).toBeNull();
+    });
+
+    // Phase 3 card should show "failed"; phases 1+2 done
+    const phaseStatuses = document.querySelectorAll('.phase-status');
+    const texts = Array.from(phaseStatuses).map(el => el.textContent ?? '');
+    expect(/failed/i.test(texts[2] ?? '')).toBe(true);
+    expect(/failed/i.test(texts[0] ?? '')).toBe(false);
+    expect(/failed/i.test(texts[1] ?? '')).toBe(false);
+  });
+});
