@@ -1006,13 +1006,20 @@ function ConfigTab({ app }: ConfigTabProps) {
  */
 function fromApi(slug: string, api: ApiApplicationDetail | undefined): SampleApp {
   const phaseStr = api?.phase ?? '';
+  // Map the API phase string to a numeric phase. Only the three real phase
+  // names produce a numbered value. rendered/done imply phase 3 completed.
+  // Any other value — including 'unknown' (the full-pipeline marker written
+  // by apply.py:_run_apply._db_phase_label) — returns null so downstream
+  // consumers (deriveProgress) leave all phase cards in their default queued
+  // state instead of falsely attributing the failure to phase 1.
+  // Closes bug-300fb9ad (roborev job 968 MEDIUM).
   const phaseNum: AppPhase =
     phaseStr === 'gather' ? 1 :
     phaseStr === 'draft' ? 2 :
     phaseStr === 'render' ? 3 :
     api?.status === 'rendered' ? 3 :
     api?.status === 'done' ? 3 :
-    1;
+    null;
   const updatedAt = api?.finished_at ?? api?.started_at ?? null;
   return {
     slug,

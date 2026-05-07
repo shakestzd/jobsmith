@@ -12,20 +12,19 @@ Design goals
 - Tool results as ``[dim]← result…[/]``
 - Phase complete / failed as styled summary panels
 - Non-TTY fallback: plain line-by-line output, no spinners
-- Transcript JSONL always written to .apply-state/transcript.jsonl
+- Transcript records appended to ``apply_state_log`` (DB) for audit + SSE
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
-from io import IOBase
 from pathlib import Path
-from typing import TextIO
 
 from rich.console import Console
 from rich.panel import Panel
@@ -33,6 +32,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 from . import headless
+from .core.events import PipelineEvent
 
 # Max chars for truncated args / result previews
 _MAX_ARG_CHARS = 80
@@ -250,20 +250,12 @@ class ApplyRenderer:
         self._agent_dispatch_times: dict[str, float] = {}
         # Current phase name (for transcript)
         self._current_phase: str | None = None
-        # Transcript file handle (append-only, opened per phase)
-        self._transcript_fh: TextIO | None = None
-        self._transcript_path: Path | None = None
-        # trk-60217f9f Pass 4: every transcript record also lands in
-        # apply_state_log so the supervisor can tail by row id instead of
-        # file offset (Pass 5 removes the disk file). Set by
-        # ``open_transcript`` when a slug + cwd are passed; None otherwise.
+        # Transcript context — every transcript record lands in
+        # apply_state_log filtered by (slug, run_id) for the SSE producer.
+        # Slice 6 (trk-ad6d8227): the disk transcript.jsonl file is gone;
+        # DB rows are the only persistence and the SSE source of truth.
         self._transcript_slug: str | None = None
         self._transcript_db_path: Path | None = None
-        # Roborev job 954 HIGH (migration 006): supervisor's tailer
-        # filters by ``run_id`` so cross-run pollution and historical
-        # row replay are bounded. Renderer carries the run_id from
-        # ``apply.py`` through ``open_transcript`` and writes it on
-        # every ``apply_state_log`` row.
         self._transcript_run_id: str | None = None
 
     # ------------------------------------------------------------------
@@ -301,59 +293,47 @@ class ApplyRenderer:
 
     def open_transcript(
         self,
-        transcript_path: Path,
         phase_name: str,
         *,
         slug: str | None = None,
         db_path: Path | None = None,
         run_id: str | None = None,
     ) -> None:
-        """Open the transcript JSONL file for append and write a phase boundary marker.
+        """Record transcript context and write a phase boundary marker to the DB.
+
+        Slice 6 (trk-ad6d8227): the disk ``transcript.jsonl`` path is gone.
+        All transcript persistence now goes through ``apply_state_log`` —
+        the SSE producer polls that table by ``run_id`` to feed the
+        per-tool stream to subscribers.
 
         Parameters
         ----------
-        transcript_path:
-            Absolute path to the transcript.jsonl file.
         phase_name:
-            Current phase name (used in the boundary marker).
-        slug, db_path:
-            When both are provided, every transcript record is also appended
-            to ``apply_state_log`` (trk-60217f9f Pass 4). Disk + DB run in
-            parallel during the migration window so existing tailers (file
-            offset) and new tailers (DB row id) see identical streams.
+            Current phase name (recorded in the boundary marker).
+        slug, db_path, run_id:
+            When all three are provided, every transcript record (and the
+            boundary marker emitted here) is appended to ``apply_state_log``
+            so the supervisor / SSE path sees it. Otherwise this is a no-op
+            (CLI-only contexts and tests skip the DB hop).
         """
-        transcript_path.parent.mkdir(parents=True, exist_ok=True)
-        self._transcript_path = transcript_path
-        self._transcript_fh = transcript_path.open("a", encoding="utf-8")
         self._transcript_slug = slug
         self._transcript_db_path = db_path
         self._transcript_run_id = run_id
-        # Write phase boundary marker (disk + DB)
         marker = {"_phase_boundary": phase_name, "ts": _now_iso()}
-        self._transcript_fh.write(json.dumps(marker) + "\n")
-        self._transcript_fh.flush()
         self._append_state_log(marker)
 
     def close_transcript(self) -> None:
-        """Flush and close the transcript file handle."""
-        if self._transcript_fh is not None:
-            try:
-                self._transcript_fh.flush()
-                self._transcript_fh.close()
-            except OSError:
-                pass
-            self._transcript_fh = None
-            self._transcript_path = None
+        """Clear transcript context after a phase ends."""
         self._transcript_slug = None
         self._transcript_db_path = None
         self._transcript_run_id = None
 
     def _append_state_log(self, record: dict) -> None:
-        """Mirror *record* into ``apply_state_log`` (best-effort, never raises).
+        """Append *record* to ``apply_state_log`` (best-effort, never raises).
 
-        Pass 4 dual-write. When the renderer was opened without a slug + DB
-        path (CLI-only contexts, tests) this is a no-op. The disk file
-        remains the canonical store until Pass 5 removes it.
+        ``apply_state_log`` is the canonical transcript store. When the
+        renderer was opened without a slug + DB path (CLI-only contexts,
+        tests) this is a no-op.
         """
         slug = self._transcript_slug
         db_path = self._transcript_db_path
@@ -378,14 +358,11 @@ class ApplyRenderer:
             pass
 
     def _write_transcript(self, record: dict) -> None:
-        """Append a JSON record to the transcript file + apply_state_log."""
-        if self._transcript_fh is None:
-            return
-        try:
-            self._transcript_fh.write(json.dumps(record) + "\n")
-            self._transcript_fh.flush()
-        except OSError:
-            pass
+        """Append a JSON record to apply_state_log (DB audit trail).
+
+        Slice 4 (trk-ad6d8227): disk transcript.jsonl write removed.
+        DB write via ``_append_state_log`` is retained for audit purposes.
+        """
         self._append_state_log(record)
 
     def update_status(self, text: str) -> None:
@@ -780,3 +757,49 @@ class ApplyRenderer:
                 expand=False,
             )
         )
+
+    # ------------------------------------------------------------------
+    # EventSink protocol (jobsmith.core.protocols.EventSink — Slice 3a)
+    # ------------------------------------------------------------------
+
+    def emit(self, event: PipelineEvent) -> None:
+        """Route a structured PipelineEvent to internal renderer handlers.
+
+        Implements jobsmith.core.protocols.EventSink so the orchestrator in
+        core/pipeline.py (Slice 3b/3c) can drive terminal output through this
+        sink without importing Rich.
+
+        Sink-side exceptions are swallowed (consistent with
+        sinks.CallbackEventSink) so a broken sink never aborts the pipeline.
+        """
+        kind = event.kind
+        if kind == "phase_started":
+            with contextlib.suppress(Exception):
+                self.start_phase(event.phase)
+        elif kind == "phase_complete":
+            with contextlib.suppress(Exception):
+                self.stop_phase()
+        elif kind == "phase_failed":
+            with contextlib.suppress(Exception):
+                self.stop_phase()
+                rc = event.payload.get("rc")
+                self.print_error(f"Phase {event.phase} failed (rc={rc})")
+        elif kind == "slug_changed":
+            with contextlib.suppress(Exception):
+                old = event.payload.get("old_slug")
+                new = event.payload.get("new_slug")
+                self.print_info(f"Canonical slug: {old!r} → {new!r}")
+        elif kind == "guard_failed":
+            with contextlib.suppress(Exception):
+                rc = event.payload.get("rc")
+                self.print_error(f"Guard step failed (rc={rc})")
+        elif kind == "cancelled":
+            with contextlib.suppress(Exception):
+                self.stop_phase()
+        elif kind == "already_complete":
+            with contextlib.suppress(Exception):
+                app_dir_str = event.payload.get("app_dir")
+                if app_dir_str is not None:
+                    from pathlib import Path as _Path
+                    self.print_already_complete(_Path(app_dir_str))
+        # unknown kinds: no-op — forward-compat

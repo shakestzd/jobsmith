@@ -17,12 +17,15 @@ POST /applications
 
 from __future__ import annotations
 
+import asyncio
 import json
-import sys
+import logging
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, status
+
+logger = logging.getLogger(__name__)
 
 from jobsmith.api.artifacts import _get_db_path, _row_to_envelope
 from jobsmith.api.supervisor import RunSupervisor, get_supervisor
@@ -142,28 +145,6 @@ def _resolve_supervisor(request: Request) -> RunSupervisor:
     return get_supervisor()
 
 
-def _resolve_transcript_path(slug: str, cwd: Path) -> Path | None:
-    """Return the slug's transcript.jsonl path under applications_dir.
-
-    Used by the supervisor's terminal-phase guard (S6, feat-438090af) to
-    synthesize a phase=failed SSE event when the apply subprocess dies
-    without one.  Returns None when config can't be resolved — the
-    supervisor degrades gracefully (no synth, regular log stream only).
-    """
-    try:
-        from jobsmith.config import find_config, load_config
-        from jobsmith.paths import resolve
-
-        config_path = find_config(cwd)
-        if config_path is None:
-            return None
-        config = load_config(path=config_path)
-        apps_dir = resolve(config.output.applications_dir, cwd)
-        return apps_dir / slug / ".apply-state" / "transcript.jsonl"
-    except Exception:
-        return None
-
-
 async def _launch_run(
     supervisor: RunSupervisor,
     slug: str,
@@ -172,112 +153,78 @@ async def _launch_run(
     force: bool = False,
     jd_text: str | None = None,
 ) -> str:
-    """Build the apply argv and call supervisor.start(). Returns run_id.
+    """Register an in-process apply run and launch it. Returns run_id.
 
-    When *force* is true, ``--force`` is appended so the apply pipeline
-    restarts from phase 1 even if prior artifacts exist for *slug*.
+    Slice 4 (trk-ad6d8227): No subprocess is spawned. Instead:
+    1. A run_id is minted and a RunHandle + EventSink allocated via
+       ``supervisor.register_run``.
+    2. ``core_run_apply`` is wrapped in ``asyncio.to_thread`` (it is a
+       blocking/synchronous function) and launched as an asyncio Task.
+    3. A completion callback calls ``supervisor.on_run_complete`` when the
+       task resolves so subscribers receive the end-of-stream sentinel.
 
-    When *jd_text* is non-empty, write it to a temp file and append
-    ``--jd-text-file <path>`` so the pipeline uses pasted text instead of
-    fetching the URL (bug-1c800e09 — needed for JS-rendered ATS portals).
-    The temp file lives under ``applications/{slug}/.apply-state/`` so it
-    survives the lifetime of the run and is cleaned up alongside other
-    apply-state artifacts.
+    Args:
+        supervisor: The RunSupervisor singleton (or test double).
+        slug: Application slug (pre-derived by the caller).
+        url: Job description URL.
+        cwd: Working directory for the apply pipeline.
+        force: When True, the pipeline ignores prior artifacts and reruns.
+        jd_text: Optional out-of-band JD text (passed directly to
+            ``core_run_apply`` which handles temp-file management).
 
-    Threads ``transcript_path`` through to the supervisor so the
-    terminal-phase guard (S6, feat-438090af) can synth a phase=failed
-    SSE event when the subprocess dies without emitting one.
+    Returns:
+        The minted ``run_id`` string.
     """
-    # ``--yes`` is mandatory under the supervisor: the subprocess has stdin
-    # wired to /dev/null, so the inter-phase ``click.confirm`` gate would
-    # raise ``click.Abort`` and the whole pipeline would exit non-zero
-    # immediately after phase 1 completes (trk-60217f9f live-test surfaced
-    # this — the UI said --yes but the supervisor never propagated it).
-    #
-    # ``--run-id`` is mandatory when the supervisor's transcript tailer is
-    # active (db_path != None). The tailer filters apply_state_log by
-    # ``handle.run_id`` from migration 006; without sharing that id with
-    # the subprocess, the renderer would tag rows with its own uuid4 and
-    # the tailer would see zero structured transcript events (closes
-    # roborev job 955 HIGH).
+    from jobsmith import apply as apply_mod
+
     run_id = uuid.uuid4().hex
-    argv = [
-        sys.executable,
-        "-m",
-        "jobsmith.cli",
-        "apply",
-        url,
-        "--slug",
-        slug,
-        "--yes",
-        "--run-id",
-        run_id,
-    ]
-    if force:
-        argv.append("--force")
-    if jd_text:
-        # Persist pasted JD next to the run so it is reproducible.
+    sink = supervisor.register_run(run_id=run_id, slug=slug)
+
+    # The renderer's emit() also forwards to our supervisor sink so SSE
+    # subscribers see PipelineEvents in real time. This is the "API gets
+    # the same events the CLI does" wiring the in-process pipeline needs.
+    from jobsmith.render import ApplyRenderer
+
+    rdr = ApplyRenderer(yes=True, verbosity=0)
+    _orig_emit = rdr.emit
+
+    def _emit_and_broadcast(event):
+        sink.emit(event)
         try:
-            from jobsmith.config import find_config, load_config
-            from jobsmith.paths import resolve as _resolve
+            _orig_emit(event)
+        except Exception:  # noqa: BLE001 — never fail the pipeline on a render side-effect
+            logger.exception("renderer.emit raised for run_id=%r", run_id)
 
-            config_path = find_config(cwd)
-            if config_path is not None:
-                config = load_config(path=config_path)
-                apps_dir = _resolve(config.output.applications_dir, cwd)
-            else:
-                apps_dir = cwd / "private" / "applications"
-            jd_dir = apps_dir / slug / ".apply-state"
-            jd_dir.mkdir(parents=True, exist_ok=True)
-            jd_path = jd_dir / "jd-pasted.txt"
-            jd_path.write_text(jd_text, encoding="utf-8")
-            argv.extend(["--jd-text-file", str(jd_path)])
-        except Exception:
-            # Fall back to a tempfile if writing under the run dir fails.
-            import tempfile
+    rdr.emit = _emit_and_broadcast  # type: ignore[method-assign]
 
-            tmp = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".txt", prefix=f"jd-{slug}-", delete=False, encoding="utf-8"
+    cancel_event = supervisor.get_cancel_event(run_id)
+
+    async def _run_wrapper() -> None:
+        """Run apply.run_apply in a thread; finalise supervisor on completion."""
+        try:
+            rc = await asyncio.to_thread(
+                apply_mod.run_apply,
+                url=url,
+                cwd=cwd,
+                skip_confirm=True,
+                force=force,
+                jd_text=jd_text,
+                slug=slug,
+                run_id=run_id,
+                renderer=rdr,
+                cancel_event=cancel_event,
             )
-            tmp.write(jd_text)
-            tmp.close()
-            argv.extend(["--jd-text-file", tmp.name])
-    transcript_path = _resolve_transcript_path(slug, cwd)
-    db_path = _resolve_db_path(cwd)
-    return await supervisor.start(
-        slug=slug,
-        argv=argv,
-        cwd=cwd,
-        transcript_path=transcript_path,
-        db_path=db_path,
-        run_id=run_id,
-    )
+        except Exception:  # noqa: BLE001 — task must not propagate unhandled
+            logger.exception(
+                "core_run_apply task raised for run_id=%r slug=%r", run_id, slug
+            )
+            rc = 1
+        finally:
+            supervisor.on_run_complete(run_id, rc)
 
-
-def _resolve_db_path(cwd: Path) -> Path | None:
-    """Return the pipeline DB absolute path, or ``None`` on config miss.
-
-    Threaded into ``supervisor.start`` so the new ``_tail_state_log``
-    (trk-60217f9f Pass 4) can poll apply_state_log by row id instead of
-    file offset. ``None`` falls back to the legacy file-tail path.
-
-    Resolves ``config.output.jobsmith_db`` relative to ``config_path.parent``
-    (the project root that ``find_config`` walked up to), not relative to
-    the supervisor's ``cwd`` — otherwise an API started from a subdirectory
-    would create or tail a DB at ``<subdir>/private/jobsmith.db`` while
-    ``apply.py:_pipeline_db_path`` writes to ``<project_root>/private/jobsmith.db``,
-    silently splitting the slug's apply_state_log between two files.
-    """
-    try:
-        from jobsmith.config import find_config, load_config
-
-        config_path = find_config(cwd)
-        if config_path is None:
-            return None
-        config = load_config(config_path)
-        return (config_path.parent / config.output.jobsmith_db).resolve()
-    except Exception:
-        return None
+    task = asyncio.create_task(_run_wrapper(), name=f"apply-{run_id}")
+    supervisor.set_task(run_id, task)
+    return run_id
 
 
 # ---------------------------------------------------------------------------

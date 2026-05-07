@@ -247,27 +247,31 @@ class TestPostApplicationsConflict:
 
 
 # ---------------------------------------------------------------------------
-# 6a. force=True propagates --force to the launched argv (feat-d6b1e167, GH#50)
+# 6a. force=True propagates to core_run_apply (feat-d6b1e167, GH#50)
 # ---------------------------------------------------------------------------
 
 
 class TestPostApplicationsForce:
-    """Re-running an already-complete slug requires --force on the server side
-    or the apply pipeline silently aborts. The UI surfaces this via a `force`
-    field on the request body; the API must plumb it through to argv.
+    """Re-running an already-complete slug requires force=True on the server side
+    or the apply pipeline silently aborts. The UI surfaces this via a ``force``
+    field on the request body; the API must plumb it through to core_run_apply.
+
+    Slice 4 (trk-ad6d8227): the old argv-based subprocess path is gone.
+    Tests now verify that _launch_run is called with the correct ``force`` kwarg
+    rather than inspecting an argv list.
     """
 
-    def test_force_true_appends_force_to_argv(self, client: TestClient) -> None:
-        """When body.force=True, the argv built by _launch_run includes --force."""
+    def test_force_true_passed_to_launch_run(self, client: TestClient) -> None:
+        """When body.force=True, _launch_run is called with force=True."""
         from jobsmith.api import applications as apps_mod
 
-        captured: dict[str, list[str]] = {}
+        captured: dict = {}
 
-        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None, db_path=None, run_id=None):
-            captured["argv"] = argv
+        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None):
+            captured["force"] = force
             return "run-force-001"
 
-        with patch.object(apps_mod.RunSupervisor, "start", new=fake_start):
+        with patch.object(apps_mod, "_launch_run", new=fake_launch):
             resp = client.post(
                 "/api/applications",
                 json={
@@ -279,22 +283,21 @@ class TestPostApplicationsForce:
             )
 
         assert resp.status_code == 201, resp.text
-        assert "argv" in captured, "supervisor.start was not invoked"
-        assert "--force" in captured["argv"], (
-            f"--force missing from argv when body.force=True. argv={captured['argv']!r}"
+        assert captured.get("force") is True, (
+            f"force=True not propagated to _launch_run. captured={captured!r}"
         )
 
-    def test_force_false_omits_force_from_argv(self, client: TestClient) -> None:
-        """When body.force=False (default), --force is NOT in argv."""
+    def test_force_false_omits_force(self, client: TestClient) -> None:
+        """When body.force=False (default), _launch_run is called with force=False."""
         from jobsmith.api import applications as apps_mod
 
-        captured: dict[str, list[str]] = {}
+        captured: dict = {}
 
-        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None, db_path=None, run_id=None):
-            captured["argv"] = argv
+        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None):
+            captured["force"] = force
             return "run-force-002"
 
-        with patch.object(apps_mod.RunSupervisor, "start", new=fake_start):
+        with patch.object(apps_mod, "_launch_run", new=fake_launch):
             resp = client.post(
                 "/api/applications",
                 json={
@@ -306,22 +309,21 @@ class TestPostApplicationsForce:
             )
 
         assert resp.status_code == 201, resp.text
-        assert "argv" in captured
-        assert "--force" not in captured["argv"], (
-            f"--force should NOT be in argv when body.force=False. argv={captured['argv']!r}"
+        assert captured.get("force") is False, (
+            f"force should be False when body.force=False. captured={captured!r}"
         )
 
     def test_force_omitted_defaults_to_false(self, client: TestClient) -> None:
         """When body has no `force` key, server treats it as force=False."""
         from jobsmith.api import applications as apps_mod
 
-        captured: dict[str, list[str]] = {}
+        captured: dict = {}
 
-        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None, db_path=None, run_id=None):
-            captured["argv"] = argv
+        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None):
+            captured["force"] = force
             return "run-force-003"
 
-        with patch.object(apps_mod.RunSupervisor, "start", new=fake_start):
+        with patch.object(apps_mod, "_launch_run", new=fake_launch):
             resp = client.post(
                 "/api/applications",
                 json={"url": "https://example.com/jobs/eng", "slug": "default-slug"},
@@ -329,34 +331,36 @@ class TestPostApplicationsForce:
             )
 
         assert resp.status_code == 201, resp.text
-        assert "--force" not in captured["argv"]
+        assert captured.get("force") is False
 
 
 # ---------------------------------------------------------------------------
-# 6b. jd_text propagates to --jd-text-file (bug-1c800e09)
+# 6b. jd_text propagates to core_run_apply (bug-1c800e09)
 # ---------------------------------------------------------------------------
 
 
 class TestPostApplicationsJdText:
-    """The new-application form's "paste text" mode must reach the apply
-    pipeline as ``--jd-text-file <path>``. Prior to bug-1c800e09 the form
-    posted only ``url`` and the pipeline tried (and failed) to fetch JS-
-    rendered ATS portals like Microsoft Eightfold.
+    """The new-application form's "paste text" mode must reach core_run_apply
+    as ``jd_text``. Prior to bug-1c800e09 the form posted only ``url`` and the
+    pipeline tried (and failed) to fetch JS-rendered ATS portals.
+
+    Slice 4 (trk-ad6d8227): jd_text is now passed directly to core_run_apply
+    (which handles temp-file management) rather than written to a file and
+    added as ``--jd-text-file`` in argv.
     """
 
-    def test_jd_text_appends_jd_text_file_to_argv(self, client: TestClient) -> None:
-        """When body.jd_text is set, --jd-text-file <path> is in argv and the
-        pasted text is on disk at <path>."""
+    def test_jd_text_passed_to_launch_run(self, client: TestClient) -> None:
+        """When body.jd_text is set, _launch_run receives it as jd_text kwarg."""
         from jobsmith.api import applications as apps_mod
 
-        captured: dict[str, list[str]] = {}
+        captured: dict = {}
 
-        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None):
-            captured["argv"] = argv
+        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None):
+            captured["jd_text"] = jd_text
             return "run-paste-001"
 
         pasted = "Senior Data Engineer at TestCo\n\nResponsibilities: own data."
-        with patch.object(apps_mod.RunSupervisor, "start", new=fake_start):
+        with patch.object(apps_mod, "_launch_run", new=fake_launch):
             resp = client.post(
                 "/api/applications",
                 json={
@@ -368,24 +372,21 @@ class TestPostApplicationsJdText:
             )
 
         assert resp.status_code == 201, resp.text
-        argv = captured["argv"]
-        assert "--jd-text-file" in argv, f"--jd-text-file missing from argv: {argv!r}"
-        idx = argv.index("--jd-text-file")
-        jd_path = Path(argv[idx + 1])
-        assert jd_path.exists(), f"jd-text-file path does not exist: {jd_path}"
-        assert jd_path.read_text(encoding="utf-8") == pasted
+        assert captured.get("jd_text") == pasted, (
+            f"jd_text not passed to _launch_run. captured={captured!r}"
+        )
 
-    def test_jd_text_omitted_no_jd_text_file_in_argv(self, client: TestClient) -> None:
-        """When jd_text is absent, --jd-text-file is NOT in argv (URL fetched)."""
+    def test_jd_text_omitted_passes_none(self, client: TestClient) -> None:
+        """When jd_text is absent, _launch_run receives jd_text=None."""
         from jobsmith.api import applications as apps_mod
 
-        captured: dict[str, list[str]] = {}
+        captured: dict = {}
 
-        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None):
-            captured["argv"] = argv
+        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None):
+            captured["jd_text"] = jd_text
             return "run-fetch-001"
 
-        with patch.object(apps_mod.RunSupervisor, "start", new=fake_start):
+        with patch.object(apps_mod, "_launch_run", new=fake_launch):
             resp = client.post(
                 "/api/applications",
                 json={"url": "https://example.com/jobs/eng", "slug": "fetch-slug"},
@@ -393,20 +394,20 @@ class TestPostApplicationsJdText:
             )
 
         assert resp.status_code == 201, resp.text
-        assert "--jd-text-file" not in captured["argv"]
+        assert captured.get("jd_text") is None
 
-    def test_jd_text_empty_string_treated_as_omitted(self, client: TestClient) -> None:
-        """An empty jd_text string (e.g., user toggled paste mode but typed nothing)
-        must NOT add --jd-text-file (else apply would read a zero-byte file)."""
+    def test_jd_text_empty_string_passed_as_empty(self, client: TestClient) -> None:
+        """An empty jd_text string is passed through as-is.
+        core_run_apply's own jd_text guard (strip check) handles the empty case."""
         from jobsmith.api import applications as apps_mod
 
-        captured: dict[str, list[str]] = {}
+        captured: dict = {}
 
-        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None):
-            captured["argv"] = argv
+        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None):
+            captured["jd_text"] = jd_text
             return "run-empty-001"
 
-        with patch.object(apps_mod.RunSupervisor, "start", new=fake_start):
+        with patch.object(apps_mod, "_launch_run", new=fake_launch):
             resp = client.post(
                 "/api/applications",
                 json={
@@ -418,7 +419,8 @@ class TestPostApplicationsJdText:
             )
 
         assert resp.status_code == 201, resp.text
-        assert "--jd-text-file" not in captured["argv"]
+        # Empty string passed through — core_run_apply will ignore it (strip check).
+        assert captured.get("jd_text") == ""
 
 
 # ---------------------------------------------------------------------------

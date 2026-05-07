@@ -34,6 +34,7 @@ create the directory/file directly, so they do not rely on the live CLI.
 from __future__ import annotations
 
 import contextlib
+import threading  # noqa: F401 — used in run_phase's optional cancel_event annotation
 import json
 import re
 import subprocess
@@ -296,6 +297,7 @@ def run_phase(
     *,
     cwd: Path | None = None,
     max_turns: int = 30,
+    cancel_event: "threading.Event | None" = None,
 ) -> Iterator[Event]:
     """Spawn ``claude -p`` and yield :class:`Event` objects as JSONL lines arrive.
 
@@ -346,6 +348,18 @@ def run_phase(
     # iterating stdout line-by-line.
     try:
         for raw_line in proc.stdout:  # type: ignore[union-attr]
+            # roborev job 970 MEDIUM: cooperative cancellation — when the
+            # supervisor sets cancel_event, terminate the child subprocess
+            # and stop yielding so the caller's run_apply loop unwinds.
+            if cancel_event is not None and cancel_event.is_set():
+                with contextlib.suppress(Exception):
+                    proc.terminate()
+                yield Event(
+                    type="error",
+                    error="run cancelled by supervisor.kill",
+                    raw={"cancelled": True},
+                )
+                return
             line = raw_line.rstrip("\n")
             if not line:
                 continue
