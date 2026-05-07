@@ -413,81 +413,23 @@ def doctor() -> None:
 def apply(
     url: str = typer.Argument(..., help="Job description URL"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip phase-gate confirmations"),
-    force: bool = typer.Option(
-        False,
-        "--force",
-        "-f",
-        help="Restart the pipeline from phase 1 even if prior artifacts exist.",
-    ),
-    verbose: int = typer.Option(
-        0,
-        "-v",
-        "--verbose",
-        count=True,
-        help="Verbosity: -v shows filtered tool calls; -vv shows all tool calls.",
-    ),
-    jd_text: str | None = typer.Option(
-        None,
-        "--jd-text",
-        help=(
-            "Pasted job-description text. Use when the URL points to a "
-            "JS-rendered portal (Netflix careers, some Workday tenants) "
-            "that WebFetch cannot scrape. Apply-jd-parser uses this text "
-            "instead of fetching the URL."
-        ),
-    ),
+    force: bool = typer.Option(False, "--force", "-f", help="Restart pipeline from phase 1"),
+    verbose: int = typer.Option(0, "-v", "--verbose", count=True, help="-v/-vv verbosity"),
+    jd_text: str | None = typer.Option(None, "--jd-text", help="Pasted JD text (JS-rendered portals)"),
     jd_text_file: Path | None = typer.Option(
-        None,
-        "--jd-text-file",
-        help=(
-            "Read pasted job-description text from a file. Convenient for "
-            "long JDs. Mutually exclusive with --jd-text — if both are "
-            "given, --jd-text-file wins."
-        ),
-        exists=True,
-        readable=True,
-        dir_okay=False,
+        None, "--jd-text-file", help="File with pasted JD text; wins over --jd-text",
+        exists=True, readable=True, dir_okay=False,
     ),
-    slug: str | None = typer.Option(
-        None,
-        "--slug",
-        help=(
-            "Override the auto-derived slug. Used by the API when a caller "
-            "POSTs to /api/applications with an explicit slug, so the "
-            "supervisor's tracked slug matches what run_apply writes to disk."
-        ),
-    ),
-    run_id: str | None = typer.Option(
-        None,
-        "--run-id",
-        help=(
-            "Override the auto-generated apply_runs / apply_state_log run "
-            "discriminator. The API supervisor passes its own run_id here so "
-            "its transcript tailer (filters apply_state_log by run_id) sees "
-            "rows this subprocess writes. Terminal users normally omit this "
-            "and the wrapper mints a fresh uuid4."
-        ),
-    ),
+    slug: str | None = typer.Option(None, "--slug", help="Override auto-derived slug"),
+    run_id: str | None = typer.Option(None, "--run-id", help="Override auto-generated run discriminator"),
 ) -> None:
     """Run the three-phase apply pipeline against a JD URL."""
     from .apply import run_apply
 
-    resolved_jd_text: str | None = None
-    if jd_text_file is not None:
-        resolved_jd_text = jd_text_file.read_text(encoding="utf-8")
-    elif jd_text is not None:
-        resolved_jd_text = jd_text
-
+    resolved_jd_text: str | None = jd_text_file.read_text(encoding="utf-8") if jd_text_file is not None else jd_text
     raise typer.Exit(
-        run_apply(
-            url,
-            skip_confirm=yes,
-            force=force,
-            verbosity=verbose,
-            jd_text=resolved_jd_text,
-            slug=slug,
-            run_id=run_id,
-        )
+        run_apply(url, skip_confirm=yes, force=force, verbosity=verbose,
+                  jd_text=resolved_jd_text, slug=slug, run_id=run_id)
     )
 
 
