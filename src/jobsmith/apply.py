@@ -1925,6 +1925,11 @@ def run_apply(
     db_conn = _open_pipeline_db_for_run(resolved_cwd)
     db_final_status = "failed"  # default; overridden on success/decline/etc.
     db_slug_ref = [slug]
+    # Roborev job 967 MEDIUM: distinguish user-declined partial stops
+    # ("Stopped at user request" — rc=0 but should not be marked
+    # "done") from full pipeline success. The phase loop sets this to
+    # ``"cancelled"`` before returning 0 from a confirm-gate decline.
+    db_status_ref = ["unset"]
     if db_conn is not None:
         with contextlib.suppress(Exception):
             from .db import insert_apply_run as _insert_apply_run
@@ -1955,9 +1960,15 @@ def run_apply(
             db_conn=db_conn,
             db_run_id=db_run_id,
             db_slug_ref=db_slug_ref,
+            db_status_ref=db_status_ref,
             jd_text_file=jd_text_file,
         )
-        db_final_status = "done" if rc == 0 else "failed"
+        if rc != 0:
+            db_final_status = "failed"
+        elif db_status_ref[0] == "cancelled":
+            db_final_status = "cancelled"
+        else:
+            db_final_status = "done"
         return rc
     finally:
         # Best-effort cleanup of the jd_text temp file. The user-supplied
@@ -2032,11 +2043,18 @@ def _run_apply_phases(
     db_conn,
     db_run_id: str,
     db_slug_ref: list[str],
+    db_status_ref: list[str],
     jd_text_file: Path | None = None,
 ) -> int:
     """Phase-loop body extracted so the surrounding ``run_apply`` can wrap it
     with the apply_runs DB lifecycle (insert before, UPDATE after, with the
     canonical slug reflected via ``db_slug_ref[0]``).
+
+    ``db_status_ref`` (single-element list) is mutated to ``"cancelled"``
+    when the user declines an inter-phase confirm gate, distinguishing
+    that case from a full pipeline completion (``run_apply``'s finally
+    maps ``rc=0 + status_ref="cancelled"`` to apply_runs.status=cancelled
+    and ``rc=0 + status_ref!="cancelled"`` to status=done).
 
     All parameters are pre-resolved by ``run_apply``; this helper performs no
     bootstrap or slug resolution of its own.
@@ -2315,6 +2333,11 @@ def _run_apply_phases(
             rdr.pause_before_confirm()
             if not click.confirm(f"Phase {phase_num} ({phase_name}) complete. Proceed to next phase?"):
                 rdr.print_info("Stopped at user request. Partial work saved.")
+                # Roborev job 967 MEDIUM: signal user-decline to the
+                # outer ``run_apply`` so apply_runs.status is recorded
+                # as "cancelled" rather than "done". rc stays 0
+                # because the user's choice is not a CLI failure.
+                db_status_ref[0] = "cancelled"
                 return 0
 
     rdr.print_complete()

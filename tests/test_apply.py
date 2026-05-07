@@ -4319,3 +4319,42 @@ def test_run_phase_iter_force_scoped_prunes_manifest_invocations(tmp_path: Path,
     # Gather specialists preserved.
     assert "apply-jd-parser" in invocation_specialists
     assert "apply-fit-scorer" in invocation_specialists
+
+
+def test_user_decline_at_confirm_gate_records_cancelled_not_done(tmp_path: Path, monkeypatch) -> None:
+    """User declining the inter-phase confirm gate records apply_runs.status='cancelled'.
+
+    rc=0 because user-decline is not a CLI failure, but the DB row must
+    NOT be marked 'done' — that would make the partial run look completed
+    in the UI / list views (closes roborev job 967 MEDIUM)."""
+    from jobsmith.db import open_pipeline_db
+    from jobsmith.apply import run_apply
+
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    monkeypatch.setattr(
+        "jobsmith.apply.headless.run_phase",
+        lambda *a, **kw: iter(_make_phase_events("gather")),
+    )
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    # User declines the confirm prompt after phase 1.
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: False)
+
+    rc = run_apply("https://example.com/jobs/x", cwd=tmp_path, skip_confirm=False)
+
+    assert rc == 0, "user-decline must not be reported as CLI failure"
+
+    db_path = tmp_path / "private" / "jobsmith.db"
+    conn = open_pipeline_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT status FROM apply_runs ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    assert row[0] == "cancelled", (
+        f"user-decline must record status='cancelled', got {row[0]!r}"
+    )

@@ -1137,6 +1137,31 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   // Ref to hold the active EventSource so we can close it on cancel/unmount.
   const esRef = useRef<EventSource | null>(null);
 
+  // Roborev job 967 MEDIUM: ``apiDetail`` arrives asynchronously after
+  // the first render, so the ``useState`` initializers above run
+  // against the placeholder app and never re-run when the real data
+  // lands. Sync ``progress`` / ``activePhase`` / ``failedPhaseNum`` /
+  // ``sseStatus`` / ``running`` when ``apiDetail`` loads or refreshes
+  // so reloading a failed application paints the right phase card
+  // immediately, without waiting for a live SSE event.
+  useEffect(() => {
+    if (apiDetail === undefined) return;
+    const next = deriveProgress(app);
+    setProgress(next.progress);
+    setActivePhase(next.activePhase);
+    setFailedPhaseNum(next.failedPhaseNum);
+    if (app.status === 'failed') {
+      setSseStatus('failed');
+      setRunning(false);
+    } else if (app.status === 'rendered' || app.status === 'done') {
+      setSseStatus('done');
+      setRunning(false);
+    } else if (app.status === 'running') {
+      setRunning(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiDetail]);
+
   // ── Subscribe to SSE stream ──────────────────────────────────────────
   const subscribeToEvents = useCallback((targetSlug: string) => {
     // Close any existing connection.
