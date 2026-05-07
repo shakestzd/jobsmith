@@ -1139,21 +1139,41 @@ def _pipeline_db_path(cwd: Path) -> Path | None:
 def _load_manifest(app_dir: Path, cwd: Path) -> dict | None:
     """Read the manifest blob for ``app_dir.name`` from ``apply_state`` (DB).
 
-    Replaces the prior ``app_dir/.apply-state/manifest.json`` disk read
-    (trk-60217f9f Pass 2). The DB row is the source of truth — when callers
-    pass an *app_dir* the slug is taken from ``app_dir.name``. Returns
-    ``None`` on missing config, missing row, or malformed JSON so callers
-    fall through to the "rerun from scratch" branch unchanged.
+    Pass 2 of trk-60217f9f made the DB the source of truth, but pre-0.8.4
+    applications still have only ``app_dir/.apply-state/manifest.json``
+    on disk. Roborev job 962 MEDIUM caught the regression: those apps
+    would no longer be recognised as resumable and would silently rerun
+    from scratch when a user re-applied to the same URL.
+
+    Read order:
+
+    1. ``apply_state`` row, ``slug = app_dir.name``, ``kind = "manifest"``.
+    2. Disk fallback at ``app_dir/.apply-state/manifest.json`` when the DB
+       row is missing. The disk file is treated as authoritative input
+       only (the orchestrator writes new manifests to the DB exclusively
+       via Pass 2's prompts), so reads here cover the migration window.
+
+    Returns ``None`` when neither source has a usable dict.
     """
     db_path = _pipeline_db_path(cwd)
-    if db_path is None or not db_path.exists():
-        return None
-    slug = app_dir.name
-    conn = open_pipeline_db(db_path)
-    try:
-        blob = get_state(conn, slug=slug, kind="manifest")
-    finally:
-        conn.close()
+    blob: str | None = None
+    if db_path is not None and db_path.exists():
+        slug = app_dir.name
+        conn = open_pipeline_db(db_path)
+        try:
+            blob = get_state(conn, slug=slug, kind="manifest")
+        finally:
+            conn.close()
+    if not blob:
+        # Disk fallback for pre-0.8.4 applications (no DB-backed manifest
+        # was ever written). Returns None on missing or malformed file.
+        manifest_path = app_dir / ".apply-state" / "manifest.json"
+        if not manifest_path.exists():
+            return None
+        try:
+            blob = manifest_path.read_text(encoding="utf-8")
+        except OSError:
+            return None
     if not blob:
         return None
     try:
@@ -1385,6 +1405,25 @@ def _run_phase_iter_body(
 
     # Step 1: bootstrap
     ensure_bootstrap(resolved_cwd)
+
+    # Step 1b: seed master_content from disk YAMLs if not already loaded
+    # (roborev job 962 MEDIUM). The marimo NotebookRunner drives the
+    # apply pipeline through this generator, not through ``run_apply``,
+    # so the master-content seed in ``run_apply`` (job 958) does not
+    # cover this code path. Mirror the same idempotent ensure here so
+    # specialists' ``jobsmith db dump-master --section work`` calls
+    # find rows on a fresh DB.
+    try:
+        _config_path = find_config(resolved_cwd)
+        _db_path = _pipeline_db_path(resolved_cwd)
+        if _config_path is not None and _db_path is not None:
+            from .master_ingest import ensure_master_loaded as _ensure_master
+
+            _ensure_master(_db_path, repo_root=_config_path.parent)
+    except Exception as exc:  # noqa: BLE001 — degrade rather than abort.
+        logger.warning(
+            "master_content seed (run_phase_iter) failed: %s", exc
+        )
 
     # Step 2: resolve starting slug
     started_at = _time.time()

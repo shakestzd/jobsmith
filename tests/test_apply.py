@@ -4195,3 +4195,66 @@ def test_run_phase_iter_force_scoped_preserves_upstream(tmp_path: Path, monkeypa
         "target-phase result envelope must be cleared so the rerun is real"
     )
     assert "spec-apply-prose-writer" not in kinds
+
+
+def test_load_manifest_falls_back_to_disk_for_pre_0_8_4_apps(tmp_path: Path) -> None:
+    """Pre-0.8.4 applications only have manifest.json on disk; ``_load_manifest``
+    must still find them so a re-run does not start from scratch (roborev
+    job 962 MEDIUM)."""
+    from jobsmith.apply import _load_manifest
+
+    _seed_apply_config(tmp_path)
+    slug = "legacy-app"
+    app_dir = tmp_path / "private" / "applications" / slug
+    state_dir = app_dir / ".apply-state"
+    state_dir.mkdir(parents=True)
+    legacy_manifest = {
+        "run_id": "legacy-run",
+        "slug": slug,
+        "invocations": [
+            {"specialist": "apply-jd-parser", "status": "ok"},
+        ],
+    }
+    (state_dir / "manifest.json").write_text(json.dumps(legacy_manifest), encoding="utf-8")
+    # No DB row written — simulates the pre-migration state.
+
+    loaded = _load_manifest(app_dir, tmp_path)
+    assert loaded == legacy_manifest, (
+        "disk-only manifest must be read when the DB row is missing"
+    )
+
+
+def test_load_manifest_db_takes_precedence_over_disk(tmp_path: Path) -> None:
+    """When both the DB row and the disk file exist, the DB wins (the
+    disk fallback only matters during the migration window)."""
+    from jobsmith.apply import _load_manifest
+    from jobsmith.db import open_pipeline_db, put_state
+
+    db_path = _seed_apply_config(tmp_path)
+    slug = "both-app"
+    app_dir = tmp_path / "private" / "applications" / slug
+    state_dir = app_dir / ".apply-state"
+    state_dir.mkdir(parents=True)
+
+    # Disk: stale.
+    (state_dir / "manifest.json").write_text(
+        json.dumps({"run_id": "stale", "invocations": []}),
+        encoding="utf-8",
+    )
+    # DB: current.
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(
+            conn,
+            slug=slug,
+            kind="manifest",
+            content_blob=json.dumps({"run_id": "current", "invocations": [{"specialist": "x", "status": "ok"}]}),
+        )
+    finally:
+        conn.close()
+
+    loaded = _load_manifest(app_dir, tmp_path)
+    assert loaded is not None
+    assert loaded.get("run_id") == "current", (
+        "DB row must win over disk fallback when both exist"
+    )
