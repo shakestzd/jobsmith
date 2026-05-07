@@ -28,7 +28,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 logger = logging.getLogger(__name__)
 
 from jobsmith.api.artifacts import _get_db_path, _row_to_envelope
-from jobsmith.api.supervisor import AutoYesGate, RunSupervisor, get_supervisor
+from jobsmith.api.supervisor import RunSupervisor, get_supervisor
 from jobsmith.apply import derive_slug
 from jobsmith.db import open_pipeline_db
 
@@ -175,25 +175,41 @@ async def _launch_run(
     Returns:
         The minted ``run_id`` string.
     """
-    from jobsmith.core.pipeline import core_run_apply
+    from jobsmith import apply as apply_mod
 
     run_id = uuid.uuid4().hex
     sink = supervisor.register_run(run_id=run_id, slug=slug)
-    confirm = AutoYesGate()
+
+    # The renderer's emit() also forwards to our supervisor sink so SSE
+    # subscribers see PipelineEvents in real time. This is the "API gets
+    # the same events the CLI does" wiring the in-process pipeline needs.
+    from jobsmith.render import ApplyRenderer
+
+    rdr = ApplyRenderer(yes=True, verbosity=0)
+    _orig_emit = rdr.emit
+
+    def _emit_and_broadcast(event):
+        sink.emit(event)
+        try:
+            _orig_emit(event)
+        except Exception:  # noqa: BLE001 — never fail the pipeline on a render side-effect
+            logger.exception("renderer.emit raised for run_id=%r", run_id)
+
+    rdr.emit = _emit_and_broadcast  # type: ignore[method-assign]
 
     async def _run_wrapper() -> None:
-        """Run core_run_apply in a thread; finalise supervisor on completion."""
+        """Run apply.run_apply in a thread; finalise supervisor on completion."""
         try:
             rc = await asyncio.to_thread(
-                core_run_apply,
-                url,
+                apply_mod.run_apply,
+                url=url,
                 cwd=cwd,
-                events=sink,
-                confirm=confirm,
-                slug=slug,
-                run_id=run_id,
+                skip_confirm=True,
                 force=force,
                 jd_text=jd_text,
+                slug=slug,
+                run_id=run_id,
+                renderer=rdr,
             )
         except Exception:  # noqa: BLE001 — task must not propagate unhandled
             logger.exception(

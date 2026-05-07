@@ -281,6 +281,79 @@ async def _supervisor_log_producer(
             continue
 
 
+async def _apply_state_log_producer(
+    supervisor: RunSupervisor,
+    slug: str,
+    db_path: Path | None,
+    queue: asyncio.Queue,
+    poll_interval_s: float,
+    stop_event: asyncio.Event,
+) -> None:
+    """Poll ``apply_state_log`` for transcript rows and forward them as
+    ``TranscriptEvent`` items to the SSE producer queue.
+
+    Slice 4 (trk-ad6d8227) replaced the subprocess-tail path with an
+    in-process EventSink that only carries phase-boundary
+    ``PipelineEvent`` records — the per-line agent transcript
+    (``apply_state_log`` rows written by ``ApplyRenderer._write_transcript``)
+    no longer flowed to the SSE pane. This producer restores that flow by
+    DB-polling the table filtered by the supervisor's active run_id.
+    """
+    if db_path is None:
+        return
+
+    import sqlite3
+
+    last_seen_id_by_run: dict[str, int] = {}
+
+    def _poll(active_run_id: str, after_id: int) -> tuple[list[tuple[int, str]], int]:
+        """Returns (new rows as (id, payload_json), new max_id) for the run."""
+        # Use sqlite3.connect directly (not open_pipeline_db) so this stays
+        # cheap — read-only, no migrations.
+        conn = sqlite3.connect(str(db_path))
+        try:
+            cur = conn.execute(
+                "SELECT id, payload FROM apply_state_log "
+                "WHERE run_id = ? AND id > ? ORDER BY id ASC",
+                (active_run_id, after_id),
+            )
+            rows = [(int(r[0]), str(r[1])) for r in cur.fetchall()]
+        finally:
+            conn.close()
+        max_id = rows[-1][0] if rows else after_id
+        return rows, max_id
+
+    while not stop_event.is_set():
+        try:
+            run_id = supervisor.get_active_for_slug(slug)
+            if run_id is None:
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(stop_event.wait(), timeout=poll_interval_s)
+                continue
+
+            after_id = last_seen_id_by_run.get(run_id, 0)
+            rows, new_max = await asyncio.to_thread(_poll, run_id, after_id)
+            for _row_id, payload_json in rows:
+                try:
+                    payload = json.loads(payload_json) if payload_json else {}
+                except (ValueError, TypeError):
+                    continue
+                te = TranscriptEvent(run_id=run_id, payload=payload)
+                await queue.put(("log", run_id, te))
+            last_seen_id_by_run[run_id] = new_max
+
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(stop_event.wait(), timeout=poll_interval_s)
+        except asyncio.CancelledError:
+            return
+        except Exception:  # noqa: BLE001 — never let polling kill the SSE
+            logger.exception(
+                "apply_state_log producer failed for slug=%r", slug
+            )
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(stop_event.wait(), timeout=poll_interval_s)
+
+
 async def _stream(
     *,
     request: Request,
@@ -326,6 +399,15 @@ async def _stream(
             supervisor, slug, log_queue, poll_interval_s, stop_event
         ),
         name=f"events-supervisor-producer-{slug}",
+    )
+    # Slice 4 follow-up: poll apply_state_log for transcript rows the
+    # in-process renderer writes to DB. Without this the event-stream
+    # pane stays empty for in-process runs.
+    transcript_db_task = asyncio.create_task(
+        _apply_state_log_producer(
+            supervisor, slug, db_path, log_queue, poll_interval_s, stop_event
+        ),
+        name=f"events-transcript-db-producer-{slug}",
     )
 
     # Emit a sentinel "open" comment so clients see the stream is alive.
@@ -548,8 +630,11 @@ async def _stream(
         # connection.  Only the per-connection subscriber queue closes.
         stop_event.set()
         producer_task.cancel()
+        transcript_db_task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await producer_task
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await transcript_db_task
         # No connection to close — _db_poll_once owns its lifecycle.
 
 
