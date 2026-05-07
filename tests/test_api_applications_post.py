@@ -351,7 +351,7 @@ class TestPostApplicationsJdText:
 
         captured: dict[str, list[str]] = {}
 
-        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None):
+        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None, db_path=None, run_id=None):
             captured["argv"] = argv
             return "run-paste-001"
 
@@ -381,7 +381,7 @@ class TestPostApplicationsJdText:
 
         captured: dict[str, list[str]] = {}
 
-        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None):
+        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None, db_path=None, run_id=None):
             captured["argv"] = argv
             return "run-fetch-001"
 
@@ -402,7 +402,7 @@ class TestPostApplicationsJdText:
 
         captured: dict[str, list[str]] = {}
 
-        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None):
+        async def fake_start(self, *, slug: str, argv: list[str], cwd, transcript_path=None, db_path=None, run_id=None):
             captured["argv"] = argv
             return "run-empty-001"
 
