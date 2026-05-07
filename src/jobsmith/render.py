@@ -309,42 +309,39 @@ class ApplyRenderer:
         db_path: Path | None = None,
         run_id: str | None = None,
     ) -> None:
-        """Open the transcript JSONL file for append and write a phase boundary marker.
+        """Record transcript context and write a phase boundary marker to the DB.
+
+        Slice 4 (trk-ad6d8227): The disk ``transcript.jsonl`` write has been
+        removed. All pipeline events are now emitted in-process via the
+        EventSink (``supervisor._SupervisorEventSink``) and land in the DB
+        via ``_append_state_log``. The file-handle fields remain to avoid
+        breaking callers that still invoke ``close_transcript()``; they are
+        set to ``None`` so no disk I/O occurs.
 
         Parameters
         ----------
         transcript_path:
-            Absolute path to the transcript.jsonl file.
+            Previously: path to the JSONL file. Now unused (kept for call-site
+            compatibility with the CLI path, which may still pass a value).
         phase_name:
             Current phase name (used in the boundary marker).
         slug, db_path:
-            When both are provided, every transcript record is also appended
-            to ``apply_state_log`` (trk-60217f9f Pass 4). Disk + DB run in
-            parallel during the migration window so existing tailers (file
-            offset) and new tailers (DB row id) see identical streams.
+            When both are provided, the boundary marker is appended to
+            ``apply_state_log`` so the supervisor/SSE path sees it.
         """
-        transcript_path.parent.mkdir(parents=True, exist_ok=True)
-        self._transcript_path = transcript_path
-        self._transcript_fh = transcript_path.open("a", encoding="utf-8")
+        self._transcript_path = None
+        self._transcript_fh = None
         self._transcript_slug = slug
         self._transcript_db_path = db_path
         self._transcript_run_id = run_id
-        # Write phase boundary marker (disk + DB)
+        # Write phase boundary marker to DB only.
         marker = {"_phase_boundary": phase_name, "ts": _now_iso()}
-        self._transcript_fh.write(json.dumps(marker) + "\n")
-        self._transcript_fh.flush()
         self._append_state_log(marker)
 
     def close_transcript(self) -> None:
-        """Flush and close the transcript file handle."""
-        if self._transcript_fh is not None:
-            try:
-                self._transcript_fh.flush()
-                self._transcript_fh.close()
-            except OSError:
-                pass
-            self._transcript_fh = None
-            self._transcript_path = None
+        """Clear transcript context (no-op for the disk handle after Slice 4)."""
+        self._transcript_fh = None
+        self._transcript_path = None
         self._transcript_slug = None
         self._transcript_db_path = None
         self._transcript_run_id = None
@@ -379,14 +376,11 @@ class ApplyRenderer:
             pass
 
     def _write_transcript(self, record: dict) -> None:
-        """Append a JSON record to the transcript file + apply_state_log."""
-        if self._transcript_fh is None:
-            return
-        try:
-            self._transcript_fh.write(json.dumps(record) + "\n")
-            self._transcript_fh.flush()
-        except OSError:
-            pass
+        """Append a JSON record to apply_state_log (DB audit trail).
+
+        Slice 4 (trk-ad6d8227): disk transcript.jsonl write removed.
+        DB write via ``_append_state_log`` is retained for audit purposes.
+        """
         self._append_state_log(record)
 
     def update_status(self, text: str) -> None:

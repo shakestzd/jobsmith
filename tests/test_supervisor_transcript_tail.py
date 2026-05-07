@@ -1,251 +1,119 @@
-"""Tests for supervisor transcript-tail (bug-0e13706c, trk-eb70f385).
+"""Tests for supervisor event buffering and DB state log — updated for Slice 4 (trk-ad6d8227).
 
-The renderer in jobsmith.render writes structured agent events
-(tool_call, tool_result, text, phase boundary markers) directly to
-``transcript.jsonl`` without echoing them to stdout. The supervisor's
-``_tail_transcript`` task watches the file and forwards each new JSON
-line as a structured ``TranscriptEvent`` over the SSE stream so the UI
-can render typed events instead of parsing terminal log lines.
+Slice 4 change summary
+----------------------
+The supervisor no longer spawns subprocesses or tails transcript.jsonl files.
+The old ``TestTranscriptTail`` tests that called ``supervisor.start(argv=...)``
+have been removed.
 
-Coverage
---------
-- test_tail_emits_each_jsonl_line_as_transcript_event
-- test_tail_handles_partial_writes  (renderer flushes mid-line)
-- test_tail_drops_non_json_lines  (defensive)
-- test_tail_drops_non_dict_payloads  (defensive)
-- test_tail_handles_missing_transcript_file_then_creation
-- test_tail_stops_when_run_finishes_and_file_drained
-- test_tail_no_op_when_transcript_path_none
+The DB-level tests for ``apply_state_log`` (append/read round-trips) are
+retained because the pipeline still writes to that table for audit purposes.
+
+The ``test_render_dual_writes_transcript_and_state_log`` test has been
+updated: after Slice 4 the disk transcript.jsonl is no longer written, but
+the DB rows are still present.
+
+Retained tests
+--------------
+- DB round-trip: append_state_log + read_state_log
+- DB cursor advancement: after_id semantics
+- DB run_id discriminator: cross-run isolation
+- DB slug rekey: run_id survives rekey_slug
+- Render: open_transcript writes to DB (not disk) after Slice 4
+- Supervisor: EventSink emits TranscriptEvents to subscribers
 """
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 
 import pytest
 
 from jobsmith.api.supervisor import (
-    LogLine,
     RunSupervisor,
     TranscriptEvent,
 )
 
 
-@pytest.fixture
-def anyio_backend() -> str:
-    return "asyncio"
-
-
 # ---------------------------------------------------------------------------
-# Helpers
+# Supervisor EventSink → TranscriptEvent path
 # ---------------------------------------------------------------------------
 
 
-def _append_jsonl(path: Path, payload: dict) -> None:
-    """Append one JSON object as a single newline-terminated line."""
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(payload) + "\n")
-        fh.flush()
+class TestSupervisorEventSinkBuffering:
+    """The in-process EventSink buffers TranscriptEvents for SSE subscribers."""
 
+    def test_sink_emit_creates_transcript_event(self) -> None:
+        """EventSink.emit converts PipelineEvent to TranscriptEvent in buffer."""
+        from jobsmith.core.events import PipelineEvent
 
-async def _drain_stream_until_finished(supervisor: RunSupervisor, run_id: str) -> list:
-    out = []
-    async for item in supervisor.stream(run_id):
-        out.append(item)
-    return out
+        sup = RunSupervisor(max_buffered_lines=100)
+        sink = sup.register_run(run_id="r-buf-1", slug="buf-slug")
+        sink.emit(PipelineEvent(kind="phase_started", phase="gather"))
+
+        record = sup._runs["r-buf-1"]
+        assert len(record.buffer) == 1
+        item = list(record.buffer)[0]
+        assert isinstance(item, TranscriptEvent)
+        assert item.run_id == "r-buf-1"
+        assert item.payload["type"] == "phase_started"
+        assert item.payload["phase"] == "gather"
+
+    def test_sink_emit_broadcasts_to_subscriber_queues(self) -> None:
+        """Sink emit pushes items to every registered subscriber queue."""
+        import asyncio
+        from jobsmith.core.events import PipelineEvent
+
+        sup = RunSupervisor(max_buffered_lines=100)
+        sink = sup.register_run(run_id="r-bcast", slug="bcast-slug")
+        record = sup._runs["r-bcast"]
+
+        q1: asyncio.Queue = asyncio.Queue()
+        q2: asyncio.Queue = asyncio.Queue()
+        record.subscribers.extend([q1, q2])
+
+        sink.emit(PipelineEvent(kind="phase_complete", phase="gather"))
+
+        item1 = q1.get_nowait()
+        item2 = q2.get_nowait()
+        assert isinstance(item1, TranscriptEvent)
+        assert item1.payload["type"] == "phase_complete"
+        assert item2.payload["type"] == "phase_complete"
+
+    def test_sink_swallows_exceptions(self) -> None:
+        """EventSink.emit must not raise even if internal _append fails."""
+        from jobsmith.core.events import PipelineEvent
+        from unittest.mock import patch
+
+        sup = RunSupervisor(max_buffered_lines=100)
+        sink = sup.register_run(run_id="r-exc", slug="exc-slug")
+
+        with patch.object(sup, "_append", side_effect=RuntimeError("boom")):
+            sink.emit(PipelineEvent(kind="phase_started", phase="gather"))
+        # No exception raised — pipeline must not be aborted by a sink failure.
+
+    @pytest.mark.anyio
+    async def test_stream_yields_buffered_events(self) -> None:
+        """stream() yields TranscriptEvents from buffer after on_run_complete."""
+        from jobsmith.core.events import PipelineEvent
+
+        sup = RunSupervisor(max_buffered_lines=100)
+        sink = sup.register_run(run_id="r-stream-2", slug="stream-slug")
+        sink.emit(PipelineEvent(kind="phase_started", phase="gather"))
+        sink.emit(PipelineEvent(kind="phase_complete", phase="gather"))
+        sup.on_run_complete("r-stream-2", rc=0)
+
+        items = []
+        async for item in sup.stream("r-stream-2"):
+            items.append(item)
+
+        assert len(items) == 2
+        assert items[0].payload["type"] == "phase_started"
+        assert items[1].payload["type"] == "phase_complete"
 
 
 # ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-
-
-class TestTranscriptTail:
-    @pytest.mark.anyio
-    async def test_tail_emits_each_jsonl_line_as_transcript_event(
-        self, tmp_path: Path
-    ) -> None:
-        """Each newline-terminated JSON line in transcript.jsonl yields a TranscriptEvent."""
-        transcript = tmp_path / "transcript.jsonl"
-        _append_jsonl(transcript, {"_phase_boundary": "gather", "ts": "2026-05-06T10:00:00Z"})
-        _append_jsonl(transcript, {"type": "tool_call", "tool_name": "Read", "tool_use_id": "u1"})
-        _append_jsonl(transcript, {"type": "tool_result", "tool_use_id": "u1", "summary": "ok"})
-
-        supervisor = RunSupervisor(max_buffered_lines=100)
-        run_id = await supervisor.start(
-            slug="tail-test-1",
-            argv=["python", "-c", "import time; time.sleep(0.4)"],
-            cwd=tmp_path,
-            transcript_path=transcript,
-        )
-
-        items = await _drain_stream_until_finished(supervisor, run_id)
-        transcripts = [i for i in items if isinstance(i, TranscriptEvent)]
-        # Three structured events tailed.
-        assert len(transcripts) == 3, f"expected 3, got {len(transcripts)}: {transcripts}"
-        assert transcripts[0].payload.get("_phase_boundary") == "gather"
-        assert transcripts[1].payload.get("type") == "tool_call"
-        assert transcripts[1].payload.get("tool_name") == "Read"
-        assert transcripts[2].payload.get("type") == "tool_result"
-        assert transcripts[2].payload.get("tool_use_id") == "u1"
-        # Run id propagated.
-        assert all(t.run_id == run_id for t in transcripts)
-
-    @pytest.mark.anyio
-    async def test_tail_handles_partial_writes(self, tmp_path: Path) -> None:
-        """A partial line (no trailing newline yet) is held until the newline arrives.
-
-        Simulates the renderer flushing mid-line (rare but possible if buffered
-        I/O lands between the JSON serialization and the newline byte).
-        """
-        transcript = tmp_path / "transcript.jsonl"
-        # Write half a JSON object with no newline.
-        transcript.write_text('{"type": "tool_call", "tool_name":', encoding="utf-8")
-
-        supervisor = RunSupervisor(max_buffered_lines=100)
-        run_id = await supervisor.start(
-            slug="tail-test-partial",
-            argv=["python", "-c", "import time; time.sleep(0.5)"],
-            cwd=tmp_path,
-            transcript_path=transcript,
-        )
-
-        # Give the tailer a moment to read the partial line.
-        await asyncio.sleep(0.2)
-
-        # Now complete the line.
-        with transcript.open("a", encoding="utf-8") as fh:
-            fh.write(' "Bash"}\n')
-            fh.flush()
-
-        items = await _drain_stream_until_finished(supervisor, run_id)
-        transcripts = [i for i in items if isinstance(i, TranscriptEvent)]
-        assert len(transcripts) == 1
-        assert transcripts[0].payload == {"type": "tool_call", "tool_name": "Bash"}
-
-    @pytest.mark.anyio
-    async def test_tail_drops_non_json_lines(self, tmp_path: Path) -> None:
-        """Garbage non-JSON lines are silently dropped — never break the stream."""
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text(
-            "not valid json\n"
-            + json.dumps({"type": "text", "text_truncated": "ok"})
-            + "\n"
-            + "{also broken\n",
-            encoding="utf-8",
-        )
-
-        supervisor = RunSupervisor(max_buffered_lines=100)
-        run_id = await supervisor.start(
-            slug="tail-test-bad-json",
-            argv=["python", "-c", "import time; time.sleep(0.4)"],
-            cwd=tmp_path,
-            transcript_path=transcript,
-        )
-
-        items = await _drain_stream_until_finished(supervisor, run_id)
-        transcripts = [i for i in items if isinstance(i, TranscriptEvent)]
-        assert len(transcripts) == 1
-        assert transcripts[0].payload.get("type") == "text"
-
-    @pytest.mark.anyio
-    async def test_tail_drops_non_dict_payloads(self, tmp_path: Path) -> None:
-        """JSON-decoded payloads that are NOT dicts (lists, strings) are dropped."""
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text(
-            json.dumps([1, 2, 3]) + "\n"
-            + json.dumps("a string") + "\n"
-            + json.dumps({"type": "tool_call", "tool_name": "Read"}) + "\n",
-            encoding="utf-8",
-        )
-
-        supervisor = RunSupervisor(max_buffered_lines=100)
-        run_id = await supervisor.start(
-            slug="tail-test-non-dict",
-            argv=["python", "-c", "import time; time.sleep(0.4)"],
-            cwd=tmp_path,
-            transcript_path=transcript,
-        )
-
-        items = await _drain_stream_until_finished(supervisor, run_id)
-        transcripts = [i for i in items if isinstance(i, TranscriptEvent)]
-        assert len(transcripts) == 1
-        assert transcripts[0].payload.get("tool_name") == "Read"
-
-    @pytest.mark.anyio
-    async def test_tail_handles_missing_transcript_file_then_creation(
-        self, tmp_path: Path
-    ) -> None:
-        """The transcript file may not exist when start() runs — it appears mid-run."""
-        transcript = tmp_path / "transcript.jsonl"
-        # Do NOT pre-create.
-        assert not transcript.exists()
-
-        supervisor = RunSupervisor(max_buffered_lines=100)
-        run_id = await supervisor.start(
-            slug="tail-test-late-file",
-            argv=["python", "-c", "import time; time.sleep(0.5)"],
-            cwd=tmp_path,
-            transcript_path=transcript,
-        )
-
-        # Tailer is polling. After ~150ms create the file with one event.
-        await asyncio.sleep(0.15)
-        _append_jsonl(transcript, {"type": "text", "text_truncated": "late"})
-
-        items = await _drain_stream_until_finished(supervisor, run_id)
-        transcripts = [i for i in items if isinstance(i, TranscriptEvent)]
-        assert len(transcripts) == 1
-        assert transcripts[0].payload.get("type") == "text"
-
-    @pytest.mark.anyio
-    async def test_tail_stops_when_run_finishes_and_file_drained(
-        self, tmp_path: Path
-    ) -> None:
-        """Tailer terminates cleanly: no spinning when the subprocess is done and
-        the file has nothing more to read."""
-        transcript = tmp_path / "transcript.jsonl"
-        _append_jsonl(transcript, {"type": "tool_call", "tool_name": "Read"})
-
-        supervisor = RunSupervisor(max_buffered_lines=100)
-        run_id = await supervisor.start(
-            slug="tail-test-stop",
-            argv=["python", "-c", "import sys; sys.exit(0)"],
-            cwd=tmp_path,
-            transcript_path=transcript,
-        )
-
-        # The stream should complete in well under a second.
-        items = await asyncio.wait_for(
-            _drain_stream_until_finished(supervisor, run_id), timeout=2.0
-        )
-        # Verify we got the one event AND log lines coexist.
-        transcripts = [i for i in items if isinstance(i, TranscriptEvent)]
-        logs = [i for i in items if isinstance(i, LogLine)]
-        assert len(transcripts) == 1
-        # A successful 0-exit produces no stdout in this script — that's fine.
-        assert isinstance(logs, list)  # just exercises union typing
-
-    @pytest.mark.anyio
-    async def test_tail_no_op_when_transcript_path_none(self, tmp_path: Path) -> None:
-        """When transcript_path is None, no tailer is started and the stream
-        contains only LogLines (no TranscriptEvents)."""
-        supervisor = RunSupervisor(max_buffered_lines=100)
-        run_id = await supervisor.start(
-            slug="tail-test-no-path",
-            argv=["python", "-c", "print('hello')"],
-            cwd=tmp_path,
-            transcript_path=None,
-        )
-
-        items = await _drain_stream_until_finished(supervisor, run_id)
-        transcripts = [i for i in items if isinstance(i, TranscriptEvent)]
-        assert transcripts == []
-
-
-# ---------------------------------------------------------------------------
-# trk-60217f9f Pass 4 — DB-backed transcript tailer
+# trk-60217f9f Pass 4 — DB-backed state log (tests retained from before Slice 4)
 # ---------------------------------------------------------------------------
 
 
@@ -280,9 +148,7 @@ def test_read_state_log_after_id_skips_already_seen(tmp_path):
         id1 = append_state_log(conn, slug="acme", payload='{"n":1}')
         id2 = append_state_log(conn, slug="acme", payload='{"n":2}')
         first = read_state_log(conn, slug="acme", after_id=0)
-        # Cursor at id1 → only id2 should come back next.
         second = read_state_log(conn, slug="acme", after_id=id1)
-        # Cursor at id2 → no more rows.
         third = read_state_log(conn, slug="acme", after_id=id2)
     finally:
         conn.close()
@@ -292,8 +158,10 @@ def test_read_state_log_after_id_skips_already_seen(tmp_path):
     assert third == []
 
 
-def test_render_dual_writes_transcript_and_state_log(tmp_path):
-    """ApplyRenderer.open_transcript with slug+db_path mirrors records to apply_state_log."""
+def test_render_writes_to_state_log_not_disk(tmp_path):
+    """After Slice 4: open_transcript writes boundary marker to apply_state_log;
+    no disk transcript.jsonl is created.
+    """
     import io
     from jobsmith.db import open_pipeline_db, read_state_log
     from jobsmith.render import ApplyRenderer
@@ -301,7 +169,7 @@ def test_render_dual_writes_transcript_and_state_log(tmp_path):
 
     db_path = tmp_path / "private" / "jobsmith.db"
     db_path.parent.mkdir(parents=True)
-    open_pipeline_db(db_path).close()  # materialize schema
+    open_pipeline_db(db_path).close()
 
     transcript_path = tmp_path / "applications" / "acme" / ".apply-state" / "transcript.jsonl"
     rdr = ApplyRenderer(
@@ -314,11 +182,12 @@ def test_render_dual_writes_transcript_and_state_log(tmp_path):
     rdr._write_transcript({"type": "tool_result", "ok": True})
     rdr.close_transcript()
 
-    # Disk file got the boundary + both records.
-    lines = transcript_path.read_text().strip().splitlines()
-    assert len(lines) == 3, f"expected boundary + 2 records, got {len(lines)}: {lines!r}"
+    # Disk file must NOT exist after Slice 4.
+    assert not transcript_path.exists(), (
+        "transcript.jsonl must not be written to disk after Slice 4"
+    )
 
-    # apply_state_log got the same three (boundary marker + 2 records).
+    # apply_state_log must have boundary marker + 2 records = 3 rows.
     conn = open_pipeline_db(db_path)
     try:
         rows = read_state_log(conn, slug="acme", after_id=0)
@@ -376,8 +245,7 @@ def test_read_state_log_filters_by_run_id_isolating_concurrent_runs(tmp_path):
 
 
 def test_read_state_log_run_id_survives_rekey_slug(tmp_path):
-    """rekey_slug mutates slug column but leaves run_id untouched, so the
-    tailer keeps streaming after the orchestrator's slug rename."""
+    """rekey_slug mutates slug column but leaves run_id untouched."""
     from jobsmith.db import (
         append_state_log,
         open_pipeline_db,

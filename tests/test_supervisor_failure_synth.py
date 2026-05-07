@@ -1,258 +1,39 @@
-"""Tests for supervisor terminal-phase-failure synthesis (feat-438090af).
+"""Tests for supervisor terminal-phase handling — updated for Slice 4 (trk-ad6d8227).
 
-Coverage
---------
-Unit -- synth_terminal_phase_failed():
-  - test_synth_returns_none_when_terminal_success_present
-  - test_synth_returns_none_when_terminal_failed_present
-  - test_synth_returns_dict_when_no_terminal_event
-  - test_synth_uses_last_seen_phase_from_transcript
-  - test_synth_unknown_phase_when_transcript_empty
-  - test_synth_handles_missing_transcript_file
-  - test_synth_error_excerpt_from_stderr
-  - test_synth_sigkill_returncode_negative
-  - test_synth_no_event_for_zero_exit
+Slice 4 change summary
+----------------------
+The ``synth_terminal_phase_failed`` module-level function has been removed.
+The supervisor no longer spawns subprocesses, reads transcript files, or
+synthesises failure events from file contents. Instead, the pipeline's
+EventSink emits ``phase_failed`` PipelineEvents in-process, which are
+converted to ``TranscriptEvent`` payloads and broadcast to SSE subscribers.
 
-Unit -- SynthPhaseEvent dataclass:
-  - test_synth_phase_event_fields
+Tests retained
+--------------
+- ``SynthPhaseEvent`` dataclass import/field test (backward-compat stub is kept)
+- ``TestSupervisorInProcessCompletion``: verifies that ``register_run`` +
+  ``on_run_complete`` finalise the handle correctly and notify subscribers.
 
-Integration -- supervisor._wait() injects synth event:
-  - test_supervisor_emits_synth_phase_on_nonzero_exit
-  - test_supervisor_no_synth_when_exit_zero
-  - test_supervisor_synth_visible_in_stream
-  - test_supervisor_no_synth_when_transcript_has_terminal_event
+Tests removed (covered by Slice 4 design)
+------------------------------------------
+- synth_terminal_phase_failed unit tests (function deleted)
+- supervisor integration tests that spawned subprocesses (old start() API gone)
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
+import asyncio
 import pytest
 
-from jobsmith.api.supervisor import RunSupervisor, SynthPhaseEvent, synth_terminal_phase_failed
-
-# ---------------------------------------------------------------------------
-# Transcript fixture helpers
-# ---------------------------------------------------------------------------
-
-
-def _write_transcript(path: Path, lines: list[dict]) -> None:
-    path.write_text("\n".join(json.dumps(ln) for ln in lines) + "\n")
-
-
-def _make_phase_event(phase: str, status: str) -> dict:
-    return {"type": "phase_event", "phase": phase, "status": status}
-
-
-def _make_log_line(text: str) -> dict:
-    return {"type": "log", "text": text}
+from jobsmith.api.supervisor import RunSupervisor, SynthPhaseEvent
 
 
 # ---------------------------------------------------------------------------
-# Unit tests: synth_terminal_phase_failed()
-# ---------------------------------------------------------------------------
-
-
-class TestSynthTerminalPhaseFailed:
-    """Pure-function tests for synth_terminal_phase_failed."""
-
-    def test_synth_returns_none_when_terminal_success_present(
-        self, tmp_path: Path
-    ) -> None:
-        """When transcript already has status=success, return None."""
-        transcript = tmp_path / "transcript.jsonl"
-        _write_transcript(
-            transcript,
-            [
-                _make_phase_event("gather", "running"),
-                _make_phase_event("render", "success"),
-            ],
-        )
-        result = synth_terminal_phase_failed(
-            transcript_path=transcript,
-            returncode=0,
-            last_stderr_lines=[],
-        )
-        assert result is None
-
-    def test_synth_returns_none_when_terminal_failed_present(
-        self, tmp_path: Path
-    ) -> None:
-        """When transcript already has status=failed, return None (pipeline wrote it)."""
-        transcript = tmp_path / "transcript.jsonl"
-        _write_transcript(
-            transcript,
-            [
-                _make_phase_event("gather", "running"),
-                _make_phase_event("gather", "failed"),
-            ],
-        )
-        result = synth_terminal_phase_failed(
-            transcript_path=transcript,
-            returncode=1,
-            last_stderr_lines=["Error: something went wrong"],
-        )
-        assert result is None
-
-    def test_synth_returns_none_when_phase_complete_type_present(
-        self, tmp_path: Path
-    ) -> None:
-        """render.py writes {type: phase_complete} without a status field;
-        the synth gate must recognise it as terminal.  Regression for
-        roborev branch-review MEDIUM (feat-6d76bb22)."""
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text(
-            json.dumps({"type": "phase_started", "phase": "gather"}) + "\n"
-            + json.dumps({"type": "phase_complete", "phase": "gather"}) + "\n",
-            encoding="utf-8",
-        )
-        result = synth_terminal_phase_failed(
-            transcript_path=transcript,
-            returncode=0,
-            last_stderr_lines=[],
-        )
-        assert result is None, (
-            "Type=phase_complete must be treated as terminal — "
-            "duplicate synth events would fire otherwise"
-        )
-
-    def test_synth_returns_none_when_phase_failed_type_present(
-        self, tmp_path: Path
-    ) -> None:
-        """{type: phase_failed} (no status field) must also be terminal."""
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text(
-            json.dumps({"type": "phase_started", "phase": "draft"}) + "\n"
-            + json.dumps({"type": "phase_failed", "phase": "draft"}) + "\n",
-            encoding="utf-8",
-        )
-        result = synth_terminal_phase_failed(
-            transcript_path=transcript,
-            returncode=1,
-            last_stderr_lines=["boom"],
-        )
-        assert result is None
-
-    def test_synth_returns_dict_when_no_terminal_event(
-        self, tmp_path: Path
-    ) -> None:
-        """When transcript has no terminal phase event, return a failure dict."""
-        transcript = tmp_path / "transcript.jsonl"
-        _write_transcript(
-            transcript,
-            [
-                _make_phase_event("gather", "running"),
-                _make_log_line("Doing some work"),
-            ],
-        )
-        result = synth_terminal_phase_failed(
-            transcript_path=transcript,
-            returncode=1,
-            last_stderr_lines=["Fatal error occurred"],
-        )
-        assert result is not None
-        assert result["status"] == "failed"
-        assert isinstance(result["last_phase"], str)
-        assert isinstance(result["error_excerpt"], str)
-
-    def test_synth_uses_last_seen_phase_from_transcript(
-        self, tmp_path: Path
-    ) -> None:
-        """last_phase reflects the last phase event seen in the transcript."""
-        transcript = tmp_path / "transcript.jsonl"
-        _write_transcript(
-            transcript,
-            [
-                _make_phase_event("gather", "running"),
-                _make_phase_event("draft", "running"),
-                _make_log_line("halfway through draft"),
-            ],
-        )
-        result = synth_terminal_phase_failed(
-            transcript_path=transcript,
-            returncode=2,
-            last_stderr_lines=[],
-        )
-        assert result is not None
-        assert result["last_phase"] == "draft"
-
-    def test_synth_unknown_phase_when_no_phase_events_in_transcript(
-        self, tmp_path: Path
-    ) -> None:
-        """When transcript exists but has no phase events, last_phase='unknown'."""
-        transcript = tmp_path / "transcript.jsonl"
-        _write_transcript(transcript, [_make_log_line("some output")])
-        result = synth_terminal_phase_failed(
-            transcript_path=transcript,
-            returncode=1,
-            last_stderr_lines=[],
-        )
-        assert result is not None
-        assert result["last_phase"] == "unknown"
-
-    def test_synth_handles_missing_transcript_file(self, tmp_path: Path) -> None:
-        """When transcript path does not exist, still return a failure dict."""
-        missing = tmp_path / "nonexistent.jsonl"
-        result = synth_terminal_phase_failed(
-            transcript_path=missing,
-            returncode=1,
-            last_stderr_lines=["process died"],
-        )
-        assert result is not None
-        assert result["status"] == "failed"
-        assert result["last_phase"] == "unknown"
-
-    def test_synth_error_excerpt_from_stderr(
-        self, tmp_path: Path
-    ) -> None:
-        """error_excerpt includes content from last_stderr_lines."""
-        transcript = tmp_path / "transcript.jsonl"
-        _write_transcript(transcript, [_make_log_line("partial work")])
-        result = synth_terminal_phase_failed(
-            transcript_path=transcript,
-            returncode=1,
-            last_stderr_lines=["Killed", "Signal 9"],
-        )
-        assert result is not None
-        assert "Signal 9" in result["error_excerpt"] or "Killed" in result["error_excerpt"]
-
-    def test_synth_sigkill_returncode_negative(self, tmp_path: Path) -> None:
-        """SIGKILL (returncode=-9) still synthesizes a failure event."""
-        transcript = tmp_path / "transcript.jsonl"
-        _write_transcript(
-            transcript,
-            [_make_phase_event("gather", "running")],
-        )
-        result = synth_terminal_phase_failed(
-            transcript_path=transcript,
-            returncode=-9,
-            last_stderr_lines=[],
-        )
-        assert result is not None
-        assert result["status"] == "failed"
-
-    def test_synth_no_event_for_zero_exit(self, tmp_path: Path) -> None:
-        """When returncode=0 and no terminal event, do NOT synthesize (exit was clean)."""
-        transcript = tmp_path / "transcript.jsonl"
-        _write_transcript(
-            transcript,
-            [_make_phase_event("render", "running")],
-        )
-        result = synth_terminal_phase_failed(
-            transcript_path=transcript,
-            returncode=0,
-            last_stderr_lines=[],
-        )
-        assert result is None
-
-
-# ---------------------------------------------------------------------------
-# Unit tests: SynthPhaseEvent dataclass
+# Backward-compat stub: SynthPhaseEvent dataclass still importable
 # ---------------------------------------------------------------------------
 
 
 class TestSynthPhaseEvent:
-    """SynthPhaseEvent must be importable and hold the right fields."""
+    """SynthPhaseEvent is kept as a backward-compat stub; events.py imports it."""
 
     def test_synth_phase_event_fields(self) -> None:
         event = SynthPhaseEvent(
@@ -266,130 +47,86 @@ class TestSynthPhaseEvent:
         assert event.last_phase == "gather"
         assert event.error_excerpt == "Something died"
 
+    def test_synth_phase_event_is_frozen(self) -> None:
+        event = SynthPhaseEvent(
+            run_id="r1", status="failed", last_phase="draft", error_excerpt=""
+        )
+        import dataclasses
+        assert dataclasses.is_dataclass(event)
+
 
 # ---------------------------------------------------------------------------
-# Integration tests: supervisor._wait() synthesizes and broadcasts
+# In-process run lifecycle: register_run + on_run_complete
 # ---------------------------------------------------------------------------
 
 
-class TestSupervisorSynthIntegration:
-    """Verify supervisor injects synth-phase event into subscriber stream."""
+class TestSupervisorInProcessCompletion:
+    """Verify supervisor correctly finalises runs via on_run_complete."""
+
+    def test_on_run_complete_success_sets_done(self) -> None:
+        """rc=0 → handle.status == 'done'."""
+        sup = RunSupervisor()
+        sup.register_run(run_id="r-ok", slug="slug-ok")
+        sup.on_run_complete("r-ok", rc=0)
+        handle = sup.get("r-ok")
+        assert handle is not None
+        assert handle.status == "done"
+        assert handle.exit_code == 0
+        assert handle.finished_at is not None
+
+    def test_on_run_complete_failure_sets_failed(self) -> None:
+        """rc != 0 → handle.status == 'failed'."""
+        sup = RunSupervisor()
+        sup.register_run(run_id="r-fail", slug="slug-fail")
+        sup.on_run_complete("r-fail", rc=1)
+        handle = sup.get("r-fail")
+        assert handle is not None
+        assert handle.status == "failed"
+        assert handle.exit_code == 1
+
+    def test_on_run_complete_removes_from_active_by_slug(self) -> None:
+        """Completed run is deregistered from active-by-slug map."""
+        sup = RunSupervisor()
+        sup.register_run(run_id="r-active", slug="active-slug")
+        assert sup.get_active_for_slug("active-slug") == "r-active"
+        sup.on_run_complete("r-active", rc=0)
+        assert sup.get_active_for_slug("active-slug") is None
+
+    def test_on_run_complete_notifies_subscribers(self) -> None:
+        """Subscribers receive the end-of-stream sentinel (None) on completion."""
+        sup = RunSupervisor()
+        sup.register_run(run_id="r-sub", slug="slug-sub")
+
+        # Manually attach a subscriber queue.
+        record = sup._runs["r-sub"]
+        q: asyncio.Queue = asyncio.Queue()
+        record.subscribers.append(q)
+
+        sup.on_run_complete("r-sub", rc=0)
+        sentinel = q.get_nowait()
+        assert sentinel is None, "Expected None sentinel from on_run_complete"
+
+    def test_on_run_complete_idempotent_for_unknown_run(self) -> None:
+        """on_run_complete with unknown run_id is a no-op (no exception)."""
+        sup = RunSupervisor()
+        sup.on_run_complete("does-not-exist", rc=0)  # must not raise
 
     @pytest.mark.anyio
-    async def test_supervisor_emits_synth_phase_on_nonzero_exit(
-        self, tmp_path: Path
-    ) -> None:
-        """When subprocess exits non-zero without terminal phase, stream contains SynthPhaseEvent."""
-        transcript = tmp_path / "transcript.jsonl"
-        # No terminal phase event -- only a running event
-        _write_transcript(transcript, [_make_phase_event("gather", "running")])
+    async def test_stream_completes_after_on_run_complete(self) -> None:
+        """stream() terminates cleanly when on_run_complete is called."""
+        sup = RunSupervisor()
+        sink = sup.register_run(run_id="r-stream", slug="slug-stream")
 
-        supervisor = RunSupervisor(max_buffered_lines=100)
-        # Script: exit with code 1 immediately
-        run_id = await supervisor.start(
-            slug="test-slug",
-            argv=["python", "-c", "import sys; sys.exit(1)"],
-            cwd=tmp_path,
-            transcript_path=transcript,
-        )
+        collected = []
+        from jobsmith.core.events import PipelineEvent
 
-        collected: list = []
-        async for item in supervisor.stream(run_id):
+        sink.emit(PipelineEvent(kind="phase_started", phase="gather"))
+
+        # Simulate completion (rc=0).
+        sup.on_run_complete("r-stream", rc=0)
+
+        async for item in sup.stream("r-stream"):
             collected.append(item)
 
-        synth_events = [e for e in collected if isinstance(e, SynthPhaseEvent)]
-        assert synth_events, (
-            f"Expected at least one SynthPhaseEvent in stream, got: {collected}"
-        )
-        synth = synth_events[0]
-        assert synth.status == "failed"
-        assert synth.run_id == run_id
-
-    @pytest.mark.anyio
-    async def test_supervisor_no_synth_when_exit_zero(
-        self, tmp_path: Path
-    ) -> None:
-        """When subprocess exits 0, no SynthPhaseEvent is emitted."""
-        transcript = tmp_path / "transcript.jsonl"
-        _write_transcript(transcript, [_make_phase_event("render", "running")])
-
-        supervisor = RunSupervisor(max_buffered_lines=100)
-        run_id = await supervisor.start(
-            slug="test-slug",
-            argv=["python", "-c", "import sys; sys.exit(0)"],
-            cwd=tmp_path,
-            transcript_path=transcript,
-        )
-
-        collected: list = []
-        async for item in supervisor.stream(run_id):
-            collected.append(item)
-
-        synth_events = [e for e in collected if isinstance(e, SynthPhaseEvent)]
-        assert not synth_events, (
-            f"Expected no SynthPhaseEvent for exit 0, got: {synth_events}"
-        )
-
-    @pytest.mark.anyio
-    async def test_supervisor_synth_visible_in_stream(
-        self, tmp_path: Path
-    ) -> None:
-        """SynthPhaseEvent appears in stream after log lines."""
-        transcript = tmp_path / "transcript.jsonl"
-        _write_transcript(transcript, [_make_phase_event("draft", "running")])
-
-        supervisor = RunSupervisor(max_buffered_lines=100)
-        run_id = await supervisor.start(
-            slug="test-slug",
-            argv=["python", "-c", "print('output'); import sys; sys.exit(2)"],
-            cwd=tmp_path,
-            transcript_path=transcript,
-        )
-
-        log_lines = []
-        synth_events = []
-        async for item in supervisor.stream(run_id):
-            if isinstance(item, SynthPhaseEvent):
-                synth_events.append(item)
-            elif hasattr(item, "line"):
-                # bug-0e13706c: stream may also contain TranscriptEvent items
-                # which don't have ``line``; only collect LogLine entries.
-                log_lines.append(item)
-
-        assert synth_events, "Expected SynthPhaseEvent in stream"
-        assert synth_events[0].last_phase == "draft"
-        lines_text = [ll.line for ll in log_lines]
-        assert any("output" in t for t in lines_text)
-
-    @pytest.mark.anyio
-    async def test_supervisor_no_synth_when_transcript_has_terminal_event(
-        self, tmp_path: Path
-    ) -> None:
-        """When transcript already has a terminal phase event, no SynthPhaseEvent is emitted."""
-        transcript = tmp_path / "transcript.jsonl"
-        # Transcript already has a 'failed' terminal event (pipeline wrote it)
-        _write_transcript(
-            transcript,
-            [
-                _make_phase_event("gather", "running"),
-                _make_phase_event("gather", "failed"),
-            ],
-        )
-
-        supervisor = RunSupervisor(max_buffered_lines=100)
-        run_id = await supervisor.start(
-            slug="test-slug",
-            argv=["python", "-c", "import sys; sys.exit(1)"],
-            cwd=tmp_path,
-            transcript_path=transcript,
-        )
-
-        collected: list = []
-        async for item in supervisor.stream(run_id):
-            collected.append(item)
-
-        synth_events = [e for e in collected if isinstance(e, SynthPhaseEvent)]
-        assert not synth_events, (
-            "Expected no SynthPhaseEvent when transcript already has terminal event, "
-            f"got: {synth_events}"
-        )
+        assert len(collected) == 1
+        assert collected[0].payload["type"] == "phase_started"

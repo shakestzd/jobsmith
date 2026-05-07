@@ -3461,14 +3461,23 @@ def test_debug_mode_shows_unfiltered() -> None:
 
 
 def test_transcript_file_written_for_every_verbosity(tmp_path: Path) -> None:
-    """All verbosity levels (0, 1, 2) write the same transcript JSONL file."""
+    """All verbosity levels write to the DB (apply_state_log); no disk file is written.
+
+    Slice 4 (trk-ad6d8227): transcript.jsonl disk write removed — DB-only audit.
+    The transcript_path argument is now ignored; no disk file is created.
+    """
+    from jobsmith.db import open_pipeline_db, read_state_log
+
+    db_path = tmp_path / "jobsmith.db"
+    open_pipeline_db(db_path).close()
+
     for verbosity in (0, 1, 2):
         transcript_dir = tmp_path / f"v{verbosity}" / ".apply-state"
         transcript_path = transcript_dir / "transcript.jsonl"
 
         con, buf = _make_test_console()
         rdr = ApplyRenderer(yes=True, verbosity=verbosity, console=con)
-        rdr.open_transcript(transcript_path, "gather")
+        rdr.open_transcript(transcript_path, "gather", slug=f"test-v{verbosity}", db_path=db_path)
         rdr._current_phase = "gather"
 
         rdr.render_event(
@@ -3477,42 +3486,63 @@ def test_transcript_file_written_for_every_verbosity(tmp_path: Path) -> None:
         rdr.render_event(Event(type="tool_result", tool_result="hi", raw={}))
         rdr.close_transcript()
 
-        assert transcript_path.exists(), f"verbosity={verbosity}: transcript not created"
-        lines = [
-            line for line in transcript_path.read_text().splitlines() if line.strip()
-        ]
-        assert len(lines) >= 2, f"verbosity={verbosity}: expected at least 2 lines, got {len(lines)}"
-        # Every line must be valid JSON
-        for line in lines:
-            parsed = json.loads(line)
-            assert isinstance(parsed, dict)
+        # Disk file should NOT be created (Slice 4 removes disk writes).
+        assert not transcript_path.exists(), (
+            f"verbosity={verbosity}: transcript.jsonl should not be written to disk after Slice 4"
+        )
+        # DB rows should be present (boundary marker + 2 events = 3).
+        conn = open_pipeline_db(db_path)
+        try:
+            rows = read_state_log(conn, slug=f"test-v{verbosity}", after_id=0)
+        finally:
+            conn.close()
+        assert len(rows) >= 2, (
+            f"verbosity={verbosity}: expected at least 2 DB rows, got {len(rows)}"
+        )
 
 
 def test_transcript_has_phase_boundary_markers(tmp_path: Path) -> None:
-    """Transcript contains one boundary marker per phase open call."""
+    """Boundary markers are written to apply_state_log (DB), not disk.
+
+    Slice 4 (trk-ad6d8227): disk transcript.jsonl removed; boundary markers
+    go to the DB audit trail only.
+    """
+    from jobsmith.db import open_pipeline_db, read_state_log
+
+    db_path = tmp_path / "jobsmith.db"
+    open_pipeline_db(db_path).close()
+
     transcript_path = tmp_path / ".apply-state" / "transcript.jsonl"
+    slug = "boundary-test-slug"
 
     con, buf = _make_test_console()
     rdr = ApplyRenderer(yes=True, verbosity=0, console=con)
 
     for phase in ("gather", "draft", "render"):
-        rdr.open_transcript(transcript_path, phase)
+        rdr.open_transcript(transcript_path, phase, slug=slug, db_path=db_path)
         rdr._current_phase = phase
         rdr.render_event(
             Event(type="tool_use", tool_name="Bash", tool_input={"command": "ls"}, raw={})
         )
         rdr.close_transcript()
 
-    lines = [
-        json.loads(line)
-        for line in transcript_path.read_text().splitlines()
-        if line.strip()
-    ]
-    boundary_lines = [l for l in lines if "_phase_boundary" in l]
-    assert len(boundary_lines) == 3, (
-        f"expected 3 boundary markers, got {len(boundary_lines)}: {boundary_lines!r}"
+    # Disk file must NOT exist (Slice 4 removes disk writes).
+    assert not transcript_path.exists(), "transcript.jsonl must not be written after Slice 4"
+
+    # DB must contain all 3 boundary markers.
+    conn = open_pipeline_db(db_path)
+    try:
+        rows = read_state_log(conn, slug=slug, after_id=0)
+    finally:
+        conn.close()
+
+    import json as _json
+    payloads = [_json.loads(r[2]) for r in rows]
+    boundary_payloads = [p for p in payloads if "_phase_boundary" in p]
+    assert len(boundary_payloads) == 3, (
+        f"expected 3 boundary markers in DB, got {len(boundary_payloads)}: {boundary_payloads!r}"
     )
-    phase_names = {l["_phase_boundary"] for l in boundary_lines}
+    phase_names = {p["_phase_boundary"] for p in boundary_payloads}
     assert phase_names == {"gather", "draft", "render"}
 
 
