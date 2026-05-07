@@ -4085,3 +4085,53 @@ def test_force_clears_apply_state_for_slug(tmp_path: Path, monkeypatch) -> None:
     assert "apply-fit-scorer-result" not in kinds, (
         "stale Pass-3 result envelope must be cleared on --force"
     )
+
+
+def test_run_phase_iter_force_clears_apply_state(tmp_path: Path, monkeypatch) -> None:
+    """run_phase_iter(force=True) wipes apply_state for the slug.
+
+    Marimo single-phase reruns drive ``run_phase_iter`` with
+    ``force=True``. Without resetting apply_state, prior
+    ``apply-<specialist>-result`` rows would short-circuit the resume
+    rule in phase prompts and the specialists the user asked to rerun
+    would be silently skipped (roborev job 959 HIGH).
+    """
+    from jobsmith.db import open_pipeline_db, put_state
+    from jobsmith.apply import run_phase_iter
+
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    # Pre-populate apply_state with a stale Pass-3 result envelope.
+    db_path = tmp_path / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(
+            conn,
+            slug="x",
+            kind="apply-bullet-selector-result",
+            content_blob='{"status":"ok","summary":"stale"}',
+        )
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        "jobsmith.apply.headless.run_phase",
+        lambda *a, **kw: iter(_make_phase_events("gather")),
+    )
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+
+    # Drive the generator to completion (we don't care about the events,
+    # just the side effect of running the force branch).
+    list(run_phase_iter("https://example.com/jobs/x", cwd=tmp_path, force=True))
+
+    conn = open_pipeline_db(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT kind FROM apply_state WHERE slug = 'x' AND kind = 'apply-bullet-selector-result'"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [], "stale Pass-3 envelope must be cleared on run_phase_iter(force=True)"

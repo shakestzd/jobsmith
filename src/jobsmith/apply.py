@@ -1396,6 +1396,25 @@ def _run_phase_iter_body(
     else:
         slug, _from_index = _resolve_starting_slug(url, resolved_cwd)
 
+    # Roborev job 959 HIGH: marimo single-phase reruns drive this
+    # generator with ``force=True``. Without clearing apply_state for
+    # the slug, the phase prompts' resume rule treats prior
+    # ``apply-<specialist>-result`` rows with ``status: ok`` as
+    # "already complete" and silently skips the specialists the user
+    # asked to rerun. Mirror ``run_apply``'s reset_state on this path.
+    if force:
+        _force_db_path = _pipeline_db_path(resolved_cwd)
+        if _force_db_path is not None and _force_db_path.exists():
+            with contextlib.suppress(Exception):
+                from .db import open_pipeline_db as _open_pipe_db
+                from .db import reset_state as _reset_state
+
+                _conn = _open_pipe_db(_force_db_path)
+                try:
+                    _reset_state(_conn, slug=slug)
+                finally:
+                    _conn.close()
+
     # Step 3: phase-completion gating
     apps_dir = _applications_dir(resolved_cwd)
     app_dir = apps_dir / slug if apps_dir is not None else None
@@ -1650,18 +1669,25 @@ def run_apply(
         return 1
 
     # Step 1b: seed master_content from disk YAMLs if not already loaded
-    # (roborev job 958 HIGH). The FastAPI ``api serve`` lifespan handler
-    # does this at startup, but a direct ``jobsmith apply`` invocation
-    # never seeded the table — Pass 3 specialists then crash with
-    # ``no master_content row`` when they try to ``jobsmith db
-    # dump-master --section work`` because the rows were never inserted.
-    # Idempotent: skips when rows already exist.
+    # (roborev job 958 HIGH + job 959 MEDIUM). The FastAPI ``api serve``
+    # lifespan handler does this at startup, but a direct ``jobsmith
+    # apply`` invocation never seeded the table — Pass 3 specialists
+    # then crash with ``no master_content row`` when they try to
+    # ``jobsmith db dump-master --section work`` because the rows were
+    # never inserted. Idempotent: skips when rows already exist.
+    #
+    # ``repo_root`` MUST be the project root (the directory holding
+    # ``.apply-config.yaml``), not the supervisor's ``cwd``. When
+    # ``jobsmith apply`` is invoked from a subdirectory, ``cwd != root``
+    # and ``ensure_master_loaded`` would resolve ``master.work_yml``
+    # against the wrong base, find nothing, and seed zero rows.
     try:
+        _config_path = find_config(resolved_cwd)
         _db_path = _pipeline_db_path(resolved_cwd)
-        if _db_path is not None:
+        if _config_path is not None and _db_path is not None:
             from .master_ingest import ensure_master_loaded as _ensure_master
 
-            _ensure_master(_db_path, repo_root=resolved_cwd)
+            _ensure_master(_db_path, repo_root=_config_path.parent)
     except Exception as exc:  # noqa: BLE001 — degrade rather than abort.
         logger.warning("master_content seed failed: %s", exc)
 
