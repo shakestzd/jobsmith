@@ -1,8 +1,8 @@
 """Tests for jobsmith.core.session — Slice 2c."""
 from pathlib import Path
-import pytest
-from jobsmith.core import session as core_session
+
 from jobsmith import apply as apply_mod
+from jobsmith.core import session as core_session
 
 
 def test_claude_session_file_path_importable():

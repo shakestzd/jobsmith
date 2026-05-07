@@ -1,8 +1,6 @@
 """Tests for jobsmith.core.manifest — Slice 2d."""
-from pathlib import Path
-import pytest
-from jobsmith.core import manifest as core_manifest
 from jobsmith import apply as apply_mod
+from jobsmith.core import manifest as core_manifest
 
 
 def test_load_manifest_importable():

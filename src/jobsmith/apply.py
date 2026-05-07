@@ -51,9 +51,7 @@ import click
 from . import headless
 from . import plugin_dir as get_plugin_dir
 from ._state_readers import ARTIFACT_READERS
-from .benchmarks import resolve_benchmark_or_fallback
 from .config import CONFIG_FILENAME, find_config, load_config
-from .db import get_state, open_pipeline_db
 from .guard import check_anchors
 from .paths import resolve
 from .render import ApplyRenderer
@@ -199,8 +197,8 @@ from jobsmith.core.slug import (  # noqa: E402,F401
 _reconcile_canonical_slug = reconcile_canonical_slug
 
 from jobsmith.core.paths import (  # noqa: E402,F401
-    apply_state_dir,
     applications_dir,
+    apply_state_dir,
     build_paths,
     pipeline_db_path,
 )

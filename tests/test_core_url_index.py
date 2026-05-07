@@ -1,8 +1,8 @@
 """Tests for jobsmith.core.url_index — Slice 2e."""
 from pathlib import Path
-import pytest
-from jobsmith.core import url_index as core_url_index
+
 from jobsmith import apply as apply_mod
+from jobsmith.core import url_index as core_url_index
 
 
 def test_load_url_index_importable():

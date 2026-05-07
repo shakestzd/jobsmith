@@ -1,8 +1,8 @@
 """Tests for jobsmith.core.paths — Slice 2b."""
 from pathlib import Path
-import pytest
-from jobsmith.core import paths as core_paths
+
 from jobsmith import apply as apply_mod
+from jobsmith.core import paths as core_paths
 
 
 def test_apply_state_dir_importable():

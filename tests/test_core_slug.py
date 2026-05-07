@@ -1,6 +1,6 @@
 """Tests for jobsmith.core.slug — Slice 2a."""
-from jobsmith.core import slug as core_slug
 from jobsmith import apply as apply_mod
+from jobsmith.core import slug as core_slug
 
 
 def test_derive_slug_importable_from_core():
