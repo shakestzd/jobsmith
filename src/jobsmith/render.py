@@ -17,13 +17,13 @@ Design goals
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
-from io import IOBase
 from pathlib import Path
 from typing import TextIO
 
@@ -33,6 +33,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 from . import headless
+from .core.events import PipelineEvent
 
 # Max chars for truncated args / result previews
 _MAX_ARG_CHARS = 80
@@ -780,3 +781,43 @@ class ApplyRenderer:
                 expand=False,
             )
         )
+
+    # ------------------------------------------------------------------
+    # EventSink protocol (jobsmith.core.protocols.EventSink — Slice 3a)
+    # ------------------------------------------------------------------
+
+    def emit(self, event: PipelineEvent) -> None:
+        """Route a structured PipelineEvent to internal renderer handlers.
+
+        Implements jobsmith.core.protocols.EventSink so the orchestrator in
+        core/pipeline.py (Slice 3b/3c) can drive terminal output through this
+        sink without importing Rich.
+
+        Sink-side exceptions are swallowed (consistent with
+        sinks.CallbackEventSink) so a broken sink never aborts the pipeline.
+        """
+        kind = event.kind
+        if kind == "phase_started":
+            with contextlib.suppress(Exception):
+                self.start_phase(event.phase)
+        elif kind == "phase_complete":
+            with contextlib.suppress(Exception):
+                self.stop_phase()
+        elif kind == "phase_failed":
+            with contextlib.suppress(Exception):
+                self.stop_phase()
+                rc = event.payload.get("rc")
+                self.print_error(f"Phase {event.phase} failed (rc={rc})")
+        elif kind == "slug_changed":
+            with contextlib.suppress(Exception):
+                old = event.payload.get("old_slug")
+                new = event.payload.get("new_slug")
+                self.print_info(f"Canonical slug: {old!r} → {new!r}")
+        elif kind == "guard_failed":
+            with contextlib.suppress(Exception):
+                rc = event.payload.get("rc")
+                self.print_error(f"Guard step failed (rc={rc})")
+        elif kind == "cancelled":
+            with contextlib.suppress(Exception):
+                self.stop_phase()
+        # unknown kinds: no-op — forward-compat
