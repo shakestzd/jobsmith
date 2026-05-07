@@ -36,7 +36,7 @@ All paths required to operate are listed in the user prompt under the "Paths" bl
 - `apply-hm-enricher` (via Task tool, subagent_type="apply-hm-enricher")
 - `apply-bullet-selector` (via Task tool, subagent_type="apply-bullet-selector")
 - `apply-company-research` (via Task tool, subagent_type="apply-company-research")
-- `Bash` tool for: `date`, `uv run python -c 'import uuid;print(uuid.uuid4())'`, file moves, symlink creation, AND the trk-60217f9f DB CLI surface — `jobsmith db get-state`, `jobsmith db put-state`, `jobsmith db list-state`, `jobsmith db reset-state`, `jobsmith db rekey-slug`, `jobsmith db dump-master`, `jobsmith db append-state-log`. These are mandatory in this phase; refusing to invoke them leaves specs/manifests unwritten and downstream specialists start without inputs. Use `uv run python` for any Python invocation — never raw `python`/`python3`.
+- `Bash` tool for: `date`, `uv run python -c 'import uuid;print(uuid.uuid4())'`, file moves, symlink creation, AND the trk-60217f9f DB CLI surface — `jobsmith db get-state`, `jobsmith db put-state`, `jobsmith db list-state`, `jobsmith db reset-state`, `jobsmith db rekey-slug`, `jobsmith db dump-master`. These are mandatory in this phase; refusing to invoke them leaves specs/manifests unwritten and downstream specialists start without inputs. Use `uv run python` for any Python invocation — never raw `python`/`python3`. (The agent transcript stream — ``apply_state_log`` — is written by the Python renderer, not by the orchestrator agent; you do NOT call any ``append-state-log`` command.)
 - Read/Write tools for state files under the `apply_state_dir` absolute path from the Paths block.
 - Never use `Bash` to glob for plugin/agent files; use the absolute paths from the prompt.
 

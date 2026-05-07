@@ -210,20 +210,20 @@ function deriveProgress(app: SampleApp): {
   // For failed status, only mark phases STRICTLY BEFORE the failed phase
   // as 100. The failed phase itself stays at 0 so PipelineTab can paint
   // it 'failed' rather than 'done' (closes roborev job 965 MEDIUM).
-  // ``failedPhaseNum`` is seeded from the API's phase label so a reload
-  // of a failed run shows which phase failed without waiting for a
-  // live SSE failure event. ``app.phase`` is a string ('gather' /
-  // 'draft' / 'render' / 'unknown'); when it is 'unknown' (full-pipeline
-  // marker) we cannot pin the failure and fall back to phase 1 for the
-  // active card but leave failedPhaseNum null.
+  // ``failedPhaseNum`` is seeded from the numeric phase that ``fromApi``
+  // already mapped from the API's phase label, so a reload of a failed
+  // run shows which phase failed without waiting for a live SSE event
+  // (closes roborev job 966 MEDIUM). ``fromApi`` falls back to phase 1
+  // for ``unknown``/missing labels — we cannot prove a real failed
+  // phase from that, so ``failedPhaseNum`` stays null in those cases
+  // and the active card defaults to phase 1.
   if (app.status === 'failed') {
-    const phaseLabel = String(app.phase || '');
-    const phaseMap: Record<string, 1 | 2 | 3> = {
-      gather: 1,
-      draft: 2,
-      render: 3,
+    const apiPhase = (api: SampleApp): 1 | 2 | 3 | null => {
+      const p = api.phase;
+      if (p === 1 || p === 2 || p === 3) return p;
+      return null;
     };
-    const knownPhase: 1 | 2 | 3 | null = phaseMap[phaseLabel] ?? null;
+    const knownPhase: 1 | 2 | 3 | null = apiPhase(app);
     const failedPhase: 1 | 2 | 3 = knownPhase ?? 1;
     const progress: ProgressMap = { 1: 0, 2: 0, 3: 0 };
     // Earlier phases got there (passed); the failed phase did NOT.
