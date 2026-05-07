@@ -820,4 +820,10 @@ class ApplyRenderer:
         elif kind == "cancelled":
             with contextlib.suppress(Exception):
                 self.stop_phase()
+        elif kind == "already_complete":
+            with contextlib.suppress(Exception):
+                app_dir_str = event.payload.get("app_dir")
+                if app_dir_str is not None:
+                    from pathlib import Path as _Path
+                    self.print_already_complete(_Path(app_dir_str))
         # unknown kinds: no-op — forward-compat

@@ -586,3 +586,290 @@ def _run_phase_iter_body(
         if cancel_event is not None and cancel_event.is_set():
             yield PipelineEvent(kind="cancelled", phase=phase_name)
             return
+
+
+# ---------------------------------------------------------------------------
+# DB lifecycle helpers (moved from apply.py — Slice 3c of trk-ad6d8227)
+# No dependency on rich / click / typer.
+# ---------------------------------------------------------------------------
+
+
+def _db_now_iso() -> str:
+    """ISO-8601 UTC timestamp; matches marimo runner's apply_runs format."""
+    from datetime import datetime, timezone
+
+    return datetime.now(tz=timezone.utc).isoformat()
+
+
+def _open_pipeline_db_for_run(cwd: Path):
+    """Open the pipeline DB if config is present; otherwise return None.
+
+    Returns None silently when ``.apply-config.yaml`` is missing — the apply
+    pipeline must keep working in scratch directories without a config (the
+    bootstrap path will create one, but unit tests stub a minimal config that
+    still resolves a default ``private/jobsmith.db`` path beneath ``cwd``).
+    """
+    from jobsmith.config import find_config, load_config
+    from jobsmith.paths import resolve
+
+    config_path = find_config(cwd)
+    if config_path is None:
+        return None
+    try:
+        from jobsmith.db import open_pipeline_db as _open_pipeline_db
+
+        config = load_config(config_path)
+        db_path = resolve(config.output.jobsmith_db, config_path.parent)
+        return _open_pipeline_db(db_path)
+    except Exception:  # noqa: BLE001 — DB is secondary to the pipeline
+        return None
+
+
+def core_run_apply(
+    url: str,
+    *,
+    cwd: Path | None = None,
+    events: object = None,  # EventSink — receives PipelineEvent via emit()
+    confirm: object = None,  # ConfirmGate — decides inter-phase continuation
+    skip_confirm: bool = False,
+    force: bool = False,
+    verbosity: int = 0,
+    jd_text: str | None = None,
+    slug: str | None = None,
+    run_id: str | None = None,
+    # Dependency injection: the CLI-coupled phase runner.
+    # apply.py passes _run_apply_phases (Rich renderer aware).
+    # API path / tests can pass a stub or None (no-op).
+    phase_runner: Callable | None = None,
+    # Bootstrap injected so core/pipeline.py stays CLI-free.
+    bootstrap: Callable[[Path], None] | None = None,
+) -> int:
+    """Orchestrate the three-phase apply pipeline — business-logic entry point.
+
+    This function is the pure-orchestration core of ``run_apply``. It handles:
+    - Bootstrap (via injected *bootstrap* callable)
+    - Master-content seeding
+    - Slug resolution and force-reset
+    - DB lifecycle: ``apply_runs`` INSERT before → UPDATE after
+    - Temp-file management for out-of-band JD text
+    - Delegation to *phase_runner* for the actual per-phase execution
+
+    Parameters
+    ----------
+    url:
+        Job description URL.
+    cwd:
+        Working directory (defaults to current directory).
+    events:
+        An :class:`~jobsmith.core.protocols.EventSink` instance. Passed
+        through to *phase_runner* when provided.
+    confirm:
+        A :class:`~jobsmith.core.protocols.ConfirmGate` instance. Passed
+        through to *phase_runner* when provided.
+    skip_confirm:
+        When True, phase-gate confirmations are bypassed (--yes flag).
+    force:
+        Ignore ``.url-index.json`` and any prior ``manifest.json``; start
+        fresh from phase 1.
+    verbosity:
+        0 = quiet (default), 1 = -v, 2 = -vv.
+    jd_text:
+        Optional JD body text supplied out-of-band.
+    slug:
+        Explicit slug override (API path; bypasses URL index lookup).
+    run_id:
+        Explicit run ID (API path; supervisor correlates DB rows).
+    phase_runner:
+        Callable that executes all phases and returns an int exit code.
+        Signature: ``phase_runner(url, resolved_cwd, slug, ...) -> int``.
+        When None, returns 0 immediately (useful for tests that only need
+        the DB scaffolding).
+    bootstrap:
+        Callable ``(cwd: Path) -> None`` that ensures the working directory
+        is initialised. When None, bootstrap is skipped.
+
+    Returns
+    -------
+    int
+        Exit code: 0 on success or clean user abort, non-zero on error.
+    """
+    import contextlib as _contextlib
+    import time
+    import uuid as _uuid
+
+    from jobsmith.config import find_config
+    from jobsmith.core.manifest import load_manifest, phase_completed
+    from jobsmith.core.paths import applications_dir, pipeline_db_path
+    from jobsmith.core.slug import derive_slug
+    from jobsmith.core.url_index import load_url_index, resolve_starting_slug
+
+    resolved_cwd = cwd or Path.cwd()
+
+    # Materialise jd_text into a temp file once.
+    jd_text_file: Path | None = None
+    if jd_text is not None and jd_text.strip():
+        import os as _os
+        import tempfile as _tempfile
+
+        _fd, _tmp_path = _tempfile.mkstemp(
+            prefix="jobsmith-jdtext-",
+            suffix=".txt",
+        )
+        with _os.fdopen(_fd, "w", encoding="utf-8") as _f:
+            _f.write(jd_text)
+        jd_text_file = Path(_tmp_path)
+
+    # Step 1: ensure bootstrap
+    if bootstrap is not None:
+        try:
+            bootstrap(resolved_cwd)
+        except Exception as exc:
+            if events is not None and hasattr(events, "emit"):
+                events.emit(
+                    PipelineEvent(
+                        kind="phase_failed",
+                        phase="bootstrap",
+                        payload={"error": f"Bootstrap failed: {exc}"},
+                    )
+                )
+            return 1
+
+    # Step 1b: seed master_content from disk YAMLs if not already loaded.
+    try:
+        _config_path = find_config(resolved_cwd)
+        _db_path = pipeline_db_path(resolved_cwd)
+        if _config_path is not None and _db_path is not None:
+            from jobsmith.master_ingest import ensure_master_loaded as _ensure_master
+
+            _ensure_master(_db_path, repo_root=_config_path.parent)
+    except Exception as exc:  # noqa: BLE001 — degrade rather than abort.
+        logger.warning("master_content seed failed: %s", exc)
+
+    # Step 2: resolve starting slug.
+    started_at = time.time()
+
+    if slug is not None:
+        from_index = False
+        # caller-supplied slug: no force banner — handled by phase_runner
+    elif force:
+        index = load_url_index(resolved_cwd)
+        if url in index:
+            slug = index[url]
+            from_index = True
+        else:
+            slug = derive_slug(url)
+            from_index = False
+    else:
+        slug, from_index = resolve_starting_slug(url, resolved_cwd)
+
+    # Step 3: phase-completion gating.
+    apps_dir = applications_dir(resolved_cwd)
+    app_dir = apps_dir / slug if apps_dir is not None else None
+    manifest = None if force or app_dir is None else load_manifest(app_dir, resolved_cwd)
+
+    # Force reset: wipe stale DB state so agents don't reuse prior envelopes.
+    if force and app_dir is not None:
+        _session_id_file = app_dir / ".apply-state" / "session-id"
+        _session_id_file.unlink(missing_ok=True)
+        _force_db_path = pipeline_db_path(resolved_cwd)
+        if _force_db_path is not None and _force_db_path.exists():
+            with _contextlib.suppress(Exception):
+                from jobsmith.db import open_pipeline_db as _open_pipe_db
+                from jobsmith.db import reset_state as _reset_state
+
+                _conn = _open_pipe_db(_force_db_path)
+                try:
+                    _reset_state(_conn, slug=slug)
+                finally:
+                    _conn.close()
+
+    phase_done: dict[str, bool] = {
+        name: phase_completed(manifest, name) for name, _ in _PHASES
+    }
+
+    # All phases done → exit cleanly unless --force.
+    if all(phase_done.values()) and app_dir is not None:
+        if events is not None and hasattr(events, "emit"):
+            events.emit(
+                PipelineEvent(
+                    kind="already_complete",
+                    phase="render",
+                    payload={"app_dir": str(app_dir)},
+                )
+            )
+        return 0
+
+    # DB scaffolding: insert apply_runs row before, UPDATE after.
+    db_run_id = run_id or str(_uuid.uuid4())
+    db_started_at_iso = _db_now_iso()
+    db_conn = _open_pipeline_db_for_run(resolved_cwd)
+    db_final_status = "failed"
+    db_slug_ref = [slug]
+    db_status_ref = ["unset"]
+
+    if db_conn is not None:
+        with _contextlib.suppress(Exception):
+            from jobsmith.db import insert_apply_run as _insert_apply_run
+
+            _insert_apply_run(
+                db_conn,
+                run_id=db_run_id,
+                slug=slug,
+                phase="unknown",
+                started_at=db_started_at_iso,
+                finished_at=None,
+                status="running",
+            )
+
+    try:
+        if phase_runner is None:
+            # No runner injected — DB row is open but nothing executes.
+            db_final_status = "done"
+            return 0
+
+        rc = phase_runner(
+            url=url,
+            resolved_cwd=resolved_cwd,
+            events=events,
+            confirm=confirm,
+            skip_confirm=skip_confirm,
+            force=force,
+            verbosity=verbosity,
+            slug=slug,
+            apps_dir=apps_dir,
+            phase_done=phase_done,
+            started_at=started_at,
+            db_conn=db_conn,
+            db_run_id=db_run_id,
+            db_slug_ref=db_slug_ref,
+            db_status_ref=db_status_ref,
+            jd_text_file=jd_text_file,
+        )
+        if rc != 0:
+            db_final_status = "failed"
+        elif db_status_ref[0] == "cancelled":
+            db_final_status = "cancelled"
+        else:
+            db_final_status = "done"
+        return rc
+    finally:
+        if jd_text_file is not None:
+            with _contextlib.suppress(OSError):
+                jd_text_file.unlink()
+        if db_conn is not None:
+            try:
+                with _contextlib.suppress(Exception):
+                    db_conn.execute(
+                        "UPDATE apply_runs "
+                        "SET status=?, finished_at=?, slug=? "
+                        "WHERE run_id=?",
+                        (
+                            db_final_status,
+                            _db_now_iso(),
+                            db_slug_ref[0],
+                            db_run_id,
+                        ),
+                    )
+                    db_conn.commit()
+            finally:
+                db_conn.close()

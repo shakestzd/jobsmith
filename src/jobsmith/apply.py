@@ -38,7 +38,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -229,8 +228,11 @@ from jobsmith.core.pipeline import (  # noqa: E402,F401
     _PHASE_MAX_TURNS,
     _PHASES,
     _auto_freeze_contracts,
+    _db_now_iso,
+    _open_pipeline_db_for_run,
     _snapshot_phase_drafts,
     build_phase_prompt,
+    core_run_apply,
     run_phase_iter,
 )
 
@@ -515,6 +517,11 @@ def run_apply(
 ) -> int:
     """Run the three-phase apply pipeline.
 
+    Thin CLI wrapper around :func:`~jobsmith.core.pipeline.core_run_apply`.
+    Constructs the :class:`~jobsmith.render.ApplyRenderer` for terminal output
+    and provides the renderer-coupled ``_phase_runner`` closure before
+    delegating to the business-logic core.
+
     Parameters
     ----------
     url:
@@ -550,194 +557,58 @@ def run_apply(
     resolved_cwd = cwd or Path.cwd()
     rdr = renderer or ApplyRenderer(yes=skip_confirm, verbosity=verbosity)
 
-    # Materialize jd_text into a temp file once. The orchestrator agent
-    # reads the file inside the gather phase and inlines its contents
-    # into spec.json. Cleanup is best-effort (temp dir is OS-managed).
-    jd_text_file: Path | None = None
-    if jd_text is not None and jd_text.strip():
-        import tempfile as _tempfile
-        _fd, _tmp_path = _tempfile.mkstemp(
-            prefix="jobsmith-jdtext-",
-            suffix=".txt",
+    def _phase_runner(
+        *,
+        url: str,
+        resolved_cwd: Path,
+        events: object,
+        confirm: object,
+        skip_confirm: bool,
+        force: bool,
+        verbosity: int,
+        slug: str,
+        apps_dir,
+        phase_done: dict,
+        started_at: float,
+        db_conn,
+        db_run_id: str,
+        db_slug_ref: list,
+        db_status_ref: list,
+        jd_text_file,
+    ) -> int:
+        """CLI-coupled phase runner: constructs session_id, prints banners,
+        delegates to _run_apply_phases with the Rich renderer."""
+        # Resolve plugin directory here so monkeypatches on
+        # jobsmith.apply.get_plugin_dir take effect (core_run_apply must
+        # not call get_plugin_dir directly).
+        plugin_directory = get_plugin_dir()
+        app_dir = apps_dir / slug if apps_dir is not None else None
+
+        # Compute session ID (persisted per-application file).
+        # core_run_apply already handled force-reset of the session-id file
+        # and the DB wipe — just mint the new ID here.
+        session_id = (
+            _get_or_create_session_id(app_dir, resolved_cwd)
+            if app_dir is not None
+            else headless.deterministic_session_id(slug)
         )
-        import os as _os
-        with _os.fdopen(_fd, "w", encoding="utf-8") as _f:
-            _f.write(jd_text)
-        jd_text_file = Path(_tmp_path)
 
-    # Step 1: ensure bootstrap
-    try:
-        ensure_bootstrap(resolved_cwd)
-    except Exception as exc:
-        rdr.print_error(f"Bootstrap failed: {exc}")
-        return 1
-
-    # Step 1b: seed master_content from disk YAMLs if not already loaded
-    # (roborev job 958 HIGH + job 959 MEDIUM). The FastAPI ``api serve``
-    # lifespan handler does this at startup, but a direct ``jobsmith
-    # apply`` invocation never seeded the table — Pass 3 specialists
-    # then crash with ``no master_content row`` when they try to
-    # ``jobsmith db dump-master --section work`` because the rows were
-    # never inserted. Idempotent: skips when rows already exist.
-    #
-    # ``repo_root`` MUST be the project root (the directory holding
-    # ``.apply-config.yaml``), not the supervisor's ``cwd``. When
-    # ``jobsmith apply`` is invoked from a subdirectory, ``cwd != root``
-    # and ``ensure_master_loaded`` would resolve ``master.work_yml``
-    # against the wrong base, find nothing, and seed zero rows.
-    try:
-        _config_path = find_config(resolved_cwd)
-        _db_path = _pipeline_db_path(resolved_cwd)
-        if _config_path is not None and _db_path is not None:
-            from .master_ingest import ensure_master_loaded as _ensure_master
-
-            _ensure_master(_db_path, repo_root=_config_path.parent)
-    except Exception as exc:  # noqa: BLE001 — degrade rather than abort.
-        logger.warning("master_content seed failed: %s", exc)
-
-    # Step 2: resolve starting slug. With --force, bypass the URL index and
-    # use the URL-derived slug (a fresh run). Otherwise look up the URL in
-    # the persisted index, falling back to a one-time migration scan, and
-    # finally to the URL-derived slug.
-    import time
-
-    started_at = time.time()
-    plugin_directory = get_plugin_dir()
-
-    if slug is not None:
-        # Caller (typically the API) supplied an explicit slug — honor it
-        # without touching the URL→slug index. The supervisor tracks runs
-        # under this slug, so files must be written under it too.
-        from_index = False
+        # Banners: force and info.
         if force:
             rdr.print_force_banner()
-    elif force:
-        # --force restarts the pipeline but must still target the existing
-        # canonical directory if we know about it; otherwise phase 1 writes
-        # under the URL slug and the post-phase-1 reconcile would refuse to
-        # merge into the non-empty canonical dir, leaving us in a broken
-        # state that corrupts the URL index. Consult the persisted index
-        # first; fall back to URL-derived slug only when the URL is unknown.
-        index = _load_url_index(resolved_cwd)
-        if url in index:
-            slug = index[url]
-            from_index = True
-        else:
-            slug = derive_slug(url)
-            from_index = False
-        rdr.print_force_banner()
-    else:
-        slug, from_index = _resolve_starting_slug(url, resolved_cwd)
+        rdr.print_info(f"jobsmith apply: slug={slug!r}  session={session_id}")
 
-    # Step 3: phase-completion gating. Read manifest at the resolved app dir
-    # (when not --force) and decide which phases to skip. Manifest absence,
-    # malformed JSON, or missing invocations all fall through to "rerun".
-    apps_dir = _applications_dir(resolved_cwd)
-    app_dir = apps_dir / slug if apps_dir is not None else None
-    manifest = None if force or app_dir is None else _load_manifest(app_dir, resolved_cwd)
-
-    # Compute (or create) the session ID from the persisted per-application
-    # file.  This replaces the old uuid5-based deterministic_session_id so
-    # that a retry after a failed gather gets a fresh ID the Claude Code SDK
-    # will accept.  When there is no config (app_dir is None) fall back to
-    # the deterministic ID so the no-config path is unchanged.
-    #
-    # Finding 2 fix: when --force is set, the entire pipeline reruns from
-    # gather.  The persisted session-id may point to a previous successful
-    # run whose JSONL still exists in ~/.claude/projects/ — the SDK would
-    # reject it with "Session ID already in use".  Unlink it here so
-    # _get_or_create_session_id always mints a fresh uuid4 on a forced run.
-    if force and app_dir is not None:
-        _session_id_file = app_dir / ".apply-state" / "session-id"
-        _session_id_file.unlink(missing_ok=True)
-        # Roborev job 958 HIGH: ``--force`` bypassed the manifest gate
-        # (so phases re-run) but left every Pass-3 result envelope —
-        # ``apply-fit-scorer-result``, ``apply-bullet-selector-result``,
-        # etc. — sitting in apply_state. The phase-1 prompt's resume
-        # rule treats a prior ``status: ok`` envelope as "skip — already
-        # complete," so a forced re-run would silently reuse stale
-        # outputs. Wipe both apply_state and apply_state_log for the
-        # slug before any agent dispatch.
-        _force_db_path = _pipeline_db_path(resolved_cwd)
-        if _force_db_path is not None and _force_db_path.exists():
-            with contextlib.suppress(Exception):
-                from .db import open_pipeline_db as _open_pipe_db
-                from .db import reset_state as _reset_state
-
-                _conn = _open_pipe_db(_force_db_path)
-                try:
-                    _reset_state(_conn, slug=slug)
-                finally:
-                    _conn.close()
-    session_id = (
-        _get_or_create_session_id(app_dir, resolved_cwd)
-        if app_dir is not None
-        else headless.deterministic_session_id(slug)
-    )
-
-    rdr.print_info(f"jobsmith apply: slug={slug!r}  session={session_id}")
-
-    phase_done: dict[str, bool] = {
-        name: _phase_completed(manifest, name) for name, _ in _PHASES
-    }
-
-    # All phases done → print summary and exit cleanly unless --force.
-    if all(phase_done.values()) and app_dir is not None:
-        rdr.print_already_complete(app_dir)
-        return 0
-
-    # Resume banner above the first phase that will actually run, when
-    # phases earlier than that one are being skipped.
-    first_to_run = next(name for name, _ in _PHASES if not phase_done[name])
-    if first_to_run != "gather":
-        first_phase_num = next(
-            num for name, num in _PHASES if name == first_to_run
-        )
-        rdr.print_resume_banner(slug, first_phase_num, first_to_run)
-
-    total_phases = len(_PHASES)
-
-    # roborev #923 HIGH 2: persist apply_runs row + post-phase ingest from the
-    # CLI path too. Previously only the marimo runner wrote to the DB, so
-    # `jobsmith apply <url>` followed by `jobsmith review <slug>` would fail
-    # with "slug not found". Mirror the marimo runner's pattern: insert one
-    # apply_runs row per CLI run, ingest after each phase_complete, finalize
-    # the row's status in the wrapper finally-block. Wrapped in suppress so a
-    # missing/locked DB never aborts the apply pipeline itself — DB writes are
-    # canonical for review but secondary to the pipeline's primary work.
-    # Roborev job 955 HIGH: when the API supervisor launches this
-    # subprocess it generates its own run_id (used to filter the
-    # apply_state_log tailer). If the subprocess minted a different
-    # uuid4, the supervisor's tailer would see zero rows. Accept the
-    # caller-supplied run_id and only fall back to a fresh uuid4 when
-    # invoked directly from a terminal.
-    db_run_id = run_id or str(uuid.uuid4())
-    db_phase_label = "unknown"  # full pipeline; matches marimo runner convention
-    db_started_at_iso = _db_now_iso()
-    db_conn = _open_pipeline_db_for_run(resolved_cwd)
-    db_final_status = "failed"  # default; overridden on success/decline/etc.
-    db_slug_ref = [slug]
-    # Roborev job 967 MEDIUM: distinguish user-declined partial stops
-    # ("Stopped at user request" — rc=0 but should not be marked
-    # "done") from full pipeline success. The phase loop sets this to
-    # ``"cancelled"`` before returning 0 from a confirm-gate decline.
-    db_status_ref = ["unset"]
-    if db_conn is not None:
-        with contextlib.suppress(Exception):
-            from .db import insert_apply_run as _insert_apply_run
-
-            _insert_apply_run(
-                db_conn,
-                run_id=db_run_id,
-                slug=slug,
-                phase=db_phase_label,
-                started_at=db_started_at_iso,
-                finished_at=None,
-                status="running",
+        # Resume banner above the first phase that will actually run.
+        first_to_run = next(name for name, _ in _PHASES if not phase_done[name])
+        if first_to_run != "gather":
+            first_phase_num = next(
+                num for name, num in _PHASES if name == first_to_run
             )
+            rdr.print_resume_banner(slug, first_phase_num, first_to_run)
 
-    try:
-        rc = _run_apply_phases(
+        total_phases = len(_PHASES)
+
+        return _run_apply_phases(
             url=url,
             resolved_cwd=resolved_cwd,
             rdr=rdr,
@@ -755,68 +626,20 @@ def run_apply(
             db_status_ref=db_status_ref,
             jd_text_file=jd_text_file,
         )
-        if rc != 0:
-            db_final_status = "failed"
-        elif db_status_ref[0] == "cancelled":
-            db_final_status = "cancelled"
-        else:
-            db_final_status = "done"
-        return rc
-    finally:
-        # Best-effort cleanup of the jd_text temp file. The user-supplied
-        # JD body may include sensitive content (compensation expectations,
-        # named hiring managers from private channels) so unlink it as
-        # soon as the pipeline no longer needs it (roborev #928 LOW).
-        if jd_text_file is not None:
-            with contextlib.suppress(OSError):
-                jd_text_file.unlink()
-        if db_conn is not None:
-            try:
-                # db_slug_ref[0] reflects the canonical slug after gather
-                # reconciliation (run_apply_phases mutates it in place); use
-                # that for the final UPDATE so the apply_runs row points at the
-                # actual application directory.
-                with contextlib.suppress(Exception):
-                    db_conn.execute(
-                        "UPDATE apply_runs "
-                        "SET status=?, finished_at=?, slug=? "
-                        "WHERE run_id=?",
-                        (
-                            db_final_status,
-                            _db_now_iso(),
-                            db_slug_ref[0],
-                            db_run_id,
-                        ),
-                    )
-                    db_conn.commit()
-            finally:
-                db_conn.close()
 
-
-def _db_now_iso() -> str:
-    """ISO-8601 UTC timestamp; matches marimo runner's apply_runs format."""
-    from datetime import datetime, timezone
-    return datetime.now(tz=timezone.utc).isoformat()
-
-
-def _open_pipeline_db_for_run(cwd: Path):
-    """Open the pipeline DB if config is present; otherwise return None.
-
-    Returns None silently when ``.apply-config.yaml`` is missing — the apply
-    pipeline must keep working in scratch directories without a config (the
-    bootstrap path will create one, but unit tests stub a minimal config that
-    still resolves a default ``private/jobsmith.db`` path beneath ``cwd``).
-    """
-    config_path = find_config(cwd)
-    if config_path is None:
-        return None
-    try:
-        from .db import open_pipeline_db as _open_pipeline_db
-        config = load_config(config_path)
-        db_path = resolve(config.output.jobsmith_db, config_path.parent)
-        return _open_pipeline_db(db_path)
-    except Exception:  # noqa: BLE001 — DB is secondary to the pipeline
-        return None
+    return core_run_apply(
+        url,
+        cwd=resolved_cwd,
+        events=rdr,
+        skip_confirm=skip_confirm,
+        force=force,
+        verbosity=verbosity,
+        jd_text=jd_text,
+        slug=slug,
+        run_id=run_id,
+        phase_runner=_phase_runner,
+        bootstrap=ensure_bootstrap,
+    )
 
 
 def _run_apply_phases(
