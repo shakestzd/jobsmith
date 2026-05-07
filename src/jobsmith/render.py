@@ -12,7 +12,7 @@ Design goals
 - Tool results as ``[dim]← result…[/]``
 - Phase complete / failed as styled summary panels
 - Non-TTY fallback: plain line-by-line output, no spinners
-- Transcript JSONL always written to .apply-state/transcript.jsonl
+- Transcript records appended to ``apply_state_log`` (DB) for audit + SSE
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TextIO
 
 from rich.console import Console
 from rich.panel import Panel
@@ -251,20 +250,12 @@ class ApplyRenderer:
         self._agent_dispatch_times: dict[str, float] = {}
         # Current phase name (for transcript)
         self._current_phase: str | None = None
-        # Transcript file handle (append-only, opened per phase)
-        self._transcript_fh: TextIO | None = None
-        self._transcript_path: Path | None = None
-        # trk-60217f9f Pass 4: every transcript record also lands in
-        # apply_state_log so the supervisor can tail by row id instead of
-        # file offset (Pass 5 removes the disk file). Set by
-        # ``open_transcript`` when a slug + cwd are passed; None otherwise.
+        # Transcript context — every transcript record lands in
+        # apply_state_log filtered by (slug, run_id) for the SSE producer.
+        # Slice 6 (trk-ad6d8227): the disk transcript.jsonl file is gone;
+        # DB rows are the only persistence and the SSE source of truth.
         self._transcript_slug: str | None = None
         self._transcript_db_path: Path | None = None
-        # Roborev job 954 HIGH (migration 006): supervisor's tailer
-        # filters by ``run_id`` so cross-run pollution and historical
-        # row replay are bounded. Renderer carries the run_id from
-        # ``apply.py`` through ``open_transcript`` and writes it on
-        # every ``apply_state_log`` row.
         self._transcript_run_id: str | None = None
 
     # ------------------------------------------------------------------
@@ -302,7 +293,6 @@ class ApplyRenderer:
 
     def open_transcript(
         self,
-        transcript_path: Path,
         phase_name: str,
         *,
         slug: str | None = None,
@@ -311,47 +301,39 @@ class ApplyRenderer:
     ) -> None:
         """Record transcript context and write a phase boundary marker to the DB.
 
-        Slice 4 (trk-ad6d8227): The disk ``transcript.jsonl`` write has been
-        removed. All pipeline events are now emitted in-process via the
-        EventSink (``supervisor._SupervisorEventSink``) and land in the DB
-        via ``_append_state_log``. The file-handle fields remain to avoid
-        breaking callers that still invoke ``close_transcript()``; they are
-        set to ``None`` so no disk I/O occurs.
+        Slice 6 (trk-ad6d8227): the disk ``transcript.jsonl`` path is gone.
+        All transcript persistence now goes through ``apply_state_log`` —
+        the SSE producer polls that table by ``run_id`` to feed the
+        per-tool stream to subscribers.
 
         Parameters
         ----------
-        transcript_path:
-            Previously: path to the JSONL file. Now unused (kept for call-site
-            compatibility with the CLI path, which may still pass a value).
         phase_name:
-            Current phase name (used in the boundary marker).
-        slug, db_path:
-            When both are provided, the boundary marker is appended to
-            ``apply_state_log`` so the supervisor/SSE path sees it.
+            Current phase name (recorded in the boundary marker).
+        slug, db_path, run_id:
+            When all three are provided, every transcript record (and the
+            boundary marker emitted here) is appended to ``apply_state_log``
+            so the supervisor / SSE path sees it. Otherwise this is a no-op
+            (CLI-only contexts and tests skip the DB hop).
         """
-        self._transcript_path = None
-        self._transcript_fh = None
         self._transcript_slug = slug
         self._transcript_db_path = db_path
         self._transcript_run_id = run_id
-        # Write phase boundary marker to DB only.
         marker = {"_phase_boundary": phase_name, "ts": _now_iso()}
         self._append_state_log(marker)
 
     def close_transcript(self) -> None:
-        """Clear transcript context (no-op for the disk handle after Slice 4)."""
-        self._transcript_fh = None
-        self._transcript_path = None
+        """Clear transcript context after a phase ends."""
         self._transcript_slug = None
         self._transcript_db_path = None
         self._transcript_run_id = None
 
     def _append_state_log(self, record: dict) -> None:
-        """Mirror *record* into ``apply_state_log`` (best-effort, never raises).
+        """Append *record* to ``apply_state_log`` (best-effort, never raises).
 
-        Pass 4 dual-write. When the renderer was opened without a slug + DB
-        path (CLI-only contexts, tests) this is a no-op. The disk file
-        remains the canonical store until Pass 5 removes it.
+        ``apply_state_log`` is the canonical transcript store. When the
+        renderer was opened without a slug + DB path (CLI-only contexts,
+        tests) this is a no-op.
         """
         slug = self._transcript_slug
         db_path = self._transcript_db_path

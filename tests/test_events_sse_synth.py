@@ -133,31 +133,7 @@ async def test_drain_loop_still_forwards_log_lines():
     assert payload["stream"] == "stdout"
 
 
-def test_resolve_transcript_path_uses_apply_state(tmp_path):
-    """_launch_run threads transcript.jsonl path through supervisor.start
-    (regression for bug_029 second half)."""
-    from jobsmith.api.applications import _resolve_transcript_path
-
-    config = tmp_path / ".apply-config.yaml"
-    config.write_text(
-        "output:\n"
-        "  applications_dir: applications\n"
-        "  jobsmith_db: private/jobsmith.db\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "applications").mkdir()
-    (tmp_path / "private").mkdir()
-
-    transcript = _resolve_transcript_path("acme-swe", tmp_path)
-    assert transcript is not None
-    assert transcript.name == "transcript.jsonl"
-    assert transcript.parent.name == ".apply-state"
-    assert transcript.parent.parent.name == "acme-swe"
-
-
-def test_resolve_transcript_path_returns_none_without_config(tmp_path):
-    """When no config is found, _resolve_transcript_path degrades gracefully."""
-    from jobsmith.api.applications import _resolve_transcript_path
-
-    transcript = _resolve_transcript_path("acme-swe", tmp_path)
-    assert transcript is None
+# _resolve_transcript_path was removed in Slice 4 (trk-ad6d8227) when the
+# in-process supervisor stopped tailing transcript.jsonl. The corresponding
+# tests were retired in Slice 6 — apply_state_log is now the canonical
+# transcript store and there is no file path to resolve.

@@ -159,8 +159,8 @@ def test_read_state_log_after_id_skips_already_seen(tmp_path):
 
 
 def test_render_writes_to_state_log_not_disk(tmp_path):
-    """After Slice 4: open_transcript writes boundary marker to apply_state_log;
-    no disk transcript.jsonl is created.
+    """Slice 6: open_transcript writes boundary marker + transcript records
+    to apply_state_log only. The transcript_path argument was removed.
     """
     import io
     from jobsmith.db import open_pipeline_db, read_state_log
@@ -171,21 +171,15 @@ def test_render_writes_to_state_log_not_disk(tmp_path):
     db_path.parent.mkdir(parents=True)
     open_pipeline_db(db_path).close()
 
-    transcript_path = tmp_path / "applications" / "acme" / ".apply-state" / "transcript.jsonl"
     rdr = ApplyRenderer(
         yes=True,
         console=Console(file=io.StringIO(), force_terminal=False, no_color=True, width=120),
     )
 
-    rdr.open_transcript(transcript_path, "gather", slug="acme", db_path=db_path)
+    rdr.open_transcript("gather", slug="acme", db_path=db_path)
     rdr._write_transcript({"type": "tool_use", "name": "Read"})
     rdr._write_transcript({"type": "tool_result", "ok": True})
     rdr.close_transcript()
-
-    # Disk file must NOT exist after Slice 4.
-    assert not transcript_path.exists(), (
-        "transcript.jsonl must not be written to disk after Slice 4"
-    )
 
     # apply_state_log must have boundary marker + 2 records = 3 rows.
     conn = open_pipeline_db(db_path)
