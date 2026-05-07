@@ -1174,9 +1174,19 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
             : null
         );
         if (phaseNum !== null) {
+          // Roborev job 964 MEDIUM: progress must be monotonic. The
+          // raw ``Math.min(90, p[phaseNum] + 15)`` caps at 90, so a
+          // late-arriving specialist event for a phase already at 100
+          // (because the matching ``phase done`` event landed first)
+          // would regress the bar back to 90 and the UI would show
+          // the completed phase as queued/incomplete. ``Math.max``
+          // against the prior value pins the floor at "what was".
           setProgress(p => ({
             ...p,
-            [phaseNum]: Math.min(90, p[phaseNum] + 15),
+            [phaseNum]: Math.max(
+              p[phaseNum],
+              Math.min(90, p[phaseNum] + 15),
+            ),
           }));
         }
       } catch { /* ignore malformed event */ }
