@@ -64,10 +64,10 @@ def get_or_create_session_id(
         lazy-import strategy as *_load_manifest*.
     """
     if _load_manifest is None:
-        from jobsmith.apply import _load_manifest as _lm  # noqa: PLC0415
+        from jobsmith.core.manifest import load_manifest as _lm  # noqa: PLC0415
         _load_manifest = _lm
     if _phase_completed is None:
-        from jobsmith.apply import _phase_completed as _pc  # noqa: PLC0415
+        from jobsmith.core.manifest import phase_completed as _pc  # noqa: PLC0415
         _phase_completed = _pc
 
     state_dir = application_dir / ".apply-state"
