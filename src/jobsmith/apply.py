@@ -1649,6 +1649,22 @@ def run_apply(
         rdr.print_error(f"Bootstrap failed: {exc}")
         return 1
 
+    # Step 1b: seed master_content from disk YAMLs if not already loaded
+    # (roborev job 958 HIGH). The FastAPI ``api serve`` lifespan handler
+    # does this at startup, but a direct ``jobsmith apply`` invocation
+    # never seeded the table — Pass 3 specialists then crash with
+    # ``no master_content row`` when they try to ``jobsmith db
+    # dump-master --section work`` because the rows were never inserted.
+    # Idempotent: skips when rows already exist.
+    try:
+        _db_path = _pipeline_db_path(resolved_cwd)
+        if _db_path is not None:
+            from .master_ingest import ensure_master_loaded as _ensure_master
+
+            _ensure_master(_db_path, repo_root=resolved_cwd)
+    except Exception as exc:  # noqa: BLE001 — degrade rather than abort.
+        logger.warning("master_content seed failed: %s", exc)
+
     # Step 2: resolve starting slug. With --force, bypass the URL index and
     # use the URL-derived slug (a fresh run). Otherwise look up the URL in
     # the persisted index, falling back to a one-time migration scan, and
@@ -1704,6 +1720,25 @@ def run_apply(
     if force and app_dir is not None:
         _session_id_file = app_dir / ".apply-state" / "session-id"
         _session_id_file.unlink(missing_ok=True)
+        # Roborev job 958 HIGH: ``--force`` bypassed the manifest gate
+        # (so phases re-run) but left every Pass-3 result envelope —
+        # ``apply-fit-scorer-result``, ``apply-bullet-selector-result``,
+        # etc. — sitting in apply_state. The phase-1 prompt's resume
+        # rule treats a prior ``status: ok`` envelope as "skip — already
+        # complete," so a forced re-run would silently reuse stale
+        # outputs. Wipe both apply_state and apply_state_log for the
+        # slug before any agent dispatch.
+        _force_db_path = _pipeline_db_path(resolved_cwd)
+        if _force_db_path is not None and _force_db_path.exists():
+            with contextlib.suppress(Exception):
+                from .db import open_pipeline_db as _open_pipe_db
+                from .db import reset_state as _reset_state
+
+                _conn = _open_pipe_db(_force_db_path)
+                try:
+                    _reset_state(_conn, slug=slug)
+                finally:
+                    _conn.close()
     session_id = (
         _get_or_create_session_id(app_dir, resolved_cwd)
         if app_dir is not None

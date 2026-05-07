@@ -3973,3 +3973,115 @@ def test_phase_completed_with_db_backed_manifest(tmp_path: Path) -> None:
     loaded = _load_manifest(app_dir, tmp_path)
     assert _phase_completed(loaded, "gather") is True
     assert _phase_completed(loaded, "draft") is False
+
+
+# ---------------------------------------------------------------------------
+# trk-60217f9f roborev job 958 — master_content seed + force resets apply_state
+# ---------------------------------------------------------------------------
+
+
+def test_run_apply_seeds_master_content_on_first_invocation(tmp_path: Path, monkeypatch) -> None:
+    """run_apply must populate master_content from disk before agents run.
+
+    Pre-fix: a fresh ``jobsmith apply`` left master_content empty, so the
+    first specialist's ``jobsmith db dump-master --section work`` exited 2
+    with "no master_content row" and the pipeline halted.
+    """
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    # Write real master content to disk so master_ingest has something to load.
+    content = tmp_path / "assets" / "content"
+    (content / "work.yml").write_text("- role: x\n", encoding="utf-8")
+    (content / "skill.yml").write_text("- skill: y\n", encoding="utf-8")
+    (content / "education.yml").write_text("- school: z\n", encoding="utf-8")
+    (content / "author.yml").write_text("name: a\n", encoding="utf-8")
+
+    # Stub headless so run_apply does not actually invoke claude.
+    monkeypatch.setattr(
+        "jobsmith.apply.headless.run_phase",
+        lambda *a, **kw: iter(_make_phase_events("gather")),
+    )
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: False)
+
+    rc = run_apply("https://example.com/jobs/x", cwd=tmp_path, skip_confirm=True)
+    assert rc == 0
+
+    # master_content must now have rows for all four sections.
+    db_path = tmp_path / "private" / "jobsmith.db"
+    from jobsmith.db import open_pipeline_db
+
+    conn = open_pipeline_db(db_path)
+    try:
+        sections = sorted(
+            r[0] for r in conn.execute("SELECT section FROM master_content")
+        )
+    finally:
+        conn.close()
+    assert sections == ["author", "education", "skill", "work"], (
+        f"master_content not seeded — got {sections}"
+    )
+
+
+def test_force_clears_apply_state_for_slug(tmp_path: Path, monkeypatch) -> None:
+    """run_apply(... force=True) wipes prior apply_state rows for the slug.
+
+    Pre-fix: ``--force`` bypassed the manifest but left Pass-3 result
+    envelopes intact, so the resume rule in phase-1-gather.md ("skip —
+    already complete" on status=ok) silently reused stale fit/bullet
+    outputs from the prior run.
+    """
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    # Pre-populate apply_state with stale envelopes for the URL-derived slug.
+    from jobsmith.db import open_pipeline_db, put_state
+
+    db_path = tmp_path / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(
+            conn,
+            slug="x",  # ``derive_slug("https://example.com/jobs/x") == "x"``
+            kind="apply-fit-scorer-result",
+            content_blob='{"status":"ok","summary":"stale"}',
+        )
+        put_state(
+            conn,
+            slug="x",
+            kind="manifest",
+            content_blob='{"invocations":[]}',
+        )
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        "jobsmith.apply.headless.run_phase",
+        lambda *a, **kw: iter(_make_phase_events("gather")),
+    )
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: False)
+
+    rc = run_apply(
+        "https://example.com/jobs/x",
+        cwd=tmp_path,
+        skip_confirm=True,
+        force=True,
+    )
+    assert rc == 0
+
+    conn = open_pipeline_db(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT kind FROM apply_state WHERE slug = 'x'"
+        ).fetchall()
+    finally:
+        conn.close()
+    kinds = sorted(r[0] for r in rows)
+    assert "apply-fit-scorer-result" not in kinds, (
+        "stale Pass-3 result envelope must be cleared on --force"
+    )
