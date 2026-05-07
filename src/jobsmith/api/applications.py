@@ -197,6 +197,8 @@ async def _launch_run(
 
     rdr.emit = _emit_and_broadcast  # type: ignore[method-assign]
 
+    cancel_event = supervisor.get_cancel_event(run_id)
+
     async def _run_wrapper() -> None:
         """Run apply.run_apply in a thread; finalise supervisor on completion."""
         try:
@@ -210,6 +212,7 @@ async def _launch_run(
                 slug=slug,
                 run_id=run_id,
                 renderer=rdr,
+                cancel_event=cancel_event,
             )
         except Exception:  # noqa: BLE001 — task must not propagate unhandled
             logger.exception(

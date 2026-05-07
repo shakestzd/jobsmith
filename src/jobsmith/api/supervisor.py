@@ -49,6 +49,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import threading
 from collections import deque
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -159,6 +160,13 @@ class _RunRecord:
     finished_event: asyncio.Event = field(default_factory=asyncio.Event)
     # The asyncio Task running core_run_apply in a thread. Set after creation.
     task: asyncio.Task | None = None
+    # roborev job 970 MEDIUM: cooperative cancellation flag. The asyncio
+    # task is awaiting asyncio.to_thread, so cancelling the task does not
+    # stop the worker thread or the claude subprocess inside
+    # ``headless.run_phase``. ``kill()`` sets this event and the in-process
+    # pipeline plumbs it down to ``headless.run_phase`` which terminates
+    # the subprocess between event lines.
+    cancel_event: threading.Event = field(default_factory=threading.Event)
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +298,16 @@ class RunSupervisor:
         if record is not None:
             record.task = task
 
+    def get_cancel_event(self, run_id: str) -> threading.Event | None:
+        """Return the cancel event for a registered run, or None.
+
+        roborev job 970: ``_launch_run`` plumbs this event into
+        ``apply.run_apply`` so ``kill()`` can cooperatively stop the
+        in-process pipeline at the next ``headless.run_phase`` event line.
+        """
+        record = self._runs.get(run_id)
+        return None if record is None else record.cancel_event
+
     def on_run_complete(self, run_id: str, rc: int) -> None:
         """Finalise the run handle after core_run_apply returns.
 
@@ -391,6 +409,13 @@ class RunSupervisor:
             return False
         if record.handle.status != "running":
             return False
+
+        # roborev job 970 MEDIUM: signal cooperative cancellation to the
+        # in-process pipeline so the worker thread terminates the running
+        # claude subprocess at the next event-line boundary. Setting the
+        # event before cancelling the asyncio task gives the to_thread
+        # worker a chance to unwind cleanly with a "cancelled" error event.
+        record.cancel_event.set()
 
         task = record.task
         if task is not None and not task.done():

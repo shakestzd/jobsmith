@@ -32,6 +32,7 @@ import contextlib
 import logging
 import os
 import sys
+import threading  # noqa: F401 — referenced in optional cancel_event annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -321,6 +322,7 @@ def _run_apply_phases(
     db_slug_ref: list[str],
     db_status_ref: list[str],
     jd_text_file: Path | None = None,
+    cancel_event: "threading.Event | None" = None,
 ) -> int:
     """Phase-loop body extracted so the surrounding ``run_apply`` can wrap it
     with the apply_runs DB lifecycle (insert before, UPDATE after, with the
@@ -465,6 +467,7 @@ def _run_apply_phases(
                 resume=resume,
                 cwd=resolved_cwd,
                 max_turns=_PHASE_MAX_TURNS[phase_name],
+                cancel_event=cancel_event,
             ):
                 rdr.render_event(event)
 
@@ -665,6 +668,7 @@ def run_apply(
     jd_text: str | None = None,
     slug: str | None = None,
     run_id: str | None = None,
+    cancel_event: "threading.Event | None" = None,
 ) -> int:
     """Run the three-phase apply pipeline.
 
@@ -781,6 +785,7 @@ def run_apply(
             db_slug_ref=db_slug_ref,
             db_status_ref=db_status_ref,
             jd_text_file=jd_text_file,
+            cancel_event=cancel_event,
         )
 
     # Look up ensure_bootstrap through apply's namespace so that

@@ -323,14 +323,46 @@ async def _apply_state_log_producer(
         max_id = rows[-1][0] if rows else after_id
         return rows, max_id
 
+    # roborev job 970 MEDIUM: when on_run_complete clears the active slug
+    # immediately after run_apply returns, any apply_state_log rows written
+    # between the last poll and that point — including final phase_complete
+    # / phase_failed transcript rows — would be missed. Track the last
+    # active run_id across iterations and do one final drain after the run
+    # leaves the active map before forgetting it.
+    last_active_run_id: str | None = None
+    drained_run_ids: set[str] = set()
+
     while not stop_event.is_set():
         try:
             run_id = supervisor.get_active_for_slug(slug)
+            # Run just completed — drain its tail rows once before moving on.
+            if (
+                run_id is None
+                and last_active_run_id is not None
+                and last_active_run_id not in drained_run_ids
+            ):
+                final_run_id = last_active_run_id
+                final_after = last_seen_id_by_run.get(final_run_id, 0)
+                rows, new_max = await asyncio.to_thread(
+                    _poll, final_run_id, final_after
+                )
+                for _row_id, payload_json in rows:
+                    try:
+                        payload = json.loads(payload_json) if payload_json else {}
+                    except (ValueError, TypeError):
+                        continue
+                    te = TranscriptEvent(run_id=final_run_id, payload=payload)
+                    await queue.put(("log", final_run_id, te))
+                last_seen_id_by_run[final_run_id] = new_max
+                drained_run_ids.add(final_run_id)
+                last_active_run_id = None
+
             if run_id is None:
                 with contextlib.suppress(asyncio.TimeoutError):
                     await asyncio.wait_for(stop_event.wait(), timeout=poll_interval_s)
                 continue
 
+            last_active_run_id = run_id
             after_id = last_seen_id_by_run.get(run_id, 0)
             rows, new_max = await asyncio.to_thread(_poll, run_id, after_id)
             for _row_id, payload_json in rows:

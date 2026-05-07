@@ -719,6 +719,14 @@ def core_run_apply(
             _f.write(jd_text)
         jd_text_file = Path(_tmp_path)
 
+    def _cleanup_jd_text_file() -> None:
+        # roborev job 970 LOW: ensure the temp file is unlinked even on the
+        # early-return paths (bootstrap failure, already-complete short-circuit)
+        # that bypass the outer try/finally below.
+        if jd_text_file is not None:
+            with _contextlib.suppress(OSError):
+                jd_text_file.unlink()
+
     # Step 1: ensure bootstrap
     if bootstrap is not None:
         try:
@@ -732,6 +740,7 @@ def core_run_apply(
                         payload={"error": f"Bootstrap failed: {exc}"},
                     )
                 )
+            _cleanup_jd_text_file()
             return 1
 
     # Step 1b: seed master_content from disk YAMLs if not already loaded.
@@ -797,6 +806,7 @@ def core_run_apply(
                     payload={"app_dir": str(app_dir)},
                 )
             )
+        _cleanup_jd_text_file()
         return 0
 
     # DB scaffolding: insert apply_runs row before, UPDATE after.
