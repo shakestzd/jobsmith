@@ -196,24 +196,45 @@ type ProgressMap = Record<1 | 2 | 3, number>;
 function deriveProgress(app: SampleApp): {
   progress: ProgressMap;
   activePhase: 1 | 2 | 3;
+  failedPhaseNum: 1 | 2 | 3 | null;
 } {
   // If rendered or done, all phases complete
   if (app.status === 'rendered' || app.status === 'done') {
     return {
       progress: { 1: 100, 2: 100, 3: 100 },
       activePhase: 3,
+      failedPhaseNum: null,
     };
   }
 
-  // For failed status, initialize based on phase but don't fake completion
+  // For failed status, only mark phases STRICTLY BEFORE the failed phase
+  // as 100. The failed phase itself stays at 0 so PipelineTab can paint
+  // it 'failed' rather than 'done' (closes roborev job 965 MEDIUM).
+  // ``failedPhaseNum`` is seeded from the API's phase label so a reload
+  // of a failed run shows which phase failed without waiting for a
+  // live SSE failure event. ``app.phase`` is a string ('gather' /
+  // 'draft' / 'render' / 'unknown'); when it is 'unknown' (full-pipeline
+  // marker) we cannot pin the failure and fall back to phase 1 for the
+  // active card but leave failedPhaseNum null.
   if (app.status === 'failed') {
-    const failedPhase = (app.phase || 1) as 1 | 2 | 3;
+    const phaseLabel = String(app.phase || '');
+    const phaseMap: Record<string, 1 | 2 | 3> = {
+      gather: 1,
+      draft: 2,
+      render: 3,
+    };
+    const knownPhase: 1 | 2 | 3 | null = phaseMap[phaseLabel] ?? null;
+    const failedPhase: 1 | 2 | 3 = knownPhase ?? 1;
     const progress: ProgressMap = { 1: 0, 2: 0, 3: 0 };
-    // Mark all phases up to and including the failed phase as we got there
-    if (failedPhase >= 1) progress[1] = 100;
-    if (failedPhase >= 2) progress[2] = 100;
-    if (failedPhase >= 3) progress[3] = 100;
-    return { progress, activePhase: failedPhase };
+    // Earlier phases got there (passed); the failed phase did NOT.
+    for (const n of [1, 2, 3] as const) {
+      if (n < failedPhase) progress[n] = 100;
+    }
+    return {
+      progress,
+      activePhase: failedPhase,
+      failedPhaseNum: knownPhase,
+    };
   }
 
   // For running statuses: initialize based on phase
@@ -222,6 +243,7 @@ function deriveProgress(app: SampleApp): {
     return {
       progress: { 1: 0, 2: 0, 3: 0 },
       activePhase: 1,
+      failedPhaseNum: null,
     };
   }
 
@@ -230,6 +252,7 @@ function deriveProgress(app: SampleApp): {
     return {
       progress: { 1: app.status === 'running' ? 42 : 0, 2: 0, 3: 0 },
       activePhase: 1,
+      failedPhaseNum: null,
     };
   }
 
@@ -238,6 +261,7 @@ function deriveProgress(app: SampleApp): {
     return {
       progress: { 1: 100, 2: app.status === 'running' ? 42 : 0, 3: 0 },
       activePhase: 2,
+      failedPhaseNum: null,
     };
   }
 
@@ -246,6 +270,7 @@ function deriveProgress(app: SampleApp): {
     return {
       progress: { 1: 100, 2: 100, 3: app.status === 'running' ? 42 : 0 },
       activePhase: 3,
+      failedPhaseNum: null,
     };
   }
 
@@ -253,6 +278,7 @@ function deriveProgress(app: SampleApp): {
   return {
     progress: { 1: 0, 2: 0, 3: 0 },
     activePhase: 1,
+    failedPhaseNum: null,
   };
 }
 
@@ -1077,8 +1103,11 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   const { data: apiDetail, isLoading, error } = useApplication(slug);
 
   const app = useMemo<SampleApp>(() => fromApi(slug, apiDetail), [slug, apiDetail]);
-  const { progress: initialProgress, activePhase: initialActivePhase } =
-    deriveProgress(app);
+  const {
+    progress: initialProgress,
+    activePhase: initialActivePhase,
+    failedPhaseNum: initialFailedPhaseNum,
+  } = deriveProgress(app);
 
   const [tab, setTab] = useState<TabName>('pipeline');
   const [activePhase, setActivePhase] = useState<number>(initialActivePhase);
@@ -1089,12 +1118,21 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   // SSE-derived terminal status — overrides app.status in the header badge when
   // a phase event with status=failed arrives over the stream. Null means no SSE
   // terminal event has been received yet; fall back to app.status in that case.
-  const [sseStatus, setSseStatus] = useState<AppStatus | null>(null);
+  // For an already-failed app loaded from the API, seed this so the header
+  // badge does not flip from 'failed' back to the running default during
+  // initial render (closes roborev job 965 MEDIUM).
+  const [sseStatus, setSseStatus] = useState<AppStatus | null>(
+    app.status === 'failed' ? 'failed' : null,
+  );
   // Phase number (1=gather, 2=draft, 3=render) that the SSE failure event
   // pinned the failure to. Used by PipelineTab so a gather failure does not
   // mis-render the queued draft + render specialists as "failed" (closes
-  // roborev job 953 LOW). Null when no failure has been observed yet.
-  const [failedPhaseNum, setFailedPhaseNum] = useState<1 | 2 | 3 | null>(null);
+  // roborev job 953 LOW). Seeded from ``deriveProgress`` so reloading a
+  // failed run shows which phase failed without waiting for a live SSE
+  // event (closes roborev job 965 MEDIUM).
+  const [failedPhaseNum, setFailedPhaseNum] = useState<1 | 2 | 3 | null>(
+    initialFailedPhaseNum,
+  );
 
   // Ref to hold the active EventSource so we can close it on cancel/unmount.
   const esRef = useRef<EventSource | null>(null);

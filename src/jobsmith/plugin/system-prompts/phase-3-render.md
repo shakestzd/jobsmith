@@ -36,7 +36,7 @@ The `manifest` lives in the DB (kind=`manifest`), not on disk. Recover `run_id`,
 - `apply-cover-letter-writer` (via Task tool, subagent_type="apply-cover-letter-writer")
 - `apply-index-writer` (via Task tool, subagent_type="apply-index-writer")
 - `apply-db-logger` (via Task tool, subagent_type="apply-db-logger")
-- `Bash` tool for: `jobsmith assemble <slug>`, reading render logs, checking file existence.
+- `Bash` tool for: `jobsmith assemble <slug>`, reading render logs, checking file existence, AND the trk-60217f9f DB CLI surface — `jobsmith db get-state`, `jobsmith db put-state`, `jobsmith db list-state`, `jobsmith db dump-master`. These DB commands are mandatory in this phase: the manifest, per-specialist spec, and result envelopes live in `apply_state` (Pass 2). Refusing to invoke them leaves render specialists without inputs.
 - Read/Write tools for state files under `applications/{slug}/.apply-state/`.
 
 Do NOT invoke: apply-jd-parser, apply-fit-scorer, apply-hm-enricher, apply-bullet-selector, apply-company-research, apply-prose-writer, apply-prose-qa.

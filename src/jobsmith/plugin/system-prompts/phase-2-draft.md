@@ -36,6 +36,7 @@ Also required: tailored YAMLs in `applications/{slug}/documents/` (from apply-bu
 - `apply-prose-writer` (via Task tool, subagent_type="apply-prose-writer")
 - `apply-prose-qa` (via Task tool, subagent_type="apply-prose-qa")
 - Read/Write tools for state files under `applications/{slug}/.apply-state/`.
+- `Bash` tool for the trk-60217f9f DB CLI surface — `jobsmith db get-state`, `jobsmith db put-state`, `jobsmith db list-state`, `jobsmith db dump-master`. These are mandatory in this phase: the manifest, per-specialist spec, and result envelopes live in `apply_state` (Pass 2). Refusing to invoke them leaves specs/manifests unwritten and the prose-writer/prose-qa loop starts without inputs.
 
 Do NOT invoke: apply-jd-parser, apply-fit-scorer, apply-hm-enricher, apply-bullet-selector, apply-company-research, apply-resume-renderer, apply-portfolio-ats-checker, apply-visual-layout-reviewer, apply-cover-letter-writer, apply-index-writer, apply-db-logger.
 
