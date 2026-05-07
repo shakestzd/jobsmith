@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import sys
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -187,7 +188,31 @@ async def _launch_run(
     terminal-phase guard (S6, feat-438090af) can synth a phase=failed
     SSE event when the subprocess dies without emitting one.
     """
-    argv = [sys.executable, "-m", "jobsmith.cli", "apply", url, "--slug", slug]
+    # ``--yes`` is mandatory under the supervisor: the subprocess has stdin
+    # wired to /dev/null, so the inter-phase ``click.confirm`` gate would
+    # raise ``click.Abort`` and the whole pipeline would exit non-zero
+    # immediately after phase 1 completes (trk-60217f9f live-test surfaced
+    # this — the UI said --yes but the supervisor never propagated it).
+    #
+    # ``--run-id`` is mandatory when the supervisor's transcript tailer is
+    # active (db_path != None). The tailer filters apply_state_log by
+    # ``handle.run_id`` from migration 006; without sharing that id with
+    # the subprocess, the renderer would tag rows with its own uuid4 and
+    # the tailer would see zero structured transcript events (closes
+    # roborev job 955 HIGH).
+    run_id = uuid.uuid4().hex
+    argv = [
+        sys.executable,
+        "-m",
+        "jobsmith.cli",
+        "apply",
+        url,
+        "--slug",
+        slug,
+        "--yes",
+        "--run-id",
+        run_id,
+    ]
     if force:
         argv.append("--force")
     if jd_text:
@@ -218,9 +243,41 @@ async def _launch_run(
             tmp.close()
             argv.extend(["--jd-text-file", tmp.name])
     transcript_path = _resolve_transcript_path(slug, cwd)
+    db_path = _resolve_db_path(cwd)
     return await supervisor.start(
-        slug=slug, argv=argv, cwd=cwd, transcript_path=transcript_path
+        slug=slug,
+        argv=argv,
+        cwd=cwd,
+        transcript_path=transcript_path,
+        db_path=db_path,
+        run_id=run_id,
     )
+
+
+def _resolve_db_path(cwd: Path) -> Path | None:
+    """Return the pipeline DB absolute path, or ``None`` on config miss.
+
+    Threaded into ``supervisor.start`` so the new ``_tail_state_log``
+    (trk-60217f9f Pass 4) can poll apply_state_log by row id instead of
+    file offset. ``None`` falls back to the legacy file-tail path.
+
+    Resolves ``config.output.jobsmith_db`` relative to ``config_path.parent``
+    (the project root that ``find_config`` walked up to), not relative to
+    the supervisor's ``cwd`` — otherwise an API started from a subdirectory
+    would create or tail a DB at ``<subdir>/private/jobsmith.db`` while
+    ``apply.py:_pipeline_db_path`` writes to ``<project_root>/private/jobsmith.db``,
+    silently splitting the slug's apply_state_log between two files.
+    """
+    try:
+        from jobsmith.config import find_config, load_config
+
+        config_path = find_config(cwd)
+        if config_path is None:
+            return None
+        config = load_config(config_path)
+        return (config_path.parent / config.output.jobsmith_db).resolve()
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------

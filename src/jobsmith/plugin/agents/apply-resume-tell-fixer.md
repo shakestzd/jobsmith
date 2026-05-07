@@ -1,7 +1,7 @@
 ---
 name: apply-resume-tell-fixer
 description: Detect AI tells in resume prose using a calibrated word list. NOT a wrapper on the academic ai-tell-fixer — its list misses "Architected" and other resume tells. Used by prose-qa.
-tools: Read, Edit, Grep, Glob
+tools: Read, Edit, Grep, Glob, Bash
 model: sonnet
 color: red
 ---
@@ -17,7 +17,8 @@ Reusing the academic agent directly would miss "Architected" and produce false c
 
 ## Inputs
 
-Read `.apply-state/spec.json`:
+Read your spec from the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-resume-tell-fixer")`. The blob carries:
 - `inputs.target_file`: string path to the file to scan
 - `inputs.mode`: `scan` (find findings only) or `suggest` (find + propose specific replacements)
 
@@ -83,7 +84,8 @@ Write `.apply-state/ai-tell-report.json`:
 }
 ```
 
-Write `.apply-state/resume-tell-fixer-result.json`:
+Persist your result envelope to the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db put-state --slug {slug} --kind apply-resume-tell-fixer-result" <<< '<json>')`:
 ```json
 {"status": "ok", "summary": "blocking={N}, advisory={M}, file={path}"}
 ```

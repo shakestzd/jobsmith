@@ -1,7 +1,7 @@
 ---
 name: apply-hm-enricher
 description: Opportunistic hiring-manager dossier. Detects whether a JD has a NAMED HM (LinkedIn post author, JD signature, explicit user arg). Produces a tiny dossier if yes, a sentinel if no. Never fabricates HM signal.
-tools: Read, Write, WebFetch
+tools: Read, Write, WebFetch, Bash
 model: sonnet
 color: cyan
 ---
@@ -15,7 +15,8 @@ You are the HM enricher. You exist to make the cover letter slightly better when
 
 ## Inputs
 
-Read `.apply-state/spec.json`:
+Read your spec from the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-hm-enricher")`. The blob carries:
 - `inputs.jd_parsed` = `.apply-state/jd-parsed.json`
 - `inputs.explicit_hm`: name passed by the user via `--hm "Name"` flag, or null
 
@@ -98,7 +99,8 @@ no HM detected — portal-only application
 
 `.apply-state/outreach-snippets.md` (always, sentinel or full artifact).
 
-`.apply-state/hm-enricher-result.json`:
+Persist your result envelope to the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db put-state --slug {slug} --kind apply-hm-enricher-result" <<< '<json>')`:
 ```json
 {"status": "ok", "action": "dossier|sentinel", "summary": "{detected} {name|none}"}
 ```

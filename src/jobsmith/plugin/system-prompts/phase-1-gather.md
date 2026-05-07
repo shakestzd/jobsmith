@@ -10,7 +10,14 @@ All paths required to operate are listed in the user prompt under the "Paths" bl
 
 - Read `specialist-contracts.yaml` at the absolute path supplied in the user-prompt Paths block (key: `specialist_contracts`). Do NOT search for it.
 - Read `.apply-config.yaml` at the absolute path supplied in the user-prompt Paths block (key: `config`). Do NOT search for it.
-- Master YAMLs are at the paths listed as `master.work_yml`, `master.skill_yml`, `master.education_yml`, `master.author_yml` (and optionally `master.publication_yml`) in the Paths block.
+- Master content is canonically stored in the `master_content` DB table per
+  the 0.8.1 S5 contract. **Specialists must fetch master sections via**
+  `Bash("jobsmith db dump-master --section <work|skill|education|author>")`,
+  NOT by `Read`-ing the YAML files at `master.*_yml` paths (bug-3d335f93 —
+  the disk files are materialised snapshots and can be stale relative to
+  user edits made via the web UI). The Paths block still lists
+  `master.work_yml` etc. for documentation, but treat those paths as
+  read-only fallback only when the DB is unavailable.
 - State artifacts go under `apply_state_dir` (absolute path in the Paths block).
 - Agent definitions live under `agent_dir` (absolute path in the Paths block).
 
@@ -29,7 +36,7 @@ All paths required to operate are listed in the user prompt under the "Paths" bl
 - `apply-hm-enricher` (via Task tool, subagent_type="apply-hm-enricher")
 - `apply-bullet-selector` (via Task tool, subagent_type="apply-bullet-selector")
 - `apply-company-research` (via Task tool, subagent_type="apply-company-research")
-- `Bash` tool for: `date`, `uv run python -c 'import uuid;print(uuid.uuid4())'`, file moves, symlink creation. Use `uv run python` for any Python invocation — never raw `python`/`python3`.
+- `Bash` tool for: `date`, `uv run python -c 'import uuid;print(uuid.uuid4())'`, file moves, symlink creation, AND the trk-60217f9f DB CLI surface — `jobsmith db get-state`, `jobsmith db put-state`, `jobsmith db list-state`, `jobsmith db reset-state`, `jobsmith db rekey-slug`, `jobsmith db dump-master`. These are mandatory in this phase; refusing to invoke them leaves specs/manifests unwritten and downstream specialists start without inputs. Use `uv run python` for any Python invocation — never raw `python`/`python3`. (The agent transcript stream — ``apply_state_log`` — is written by the Python renderer, not by the orchestrator agent; you do NOT call any ``append-state-log`` command.)
 - Read/Write tools for state files under the `apply_state_dir` absolute path from the Paths block.
 - Never use `Bash` to glob for plugin/agent files; use the absolute paths from the prompt.
 
@@ -45,13 +52,35 @@ Do NOT invoke: apply-prose-writer, apply-prose-qa, apply-resume-renderer, apply-
 
 ### Step 1 — Dispatch apply-jd-parser (sequential)
 
-Write `applications/_pending/.apply-state/spec.json` with `{specialist: "apply-jd-parser", inputs: {jd_url, jd_text, explicit_company: slug_override}}`. Dispatch via the Task tool with `subagent_type="apply-jd-parser"` and a prompt that points the specialist at the spec.json path.
+The wrapper started this run under a `STARTING_SLUG` (URL-derived; the basename of `apply_state_dir` from your Paths block). Use that slug for every DB write in this step — the rekey step in the next block atomically moves all rows under `STARTING_SLUG` onto `CANONICAL_SLUG` once the parser derives it. Do NOT write to `_pending`: that slug is never re-keyed and would strand `jd-parsed` and the parser result envelope outside of every canonical-slug reader (closes roborev job 954 HIGH).
+
+Persist the spec for `apply-jd-parser` into the DB:
+`Bash("jobsmith db put-state --slug {STARTING_SLUG} --kind spec-apply-jd-parser" <<< '{"specialist":"apply-jd-parser","inputs":{"jd_url":"…","jd_text":"…","explicit_company":"…"}}')`.
+Dispatch via the Task tool with `subagent_type="apply-jd-parser"` and a prompt that points the specialist at `STARTING_SLUG` for spec lookup (the specialist resolves its spec via `jobsmith db get-state --slug {STARTING_SLUG} --kind spec-apply-jd-parser` and writes its `jd-parsed` + `apply-jd-parser-result` envelopes under the same slug).
 
 After it writes `jd-parsed.json`:
-- Derive slug = `{company-slug}-{position-slug}` (lowercase, hyphenated).
-- Create `applications/{slug}/.apply-state/` and move `_pending` artifacts in.
-- Create `applications/{slug}/documents/` with `_extensions` symlink: `(cd applications/{slug}/documents && ln -sf ../../../../templates/extensions/_extensions _extensions)`.
-- Initialize `manifest.json` with `{run_id, slug, started_at, role_type, invocations: []}`.
+- Derive `CANONICAL_SLUG = {company-slug}-{position-slug}` (lowercase, hyphenated).
+- The wrapper started this run with a `STARTING_SLUG` extracted from the URL or any prior URL-index entry; the `apply_state_dir` path in your Paths block ends in `<STARTING_SLUG>/.apply-state`. Read `STARTING_SLUG = basename(dirname(apply_state_dir))`.
+- **CRITICAL slug rekey (trk-60217f9f, fixes phase-2 resume mismatch).** When `STARTING_SLUG != CANONICAL_SLUG`, atomically move every DB row written so far onto the canonical slug; without this, ``apply.py:_load_manifest`` and ``db_ingest._load_manifest`` look under `CANONICAL_SLUG` and find nothing because the orchestrator wrote under `STARTING_SLUG`:
+  `Bash("jobsmith db rekey-slug --from {STARTING_SLUG} --to {CANONICAL_SLUG}")`
+  This wraps every ``apply_state`` and ``apply_state_log`` row under `STARTING_SLUG` (including the JD parser's `spec-apply-jd-parser`, `jd-parsed`, and `apply-jd-parser-result`) into one transaction. Idempotent when slugs match (no-op).
+- Create `applications/{CANONICAL_SLUG}/.apply-state/` and move any `STARTING_SLUG` on-disk artifacts in (jd-parsed.json, voice-profile.json, session-id, transcript.jsonl).
+- Create `applications/{CANONICAL_SLUG}/documents/` with the `_extensions` symlink Quarto needs for the render phase. Probe these paths IN ORDER and pick the FIRST one that exists as a real directory (resolve symlinks):
+  1. `shared/extensions/_extensions` (current convention)
+  2. `templates/extensions/_extensions` (legacy convention)
+
+  Use `Bash` (`test -d` resolves symlinks):
+  ```bash
+  for cand in shared/extensions/_extensions templates/extensions/_extensions; do
+    if [ -d "$cand" ]; then EXT_TARGET="$cand"; break; fi
+  done
+  ```
+  Then create the relative symlink so the four `..` segments climb out of `applications/{CANONICAL_SLUG}/documents/` back to the repo root:
+  `(cd applications/{CANONICAL_SLUG}/documents && ln -sf "../../../../$EXT_TARGET" _extensions)`.
+
+  If neither path resolves to a real directory, log a warning to the manifest's `notes[]` and continue — the gather phase does not need the extension bundle. The render phase will halt later if it actually requires it. Do NOT halt gather here.
+- Initialize the manifest in the DB under the canonical slug:
+  `Bash("jobsmith db put-state --slug {CANONICAL_SLUG} --kind manifest" <<< '{"run_id":"…","slug":"{CANONICAL_SLUG}","started_at":"…","role_type":"…","invocations":[]}')`.
 
 ### Step 2 — Fan-out (parallel)
 
@@ -61,7 +90,21 @@ In ONE message dispatch four specialists in parallel:
 - `apply-bullet-selector` (writes `bullet-selection.json`, `bullet-diff.md`, tailored YAMLs in `documents/`)
 - `apply-company-research` (writes `company-research.md` — uses `private/companies/<slug>.md` cache; writes a callout-warning sentinel if WebFetch fails)
 
-Each gets its own `spec.json`. Update `manifest.json.invocations` with start/finish/agent_id for each.
+Each specialist gets its own DB-backed spec keyed by `spec-<specialist-name>`:
+`Bash("jobsmith db put-state --slug {slug} --kind spec-apply-fit-scorer" <<< '<json>')` (and similarly for `spec-apply-hm-enricher`, `spec-apply-bullet-selector`, `spec-apply-company-research`). Update the manifest's `invocations[]` with start/finish/agent_id for each by reading `manifest`, mutating in place, and writing back: `jobsmith db get-state --slug {slug} --kind manifest | <edit JSON> | jobsmith db put-state --slug {slug} --kind manifest`.
+
+**Resume rule (bug-099493d0):** when a specialist's prior result envelope is
+already present in the DB at `kind=apply-<name>-result` (read with
+`jobsmith db get-state --slug {slug} --kind apply-<name>-result`), follow this table. The "user
+re-triggered the run" is itself the signal that they expect a different
+outcome — never silently emit a halt that was decided before they edited
+master content.
+
+| Prior result `status` | Action this run |
+| --- | --- |
+| `ok` | skip — already complete |
+| `halt` | **MUST re-dispatch** — the user re-ran the pipeline because they (presumably) updated master content to address the gap. Reading the prior halt result and re-emitting `<<PHASE_FAILED>>` without re-dispatching is a bug. |
+| missing / empty / unrecognized | dispatch normally |
 
 ### Step 3 — Tier decision + analysis pause
 
@@ -70,7 +113,7 @@ Read `fit-score.json`. Tier per `tier_policy` in contracts:
 - `--deep` flag → `deep`
 - Otherwise: `score >= 0.70` → `fast`, else `deep`
 
-Phase 1 treats fast and deep identically (slice 9 deferred). Record tier in `manifest.json`.
+Phase 1 treats fast and deep identically (slice 9 deferred). Record tier in the manifest (read-modify-write the `manifest` kind via `jobsmith db get-state` / `put-state`).
 
 PAUSE and present to the user:
 1. Role type + fit table (from fit-score.json `must_have_table`)
@@ -83,10 +126,15 @@ Ask: "Proceed?" — then emit the phase-complete marker and STOP. Do not wait fo
 
 ## Artifacts to write
 
-Before emitting the phase-complete marker, the following MUST exist under `applications/{slug}/.apply-state/`:
+Before emitting the phase-complete marker the following artifacts MUST be present.
+
+DB-backed (queryable via `jobsmith db list-state --slug {slug}`; the manifest is the orchestrator's responsibility, every other kind is a specialist responsibility — Pass 3 of trk-60217f9f migrates the specialists):
+
+- `manifest` — initialized in Step 1, updated in Step 2 and Step 3 (orchestrator)
+
+On-disk under `applications/{slug}/.apply-state/` (specialist outputs; Pass 3 will move these to DB rows of the same name):
 
 - `jd-parsed.json` — produced by apply-jd-parser
-- `manifest.json` — initialized in Step 1, updated in Step 2 and Step 3
 - `fit-score.json` — produced by apply-fit-scorer
 - `hm-snippet.md` — produced by apply-hm-enricher
 - `bullet-selection.json` — produced by apply-bullet-selector
@@ -103,7 +151,7 @@ You are running phase 1 (gather) ONLY. Phase 2 (draft) owns prose-draft.md, pros
 
 When all five phase-1 specialists (jd-parser, fit-scorer, hm-enricher, bullet-selector, company-research) have written their result files AND you have presented the Step 3 analysis pause, your phase is OVER. Execute these three steps in this exact order, then stop:
 
-1. **Append manifest entries.** Open `<applications-dir>/<slug>/.apply-state/manifest.json` and ensure `invocations[]` contains one entry per specialist dispatched (apply-jd-parser, apply-fit-scorer, apply-hm-enricher, apply-bullet-selector, apply-company-research), each with `{"specialist": "<name>", "status": "ok", "started_at": "<iso8601>", "finished_at": "<iso8601>", "agent_id": "<headless agent_id>", "retry_count": 0, "notes": "<brief>"}`.
+1. **Append manifest entries.** Read the manifest via `Bash("jobsmith db get-state --slug {slug} --kind manifest")`, ensure `invocations[]` contains one entry per specialist dispatched (apply-jd-parser, apply-fit-scorer, apply-hm-enricher, apply-bullet-selector, apply-company-research), each with `{"specialist": "<name>", "status": "ok", "started_at": "<iso8601>", "finished_at": "<iso8601>", "agent_id": "<headless agent_id>", "retry_count": 0, "notes": "<brief>"}`, and write it back: `Bash("jobsmith db put-state --slug {slug} --kind manifest" <<< '<updated json>')`.
 2. **Emit the marker.** Output exactly: `<<PHASE_COMPLETE: gather>>` on its own line.
 3. **Stop.** Do not call any more tools. Do not narrate next steps. Do not wait for the user's "Proceed?" answer — the Python caller handles resumption.
 
@@ -117,7 +165,7 @@ When all five phase-1 specialists (jd-parser, fit-scorer, hm-enricher, bullet-se
 ## Failure mode
 
 - If `specialist-contracts.yaml` has `frozen_at: null` → emit `<<PHASE_FAILED: gather: Contracts not frozen; freeze specialist-contracts.yaml before running apply.>>` and stop immediately. Do NOT emit the phase-complete marker.
-- If any Step 2 specialist returns `status=halt` → surface the halt reason and the relevant state files to the user. Do NOT emit the phase-complete marker.
+- If any Step 2 specialist returns `status=halt` → surface the halt reason and the relevant state files to the user, **then emit** `<<PHASE_FAILED: gather: <agent>-halted: <one-line reason>>>` on its own line and stop. (Without this marker the supervisor cannot push a structured `phase_failed` event to the web UI — see bug-0489bff3. Phase 2's draft.md already follows this pattern.) Do NOT emit the phase-complete marker.
 - If apply-company-research fails WebFetch → it writes a callout-warning sentinel to `company-research.md`. This is NOT a halt; continue to Step 3 normally.
 - If apply-hm-enricher detects no HM → it writes a sentinel `detected=no` to `hm-snippet.md`. This is NOT a halt; continue to Step 3 normally and report "HM: not detected" in the analysis pause output.
 - Present the Step 3 analysis pause output, then emit `<<PHASE_COMPLETE: gather>>` and STOP regardless of dealbreakers — the human decision to proceed happens in the Python caller after reading the marker.

@@ -457,6 +457,17 @@ def apply(
             "supervisor's tracked slug matches what run_apply writes to disk."
         ),
     ),
+    run_id: str | None = typer.Option(
+        None,
+        "--run-id",
+        help=(
+            "Override the auto-generated apply_runs / apply_state_log run "
+            "discriminator. The API supervisor passes its own run_id here so "
+            "its transcript tailer (filters apply_state_log by run_id) sees "
+            "rows this subprocess writes. Terminal users normally omit this "
+            "and the wrapper mints a fresh uuid4."
+        ),
+    ),
 ) -> None:
     """Run the three-phase apply pipeline against a JD URL."""
     from .apply import run_apply
@@ -475,6 +486,7 @@ def apply(
             verbosity=verbose,
             jd_text=resolved_jd_text,
             slug=slug,
+            run_id=run_id,
         )
     )
 
@@ -1353,6 +1365,284 @@ def db_load_master(
     else:
         delta = max(after - before, 0)
         console.print(f"[green]Loaded[/green] {delta} new master section(s) ({after} total).")
+
+
+@db_app.command("dump-master")
+def db_dump_master(
+    section: str = typer.Option(
+        ...,
+        "--section",
+        help="Section to dump: 'work', 'skill', 'education', or 'author'.",
+    ),
+) -> None:
+    """Print the master_content blob for *section* to stdout.
+
+    Used by apply-pipeline specialists to read master content from the DB
+    instead of from disk YAML files (bug-3d335f93). The DB is the
+    canonical source of truth for master content per the 0.8.1 S5
+    contract; this command is the read interface for tools (Bash) that
+    cannot speak SQL directly.
+
+    Output is the raw blob as stored in master_content.content_blob —
+    YAML for {work,skill,education,author}. Exit code 0 on success,
+    2 on missing config / DB / row.
+
+    Note: ``benchmark`` is intentionally NOT a section here. Benchmark
+    files (``benchmarks.resume_qmd`` etc.) live under ``master_ingest``'s
+    radar — they are reference fixtures, not master content — and the
+    apply pipeline's prompts read them directly via the Paths block
+    (e.g. ``benchmark.resume_qmd``) rather than through the DB. Roborev
+    job 957 MEDIUM caught the prior advertise-but-never-seed mismatch.
+
+    Stderr carries human-readable errors so stdout stays parseable.
+    """
+    valid_sections = {"work", "skill", "education", "author"}
+    if section not in valid_sections:
+        typer.echo(
+            f"ERROR: unknown section {section!r} (expected one of {sorted(valid_sections)})",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        typer.echo(
+            f"ERROR: No {CONFIG_FILENAME} found — run `jobsmith init` first.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    config = load_config(config_path)
+    repo_root = repo_root_for()
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        typer.echo(f"ERROR: Pipeline DB not found at {db_path}.", err=True)
+        raise typer.Exit(code=2)
+
+    conn = open_pipeline_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT content_blob FROM master_content WHERE section = ?",
+            (section,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        typer.echo(
+            f"ERROR: no master_content row for section {section!r}. "
+            "Run `jobsmith db load-master` to seed from disk.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    # Print blob to stdout WITHOUT rich formatting — callers parse this.
+    typer.echo(row["content_blob"], nl=False)
+
+
+@db_app.command("get-state")
+def db_get_state(
+    slug: str = typer.Option(..., "--slug", help="Application slug."),
+    kind: str = typer.Option(
+        ...,
+        "--kind",
+        help="Artifact kind (e.g. 'manifest', 'spec', 'jd-parsed', 'fit-score', "
+        "'bullet-selection', 'apply-bullet-selector-result').",
+    ),
+) -> None:
+    """Print the apply_state blob for (slug, kind) to stdout (trk-eb70f385).
+
+    Bash-callable read interface for orchestrators and specialists.
+    Replaces ``Read(applications/{slug}/.apply-state/{kind}.json)``. The
+    DB is the source of truth for pipeline state — no specialist or
+    orchestrator should ever read from the file system.
+
+    Stdout: raw blob, byte-clean.
+    Stderr: human-readable error.
+    Exit: 0 on success, 2 on missing config / DB / row.
+    """
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        typer.echo(f"ERROR: No {CONFIG_FILENAME} found.", err=True)
+        raise typer.Exit(code=2)
+    config = load_config(config_path)
+    repo_root = repo_root_for()
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        typer.echo(f"ERROR: Pipeline DB not found at {db_path}.", err=True)
+        raise typer.Exit(code=2)
+
+    conn = open_pipeline_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT content_blob FROM apply_state WHERE slug = ? AND kind = ?",
+            (slug, kind),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        typer.echo(
+            f"ERROR: no apply_state row for slug={slug!r} kind={kind!r}.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    typer.echo(row["content_blob"], nl=False)
+
+
+@db_app.command("put-state")
+def db_put_state(
+    slug: str = typer.Option(..., "--slug", help="Application slug."),
+    kind: str = typer.Option(..., "--kind", help="Artifact kind."),
+) -> None:
+    """Upsert apply_state row from stdin (trk-eb70f385).
+
+    Bash-callable write interface for orchestrators and specialists.
+    Replaces ``Write(applications/{slug}/.apply-state/{kind}.json, ...)``.
+
+    Reads the full blob from stdin, upserts (slug, kind) -> content_blob.
+    """
+    import sys as _sys
+
+    blob = _sys.stdin.read()
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        typer.echo(f"ERROR: No {CONFIG_FILENAME} found.", err=True)
+        raise typer.Exit(code=2)
+    config = load_config(config_path)
+    repo_root = repo_root_for()
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        typer.echo(f"ERROR: Pipeline DB not found at {db_path}.", err=True)
+        raise typer.Exit(code=2)
+
+    from datetime import datetime, timezone
+
+    conn = open_pipeline_db(db_path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO apply_state (slug, kind, content_blob, updated_at) "
+            "VALUES (?, ?, ?, ?)",
+            (slug, kind, blob, datetime.now(tz=timezone.utc).isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@db_app.command("list-state")
+def db_list_state(
+    slug: str = typer.Option(..., "--slug", help="Application slug."),
+) -> None:
+    """List all artifact kinds present in apply_state for *slug*.
+
+    Useful for the orchestrator to see which prior artifacts exist on
+    resume (e.g. which specialists have already produced results).
+    Output: one ``<kind>\\t<updated_at>`` line per row, alphabetical.
+    """
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        typer.echo(f"ERROR: No {CONFIG_FILENAME} found.", err=True)
+        raise typer.Exit(code=2)
+    config = load_config(config_path)
+    repo_root = repo_root_for()
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        typer.echo(f"ERROR: Pipeline DB not found at {db_path}.", err=True)
+        raise typer.Exit(code=2)
+
+    conn = open_pipeline_db(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT kind, updated_at FROM apply_state WHERE slug = ? ORDER BY kind",
+            (slug,),
+        ).fetchall()
+    finally:
+        conn.close()
+    for row in rows:
+        typer.echo(f"{row['kind']}\t{row['updated_at']}")
+
+
+@db_app.command("reset-state")
+def db_reset_state(
+    slug: str = typer.Option(..., "--slug", help="Application slug to wipe."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+) -> None:
+    """Delete every apply_state row for *slug* (trk-eb70f385).
+
+    Equivalent to the prior ``rm -rf applications/{slug}/.apply-state/``
+    and used to start a fresh run. Idempotent; safe to call when no rows
+    exist.
+    """
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        typer.echo(f"ERROR: No {CONFIG_FILENAME} found.", err=True)
+        raise typer.Exit(code=2)
+    config = load_config(config_path)
+    repo_root = repo_root_for()
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        typer.echo(f"ERROR: Pipeline DB not found at {db_path}.", err=True)
+        raise typer.Exit(code=2)
+
+    conn = open_pipeline_db(db_path)
+    try:
+        n_state = conn.execute(
+            "SELECT COUNT(*) FROM apply_state WHERE slug = ?", (slug,)
+        ).fetchone()[0]
+        n_log = conn.execute(
+            "SELECT COUNT(*) FROM apply_state_log WHERE slug = ?", (slug,)
+        ).fetchone()[0]
+        if not yes and (n_state > 0 or n_log > 0):
+            typer.echo(
+                f"Will delete {n_state} apply_state row(s) and {n_log} log row(s) "
+                f"for slug={slug!r}. Re-run with --yes to confirm.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        conn.execute("DELETE FROM apply_state WHERE slug = ?", (slug,))
+        conn.execute("DELETE FROM apply_state_log WHERE slug = ?", (slug,))
+        conn.commit()
+    finally:
+        conn.close()
+    typer.echo(f"Reset state for slug={slug}: {n_state} state row(s), {n_log} log row(s).")
+
+
+@db_app.command("rekey-slug")
+def db_rekey_slug(
+    from_slug: str = typer.Option(..., "--from", help="Source slug to drain."),
+    to_slug: str = typer.Option(..., "--to", help="Destination slug."),
+) -> None:
+    """Atomically move apply_state + apply_state_log rows between slugs (trk-60217f9f).
+
+    Used by the orchestrator after the JD parser derives the canonical
+    company-position slug to migrate every DB row written under the
+    starting slug (URL-derived fallback, ``_pending``, etc.) onto the
+    canonical slug. Wraps :func:`jobsmith.db.rekey_slug` so the move is
+    one transaction; either every row lands or none do.
+
+    Equivalent to ``rm -rf applications/{old}/.apply-state &&
+    mv applications/{old}/.apply-state applications/{new}/.apply-state``
+    before pipeline state moved into the DB.
+    """
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        typer.echo(f"ERROR: No {CONFIG_FILENAME} found.", err=True)
+        raise typer.Exit(code=2)
+    config = load_config(config_path)
+    repo_root = repo_root_for()
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        typer.echo(f"ERROR: Pipeline DB not found at {db_path}.", err=True)
+        raise typer.Exit(code=2)
+
+    from jobsmith.db import rekey_slug as _rekey_slug
+
+    conn = open_pipeline_db(db_path)
+    try:
+        n_state, n_log = _rekey_slug(conn, from_slug=from_slug, to_slug=to_slug)
+    finally:
+        conn.close()
+    typer.echo(
+        f"Rekeyed slug={from_slug!r} → {to_slug!r}: "
+        f"{n_state} apply_state row(s), {n_log} apply_state_log row(s)."
+    )
 
 
 @db_app.command("migrate-slugs")

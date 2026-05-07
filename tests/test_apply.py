@@ -513,7 +513,7 @@ def test_cli_apply_yes_flag(tmp_path: Path, monkeypatch) -> None:
 
     captured: dict = {}
 
-    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None):
+    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None, run_id=None):
         captured["url"] = url
         captured["skip_confirm"] = skip_confirm
         captured["force"] = force
@@ -542,7 +542,7 @@ def test_cli_apply_force_flag(tmp_path: Path, monkeypatch) -> None:
     runner = CliRunner()
     captured: dict = {}
 
-    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None):
+    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None, run_id=None):
         captured["force"] = force
         return 0
 
@@ -568,7 +568,7 @@ def test_cli_apply_jd_text_flag_passes_through(tmp_path: Path, monkeypatch) -> N
     captured: dict = {}
 
     def fake_run_apply(
-        url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None
+        url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None, run_id=None
     ):
         captured["jd_text"] = jd_text
         return 0
@@ -603,7 +603,7 @@ def test_cli_apply_jd_text_file_flag_reads_contents(tmp_path: Path, monkeypatch)
     captured: dict = {}
 
     def fake_run_apply(
-        url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None
+        url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None, run_id=None
     ):
         captured["jd_text"] = jd_text
         return 0
@@ -633,7 +633,7 @@ def test_cli_apply_jd_text_file_wins_over_jd_text(tmp_path: Path, monkeypatch) -
     captured: dict = {}
 
     def fake_run_apply(
-        url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None
+        url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None, run_id=None
     ):
         captured["jd_text"] = jd_text
         return 0
@@ -661,7 +661,7 @@ def test_cli_apply_without_yes_default_confirm_false(tmp_path: Path, monkeypatch
 
     captured: dict = {}
 
-    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None):
+    def fake_run_apply(url, *, cwd=None, skip_confirm=False, force=False, verbosity=0, jd_text=None, slug=None, run_id=None):
         captured["skip_confirm"] = skip_confirm
         return 0
 
@@ -2693,13 +2693,26 @@ def _write_manifest(
     *,
     completed_specialists: list[str],
 ) -> None:
-    """Write a minimal manifest.json with the listed specialists marked status=ok."""
+    """Write a minimal manifest blob to ``apply_state`` (DB-backed, trk-60217f9f).
+
+    Resolves slug + cwd from the conventional layout
+    ``<cwd>/private/applications/<slug>/.apply-state`` so existing call
+    sites do not need to thread extra arguments. The manifest row is
+    upserted into the pipeline DB at ``<cwd>/private/jobsmith.db`` (default
+    config path); a stub disk file is also written so any code still in the
+    pre-Pass-3 transition window does not crash on missing-file checks
+    (Pass 5 removes that fallback entirely).
+    """
     import json
 
+    from jobsmith.db import open_pipeline_db, put_state
+
     apply_state.mkdir(parents=True, exist_ok=True)
+    slug = apply_state.parent.name
+    cwd = apply_state.parent.parent.parent.parent
     manifest = {
         "run_id": "00000000-0000-0000-0000-000000000000",
-        "slug": "acme-ml-engineer",
+        "slug": slug,
         "started_at": "2026-01-01T00:00:00Z",
         "role_type": "ai-engineer",
         "tier": "fast",
@@ -2707,7 +2720,17 @@ def _write_manifest(
             {"specialist": s, "status": "ok"} for s in completed_specialists
         ],
     }
-    (apply_state / "manifest.json").write_text(json.dumps(manifest))
+    blob = json.dumps(manifest)
+
+    db_path = cwd / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(conn, slug=slug, kind="manifest", content_blob=blob)
+    finally:
+        conn.close()
+
+    (apply_state / "manifest.json").write_text(blob)
 
 
 _PHASE_1_SPECIALISTS = [
@@ -3637,15 +3660,24 @@ def test_get_or_create_session_id_resumable_when_gather_complete(
 ) -> None:
     """If gather is marked complete in the manifest, return the persisted ID
     even when the orphan .jsonl is present (legitimate --resume scenario)."""
-    app_dir = tmp_path / "acme-corp-engineer"
+    from jobsmith.db import open_pipeline_db, put_state
+
     cwd = tmp_path / "project"
+    cwd.mkdir(parents=True)
+    (cwd / ".apply-config.yaml").write_text(
+        "output:\n"
+        "  jobsmith_db: private/jobsmith.db\n"
+        "  applications_dir: private/applications\n",
+        encoding="utf-8",
+    )
+    app_dir = cwd / "private" / "applications" / "acme-corp-engineer"
     persisted_id = str(uuid.uuid4())
 
     state_dir = app_dir / ".apply-state"
     state_dir.mkdir(parents=True)
     (state_dir / "session-id").write_text(persisted_id, encoding="utf-8")
 
-    # Write a manifest that marks all gather specialists as complete.
+    # Write a DB-backed manifest that marks all gather specialists complete.
     manifest = {
         "invocations": [
             {"specialist": "apply-jd-parser", "status": "ok"},
@@ -3655,7 +3687,18 @@ def test_get_or_create_session_id_resumable_when_gather_complete(
             {"specialist": "apply-company-research", "status": "ok"},
         ]
     }
-    (state_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    db_path = cwd / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(
+            conn,
+            slug="acme-corp-engineer",
+            kind="manifest",
+            content_blob=json.dumps(manifest),
+        )
+    finally:
+        conn.close()
 
     # Also create the orphan file (should be ignored when gather is done).
     encoded_cwd = str(cwd).replace("/", "-")
@@ -3811,4 +3854,507 @@ def test_auto_freeze_is_idempotent(
     updated = yaml.safe_load(contracts_file.read_text())
     assert updated["frozen_at"] == "2025-01-15", (
         "existing frozen_at must not be overwritten"
+    )
+
+
+# ---------------------------------------------------------------------------
+# trk-60217f9f Pass 2 — DB-backed _load_manifest
+# ---------------------------------------------------------------------------
+
+
+def _seed_apply_config(cwd: Path) -> Path:
+    """Write a minimal .apply-config.yaml under *cwd* and return the DB path."""
+    cwd.mkdir(parents=True, exist_ok=True)
+    (cwd / ".apply-config.yaml").write_text(
+        "output:\n"
+        "  jobsmith_db: private/jobsmith.db\n"
+        "  applications_dir: private/applications\n",
+        encoding="utf-8",
+    )
+    db_path = cwd / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return db_path
+
+
+def test_load_manifest_reads_from_db_not_disk(tmp_path: Path) -> None:
+    """_load_manifest reads the manifest blob from apply_state, not the file."""
+    from jobsmith.apply import _load_manifest
+    from jobsmith.db import open_pipeline_db, put_state
+
+    db_path = _seed_apply_config(tmp_path)
+    slug = "acme-ml-engineer"
+    app_dir = tmp_path / "private" / "applications" / slug
+    app_dir.mkdir(parents=True)
+    # Disk file deliberately absent — DB row is the source of truth.
+
+    manifest = {
+        "run_id": "run-1",
+        "slug": slug,
+        "invocations": [{"specialist": "apply-jd-parser", "status": "ok"}],
+    }
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(conn, slug=slug, kind="manifest", content_blob=json.dumps(manifest))
+    finally:
+        conn.close()
+
+    result = _load_manifest(app_dir, tmp_path)
+    assert result == manifest
+
+
+def test_load_manifest_returns_none_when_db_row_absent(tmp_path: Path) -> None:
+    """No DB row → None (callers re-run from scratch)."""
+    from jobsmith.apply import _load_manifest
+
+    _seed_apply_config(tmp_path)
+    app_dir = tmp_path / "private" / "applications" / "no-such-slug"
+    app_dir.mkdir(parents=True)
+
+    assert _load_manifest(app_dir, tmp_path) is None
+
+
+def test_load_manifest_returns_none_when_blob_malformed(tmp_path: Path) -> None:
+    """Malformed JSON in the DB row → None (callers re-run, no crash)."""
+    from jobsmith.apply import _load_manifest
+    from jobsmith.db import open_pipeline_db, put_state
+
+    db_path = _seed_apply_config(tmp_path)
+    slug = "acme-corp"
+    app_dir = tmp_path / "private" / "applications" / slug
+    app_dir.mkdir(parents=True)
+
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(conn, slug=slug, kind="manifest", content_blob="{not valid json")
+    finally:
+        conn.close()
+
+    assert _load_manifest(app_dir, tmp_path) is None
+
+
+def test_load_manifest_returns_none_when_no_config(tmp_path: Path) -> None:
+    """No .apply-config.yaml under cwd → None (graceful fallthrough)."""
+    from jobsmith.apply import _load_manifest
+
+    app_dir = tmp_path / "private" / "applications" / "acme"
+    app_dir.mkdir(parents=True)
+
+    assert _load_manifest(app_dir, tmp_path) is None
+
+
+def test_phase_completed_with_db_backed_manifest(tmp_path: Path) -> None:
+    """_phase_completed integrates with DB-backed _load_manifest end-to-end."""
+    from jobsmith.apply import _load_manifest, _phase_completed
+    from jobsmith.db import open_pipeline_db, put_state
+
+    db_path = _seed_apply_config(tmp_path)
+    slug = "acme-ml-engineer"
+    app_dir = tmp_path / "private" / "applications" / slug
+    app_dir.mkdir(parents=True)
+
+    manifest = {
+        "invocations": [
+            {"specialist": s, "status": "ok"}
+            for s in (
+                "apply-jd-parser",
+                "apply-fit-scorer",
+                "apply-hm-enricher",
+                "apply-bullet-selector",
+                "apply-company-research",
+            )
+        ]
+    }
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(conn, slug=slug, kind="manifest", content_blob=json.dumps(manifest))
+    finally:
+        conn.close()
+
+    loaded = _load_manifest(app_dir, tmp_path)
+    assert _phase_completed(loaded, "gather") is True
+    assert _phase_completed(loaded, "draft") is False
+
+
+# ---------------------------------------------------------------------------
+# trk-60217f9f roborev job 958 — master_content seed + force resets apply_state
+# ---------------------------------------------------------------------------
+
+
+def test_run_apply_seeds_master_content_on_first_invocation(tmp_path: Path, monkeypatch) -> None:
+    """run_apply must populate master_content from disk before agents run.
+
+    Pre-fix: a fresh ``jobsmith apply`` left master_content empty, so the
+    first specialist's ``jobsmith db dump-master --section work`` exited 2
+    with "no master_content row" and the pipeline halted.
+    """
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    # Write real master content to disk so master_ingest has something to load.
+    content = tmp_path / "assets" / "content"
+    (content / "work.yml").write_text("- role: x\n", encoding="utf-8")
+    (content / "skill.yml").write_text("- skill: y\n", encoding="utf-8")
+    (content / "education.yml").write_text("- school: z\n", encoding="utf-8")
+    (content / "author.yml").write_text("name: a\n", encoding="utf-8")
+
+    # Stub headless so run_apply does not actually invoke claude.
+    monkeypatch.setattr(
+        "jobsmith.apply.headless.run_phase",
+        lambda *a, **kw: iter(_make_phase_events("gather")),
+    )
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: False)
+
+    rc = run_apply("https://example.com/jobs/x", cwd=tmp_path, skip_confirm=True)
+    assert rc == 0
+
+    # master_content must now have rows for all four sections.
+    db_path = tmp_path / "private" / "jobsmith.db"
+    from jobsmith.db import open_pipeline_db
+
+    conn = open_pipeline_db(db_path)
+    try:
+        sections = sorted(
+            r[0] for r in conn.execute("SELECT section FROM master_content")
+        )
+    finally:
+        conn.close()
+    assert sections == ["author", "education", "skill", "work"], (
+        f"master_content not seeded — got {sections}"
+    )
+
+
+def test_force_clears_apply_state_for_slug(tmp_path: Path, monkeypatch) -> None:
+    """run_apply(... force=True) wipes prior apply_state rows for the slug.
+
+    Pre-fix: ``--force`` bypassed the manifest but left Pass-3 result
+    envelopes intact, so the resume rule in phase-1-gather.md ("skip —
+    already complete" on status=ok) silently reused stale fit/bullet
+    outputs from the prior run.
+    """
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    # Pre-populate apply_state with stale envelopes for the URL-derived slug.
+    from jobsmith.db import open_pipeline_db, put_state
+
+    db_path = tmp_path / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(
+            conn,
+            slug="x",  # ``derive_slug("https://example.com/jobs/x") == "x"``
+            kind="apply-fit-scorer-result",
+            content_blob='{"status":"ok","summary":"stale"}',
+        )
+        put_state(
+            conn,
+            slug="x",
+            kind="manifest",
+            content_blob='{"invocations":[]}',
+        )
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        "jobsmith.apply.headless.run_phase",
+        lambda *a, **kw: iter(_make_phase_events("gather")),
+    )
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: False)
+
+    rc = run_apply(
+        "https://example.com/jobs/x",
+        cwd=tmp_path,
+        skip_confirm=True,
+        force=True,
+    )
+    assert rc == 0
+
+    conn = open_pipeline_db(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT kind FROM apply_state WHERE slug = 'x'"
+        ).fetchall()
+    finally:
+        conn.close()
+    kinds = sorted(r[0] for r in rows)
+    assert "apply-fit-scorer-result" not in kinds, (
+        "stale Pass-3 result envelope must be cleared on --force"
+    )
+
+
+def test_run_phase_iter_force_clears_apply_state(tmp_path: Path, monkeypatch) -> None:
+    """run_phase_iter(force=True) wipes apply_state for the slug.
+
+    Marimo single-phase reruns drive ``run_phase_iter`` with
+    ``force=True``. Without resetting apply_state, prior
+    ``apply-<specialist>-result`` rows would short-circuit the resume
+    rule in phase prompts and the specialists the user asked to rerun
+    would be silently skipped (roborev job 959 HIGH).
+    """
+    from jobsmith.db import open_pipeline_db, put_state
+    from jobsmith.apply import run_phase_iter
+
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    # Pre-populate apply_state with a stale Pass-3 result envelope.
+    db_path = tmp_path / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(
+            conn,
+            slug="x",
+            kind="apply-bullet-selector-result",
+            content_blob='{"status":"ok","summary":"stale"}',
+        )
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        "jobsmith.apply.headless.run_phase",
+        lambda *a, **kw: iter(_make_phase_events("gather")),
+    )
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+
+    # Drive the generator to completion (we don't care about the events,
+    # just the side effect of running the force branch).
+    list(run_phase_iter("https://example.com/jobs/x", cwd=tmp_path, force=True))
+
+    conn = open_pipeline_db(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT kind FROM apply_state WHERE slug = 'x' AND kind = 'apply-bullet-selector-result'"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [], "stale Pass-3 envelope must be cleared on run_phase_iter(force=True)"
+
+
+def test_run_phase_iter_force_scoped_preserves_upstream(tmp_path: Path, monkeypatch) -> None:
+    """run_phase_iter(force=True, phases=["draft"]) preserves manifest + gather rows.
+
+    A scoped single-phase rerun must not wipe everything: the manifest
+    and the gather-phase result envelopes are inputs the downstream
+    phase needs. Only the target phase's spec/result rows should drop
+    (roborev job 960 HIGH).
+    """
+    from jobsmith.db import open_pipeline_db, put_state
+    from jobsmith.apply import run_phase_iter
+
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    db_path = tmp_path / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = open_pipeline_db(db_path)
+    try:
+        # Manifest + gather-phase rows + draft-phase rows.
+        put_state(conn, slug="x", kind="manifest", content_blob='{"invocations":[]}')
+        put_state(conn, slug="x", kind="apply-jd-parser-result", content_blob='{"status":"ok"}')
+        put_state(conn, slug="x", kind="apply-fit-scorer-result", content_blob='{"status":"ok"}')
+        put_state(conn, slug="x", kind="apply-prose-writer-result", content_blob='{"status":"ok","stale":1}')
+        put_state(conn, slug="x", kind="spec-apply-prose-writer", content_blob='{"old_spec":1}')
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        "jobsmith.apply.headless.run_phase",
+        lambda *a, **kw: iter(_make_phase_events("draft")),
+    )
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+
+    list(run_phase_iter(
+        "https://example.com/jobs/x",
+        cwd=tmp_path,
+        force=True,
+        phases=["draft"],
+    ))
+
+    conn = open_pipeline_db(db_path)
+    try:
+        kinds = sorted(
+            r[0] for r in conn.execute("SELECT kind FROM apply_state WHERE slug = 'x'")
+        )
+    finally:
+        conn.close()
+
+    # Must preserve: manifest + gather-phase outputs.
+    assert "manifest" in kinds, "manifest must survive a scoped single-phase rerun"
+    assert "apply-jd-parser-result" in kinds, "gather-phase rows must survive"
+    assert "apply-fit-scorer-result" in kinds
+    # Must clear: target phase spec + result.
+    assert "apply-prose-writer-result" not in kinds, (
+        "target-phase result envelope must be cleared so the rerun is real"
+    )
+    assert "spec-apply-prose-writer" not in kinds
+
+
+def test_load_manifest_falls_back_to_disk_for_pre_0_8_4_apps(tmp_path: Path) -> None:
+    """Pre-0.8.4 applications only have manifest.json on disk; ``_load_manifest``
+    must still find them so a re-run does not start from scratch (roborev
+    job 962 MEDIUM)."""
+    from jobsmith.apply import _load_manifest
+
+    _seed_apply_config(tmp_path)
+    slug = "legacy-app"
+    app_dir = tmp_path / "private" / "applications" / slug
+    state_dir = app_dir / ".apply-state"
+    state_dir.mkdir(parents=True)
+    legacy_manifest = {
+        "run_id": "legacy-run",
+        "slug": slug,
+        "invocations": [
+            {"specialist": "apply-jd-parser", "status": "ok"},
+        ],
+    }
+    (state_dir / "manifest.json").write_text(json.dumps(legacy_manifest), encoding="utf-8")
+    # No DB row written — simulates the pre-migration state.
+
+    loaded = _load_manifest(app_dir, tmp_path)
+    assert loaded == legacy_manifest, (
+        "disk-only manifest must be read when the DB row is missing"
+    )
+
+
+def test_load_manifest_db_takes_precedence_over_disk(tmp_path: Path) -> None:
+    """When both the DB row and the disk file exist, the DB wins (the
+    disk fallback only matters during the migration window)."""
+    from jobsmith.apply import _load_manifest
+    from jobsmith.db import open_pipeline_db, put_state
+
+    db_path = _seed_apply_config(tmp_path)
+    slug = "both-app"
+    app_dir = tmp_path / "private" / "applications" / slug
+    state_dir = app_dir / ".apply-state"
+    state_dir.mkdir(parents=True)
+
+    # Disk: stale.
+    (state_dir / "manifest.json").write_text(
+        json.dumps({"run_id": "stale", "invocations": []}),
+        encoding="utf-8",
+    )
+    # DB: current.
+    conn = open_pipeline_db(db_path)
+    try:
+        put_state(
+            conn,
+            slug=slug,
+            kind="manifest",
+            content_blob=json.dumps({"run_id": "current", "invocations": [{"specialist": "x", "status": "ok"}]}),
+        )
+    finally:
+        conn.close()
+
+    loaded = _load_manifest(app_dir, tmp_path)
+    assert loaded is not None
+    assert loaded.get("run_id") == "current", (
+        "DB row must win over disk fallback when both exist"
+    )
+
+
+def test_run_phase_iter_force_scoped_prunes_manifest_invocations(tmp_path: Path, monkeypatch) -> None:
+    """Scoped force-reset must strip the targeted phase's invocations from
+    manifest so a later normal apply does not see "phase done" and skip
+    the rerun work (roborev job 963 MEDIUM)."""
+    from jobsmith.db import get_state, open_pipeline_db, put_state
+    from jobsmith.apply import run_phase_iter
+
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    db_path = tmp_path / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = open_pipeline_db(db_path)
+    try:
+        manifest = {
+            "run_id": "r1",
+            "invocations": [
+                {"specialist": "apply-jd-parser", "status": "ok"},
+                {"specialist": "apply-fit-scorer", "status": "ok"},
+                {"specialist": "apply-prose-writer", "status": "ok"},
+                {"specialist": "apply-prose-qa", "status": "ok"},
+            ],
+        }
+        put_state(conn, slug="x", kind="manifest", content_blob=json.dumps(manifest))
+        put_state(conn, slug="x", kind="apply-prose-writer-result", content_blob='{"status":"ok"}')
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        "jobsmith.apply.headless.run_phase",
+        lambda *a, **kw: iter(_make_phase_events("draft")),
+    )
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+
+    list(run_phase_iter(
+        "https://example.com/jobs/x",
+        cwd=tmp_path,
+        force=True,
+        phases=["draft"],
+    ))
+
+    conn = open_pipeline_db(db_path)
+    try:
+        manifest_blob = get_state(conn, slug="x", kind="manifest")
+    finally:
+        conn.close()
+
+    assert manifest_blob is not None
+    manifest_after = json.loads(manifest_blob)
+    invocation_specialists = {
+        inv["specialist"] for inv in manifest_after["invocations"]
+    }
+    # Draft specialists pruned.
+    assert "apply-prose-writer" not in invocation_specialists
+    assert "apply-prose-qa" not in invocation_specialists
+    # Gather specialists preserved.
+    assert "apply-jd-parser" in invocation_specialists
+    assert "apply-fit-scorer" in invocation_specialists
+
+
+def test_user_decline_at_confirm_gate_records_cancelled_not_done(tmp_path: Path, monkeypatch) -> None:
+    """User declining the inter-phase confirm gate records apply_runs.status='cancelled'.
+
+    rc=0 because user-decline is not a CLI failure, but the DB row must
+    NOT be marked 'done' — that would make the partial run look completed
+    in the UI / list views (closes roborev job 967 MEDIUM)."""
+    from jobsmith.db import open_pipeline_db
+    from jobsmith.apply import run_apply
+
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    monkeypatch.setattr(
+        "jobsmith.apply.headless.run_phase",
+        lambda *a, **kw: iter(_make_phase_events("gather")),
+    )
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+    # User declines the confirm prompt after phase 1.
+    monkeypatch.setattr("jobsmith.apply.click.confirm", lambda *a, **kw: False)
+
+    rc = run_apply("https://example.com/jobs/x", cwd=tmp_path, skip_confirm=False)
+
+    assert rc == 0, "user-decline must not be reported as CLI failure"
+
+    db_path = tmp_path / "private" / "jobsmith.db"
+    conn = open_pipeline_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT status FROM apply_runs ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    assert row[0] == "cancelled", (
+        f"user-decline must record status='cancelled', got {row[0]!r}"
     )

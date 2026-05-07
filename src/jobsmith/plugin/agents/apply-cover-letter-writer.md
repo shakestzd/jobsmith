@@ -19,7 +19,8 @@ It is the durable voice spec. The diagnostic checklist at the bottom of that fil
 
 ## Inputs
 
-Read `.apply-state/spec.json`:
+Read your spec from the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-cover-letter-writer")`. The blob carries:
 - `inputs.jd_parsed`, `inputs.fit_score`
 - `inputs.hm_snippet` = `.apply-state/hm-snippet.md` (sentinel if no HM)
 - `inputs.exemplars`: list of 2-3 paths to positive exemplars (from index_exemplars / retrieve_exemplars)
@@ -118,7 +119,8 @@ Skip the snippet only if the JD explicitly requires existing US citizenship/PR a
 
 `private/applications/{slug}/cover-letter-draft.md` (only if fact-check passes).
 
-`.apply-state/cover-letter-writer-result.json`:
+Persist your result envelope to the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db put-state --slug {slug} --kind apply-cover-letter-writer-result" <<< '<json>')`:
 ```json
 {
   "status": "ok|halt|skipped",

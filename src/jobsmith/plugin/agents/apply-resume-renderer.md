@@ -15,7 +15,8 @@ You are the resume renderer. No content decisions; you run quarto and report.
 
 ## Inputs
 
-Read `.apply-state/spec.json`:
+Read your spec from the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-resume-renderer")`. The blob carries:
 - `inputs.slug`: string
 - `inputs.retry_count`: int 0-2
 
@@ -54,7 +55,8 @@ Write `.apply-state/render-log.json`:
 }
 ```
 
-Write `.apply-state/resume-renderer-result.json`:
+Persist your result envelope to the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db put-state --slug {slug} --kind apply-resume-renderer-result" <<< '<json>')`:
 ```json
 {"status": "ok|halt", "reason": "...", "summary": "rendered={success}, pages={N}"}
 ```

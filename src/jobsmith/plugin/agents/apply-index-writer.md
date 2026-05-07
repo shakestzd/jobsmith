@@ -1,7 +1,7 @@
 ---
 name: apply-index-writer
 description: Write index.qmd for the application directory. Frontmatter (title, company, position, location, salary, url, req-id, date-found, status, next-action) + sections (Job Summary, Key Requirements, Why This Role, Strategy, Application Materials, Timeline). Runs BEFORE db-logger.
-tools: Read, Write
+tools: Read, Write, Bash
 model: haiku
 color: cyan
 ---
@@ -15,7 +15,8 @@ You are the index writer. You produce the human-readable index.qmd that summariz
 
 ## Inputs
 
-Read `.apply-state/spec.json`:
+Read your spec from the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-index-writer")`. The blob carries:
 - `inputs.jd_parsed` = `.apply-state/jd-parsed.json`
 - `inputs.fit_score` = `.apply-state/fit-score.json`
 - `inputs.bullet_selection` = `.apply-state/bullet-selection.json`
@@ -99,7 +100,8 @@ next-action: "Review resume and submit application"
 - {date-found}: Materials generated via /apply ({tier} path, {wall_clock_minutes} min wall-clock).
 ```
 
-Write `.apply-state/index-writer-result.json`:
+Persist your result envelope to the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db put-state --slug {slug} --kind apply-index-writer-result" <<< '<json>')`:
 ```json
 {"status": "ok", "summary": "index.qmd written, must_haves={N}, nice_to_haves={M}"}
 ```

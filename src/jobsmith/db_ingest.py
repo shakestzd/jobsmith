@@ -109,8 +109,35 @@ def _now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
-def _load_manifest(state_dir: Path) -> dict | None:
-    """Return parsed manifest.json or None on missing/corrupt."""
+def _load_manifest(state_dir: Path, db_path: Path | None = None) -> dict | None:
+    """Return parsed manifest blob, preferring the DB over disk.
+
+    trk-60217f9f Pass 2 moved the orchestrator's manifest into ``apply_state``
+    (kind=manifest); this reader checks the DB first, then falls back to the
+    legacy ``manifest.json`` file so projects mid-migration still work. The
+    slug is taken from ``state_dir.parent.name`` — the conventional
+    ``applications/<slug>/.apply-state`` layout.
+    """
+    if db_path is not None and db_path.exists():
+        slug = state_dir.parent.name
+        try:
+            from .db import get_state, open_pipeline_db
+
+            conn = open_pipeline_db(db_path)
+            try:
+                blob = get_state(conn, slug=slug, kind="manifest")
+            finally:
+                conn.close()
+        except Exception:  # noqa: BLE001 — disk fallback handles all DB errors.
+            blob = None
+        if blob:
+            try:
+                data = json.loads(blob)
+            except json.JSONDecodeError:
+                data = None
+            if isinstance(data, dict):
+                return data
+
     manifest_path = state_dir / "manifest.json"
     if not manifest_path.exists():
         return None
@@ -181,7 +208,17 @@ def ingest_phase_outputs(
 
     Returns the number of *new* rows inserted (skipped duplicates excluded).
     """
-    invocations = _phase_invocations(_load_manifest(state_dir), phase)
+    # The same connection points at the pipeline DB; resolve its path so
+    # _load_manifest can read kind=manifest before falling back to disk.
+    db_path: Path | None = None
+    try:
+        for row in conn.execute("PRAGMA database_list").fetchall():
+            if row["name"] == "main" and row["file"]:
+                db_path = Path(row["file"])
+                break
+    except sqlite3.Error:
+        db_path = None
+    invocations = _phase_invocations(_load_manifest(state_dir, db_path), phase)
     if not invocations:
         return 0
 

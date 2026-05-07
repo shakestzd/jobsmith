@@ -26,17 +26,17 @@ The following artifacts MUST already exist in the `apply_state_dir` (see Paths b
 - `company-research.md` — from phase 1 / apply-company-research
 - `bullet-decisions.json` — from anchor guard (between phases)
 - `gap-resolutions.md` — from apply-relevance-inquirer (if triggered between phases; may be absent if guard passed cleanly)
-- `manifest.json` — initialized by phase 1
+
+The `manifest` lives in the DB (kind=`manifest`), not on disk. Recover `run_id`, `slug`, and `tier` with `Bash("jobsmith db get-state --slug {slug} --kind manifest")` before starting any dispatch.
 
 Also required: tailored YAMLs in `applications/{slug}/documents/` (from apply-bullet-selector).
-
-Read `manifest.json` to recover `run_id`, `slug`, and `tier` before starting any dispatch.
 
 ## Allowed agents / tools
 
 - `apply-prose-writer` (via Task tool, subagent_type="apply-prose-writer")
 - `apply-prose-qa` (via Task tool, subagent_type="apply-prose-qa")
 - Read/Write tools for state files under `applications/{slug}/.apply-state/`.
+- `Bash` tool for the trk-60217f9f DB CLI surface — `jobsmith db get-state`, `jobsmith db put-state`, `jobsmith db list-state`, `jobsmith db dump-master`. These are mandatory in this phase: the manifest, per-specialist spec, and result envelopes live in `apply_state` (Pass 2). Refusing to invoke them leaves specs/manifests unwritten and the prose-writer/prose-qa loop starts without inputs.
 
 Do NOT invoke: apply-jd-parser, apply-fit-scorer, apply-hm-enricher, apply-bullet-selector, apply-company-research, apply-resume-renderer, apply-portfolio-ats-checker, apply-visual-layout-reviewer, apply-cover-letter-writer, apply-index-writer, apply-db-logger.
 
@@ -44,13 +44,15 @@ Do NOT invoke: apply-jd-parser, apply-fit-scorer, apply-hm-enricher, apply-bulle
 
 ### Step 6 — Prose loop (max 3 iterations)
 
-Before dispatching, read `manifest.json` once to recover `role_type`. The Paths
-block carries any benchmark + feedback paths injected by the wrapper —
-specifically `benchmark.resume_qmd` and `feedback.dir` (both optional;
-absent keys mean "not configured", not "unset string").
+Before dispatching, read the DB-backed `manifest` once
+(`Bash("jobsmith db get-state --slug {slug} --kind manifest")`) to recover
+`role_type`. The Paths block carries any benchmark + feedback paths
+injected by the wrapper — specifically `benchmark.resume_qmd` and
+`feedback.dir` (both optional; absent keys mean "not configured", not
+"unset string").
 
-Each prose-writer dispatch must write a per-invocation
-`<applications-dir>/<slug>/.apply-state/spec.json` with:
+Each prose-writer dispatch must persist a per-invocation spec into the DB:
+`Bash("jobsmith db put-state --slug {slug} --kind spec-apply-prose-writer" <<< '<json below>')`.
 
 ```json
 {
@@ -59,24 +61,24 @@ Each prose-writer dispatch must write a per-invocation
   "retry_count": <iteration - 1>,
   "inputs": {
     "iteration": <iteration>,
-    "previous_ai_tell_report": "ai-tell-report.json"  // omit on iteration 1
+    "previous_ai_tell_report": "ai-tell-report.json",  // omit on iteration 1
     "benchmark_resume_qmd": "<Paths block: benchmark.resume_qmd, omit if absent>",
     "feedback_dir": "<Paths block: feedback.dir, omit if absent>",
-    "role_type": "<manifest.json: role_type>"
+    "role_type": "<manifest.role_type>"
   }
 }
 ```
 
 Loop (iteration = 1, 2, 3):
 
-1. Write the `spec.json` shown above, then dispatch `apply-prose-writer` — writes `prose-draft.md` and updates `documents/work.yml` with rephrased bullets. Pass current `iteration` count and, from iteration 2 onward, the previous `ai-tell-report.json` as input for revision guidance.
-2. Dispatch `apply-prose-qa` with `iteration` count and `prose-draft.md` as input.
+1. Persist the `spec-apply-prose-writer` blob shown above to the DB, then dispatch `apply-prose-writer` — writes `prose-draft.md` and updates `documents/work.yml` with rephrased bullets. Pass current `iteration` count and, from iteration 2 onward, the previous `ai-tell-report.json` as input for revision guidance.
+2. Persist `spec-apply-prose-qa` for the QA pass with iteration + prose-draft path, then dispatch `apply-prose-qa`.
 3. Read `ai-tell-report.json`:
    - If `decision=pass` → exit loop. Proceed to the artifacts-written check and emit the phase-complete marker.
    - If `decision=revise` and `iteration < 3` → increment iteration, loop back to step 1.
    - If `iteration == 3` and `decision=revise` (still failing) → exit loop with `status=fail`. See Failure mode below.
 
-Update `manifest.json.invocations` with start/finish/agent_id for each prose-writer and prose-qa dispatch.
+Update the DB-backed manifest's `invocations[]` with start/finish/agent_id for each prose-writer and prose-qa dispatch (read-modify-write the `manifest` kind via `jobsmith db get-state` / `put-state`).
 
 ## Artifacts to write
 
@@ -94,7 +96,7 @@ You are running phase 2 (draft) ONLY. Phase 3 (render) owns resume.qmd, cover-le
 
 The instant `apply-prose-qa-result.json` is written with `decision == "pass"`, your phase is OVER. Execute these three steps in this exact order, then stop:
 
-1. **Append manifest entries.** Open `<applications-dir>/<slug>/.apply-state/manifest.json` and APPEND two entries to `invocations[]`:
+1. **Append manifest entries.** Read the manifest via `Bash("jobsmith db get-state --slug {slug} --kind manifest")`, APPEND two entries to `invocations[]`, and write it back with `Bash("jobsmith db put-state --slug {slug} --kind manifest" <<< '<updated json>')`:
    - `{"specialist": "apply-prose-writer", "status": "ok", "started_at": "<iso8601>", "finished_at": "<iso8601>", "agent_id": "<headless agent_id>", "retry_count": <0-2>, "notes": "<brief>"}`
    - `{"specialist": "apply-prose-qa", "status": "ok", "decision": "pass", "started_at": "<iso8601>", "finished_at": "<iso8601>", "agent_id": "<headless agent_id>", "retry_count": <iter_count - 1>, "notes": "<brief>"}`
 2. **Emit the marker.** Output exactly: `<<PHASE_COMPLETE: draft>>` on its own line.

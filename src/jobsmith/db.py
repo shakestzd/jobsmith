@@ -51,6 +51,8 @@ _PIPELINE_MIGRATIONS = [
     ("001_initial_schema", _MIGRATIONS_DIR / "001_initial_schema.sql"),
     ("003_artifact_versioning", _MIGRATIONS_DIR / "003_artifact_versioning.sql"),
     ("004_master_content", _MIGRATIONS_DIR / "004_master_content.sql"),
+    ("005_apply_state", _MIGRATIONS_DIR / "005_apply_state.sql"),
+    ("006_apply_state_log_run_id", _MIGRATIONS_DIR / "006_apply_state_log_run_id.sql"),
 ]
 _REVIEW_MIGRATIONS = [
     ("001_review_schema", _MIGRATIONS_DIR / "001_review_schema.sql"),
@@ -112,6 +114,195 @@ def open_pipeline_db(db_path: Path) -> sqlite3.Connection:
 def open_review_db(slug: str, review_dir: Path) -> sqlite3.Connection:
     """Open the per-slug review DB at ``review_dir/<slug>.db``."""
     return _open_db(review_dir / f"{slug}.db", _REVIEW_MIGRATIONS)
+
+
+# ---------------------------------------------------------------------------
+# apply_state helpers (trk-60217f9f / 0.8.4 — pipeline state DB-backed)
+# ---------------------------------------------------------------------------
+#
+# Python-API counterparts to the ``jobsmith db get-state / put-state /
+# list-state / reset-state`` CLI commands. apply.py uses these directly to
+# avoid subprocess overhead; orchestrator + specialist agents use the CLI.
+# Both paths target the same ``apply_state`` row set, so disk vs DB is no
+# longer a question — the DB is the source of truth.
+
+
+def put_state(
+    conn: sqlite3.Connection,
+    *,
+    slug: str,
+    kind: str,
+    content_blob: str,
+) -> None:
+    """Upsert ``(slug, kind) -> content_blob`` into ``apply_state``.
+
+    Replaces ``Write(applications/{slug}/.apply-state/{kind}.json, ...)``.
+    """
+    conn.execute(
+        "INSERT OR REPLACE INTO apply_state (slug, kind, content_blob, updated_at) "
+        "VALUES (?, ?, ?, ?)",
+        (slug, kind, content_blob, datetime.now(tz=timezone.utc).isoformat()),
+    )
+    conn.commit()
+
+
+def get_state(
+    conn: sqlite3.Connection, *, slug: str, kind: str
+) -> str | None:
+    """Return the ``content_blob`` for ``(slug, kind)`` or ``None`` if missing.
+
+    Replaces ``Read(applications/{slug}/.apply-state/{kind}.json)``.
+    """
+    row = conn.execute(
+        "SELECT content_blob FROM apply_state WHERE slug = ? AND kind = ?",
+        (slug, kind),
+    ).fetchone()
+    return None if row is None else row["content_blob"]
+
+
+def list_state(
+    conn: sqlite3.Connection, *, slug: str
+) -> list[tuple[str, str]]:
+    """List ``(kind, updated_at)`` pairs for *slug*, alphabetical by kind."""
+    rows = conn.execute(
+        "SELECT kind, updated_at FROM apply_state WHERE slug = ? ORDER BY kind",
+        (slug,),
+    ).fetchall()
+    return [(row["kind"], row["updated_at"]) for row in rows]
+
+
+def append_state_log(
+    conn: sqlite3.Connection,
+    *,
+    slug: str,
+    payload: str,
+    run_id: str | None = None,
+) -> int:
+    """Append one event row to ``apply_state_log`` and return its rowid.
+
+    Replaces the per-line append into ``.apply-state/transcript.jsonl``
+    (trk-60217f9f Pass 4). The supervisor's transcript tailer polls this
+    table by ``id`` cursor instead of byte offset, so each row is delivered
+    exactly once even across reconnects.
+
+    *run_id* (optional, NULL for legacy callers) is the per-supervisor-run
+    discriminator the tailer filters on (migration 006). New writes from
+    the apply pipeline always populate it.
+    """
+    cursor = conn.execute(
+        "INSERT INTO apply_state_log (slug, ts, payload, run_id) "
+        "VALUES (?, ?, ?, ?)",
+        (slug, datetime.now(tz=timezone.utc).isoformat(), payload, run_id),
+    )
+    conn.commit()
+    return int(cursor.lastrowid or 0)
+
+
+def read_state_log(
+    conn: sqlite3.Connection,
+    *,
+    slug: str | None = None,
+    run_id: str | None = None,
+    after_id: int = 0,
+) -> list[tuple[int, str, str]]:
+    """Return ``(id, ts, payload)`` rows with ``id > after_id``.
+
+    Discriminators (apply in this order of preference):
+
+    - *run_id* — the per-supervisor-run identifier (migration 006). When
+      provided, only rows with matching ``run_id`` are returned. This is
+      the supervisor's tailer path: ``run_id`` survives the orchestrator's
+      ``rekey-slug`` step (which only mutates ``slug``) so the tailer
+      keeps streaming through canonical-slug rekeys without mixing
+      concurrent runs or replaying historical rows from prior
+      applications (closes roborev job 954 HIGH).
+    - *slug* — legacy filter for callers that have not yet adopted
+      ``run_id`` (e.g. tools inspecting a single application).
+    - both — intersection (rare; mostly tests).
+    - neither — every row after the cursor (debug only).
+
+    The supervisor's tailer calls this in a loop with the highest ``id``
+    seen so far so each row is forwarded exactly once.
+    """
+    where = ["id > ?"]
+    params: list[object] = [after_id]
+    if run_id is not None:
+        where.append("run_id = ?")
+        params.append(run_id)
+    if slug is not None:
+        where.append("slug = ?")
+        params.append(slug)
+    sql = (
+        "SELECT id, ts, payload FROM apply_state_log "
+        f"WHERE {' AND '.join(where)} ORDER BY id"
+    )
+    rows = conn.execute(sql, tuple(params)).fetchall()
+    return [(int(row["id"]), row["ts"], row["payload"]) for row in rows]
+
+
+def rekey_slug(
+    conn: sqlite3.Connection, *, from_slug: str, to_slug: str
+) -> tuple[int, int]:
+    """Atomically move every ``apply_state`` and ``apply_state_log`` row from
+    *from_slug* to *to_slug*. Returns ``(state_rows_moved, log_rows_moved)``.
+
+    Used by the orchestrator after the JD parser derives the canonical slug
+    (e.g. ``job-boards-7445224-2026-05`` → ``reddit-senior-analytics-engineer``)
+    so subsequent reads under the canonical slug — including ``_phase_completed``
+    in apply.py and ``ingest_phase_outputs`` in db_ingest — find the manifest,
+    specs, and result envelopes the orchestrator already wrote (trk-60217f9f).
+
+    On a primary-key collision (target slug already has the same kind) the
+    target row wins and the source row is discarded; the caller is expected
+    to invoke this exactly once at the slug-derivation point. Idempotent
+    when ``from_slug == to_slug``: no-op, returns (0, 0).
+    """
+    if from_slug == to_slug:
+        return (0, 0)
+    with conn:  # implicit transaction so a partial move can roll back
+        n_state = conn.execute(
+            "SELECT COUNT(*) FROM apply_state WHERE slug = ?", (from_slug,)
+        ).fetchone()[0]
+        n_log = conn.execute(
+            "SELECT COUNT(*) FROM apply_state_log WHERE slug = ?", (from_slug,)
+        ).fetchone()[0]
+        # Move rows one kind at a time so a target collision falls back to
+        # "keep target, discard source" rather than aborting the whole move.
+        rows = conn.execute(
+            "SELECT kind, content_blob, updated_at FROM apply_state "
+            "WHERE slug = ?",
+            (from_slug,),
+        ).fetchall()
+        for row in rows:
+            conn.execute(
+                "INSERT OR IGNORE INTO apply_state "
+                "(slug, kind, content_blob, updated_at) VALUES (?, ?, ?, ?)",
+                (to_slug, row["kind"], row["content_blob"], row["updated_at"]),
+            )
+        conn.execute("DELETE FROM apply_state WHERE slug = ?", (from_slug,))
+        # Log rows have no PK collision risk (id is autoincrement).
+        conn.execute(
+            "UPDATE apply_state_log SET slug = ? WHERE slug = ?",
+            (to_slug, from_slug),
+        )
+    return (int(n_state), int(n_log))
+
+
+def reset_state(conn: sqlite3.Connection, *, slug: str) -> tuple[int, int]:
+    """Delete every ``apply_state`` and ``apply_state_log`` row for *slug*.
+
+    Returns ``(state_rows_deleted, log_rows_deleted)``. Idempotent.
+    """
+    n_state = conn.execute(
+        "SELECT COUNT(*) FROM apply_state WHERE slug = ?", (slug,)
+    ).fetchone()[0]
+    n_log = conn.execute(
+        "SELECT COUNT(*) FROM apply_state_log WHERE slug = ?", (slug,)
+    ).fetchone()[0]
+    conn.execute("DELETE FROM apply_state WHERE slug = ?", (slug,))
+    conn.execute("DELETE FROM apply_state_log WHERE slug = ?", (slug,))
+    conn.commit()
+    return (n_state, n_log)
 
 
 def insert_apply_run(

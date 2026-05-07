@@ -71,7 +71,12 @@ from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from jobsmith.api.events_poll import (
     _db_poll_once,
 )
-from jobsmith.api.supervisor import RunSupervisor, SynthPhaseEvent, get_supervisor
+from jobsmith.api.supervisor import (
+    RunSupervisor,
+    SynthPhaseEvent,
+    TranscriptEvent,
+    get_supervisor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -359,6 +364,62 @@ async def _stream(
                             "status": payload_obj.status,
                             "last_phase": payload_obj.last_phase,
                             "error_excerpt": payload_obj.error_excerpt,
+                        }),
+                    )
+                    saw_activity = True
+                    continue
+                if isinstance(payload_obj, TranscriptEvent):
+                    # Structured agent event tailed from the transcript
+                    # (file or apply_state_log per trk-60217f9f Pass 4).
+                    # Promote terminal phase markers (``phase_complete`` /
+                    # ``phase_failed``) to canonical ``event=phase`` SSE
+                    # messages BEFORE the transcript message so the
+                    # frontend phase tracker updates even for clients that
+                    # ignore unknown transcript types. Without this, a
+                    # specialist halt that emits ``<<PHASE_FAILED>>``
+                    # leaves the UI stuck on "running" because
+                    # ``synth_terminal_phase_failed`` deliberately
+                    # suppresses its fallback when it sees a terminal
+                    # transcript record (closes roborev job 952 HIGH).
+                    transcript_payload = payload_obj.payload
+                    transcript_type = (
+                        transcript_payload.get("type")
+                        if isinstance(transcript_payload, dict)
+                        else None
+                    )
+                    if transcript_type in ("phase_complete", "phase_failed"):
+                        phase_name = (
+                            transcript_payload.get("phase")
+                            or transcript_payload.get("name")
+                            or ""
+                        )
+                        # Use ``done`` (not ``success``) for completion so
+                        # the frontend phase tracker recognises it: the UI
+                        # gates phase advance on ``status in {done, backfilled}``
+                        # (closes roborev job 953 MEDIUM).
+                        status = (
+                            "done"
+                            if transcript_type == "phase_complete"
+                            else "failed"
+                        )
+                        phase_data: dict[str, object] = {
+                            "run_id": payload_obj.run_id,
+                            "phase": phase_name,
+                            "status": status,
+                            "last_phase": phase_name,
+                        }
+                        error_text = transcript_payload.get("error")
+                        if isinstance(error_text, str) and error_text:
+                            phase_data["error_excerpt"] = error_text
+                        yield ServerSentEvent(
+                            event="phase",
+                            data=json.dumps(phase_data),
+                        )
+                    yield ServerSentEvent(
+                        event="transcript",
+                        data=json.dumps({
+                            "run_id": payload_obj.run_id,
+                            "payload": payload_obj.payload,
                         }),
                     )
                     saw_activity = True

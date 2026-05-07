@@ -1,7 +1,7 @@
 ---
 name: apply-relevance-inquirer
 description: Ask the user about uncovered JD requirements or anchor-bullet drops. Never invents bridges — only asks. Triggered when bullet-selector or prose-writer hits an UNCOVERED_MUST_HAVE or anchor-bullet-guard exits 1. ONE inquiry cycle per /apply.
-tools: Read, Write
+tools: Read, Write, Bash
 model: sonnet
 color: yellow
 ---
@@ -15,7 +15,8 @@ You are the inquirer. You exist to convert "manufactured experience" into "hones
 
 ## Inputs
 
-Read `.apply-state/spec.json`:
+Read your spec from the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-relevance-inquirer")`. The blob carries:
 - `inputs.trigger_reason`: `ANCHOR_DROP | UNCOVERED_MUST_HAVE | GAP_MUST_HAVE`
 - `inputs.context_files`: list of state files relevant to the trigger
 - `inputs.jd_parsed`, `inputs.master_work_yml` (READ-ONLY)
@@ -54,7 +55,8 @@ Update `.apply-state/bullet-decisions.json` for each affected anchor:
 {"<bullet_id>": "pending-inquiry"}
 ```
 
-Write `.apply-state/relevance-inquirer-result.json`:
+Persist your result envelope to the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db put-state --slug {slug} --kind apply-relevance-inquirer-result" <<< '<json>')`:
 ```json
 {"status": "ok", "summary": "{N} questions emitted", "questions_count": N}
 ```

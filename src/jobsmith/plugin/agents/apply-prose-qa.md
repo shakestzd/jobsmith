@@ -15,7 +15,8 @@ You are the prose QA gate. You do not rewrite. You decide whether the current pr
 
 ## Inputs
 
-Read `.apply-state/spec.json`:
+Read your spec from the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-prose-qa")`. The blob carries:
 - `inputs.prose_draft` = `.apply-state/prose-draft.md`
 - `inputs.resume_qmd` = `private/applications/{slug}/documents/resume.qmd` (may not exist on first iteration)
 - `inputs.iteration` = int, 0-2
@@ -43,7 +44,8 @@ Write `.apply-state/ai-tell-report.json`:
 }
 ```
 
-Write `.apply-state/prose-qa-result.json`:
+Persist your result envelope to the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db put-state --slug {slug} --kind apply-prose-qa-result" <<< '<json>')`:
 ```json
 {"status": "ok|halt", "decision": "pass|revise|halt", "summary": "iter={iteration}, blocking={N}, advisory={M}"}
 ```

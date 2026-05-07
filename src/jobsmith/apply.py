@@ -9,8 +9,28 @@ Public API
   per phase completion (gather→draft→render). Consumers observe phase-granular
   events; per-specialist granularity is deferred to slice 8.
 - :func:`run_apply` — orchestrate all three phases with confirm gates and
-  per-phase resume from completed work (via ``manifest.json`` + URL index).
-  Internally drives ``run_phase_iter()`` and discards events for the CLI path.
+  per-phase resume from completed work. Internally drives
+  ``run_phase_iter()`` and discards events for the CLI path.
+
+Pipeline state — DB vs disk (trk-60217f9f, 0.8.4)
+-------------------------------------------------
+The ``apply_state`` and ``apply_state_log`` tables are the source of truth
+for orchestrator-managed state and the agent transcript:
+
+- ``kind=manifest`` — orchestrator's per-slug run manifest (Pass 2).
+- ``kind=spec-<specialist>`` — per-specialist input envelopes (Pass 2).
+- ``kind=apply-<specialist>-result`` — per-specialist result envelopes (Pass 3).
+- ``apply_state_log`` rows — agent transcript stream, polled by the
+  supervisor's ``_tail_state_log`` (Pass 4).
+
+Specialist content artifacts (``jd-parsed.json``, ``fit-score.json``,
+``bullet-selection.json``, ``prose-draft.md`` etc.) remain on disk under
+``applications/{slug}/.apply-state/`` so that ``assemble.py`` and the
+review readers in ``_state_readers.py`` continue to function. Migrating
+each content kind to ``apply_state`` rows is tracked as follow-up after
+this track lands; the specialist prompts already write the result
+envelope to the DB (Pass 3) which is what the orchestrator and reviewers
+need for resume + UI surfacing.
 """
 
 from __future__ import annotations
@@ -37,6 +57,7 @@ from . import plugin_dir as get_plugin_dir
 from ._state_readers import ARTIFACT_READERS
 from .benchmarks import resolve_benchmark_or_fallback
 from .config import CONFIG_FILENAME, find_config, load_config
+from .db import get_state, open_pipeline_db
 from .guard import check_anchors
 from .paths import resolve
 from .render import ApplyRenderer
@@ -861,7 +882,7 @@ def _get_or_create_session_id(application_dir: Path, cwd: Path) -> str:
     if session_file.exists():
         stored = session_file.read_text(encoding="utf-8").strip()
         if stored:
-            manifest = _load_manifest(application_dir)
+            manifest = _load_manifest(application_dir, cwd)
             if _phase_completed(manifest, "gather"):
                 # Gather succeeded — the session ID is legitimately reusable
                 # for phase-2/3 --resume; return it unchanged.
@@ -1100,18 +1121,66 @@ def _record_url_mapping(url: str, canonical_slug: str, cwd: Path) -> None:
     _save_url_index(cwd, index)
 
 
-def _load_manifest(app_dir: Path) -> dict | None:
-    """Read ``app_dir/.apply-state/manifest.json``. Returns None on missing/malformed."""
-    manifest_path = app_dir / ".apply-state" / "manifest.json"
-    if not manifest_path.exists():
+def _pipeline_db_path(cwd: Path) -> Path | None:
+    """Resolve the pipeline DB absolute path under *cwd*.
+
+    Returns ``None`` if config cannot be located. Does NOT verify the file
+    exists — callers handle the "DB not yet created" case via ``get_state``
+    which transparently materializes the schema.
+    """
+    config_path = find_config(cwd)
+    if config_path is None:
+        return None
+    config = load_config(config_path)
+    repo_root = config_path.parent
+    return (repo_root / config.output.jobsmith_db).resolve()
+
+
+def _load_manifest(app_dir: Path, cwd: Path) -> dict | None:
+    """Read the manifest blob for ``app_dir.name`` from ``apply_state`` (DB).
+
+    Pass 2 of trk-60217f9f made the DB the source of truth, but pre-0.8.4
+    applications still have only ``app_dir/.apply-state/manifest.json``
+    on disk. Roborev job 962 MEDIUM caught the regression: those apps
+    would no longer be recognised as resumable and would silently rerun
+    from scratch when a user re-applied to the same URL.
+
+    Read order:
+
+    1. ``apply_state`` row, ``slug = app_dir.name``, ``kind = "manifest"``.
+    2. Disk fallback at ``app_dir/.apply-state/manifest.json`` when the DB
+       row is missing. The disk file is treated as authoritative input
+       only (the orchestrator writes new manifests to the DB exclusively
+       via Pass 2's prompts), so reads here cover the migration window.
+
+    Returns ``None`` when neither source has a usable dict.
+    """
+    db_path = _pipeline_db_path(cwd)
+    blob: str | None = None
+    if db_path is not None and db_path.exists():
+        slug = app_dir.name
+        conn = open_pipeline_db(db_path)
+        try:
+            blob = get_state(conn, slug=slug, kind="manifest")
+        finally:
+            conn.close()
+    if not blob:
+        # Disk fallback for pre-0.8.4 applications (no DB-backed manifest
+        # was ever written). Returns None on missing or malformed file.
+        manifest_path = app_dir / ".apply-state" / "manifest.json"
+        if not manifest_path.exists():
+            return None
+        try:
+            blob = manifest_path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+    if not blob:
         return None
     try:
-        data = json.loads(manifest_path.read_text())
-        if isinstance(data, dict):
-            return data
-    except (json.JSONDecodeError, OSError):
-        pass
-    return None
+        data = json.loads(blob)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _phase_completed(manifest: dict | None, phase_name: str) -> bool:
@@ -1337,6 +1406,25 @@ def _run_phase_iter_body(
     # Step 1: bootstrap
     ensure_bootstrap(resolved_cwd)
 
+    # Step 1b: seed master_content from disk YAMLs if not already loaded
+    # (roborev job 962 MEDIUM). The marimo NotebookRunner drives the
+    # apply pipeline through this generator, not through ``run_apply``,
+    # so the master-content seed in ``run_apply`` (job 958) does not
+    # cover this code path. Mirror the same idempotent ensure here so
+    # specialists' ``jobsmith db dump-master --section work`` calls
+    # find rows on a fresh DB.
+    try:
+        _config_path = find_config(resolved_cwd)
+        _db_path = _pipeline_db_path(resolved_cwd)
+        if _config_path is not None and _db_path is not None:
+            from .master_ingest import ensure_master_loaded as _ensure_master
+
+            _ensure_master(_db_path, repo_root=_config_path.parent)
+    except Exception as exc:  # noqa: BLE001 — degrade rather than abort.
+        logger.warning(
+            "master_content seed (run_phase_iter) failed: %s", exc
+        )
+
     # Step 2: resolve starting slug
     started_at = _time.time()
     plugin_directory = get_plugin_dir()
@@ -1347,10 +1435,102 @@ def _run_phase_iter_body(
     else:
         slug, _from_index = _resolve_starting_slug(url, resolved_cwd)
 
+    # Roborev job 959 HIGH + job 960 HIGH: marimo single-phase reruns
+    # drive this generator with ``force=True``. Without clearing
+    # apply_state for the slug, prior ``apply-<specialist>-result``
+    # rows with ``status: ok`` cause the phase prompts to treat the
+    # specialists as "already complete" and skip them.
+    #
+    # SCOPED reset: when the caller scopes ``phases`` to a single
+    # downstream phase (e.g. ``phases=["draft"]``), we MUST NOT wipe
+    # the whole slug — the manifest, gather-phase result envelopes,
+    # and content artifacts the downstream phase reads would all be
+    # lost. Drop only the rows scoped to the target phase's
+    # specialists. The full ``reset_state`` runs only when the rerun
+    # restarts from gather (``phases is None`` or includes "gather").
+    if force:
+        _force_db_path = _pipeline_db_path(resolved_cwd)
+        if _force_db_path is not None and _force_db_path.exists():
+            with contextlib.suppress(Exception):
+                from .db import open_pipeline_db as _open_pipe_db
+                from .db import reset_state as _reset_state
+
+                full_reset = phases is None or "gather" in phases
+                _conn = _open_pipe_db(_force_db_path)
+                try:
+                    if full_reset:
+                        _reset_state(_conn, slug=slug)
+                    else:
+                        # Delete only the per-specialist spec / result rows
+                        # for the targeted phases so upstream rows survive.
+                        scoped_specs: set[str] = set()
+                        for ph in phases:
+                            for s in required_specialists_for_phase(ph):
+                                scoped_specs.add(s)
+                        kinds_to_drop = []
+                        for s in scoped_specs:
+                            kinds_to_drop.extend(
+                                [f"spec-{s}", f"{s}-result"]
+                            )
+                        if kinds_to_drop:
+                            placeholders = ",".join("?" for _ in kinds_to_drop)
+                            _conn.execute(
+                                f"DELETE FROM apply_state WHERE slug = ? "
+                                f"AND kind IN ({placeholders})",
+                                (slug, *kinds_to_drop),
+                            )
+                            _conn.commit()
+
+                        # Roborev job 963 MEDIUM: also strip the manifest's
+                        # ``invocations[]`` entries for the targeted phase
+                        # specialists. Without this, the manifest still
+                        # records ``status: "ok"`` for those specialists
+                        # so a later normal ``jobsmith apply`` (no force)
+                        # would re-read the manifest, see "phase done",
+                        # and skip the phase the user just told us to
+                        # rerun. Preserve upstream invocations untouched.
+                        from .db import (
+                            get_state as _get_state,
+                            put_state as _put_state,
+                        )
+
+                        manifest_blob = _get_state(
+                            _conn, slug=slug, kind="manifest"
+                        )
+                        if manifest_blob:
+                            try:
+                                manifest_data = json.loads(manifest_blob)
+                            except json.JSONDecodeError:
+                                manifest_data = None
+                            if isinstance(manifest_data, dict):
+                                invocations = manifest_data.get("invocations")
+                                if isinstance(invocations, list):
+                                    pruned = [
+                                        inv
+                                        for inv in invocations
+                                        if not (
+                                            isinstance(inv, dict)
+                                            and inv.get("specialist")
+                                            in scoped_specs
+                                        )
+                                    ]
+                                    if len(pruned) != len(invocations):
+                                        manifest_data["invocations"] = pruned
+                                        _put_state(
+                                            _conn,
+                                            slug=slug,
+                                            kind="manifest",
+                                            content_blob=json.dumps(
+                                                manifest_data
+                                            ),
+                                        )
+                finally:
+                    _conn.close()
+
     # Step 3: phase-completion gating
     apps_dir = _applications_dir(resolved_cwd)
     app_dir = apps_dir / slug if apps_dir is not None else None
-    manifest = None if force or app_dir is None else _load_manifest(app_dir)
+    manifest = None if force or app_dir is None else _load_manifest(app_dir, resolved_cwd)
 
     session_id = headless.deterministic_session_id(slug)
 
@@ -1539,6 +1719,7 @@ def run_apply(
     renderer: ApplyRenderer | None = None,
     jd_text: str | None = None,
     slug: str | None = None,
+    run_id: str | None = None,
 ) -> int:
     """Run the three-phase apply pipeline.
 
@@ -1599,6 +1780,29 @@ def run_apply(
         rdr.print_error(f"Bootstrap failed: {exc}")
         return 1
 
+    # Step 1b: seed master_content from disk YAMLs if not already loaded
+    # (roborev job 958 HIGH + job 959 MEDIUM). The FastAPI ``api serve``
+    # lifespan handler does this at startup, but a direct ``jobsmith
+    # apply`` invocation never seeded the table — Pass 3 specialists
+    # then crash with ``no master_content row`` when they try to
+    # ``jobsmith db dump-master --section work`` because the rows were
+    # never inserted. Idempotent: skips when rows already exist.
+    #
+    # ``repo_root`` MUST be the project root (the directory holding
+    # ``.apply-config.yaml``), not the supervisor's ``cwd``. When
+    # ``jobsmith apply`` is invoked from a subdirectory, ``cwd != root``
+    # and ``ensure_master_loaded`` would resolve ``master.work_yml``
+    # against the wrong base, find nothing, and seed zero rows.
+    try:
+        _config_path = find_config(resolved_cwd)
+        _db_path = _pipeline_db_path(resolved_cwd)
+        if _config_path is not None and _db_path is not None:
+            from .master_ingest import ensure_master_loaded as _ensure_master
+
+            _ensure_master(_db_path, repo_root=_config_path.parent)
+    except Exception as exc:  # noqa: BLE001 — degrade rather than abort.
+        logger.warning("master_content seed failed: %s", exc)
+
     # Step 2: resolve starting slug. With --force, bypass the URL index and
     # use the URL-derived slug (a fresh run). Otherwise look up the URL in
     # the persisted index, falling back to a one-time migration scan, and
@@ -1638,7 +1842,7 @@ def run_apply(
     # malformed JSON, or missing invocations all fall through to "rerun".
     apps_dir = _applications_dir(resolved_cwd)
     app_dir = apps_dir / slug if apps_dir is not None else None
-    manifest = None if force or app_dir is None else _load_manifest(app_dir)
+    manifest = None if force or app_dir is None else _load_manifest(app_dir, resolved_cwd)
 
     # Compute (or create) the session ID from the persisted per-application
     # file.  This replaces the old uuid5-based deterministic_session_id so
@@ -1654,6 +1858,25 @@ def run_apply(
     if force and app_dir is not None:
         _session_id_file = app_dir / ".apply-state" / "session-id"
         _session_id_file.unlink(missing_ok=True)
+        # Roborev job 958 HIGH: ``--force`` bypassed the manifest gate
+        # (so phases re-run) but left every Pass-3 result envelope —
+        # ``apply-fit-scorer-result``, ``apply-bullet-selector-result``,
+        # etc. — sitting in apply_state. The phase-1 prompt's resume
+        # rule treats a prior ``status: ok`` envelope as "skip — already
+        # complete," so a forced re-run would silently reuse stale
+        # outputs. Wipe both apply_state and apply_state_log for the
+        # slug before any agent dispatch.
+        _force_db_path = _pipeline_db_path(resolved_cwd)
+        if _force_db_path is not None and _force_db_path.exists():
+            with contextlib.suppress(Exception):
+                from .db import open_pipeline_db as _open_pipe_db
+                from .db import reset_state as _reset_state
+
+                _conn = _open_pipe_db(_force_db_path)
+                try:
+                    _reset_state(_conn, slug=slug)
+                finally:
+                    _conn.close()
     session_id = (
         _get_or_create_session_id(app_dir, resolved_cwd)
         if app_dir is not None
@@ -1690,12 +1913,23 @@ def run_apply(
     # the row's status in the wrapper finally-block. Wrapped in suppress so a
     # missing/locked DB never aborts the apply pipeline itself — DB writes are
     # canonical for review but secondary to the pipeline's primary work.
-    db_run_id = str(uuid.uuid4())
+    # Roborev job 955 HIGH: when the API supervisor launches this
+    # subprocess it generates its own run_id (used to filter the
+    # apply_state_log tailer). If the subprocess minted a different
+    # uuid4, the supervisor's tailer would see zero rows. Accept the
+    # caller-supplied run_id and only fall back to a fresh uuid4 when
+    # invoked directly from a terminal.
+    db_run_id = run_id or str(uuid.uuid4())
     db_phase_label = "unknown"  # full pipeline; matches marimo runner convention
     db_started_at_iso = _db_now_iso()
     db_conn = _open_pipeline_db_for_run(resolved_cwd)
     db_final_status = "failed"  # default; overridden on success/decline/etc.
     db_slug_ref = [slug]
+    # Roborev job 967 MEDIUM: distinguish user-declined partial stops
+    # ("Stopped at user request" — rc=0 but should not be marked
+    # "done") from full pipeline success. The phase loop sets this to
+    # ``"cancelled"`` before returning 0 from a confirm-gate decline.
+    db_status_ref = ["unset"]
     if db_conn is not None:
         with contextlib.suppress(Exception):
             from .db import insert_apply_run as _insert_apply_run
@@ -1726,9 +1960,15 @@ def run_apply(
             db_conn=db_conn,
             db_run_id=db_run_id,
             db_slug_ref=db_slug_ref,
+            db_status_ref=db_status_ref,
             jd_text_file=jd_text_file,
         )
-        db_final_status = "done" if rc == 0 else "failed"
+        if rc != 0:
+            db_final_status = "failed"
+        elif db_status_ref[0] == "cancelled":
+            db_final_status = "cancelled"
+        else:
+            db_final_status = "done"
         return rc
     finally:
         # Best-effort cleanup of the jd_text temp file. The user-supplied
@@ -1803,11 +2043,18 @@ def _run_apply_phases(
     db_conn,
     db_run_id: str,
     db_slug_ref: list[str],
+    db_status_ref: list[str],
     jd_text_file: Path | None = None,
 ) -> int:
     """Phase-loop body extracted so the surrounding ``run_apply`` can wrap it
     with the apply_runs DB lifecycle (insert before, UPDATE after, with the
     canonical slug reflected via ``db_slug_ref[0]``).
+
+    ``db_status_ref`` (single-element list) is mutated to ``"cancelled"``
+    when the user declines an inter-phase confirm gate, distinguishing
+    that case from a full pipeline completion (``run_apply``'s finally
+    maps ``rc=0 + status_ref="cancelled"`` to apply_runs.status=cancelled
+    and ``rc=0 + status_ref!="cancelled"`` to status=done).
 
     All parameters are pre-resolved by ``run_apply``; this helper performs no
     bootstrap or slug resolution of its own.
@@ -1890,7 +2137,16 @@ def _run_apply_phases(
         state_dir_for_transcript = _apply_state_dir(slug, resolved_cwd)
         if state_dir_for_transcript is not None:
             transcript_path = state_dir_for_transcript / "transcript.jsonl"
-            rdr.open_transcript(transcript_path, phase_name)
+            # trk-60217f9f Pass 4: dual-write to apply_state_log so the
+            # supervisor can tail by row id. Disk file remains canonical
+            # until Pass 5.
+            rdr.open_transcript(
+                transcript_path,
+                phase_name,
+                slug=slug,
+                db_path=_pipeline_db_path(resolved_cwd),
+                run_id=db_run_id,
+            )
 
         # Step 3f: stream events
         phase_succeeded = False
@@ -1987,6 +2243,7 @@ def _run_apply_phases(
         # (URL-derived) slug as if it were canonical.  Step 4/5 runs before
         # phase 2 (in Step 3pre above) regardless of how gather got "done".
         if phase_name == "gather":
+            pre_reconcile_slug = slug
             new_slug, reconciled = _reconcile_canonical_slug(
                 slug, resolved_cwd, started_at
             )
@@ -2008,6 +2265,29 @@ def _run_apply_phases(
             # final UPDATE in run_apply's finally-block records the correct
             # application directory (roborev #923 HIGH 2).
             db_slug_ref[0] = slug
+
+            # Roborev job 956 MEDIUM: catch any apply_state_log row the
+            # renderer wrote between the orchestrator's mid-phase
+            # ``rekey-slug`` and the gather event-loop close (the
+            # renderer's ``_transcript_slug`` is captured at
+            # ``open_transcript`` time and is the URL-derived starting
+            # slug for phase 1; transcript rows after rekey continue
+            # tagging that slug). Re-rekey idempotently from the old
+            # slug to the canonical one so apply_state and apply_state_log
+            # are fully consolidated under a single slug per run; subsequent
+            # ``jobsmith db list-state --slug`` and ``reset-state --slug``
+            # operations cover everything.
+            if (
+                reconciled
+                and pre_reconcile_slug != slug
+                and db_conn is not None
+            ):
+                with contextlib.suppress(Exception):
+                    from .db import rekey_slug as _rekey_slug
+
+                    _rekey_slug(
+                        db_conn, from_slug=pre_reconcile_slug, to_slug=slug
+                    )
 
             # Render per-phase summary panel before the confirm gate
             state_dir = _apply_state_dir(slug, resolved_cwd)
@@ -2053,6 +2333,11 @@ def _run_apply_phases(
             rdr.pause_before_confirm()
             if not click.confirm(f"Phase {phase_num} ({phase_name}) complete. Proceed to next phase?"):
                 rdr.print_info("Stopped at user request. Partial work saved.")
+                # Roborev job 967 MEDIUM: signal user-decline to the
+                # outer ``run_apply`` so apply_runs.status is recorded
+                # as "cancelled" rather than "done". rc stays 0
+                # because the user's choice is not a CLI failure.
+                db_status_ref[0] = "cancelled"
                 return 0
 
     rdr.print_complete()

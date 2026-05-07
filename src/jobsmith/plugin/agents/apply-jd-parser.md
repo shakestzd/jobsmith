@@ -14,7 +14,8 @@ color: blue
 You are the JD parser for the user's /apply pipeline. You convert raw job text into the fixed schema in `.claude/agents/apply/specialist-contracts.yaml` under `jd-parser`. Read that contract before you start.
 
 ## Inputs
-Read `private/applications/_pending/.apply-state/spec.json` (or the slug-specific path the orchestrator passes you):
+Read your spec from the pipeline DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-jd-parser")` where `{slug}` is the slug the orchestrator passed in your dispatch prompt — the URL-derived starting slug. (Pre-roborev-job-954 builds wrote to `_pending`; that path strands the row outside the rekey-slug atomic move and is no longer used.) Parse the JSON blob:
 - `inputs.jd_url`: URL or null
 - `inputs.jd_text`: raw text or null
 - `inputs.explicit_company`: optional override slug
@@ -89,20 +90,15 @@ For any URL that does not match the patterns above, fetch the HTML page directly
 
 ## Output
 
-Write `.apply-state/jd-parsed.json` matching the contract schema exactly. Fields: `company, position, location, location_type, salary_range, req_id, apply_url, named_hm, role_type, must_haves, nice_to_haves, top_keywords, jd_text_clean, jd_url`.
+Persist `jd-parsed` to the DB:
+`Bash("jobsmith db put-state --slug {slug} --kind jd-parsed" <<< '<json>')` matching the contract schema exactly. Fields: `company, position, location, location_type, salary_range, req_id, apply_url, named_hm, role_type, must_haves, nice_to_haves, top_keywords, jd_text_clean, jd_url`. Also keep `.apply-state/jd-parsed.json` on disk during the trk-60217f9f migration window so unmigrated downstream readers continue to work; Pass 5 removes the disk write.
 
 `jd_url` is the original input URL (from `inputs.jd_url`). Preserve it verbatim — the Python wrapper uses it on subsequent runs to short-circuit slug derivation and resume from completed phases.
 
-Append to `.apply-state/manifest.json` (read first, merge):
-```json
-{
-  "role_type": "<value>",
-  "slug_derived_from": "<company>-<position>",
-  "started_at": "<from orchestrator-passed value>"
-}
-```
+The orchestrator owns the manifest. Do NOT write `manifest.json` directly. The orchestrator records your run in `kind=manifest` after you complete.
 
-Write `.apply-state/jd-parser-result.json`:
+Persist your result envelope to the DB:
+`Bash("jobsmith db put-state --slug {slug} --kind apply-jd-parser-result" <<< '<json>')`:
 ```json
 {"status": "ok", "summary": "Parsed {company} / {position}, role_type={role_type}, must_haves={N}"}
 ```

@@ -363,6 +363,7 @@ class TestRunApplyPhasesDualWrite:
                 db_conn=None,
                 db_run_id="run-xxx",
                 db_slug_ref=["acme-swe"],
+                db_status_ref=["unset"],
                 jd_text_file=None,
             )
 

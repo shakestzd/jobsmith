@@ -28,7 +28,7 @@ export interface ApplicationDetailProps {
 
 // ── Phase-related helpers ────────────────────────────────────────────────────
 
-type PhaseStatus = 'done' | 'running' | 'queued';
+type PhaseStatus = 'done' | 'running' | 'queued' | 'failed';
 
 interface PhaseSpec {
   num: 1 | 2 | 3;
@@ -37,33 +37,137 @@ interface PhaseSpec {
   specs: string[];
 }
 
+// Specialist names mirror the canonical PHASE_SPECIALISTS map in
+// src/jobsmith/_state_readers.py. Keep these two in sync — divergence
+// surfaces as "specialist X failed" panel rows for specialists the
+// orchestrator never actually dispatched.
 const PHASES: PhaseSpec[] = [
   {
     num: 1,
     name: 'gather',
-    blurb: 'parse JD, score anchors, build spec.json',
-    specs: ['apply-jd-parser', 'apply-anchor-scorer', 'apply-spec-builder'],
+    blurb: 'parse JD, score fit, dispatch gather specialists',
+    specs: [
+      'apply-jd-parser',
+      'apply-fit-scorer',
+      'apply-hm-enricher',
+      'apply-bullet-selector',
+      'apply-company-research',
+    ],
   },
   {
     num: 2,
     name: 'draft',
-    blurb: 'select bullets, draft cover, fact-check',
-    specs: ['apply-bullet-selector', 'apply-cover-drafter', 'apply-factchecker'],
+    blurb: 'prose-writer + prose-qa loop until pass',
+    specs: ['apply-prose-writer', 'apply-prose-qa'],
   },
   {
     num: 3,
     name: 'render',
-    blurb: 'assemble _variables.yml, quarto render',
-    specs: ['apply-assembler', 'apply-renderer'],
+    blurb: 'render resume + cover letter + index, ATS check',
+    specs: [
+      'apply-resume-renderer',
+      'apply-portfolio-ats-checker',
+      'apply-visual-layout-reviewer',
+      'apply-cover-letter-writer',
+      'apply-index-writer',
+    ],
   },
 ];
 
 // ── Event stream helpers ─────────────────────────────────────────────────────
 
+/**
+ * One row in the event-stream log.
+ *
+ * - Plain stdout/stderr from the apply CLI lands as `kind: 'log'` (or undefined,
+ *   for back-compat). The `lvl` field carries 'info' / 'warn' for those.
+ * - Structured agent activity tailed from transcript.jsonl lands with
+ *   `kind: 'tool_call' | 'tool_result' | 'agent_text' | 'phase_boundary'`
+ *   (bug-0e13706c). The renderer switches on kind to format these as
+ *   tool/result rows rather than raw terminal text.
+ */
 interface LogEvent {
   ts: string;
   lvl: string;
   msg: string;
+  kind?: 'log' | 'tool_call' | 'tool_result' | 'agent_text' | 'phase_boundary';
+  toolName?: string;
+  toolInputPreview?: string;
+  toolUseId?: string;
+  status?: string;
+  phaseName?: string;
+}
+
+/**
+ * SSE payload shape for `event=transcript` — bug-0e13706c.
+ * The supervisor tails transcript.jsonl and forwards each new JSON line,
+ * preserving the renderer's record format. We only consume a few fields;
+ * unknown event types are still rendered (as kind=log) so future renderer
+ * additions show up automatically.
+ */
+interface SseTranscriptEvent {
+  run_id: string;
+  payload: {
+    ts?: string;
+    type?: string;
+    tool_name?: string;
+    tool_input_truncated?: string;
+    tool_use_id?: string;
+    text_truncated?: string;
+    result_truncated?: string;
+    _phase_boundary?: string;
+    [k: string]: unknown;
+  };
+}
+
+/** Convert a transcript SSE payload into a LogEvent for the event stream. */
+function transcriptToLogEvent(t: SseTranscriptEvent): LogEvent | null {
+  const p = t.payload;
+  // Phase-boundary marker (rendered as a header row).
+  if (typeof p._phase_boundary === 'string') {
+    return {
+      ts: now(),
+      lvl: 'phase',
+      msg: `── phase: ${p._phase_boundary} ──`,
+      kind: 'phase_boundary',
+      phaseName: p._phase_boundary,
+    };
+  }
+  if (p.type === 'tool_call') {
+    const tname = String(p.tool_name ?? '?');
+    const preview = String(p.tool_input_truncated ?? '').slice(0, 80);
+    return {
+      ts: now(),
+      lvl: 'tool',
+      msg: preview ? `${tname}(${preview})` : `${tname}()`,
+      kind: 'tool_call',
+      toolName: tname,
+      toolInputPreview: preview,
+      toolUseId: typeof p.tool_use_id === 'string' ? p.tool_use_id : undefined,
+    };
+  }
+  if (p.type === 'tool_result') {
+    const summary = String(p.result_truncated ?? '').slice(0, 80);
+    return {
+      ts: now(),
+      lvl: 'result',
+      msg: summary || '✓',
+      kind: 'tool_result',
+      toolUseId: typeof p.tool_use_id === 'string' ? p.tool_use_id : undefined,
+    };
+  }
+  if (p.type === 'text') {
+    const txt = String(p.text_truncated ?? '').slice(0, 200);
+    if (!txt) return null;
+    return {
+      ts: now(),
+      lvl: 'agent',
+      msg: txt,
+      kind: 'agent_text',
+    };
+  }
+  // Unknown payload type — drop silently rather than render terminal-formatted.
+  return null;
 }
 
 function now(): string {
@@ -92,24 +196,45 @@ type ProgressMap = Record<1 | 2 | 3, number>;
 function deriveProgress(app: SampleApp): {
   progress: ProgressMap;
   activePhase: 1 | 2 | 3;
+  failedPhaseNum: 1 | 2 | 3 | null;
 } {
   // If rendered or done, all phases complete
   if (app.status === 'rendered' || app.status === 'done') {
     return {
       progress: { 1: 100, 2: 100, 3: 100 },
       activePhase: 3,
+      failedPhaseNum: null,
     };
   }
 
-  // For failed status, initialize based on phase but don't fake completion
+  // For failed status, only mark phases STRICTLY BEFORE the failed phase
+  // as 100. The failed phase itself stays at 0 so PipelineTab can paint
+  // it 'failed' rather than 'done' (closes roborev job 965 MEDIUM).
+  // ``failedPhaseNum`` is seeded from the numeric phase that ``fromApi``
+  // already mapped from the API's phase label, so a reload of a failed
+  // run shows which phase failed without waiting for a live SSE event
+  // (closes roborev job 966 MEDIUM). ``fromApi`` falls back to phase 1
+  // for ``unknown``/missing labels — we cannot prove a real failed
+  // phase from that, so ``failedPhaseNum`` stays null in those cases
+  // and the active card defaults to phase 1.
   if (app.status === 'failed') {
-    const failedPhase = (app.phase || 1) as 1 | 2 | 3;
+    const apiPhase = (api: SampleApp): 1 | 2 | 3 | null => {
+      const p = api.phase;
+      if (p === 1 || p === 2 || p === 3) return p;
+      return null;
+    };
+    const knownPhase: 1 | 2 | 3 | null = apiPhase(app);
+    const failedPhase: 1 | 2 | 3 = knownPhase ?? 1;
     const progress: ProgressMap = { 1: 0, 2: 0, 3: 0 };
-    // Mark all phases up to and including the failed phase as we got there
-    if (failedPhase >= 1) progress[1] = 100;
-    if (failedPhase >= 2) progress[2] = 100;
-    if (failedPhase >= 3) progress[3] = 100;
-    return { progress, activePhase: failedPhase };
+    // Earlier phases got there (passed); the failed phase did NOT.
+    for (const n of [1, 2, 3] as const) {
+      if (n < failedPhase) progress[n] = 100;
+    }
+    return {
+      progress,
+      activePhase: failedPhase,
+      failedPhaseNum: knownPhase,
+    };
   }
 
   // For running statuses: initialize based on phase
@@ -118,6 +243,7 @@ function deriveProgress(app: SampleApp): {
     return {
       progress: { 1: 0, 2: 0, 3: 0 },
       activePhase: 1,
+      failedPhaseNum: null,
     };
   }
 
@@ -126,6 +252,7 @@ function deriveProgress(app: SampleApp): {
     return {
       progress: { 1: app.status === 'running' ? 42 : 0, 2: 0, 3: 0 },
       activePhase: 1,
+      failedPhaseNum: null,
     };
   }
 
@@ -134,6 +261,7 @@ function deriveProgress(app: SampleApp): {
     return {
       progress: { 1: 100, 2: app.status === 'running' ? 42 : 0, 3: 0 },
       activePhase: 2,
+      failedPhaseNum: null,
     };
   }
 
@@ -142,6 +270,7 @@ function deriveProgress(app: SampleApp): {
     return {
       progress: { 1: 100, 2: 100, 3: app.status === 'running' ? 42 : 0 },
       activePhase: 3,
+      failedPhaseNum: null,
     };
   }
 
@@ -149,6 +278,7 @@ function deriveProgress(app: SampleApp): {
   return {
     progress: { 1: 0, 2: 0, 3: 0 },
     activePhase: 1,
+    failedPhaseNum: null,
   };
 }
 
@@ -180,6 +310,7 @@ function PhaseCard({ num, name, blurb, status, progress, onClick, active, meta }
           {status === 'running' && <><span className="spin" /> running</>}
           {status === 'done' && <><Icon name="check" size={12} className="check" style={{ color: 'var(--success)' }} /> done</>}
           {status === 'queued' && <>queued</>}
+          {status === 'failed' && <><Icon name="x" size={12} style={{ color: 'var(--danger, #e55)' }} /> failed</>}
         </span>
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--fg-muted)', marginBottom: 8 }}>{blurb}</div>
@@ -193,6 +324,75 @@ function PhaseCard({ num, name, blurb, status, progress, onClick, active, meta }
   );
 }
 
+// ── EventLogRow ──────────────────────────────────────────────────────────────
+//
+// One row in the event-stream log. Branches on `kind` (bug-0e13706c) so
+// structured events from transcript.jsonl render as typed rows (tool / result
+// / agent text / phase boundary) instead of pre-formatted terminal log lines.
+
+function EventLogRow({ e }: { e: LogEvent }) {
+  if (e.kind === 'phase_boundary') {
+    return (
+      <div style={{
+        padding: '6px 0',
+        margin: '4px 0',
+        borderTop: '1px solid var(--border)',
+        borderBottom: '1px solid var(--border)',
+        background: 'var(--bg-sunk)',
+        fontWeight: 500,
+        fontSize: 12,
+        textAlign: 'center',
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+        color: 'var(--fg-muted)',
+      }}>
+        phase: {e.phaseName ?? '?'}
+      </div>
+    );
+  }
+  if (e.kind === 'tool_call') {
+    return (
+      <div>
+        <span className="ts">{e.ts}</span>
+        <span className="lvl tool" style={{ color: 'var(--accent)' }}>{'tool  '}</span>
+        <span className="msg">
+          <strong style={{ color: 'var(--fg)' }}>{e.toolName ?? '?'}</strong>
+          {e.toolInputPreview ? (
+            <span style={{ color: 'var(--fg-subtle)' }}>{' '}({e.toolInputPreview})</span>
+          ) : null}
+        </span>
+      </div>
+    );
+  }
+  if (e.kind === 'tool_result') {
+    return (
+      <div>
+        <span className="ts">{e.ts}</span>
+        <span className="lvl result" style={{ color: 'var(--success, #5a5)' }}>{'✓     '}</span>
+        <span className="msg" style={{ color: 'var(--fg-subtle)' }}>{e.msg}</span>
+      </div>
+    );
+  }
+  if (e.kind === 'agent_text') {
+    return (
+      <div style={{ padding: '4px 8px', borderLeft: '2px solid var(--border)', margin: '2px 0' }}>
+        <span className="ts">{e.ts}</span>
+        <span className="lvl agent" style={{ color: 'var(--fg-muted)' }}>{'agent '}</span>
+        <span className="msg" style={{ fontStyle: 'italic' }}>{e.msg}</span>
+      </div>
+    );
+  }
+  // Default: legacy log line. Existing styles + dangerouslySetInnerHTML for the
+  // pre-redacted/escaped HTML in `msg`.
+  return (
+    <div>
+      <span className="ts">{e.ts}</span>
+      <span className={`lvl ${e.lvl}`}>{e.lvl.padEnd(6)}</span>
+      <span className="msg" dangerouslySetInnerHTML={{ __html: e.msg }} />
+    </div>
+  );
+}
+
 // ── PipelineTab ──────────────────────────────────────────────────────────────
 
 interface PipelineTabProps {
@@ -200,9 +400,22 @@ interface PipelineTabProps {
   running: boolean;
   phase: number;
   progress: ProgressMap;
+  /**
+   * SSE-derived terminal status. When 'failed', the *failedPhaseNum*'s
+   * specialists render as 'failed' rather than perpetually 'running'
+   * (bug-8ade6f70). 'done' / 'rendered' map to 100% completion.
+   */
+  sseStatus: AppStatus | null;
+  /**
+   * Phase number that received the failure (1=gather, 2=draft, 3=render).
+   * Only that phase's specialists render as 'failed'; queued specialists
+   * for downstream phases remain 'queued'. Null when no failure pinned
+   * yet (closes roborev job 953 LOW).
+   */
+  failedPhaseNum: 1 | 2 | 3 | null;
 }
 
-function PipelineTab({ events, running, phase, progress }: PipelineTabProps) {
+function PipelineTab({ events, running, phase, progress, sseStatus, failedPhaseNum }: PipelineTabProps) {
   const logRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (logRef.current) {
@@ -227,13 +440,7 @@ function PipelineTab({ events, running, phase, progress }: PipelineTabProps) {
           </div>
         </div>
         <div className="eventlog" ref={logRef} style={{ maxHeight: 460, borderRadius: 0, border: 'none' }}>
-          {events.map((e, i) => (
-            <div key={i}>
-              <span className="ts">{e.ts}</span>
-              <span className={`lvl ${e.lvl}`}>{e.lvl.padEnd(6)}</span>
-              <span className="msg" dangerouslySetInnerHTML={{ __html: e.msg }} />
-            </div>
-          ))}
+          {events.map((e, i) => <EventLogRow key={i} e={e} />)}
           {running && (
             <div>
               <span className="ts">{now()}</span>
@@ -254,20 +461,29 @@ function PipelineTab({ events, running, phase, progress }: PipelineTabProps) {
             {phaseSpec.specs.map(s => {
               const pct = phaseDone ? 100 : Math.min(100, progress[phaseNum] * (1 + Math.random() * 0.4));
               void pct; // computed but used only implicitly via done/running/queued label
-              const iconName: IconName = phaseDone ? 'check' : 'dot';
+              // bug-8ade6f70: when the SSE stream reports a terminal failure
+              // and the active phase did not complete, the specialists in
+              // that phase are NOT still running — render them as 'failed'.
+              // Only the phase the SSE failure pinned to renders as
+              // failed — queued downstream phases stay 'queued' so a
+              // gather failure does not mis-paint the draft + render
+              // specialists (closes roborev job 953 LOW).
+              const phaseFailed =
+                sseStatus === 'failed'
+                && !phaseDone
+                && failedPhaseNum === phaseNum;
+              const iconName: IconName = phaseDone ? 'check' : (phaseFailed ? 'x' : 'dot');
+              const iconColor = phaseDone
+                ? 'var(--success)'
+                : (phaseFailed ? 'var(--danger, #e55)' : 'var(--accent)');
+              const label = phaseDone
+                ? `${(Math.random() * 1.5 + 0.4).toFixed(1)}s`
+                : (phaseFailed ? 'failed' : (progress[phaseNum] > 0 ? 'running' : 'queued'));
               return (
                 <div key={s} style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Icon
-                    name={iconName}
-                    size={12}
-                    style={{ color: phaseDone ? 'var(--success)' : 'var(--accent)' }}
-                  />
+                  <Icon name={iconName} size={12} style={{ color: iconColor }} />
                   <span className="mono-sm" style={{ flex: 1 }}>{s}</span>
-                  <span className="mono-sm" style={{ color: 'var(--fg-subtle)' }}>
-                    {phaseDone
-                      ? `${(Math.random() * 1.5 + 0.4).toFixed(1)}s`
-                      : (progress[phaseNum] > 0 ? 'running' : 'queued')}
-                  </span>
+                  <span className="mono-sm" style={{ color: 'var(--fg-subtle)' }}>{label}</span>
                 </div>
               );
             })}
@@ -852,12 +1068,46 @@ function ssePhaseToNum(phase: string): 1 | 2 | 3 {
   return 1;
 }
 
+/**
+ * Map a specialist name to its phase number. Mirrors the canonical
+ * ``PHASE_SPECIALISTS`` map in ``src/jobsmith/_state_readers.py``.
+ *
+ * Returns null when the name is not a known specialist — the caller
+ * decides whether to fall back to the SSE payload's phase label or
+ * drop the event. Used by the specialist SSE handler so a forwarded
+ * ``apply_runs.phase="unknown"`` does not corrupt phase progress.
+ */
+function specialistToPhaseNum(specialist: string): 1 | 2 | 3 | null {
+  const gatherSpecs = new Set([
+    'apply-jd-parser',
+    'apply-fit-scorer',
+    'apply-hm-enricher',
+    'apply-bullet-selector',
+    'apply-company-research',
+  ]);
+  const draftSpecs = new Set(['apply-prose-writer', 'apply-prose-qa']);
+  const renderSpecs = new Set([
+    'apply-resume-renderer',
+    'apply-portfolio-ats-checker',
+    'apply-visual-layout-reviewer',
+    'apply-cover-letter-writer',
+    'apply-index-writer',
+  ]);
+  if (gatherSpecs.has(specialist)) return 1;
+  if (draftSpecs.has(specialist)) return 2;
+  if (renderSpecs.has(specialist)) return 3;
+  return null;
+}
+
 export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   const { data: apiDetail, isLoading, error } = useApplication(slug);
 
   const app = useMemo<SampleApp>(() => fromApi(slug, apiDetail), [slug, apiDetail]);
-  const { progress: initialProgress, activePhase: initialActivePhase } =
-    deriveProgress(app);
+  const {
+    progress: initialProgress,
+    activePhase: initialActivePhase,
+    failedPhaseNum: initialFailedPhaseNum,
+  } = deriveProgress(app);
 
   const [tab, setTab] = useState<TabName>('pipeline');
   const [activePhase, setActivePhase] = useState<number>(initialActivePhase);
@@ -868,10 +1118,49 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   // SSE-derived terminal status — overrides app.status in the header badge when
   // a phase event with status=failed arrives over the stream. Null means no SSE
   // terminal event has been received yet; fall back to app.status in that case.
-  const [sseStatus, setSseStatus] = useState<AppStatus | null>(null);
+  // For an already-failed app loaded from the API, seed this so the header
+  // badge does not flip from 'failed' back to the running default during
+  // initial render (closes roborev job 965 MEDIUM).
+  const [sseStatus, setSseStatus] = useState<AppStatus | null>(
+    app.status === 'failed' ? 'failed' : null,
+  );
+  // Phase number (1=gather, 2=draft, 3=render) that the SSE failure event
+  // pinned the failure to. Used by PipelineTab so a gather failure does not
+  // mis-render the queued draft + render specialists as "failed" (closes
+  // roborev job 953 LOW). Seeded from ``deriveProgress`` so reloading a
+  // failed run shows which phase failed without waiting for a live SSE
+  // event (closes roborev job 965 MEDIUM).
+  const [failedPhaseNum, setFailedPhaseNum] = useState<1 | 2 | 3 | null>(
+    initialFailedPhaseNum,
+  );
 
   // Ref to hold the active EventSource so we can close it on cancel/unmount.
   const esRef = useRef<EventSource | null>(null);
+
+  // Roborev job 967 MEDIUM: ``apiDetail`` arrives asynchronously after
+  // the first render, so the ``useState`` initializers above run
+  // against the placeholder app and never re-run when the real data
+  // lands. Sync ``progress`` / ``activePhase`` / ``failedPhaseNum`` /
+  // ``sseStatus`` / ``running`` when ``apiDetail`` loads or refreshes
+  // so reloading a failed application paints the right phase card
+  // immediately, without waiting for a live SSE event.
+  useEffect(() => {
+    if (apiDetail === undefined) return;
+    const next = deriveProgress(app);
+    setProgress(next.progress);
+    setActivePhase(next.activePhase);
+    setFailedPhaseNum(next.failedPhaseNum);
+    if (app.status === 'failed') {
+      setSseStatus('failed');
+      setRunning(false);
+    } else if (app.status === 'rendered' || app.status === 'done') {
+      setSseStatus('done');
+      setRunning(false);
+    } else if (app.status === 'running') {
+      setRunning(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiDetail]);
 
   // ── Subscribe to SSE stream ──────────────────────────────────────────
   const subscribeToEvents = useCallback((targetSlug: string) => {
@@ -907,6 +1196,17 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         } else if (data.status === 'failed') {
           setRunning(false);
           setSseStatus('failed');
+          // roborev job 957 MEDIUM: when the API's apply_runs row is
+          // marked failed it carries phase="unknown" (full-pipeline
+          // marker — see apply.py:_run_apply._db_phase_label).
+          // ``ssePhaseToNum("unknown")`` defaults to 1, so blindly
+          // setting failedPhaseNum here would overwrite a draft/render
+          // failure that was correctly pinned by an earlier transcript
+          // ``phase_failed`` event with a real phase name. Only update
+          // when the SSE payload names a real phase.
+          if (data.phase === 'gather' || data.phase === 'draft' || data.phase === 'render') {
+            setFailedPhaseNum(phaseNum as 1 | 2 | 3);
+          }
         }
         // Add a log entry for the phase event.
         const msg = `&lt;&lt;PHASE&gt;&gt; ${data.phase} status=${data.status}`;
@@ -922,11 +1222,36 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         const msg = `<span class="dim">specialist=</span>${specialist} <span class="dim">kind=</span>${kindLabel}`;
         setEvents(ev => ev.length > 400 ? ev : [...ev, { ts: now(), lvl: 'spec', msg }]);
         // Advance phase bar progress incrementally for each specialist.
-        const phaseNum = ssePhaseToNum(data.phase);
-        setProgress(p => ({
-          ...p,
-          [phaseNum]: Math.min(90, p[phaseNum] + 15),
-        }));
+        // Roborev job 961 MEDIUM: ``events_poll`` forwards
+        // ``apply_runs.phase`` on specialist events, but apply.py records
+        // the row's phase as the full-pipeline label ``"unknown"``.
+        // ``ssePhaseToNum('unknown')`` defaults to 1, so a draft- or
+        // render-phase specialist event would bump phase 1 progress
+        // (and could regress a completed phase 1 from 100 back down).
+        // Map specialist NAME → phase via the canonical lookup we
+        // already use server-side, falling back to the SSE phase only
+        // when it names a real phase. ``unknown`` is dropped.
+        const phaseNum = specialistToPhaseNum(specialist) ?? (
+          (data.phase === 'gather' || data.phase === 'draft' || data.phase === 'render')
+            ? ssePhaseToNum(data.phase)
+            : null
+        );
+        if (phaseNum !== null) {
+          // Roborev job 964 MEDIUM: progress must be monotonic. The
+          // raw ``Math.min(90, p[phaseNum] + 15)`` caps at 90, so a
+          // late-arriving specialist event for a phase already at 100
+          // (because the matching ``phase done`` event landed first)
+          // would regress the bar back to 90 and the UI would show
+          // the completed phase as queued/incomplete. ``Math.max``
+          // against the prior value pins the floor at "what was".
+          setProgress(p => ({
+            ...p,
+            [phaseNum]: Math.max(
+              p[phaseNum],
+              Math.min(90, p[phaseNum] + 15),
+            ),
+          }));
+        }
       } catch { /* ignore malformed event */ }
     });
 
@@ -939,7 +1264,22 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         const safe = redactSensitive(data.line);
         const line = safe.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const lvl = data.stream === 'stderr' ? 'warn' : 'info';
-        setEvents(ev => ev.length > 400 ? ev : [...ev, { ts: now(), lvl, msg: line }]);
+        setEvents(ev => ev.length > 400 ? ev : [...ev, { ts: now(), lvl, msg: line, kind: 'log' }]);
+      } catch { /* ignore malformed event */ }
+    });
+
+    // bug-0e13706c: structured agent events tailed from transcript.jsonl.
+    // Rendered as typed rows (tool_call / tool_result / agent_text /
+    // phase_boundary) instead of pre-formatted terminal log lines.
+    es.addEventListener('transcript', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data as string) as SseTranscriptEvent;
+        const ev = transcriptToLogEvent(data);
+        if (ev === null) return;
+        // Redact + escape any string fields that touch the DOM.
+        if (ev.msg) ev.msg = redactSensitive(ev.msg).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        if (ev.toolInputPreview) ev.toolInputPreview = redactSensitive(ev.toolInputPreview);
+        setEvents(prev => prev.length > 400 ? prev : [...prev, ev]);
       } catch { /* ignore malformed event */ }
     });
 
@@ -990,6 +1330,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     setProgress({ 1: 0, 2: 0, 3: 0 });
     setActivePhase(1);
     setSseStatus(null);
+    setFailedPhaseNum(null);
     setEvents([{ ts: now(), lvl: 'info', msg: `<span class="dim">apply</span> start <span class="dim">slug=</span>${slug}` }]);
     setRunning(true);
 
@@ -1144,12 +1485,24 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
       </div>
 
       <div className="pipeline" style={{ marginBottom: 20 }}>
-        {PHASES.map((p, i) => {
-          const pr = progress[p.num];
+        {(() => {
           const firstIncomplete = ([1, 2, 3] as const).findIndex(n => progress[n] < 100);
+          return PHASES.map((p, i) => {
+          const pr = progress[p.num];
+          // bug-8ade6f70 + roborev job 955 MEDIUM: pin the failed-phase
+          // marker on the SSE failure payload's phase number rather than
+          // ``firstIncomplete``. If a draft/render failure follows a
+          // missed/truncated completion event for the prior phase, the
+          // earlier ``firstIncomplete`` heuristic would mis-paint the
+          // already-finished phase as failed. ``failedPhaseNum`` is the
+          // authoritative source.
+          const isStuckPhase =
+            sseStatus === 'failed' && failedPhaseNum === p.num;
           const status: PhaseStatus = pr >= 100
             ? 'done'
-            : (running && i === firstIncomplete ? 'running' : 'queued');
+            : (isStuckPhase
+              ? 'failed'
+              : (running && i === firstIncomplete ? 'running' : 'queued'));
           return (
             <PhaseCard
               key={p.num}
@@ -1169,7 +1522,8 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
               ]}
             />
           );
-        })}
+          });
+        })()}
       </div>
 
       <div className="tabs">
@@ -1178,7 +1532,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         ))}
       </div>
 
-      {tab === 'pipeline' && <PipelineTab events={events} running={running} phase={activePhase} progress={progress} />}
+      {tab === 'pipeline' && <PipelineTab events={events} running={running} phase={activePhase} progress={progress} sseStatus={sseStatus} failedPhaseNum={failedPhaseNum} />}
       {tab === 'artifacts' && <ArtifactsTab artifacts={apiDetail?.artifacts ?? []} />}
       {tab === 'factcheck' && <FactCheckTab artifacts={apiDetail?.artifacts ?? []} />}
       {tab === 'anchors' && <AnchorCheckTab artifacts={apiDetail?.artifacts ?? []} />}

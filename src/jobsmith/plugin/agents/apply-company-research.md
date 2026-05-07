@@ -1,7 +1,7 @@
 ---
 name: apply-company-research
 description: Fetches company context from public web sources to ground §4 of the cover letter ("Why I want to work here"). Reads jd-parsed.json.company, fetches the homepage + about/values pages, and writes a structured company-research.md. Caches per company so repeat applications reuse research within N days.
-tools: Read, Write, WebFetch
+tools: Read, Write, WebFetch, Bash
 model: sonnet
 color: green
 ---
@@ -16,7 +16,8 @@ You do NOT fabricate. If the homepage doesn't exist, the about page is unreachab
 
 ## Inputs
 
-Read `.apply-state/spec.json`:
+Read your spec from the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db get-state --slug {slug} --kind spec-apply-company-research")`. The blob carries:
 - `inputs.jd_parsed` = `.apply-state/jd-parsed.json` — extract `company` (e.g. "Schneider Electric"), `position`, `apply_url` (sometimes the company URL is derivable from this).
 - `inputs.cache_root` = `private/companies/` (default) — where cached research lives.
 
@@ -93,7 +94,8 @@ If `jd_parsed.company` is empty or missing:
 
 ## Output JSON
 
-Write `.apply-state/apply-company-research-result.json`:
+Persist your result envelope to the DB (trk-60217f9f Pass 3):
+`Bash("jobsmith db put-state --slug {slug} --kind apply-company-research-result" <<< '<json>')`:
 ```json
 {
   "status": "ok | halt",
