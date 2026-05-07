@@ -1042,6 +1042,37 @@ function ssePhaseToNum(phase: string): 1 | 2 | 3 {
   return 1;
 }
 
+/**
+ * Map a specialist name to its phase number. Mirrors the canonical
+ * ``PHASE_SPECIALISTS`` map in ``src/jobsmith/_state_readers.py``.
+ *
+ * Returns null when the name is not a known specialist — the caller
+ * decides whether to fall back to the SSE payload's phase label or
+ * drop the event. Used by the specialist SSE handler so a forwarded
+ * ``apply_runs.phase="unknown"`` does not corrupt phase progress.
+ */
+function specialistToPhaseNum(specialist: string): 1 | 2 | 3 | null {
+  const gatherSpecs = new Set([
+    'apply-jd-parser',
+    'apply-fit-scorer',
+    'apply-hm-enricher',
+    'apply-bullet-selector',
+    'apply-company-research',
+  ]);
+  const draftSpecs = new Set(['apply-prose-writer', 'apply-prose-qa']);
+  const renderSpecs = new Set([
+    'apply-resume-renderer',
+    'apply-portfolio-ats-checker',
+    'apply-visual-layout-reviewer',
+    'apply-cover-letter-writer',
+    'apply-index-writer',
+  ]);
+  if (gatherSpecs.has(specialist)) return 1;
+  if (draftSpecs.has(specialist)) return 2;
+  if (renderSpecs.has(specialist)) return 3;
+  return null;
+}
+
 export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   const { data: apiDetail, isLoading, error } = useApplication(slug);
 
@@ -1128,11 +1159,26 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         const msg = `<span class="dim">specialist=</span>${specialist} <span class="dim">kind=</span>${kindLabel}`;
         setEvents(ev => ev.length > 400 ? ev : [...ev, { ts: now(), lvl: 'spec', msg }]);
         // Advance phase bar progress incrementally for each specialist.
-        const phaseNum = ssePhaseToNum(data.phase);
-        setProgress(p => ({
-          ...p,
-          [phaseNum]: Math.min(90, p[phaseNum] + 15),
-        }));
+        // Roborev job 961 MEDIUM: ``events_poll`` forwards
+        // ``apply_runs.phase`` on specialist events, but apply.py records
+        // the row's phase as the full-pipeline label ``"unknown"``.
+        // ``ssePhaseToNum('unknown')`` defaults to 1, so a draft- or
+        // render-phase specialist event would bump phase 1 progress
+        // (and could regress a completed phase 1 from 100 back down).
+        // Map specialist NAME → phase via the canonical lookup we
+        // already use server-side, falling back to the SSE phase only
+        // when it names a real phase. ``unknown`` is dropped.
+        const phaseNum = specialistToPhaseNum(specialist) ?? (
+          (data.phase === 'gather' || data.phase === 'draft' || data.phase === 'render')
+            ? ssePhaseToNum(data.phase)
+            : null
+        );
+        if (phaseNum !== null) {
+          setProgress(p => ({
+            ...p,
+            [phaseNum]: Math.min(90, p[phaseNum] + 15),
+          }));
+        }
       } catch { /* ignore malformed event */ }
     });
 
