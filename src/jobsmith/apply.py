@@ -1462,9 +1462,7 @@ def _run_phase_iter_body(
                         _reset_state(_conn, slug=slug)
                     else:
                         # Delete only the per-specialist spec / result rows
-                        # for the targeted phases so the manifest +
-                        # upstream rows survive. ``manifest`` is always
-                        # preserved on scoped reruns.
+                        # for the targeted phases so upstream rows survive.
                         scoped_specs: set[str] = set()
                         for ph in phases:
                             for s in required_specialists_for_phase(ph):
@@ -1482,6 +1480,50 @@ def _run_phase_iter_body(
                                 (slug, *kinds_to_drop),
                             )
                             _conn.commit()
+
+                        # Roborev job 963 MEDIUM: also strip the manifest's
+                        # ``invocations[]`` entries for the targeted phase
+                        # specialists. Without this, the manifest still
+                        # records ``status: "ok"`` for those specialists
+                        # so a later normal ``jobsmith apply`` (no force)
+                        # would re-read the manifest, see "phase done",
+                        # and skip the phase the user just told us to
+                        # rerun. Preserve upstream invocations untouched.
+                        from .db import (
+                            get_state as _get_state,
+                            put_state as _put_state,
+                        )
+
+                        manifest_blob = _get_state(
+                            _conn, slug=slug, kind="manifest"
+                        )
+                        if manifest_blob:
+                            try:
+                                manifest_data = json.loads(manifest_blob)
+                            except json.JSONDecodeError:
+                                manifest_data = None
+                            if isinstance(manifest_data, dict):
+                                invocations = manifest_data.get("invocations")
+                                if isinstance(invocations, list):
+                                    pruned = [
+                                        inv
+                                        for inv in invocations
+                                        if not (
+                                            isinstance(inv, dict)
+                                            and inv.get("specialist")
+                                            in scoped_specs
+                                        )
+                                    ]
+                                    if len(pruned) != len(invocations):
+                                        manifest_data["invocations"] = pruned
+                                        _put_state(
+                                            _conn,
+                                            slug=slug,
+                                            kind="manifest",
+                                            content_blob=json.dumps(
+                                                manifest_data
+                                            ),
+                                        )
                 finally:
                     _conn.close()
 

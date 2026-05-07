@@ -4258,3 +4258,64 @@ def test_load_manifest_db_takes_precedence_over_disk(tmp_path: Path) -> None:
     assert loaded.get("run_id") == "current", (
         "DB row must win over disk fallback when both exist"
     )
+
+
+def test_run_phase_iter_force_scoped_prunes_manifest_invocations(tmp_path: Path, monkeypatch) -> None:
+    """Scoped force-reset must strip the targeted phase's invocations from
+    manifest so a later normal apply does not see "phase done" and skip
+    the rerun work (roborev job 963 MEDIUM)."""
+    from jobsmith.db import get_state, open_pipeline_db, put_state
+    from jobsmith.apply import run_phase_iter
+
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    db_path = tmp_path / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = open_pipeline_db(db_path)
+    try:
+        manifest = {
+            "run_id": "r1",
+            "invocations": [
+                {"specialist": "apply-jd-parser", "status": "ok"},
+                {"specialist": "apply-fit-scorer", "status": "ok"},
+                {"specialist": "apply-prose-writer", "status": "ok"},
+                {"specialist": "apply-prose-qa", "status": "ok"},
+            ],
+        }
+        put_state(conn, slug="x", kind="manifest", content_blob=json.dumps(manifest))
+        put_state(conn, slug="x", kind="apply-prose-writer-result", content_blob='{"status":"ok"}')
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        "jobsmith.apply.headless.run_phase",
+        lambda *a, **kw: iter(_make_phase_events("draft")),
+    )
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+
+    list(run_phase_iter(
+        "https://example.com/jobs/x",
+        cwd=tmp_path,
+        force=True,
+        phases=["draft"],
+    ))
+
+    conn = open_pipeline_db(db_path)
+    try:
+        manifest_blob = get_state(conn, slug="x", kind="manifest")
+    finally:
+        conn.close()
+
+    assert manifest_blob is not None
+    manifest_after = json.loads(manifest_blob)
+    invocation_specialists = {
+        inv["specialist"] for inv in manifest_after["invocations"]
+    }
+    # Draft specialists pruned.
+    assert "apply-prose-writer" not in invocation_specialists
+    assert "apply-prose-qa" not in invocation_specialists
+    # Gather specialists preserved.
+    assert "apply-jd-parser" in invocation_specialists
+    assert "apply-fit-scorer" in invocation_specialists
