@@ -1371,7 +1371,7 @@ def db_dump_master(
     section: str = typer.Option(
         ...,
         "--section",
-        help="Section to dump: 'work', 'skill', 'education', 'author', or 'benchmark'.",
+        help="Section to dump: 'work', 'skill', 'education', or 'author'.",
     ),
 ) -> None:
     """Print the master_content blob for *section* to stdout.
@@ -1383,12 +1383,19 @@ def db_dump_master(
     cannot speak SQL directly.
 
     Output is the raw blob as stored in master_content.content_blob —
-    YAML for {work,skill,education,author}, markdown for benchmark.
-    Exit code 0 on success, 2 on missing config / DB / row.
+    YAML for {work,skill,education,author}. Exit code 0 on success,
+    2 on missing config / DB / row.
+
+    Note: ``benchmark`` is intentionally NOT a section here. Benchmark
+    files (``benchmarks.resume_qmd`` etc.) live under ``master_ingest``'s
+    radar — they are reference fixtures, not master content — and the
+    apply pipeline's prompts read them directly via the Paths block
+    (e.g. ``benchmark.resume_qmd``) rather than through the DB. Roborev
+    job 957 MEDIUM caught the prior advertise-but-never-seed mismatch.
 
     Stderr carries human-readable errors so stdout stays parseable.
     """
-    valid_sections = {"work", "skill", "education", "author", "benchmark"}
+    valid_sections = {"work", "skill", "education", "author"}
     if section not in valid_sections:
         typer.echo(
             f"ERROR: unknown section {section!r} (expected one of {sorted(valid_sections)})",

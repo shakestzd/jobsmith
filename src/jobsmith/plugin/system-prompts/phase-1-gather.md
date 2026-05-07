@@ -12,7 +12,7 @@ All paths required to operate are listed in the user prompt under the "Paths" bl
 - Read `.apply-config.yaml` at the absolute path supplied in the user-prompt Paths block (key: `config`). Do NOT search for it.
 - Master content is canonically stored in the `master_content` DB table per
   the 0.8.1 S5 contract. **Specialists must fetch master sections via**
-  `Bash("jobsmith db dump-master --section <work|skill|education|author|benchmark>")`,
+  `Bash("jobsmith db dump-master --section <work|skill|education|author>")`,
   NOT by `Read`-ing the YAML files at `master.*_yml` paths (bug-3d335f93 —
   the disk files are materialised snapshots and can be stale relative to
   user edits made via the web UI). The Paths block still lists

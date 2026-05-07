@@ -1102,7 +1102,17 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         } else if (data.status === 'failed') {
           setRunning(false);
           setSseStatus('failed');
-          setFailedPhaseNum(phaseNum as 1 | 2 | 3);
+          // roborev job 957 MEDIUM: when the API's apply_runs row is
+          // marked failed it carries phase="unknown" (full-pipeline
+          // marker — see apply.py:_run_apply._db_phase_label).
+          // ``ssePhaseToNum("unknown")`` defaults to 1, so blindly
+          // setting failedPhaseNum here would overwrite a draft/render
+          // failure that was correctly pinned by an earlier transcript
+          // ``phase_failed`` event with a real phase name. Only update
+          // when the SSE payload names a real phase.
+          if (data.phase === 'gather' || data.phase === 'draft' || data.phase === 'render') {
+            setFailedPhaseNum(phaseNum as 1 | 2 | 3);
+          }
         }
         // Add a log entry for the phase event.
         const msg = `&lt;&lt;PHASE&gt;&gt; ${data.phase} status=${data.status}`;

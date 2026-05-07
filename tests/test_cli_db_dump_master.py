@@ -104,14 +104,20 @@ class TestDbDumpMaster:
         # No ANSI escape sequences leaked through.
         assert "\x1b[" not in result.stdout
 
-    def test_all_five_sections_supported(self, tmp_path: Path, runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_all_four_sections_supported(self, tmp_path: Path, runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Roborev job 957 MEDIUM: ``benchmark`` was advertised but
+        # never seeded by load-master / master_ingest, so prompts that
+        # tried to read it via dump-master got a hard "no master_content
+        # row" failure. Benchmark files are reference fixtures consumed
+        # via the Paths block (``benchmarks.resume_qmd`` etc.), not
+        # master content. The CLI now supports only the four real
+        # master sections.
         db_path = _seed_project(tmp_path)
         sections = {
             "work": "WORK BLOB\n",
             "skill": "SKILL BLOB\n",
             "education": "EDU BLOB\n",
             "author": "AUTHOR BLOB\n",
-            "benchmark": "BENCH BLOB\n",
         }
         for section, blob in sections.items():
             _insert(db_path, section, blob)
@@ -121,3 +127,11 @@ class TestDbDumpMaster:
             result = runner.invoke(cli_app, ["db", "dump-master", "--section", section])
             assert result.exit_code == 0, f"{section}: {result.stderr}"
             assert result.stdout == expected, f"{section}: stdout mismatch"
+
+    def test_benchmark_section_rejected(self, tmp_path: Path, runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``benchmark`` is intentionally not a master section — exits 2."""
+        _seed_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(cli_app, ["db", "dump-master", "--section", "benchmark"])
+        assert result.exit_code == 2
+        assert "unknown section 'benchmark'" in (result.stderr or result.output)
