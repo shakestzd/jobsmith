@@ -211,6 +211,15 @@ _applications_dir = applications_dir
 _build_paths = build_paths
 _pipeline_db_path = pipeline_db_path
 
+from jobsmith.core.session import (  # noqa: E402,F401
+    claude_session_file_path,
+    get_or_create_session_id,
+)
+
+# Back-compat aliases — old code uses leading-underscore names
+_claude_session_file_path = claude_session_file_path
+_get_or_create_session_id = get_or_create_session_id
+
 
 # ---------------------------------------------------------------------------
 # Bootstrap check
@@ -486,69 +495,6 @@ def _render_event(event: headless.Event) -> str | None:
 
 
 
-def _claude_session_file_path(session_id: str, cwd: Path) -> Path:
-    """Return the Claude Code SDK session file path for *session_id*.
-
-    The SDK stores conversation history under::
-
-        ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
-
-    where ``<encoded-cwd>`` is the absolute cwd path with every ``/`` replaced
-    by ``-`` (yielding a leading ``-`` for absolute paths).
-    """
-    encoded = str(cwd).replace("/", "-")
-    return Path.home() / ".claude" / "projects" / encoded / f"{session_id}.jsonl"
-
-
-def _get_or_create_session_id(application_dir: Path, cwd: Path) -> str:
-    """Return a stable session UUID for *application_dir*, creating it if absent.
-
-    The UUID is persisted at ``<application_dir>/.apply-state/session-id`` so
-    that repeated invocations (phase 2/3 ``--resume``) always receive the same
-    session identifier that phase 1 (gather) originally registered with Claude.
-
-    A fresh :func:`uuid.uuid4` is generated on first call; subsequent calls
-    read and return the stored value.  Using uuid4 (random) rather than uuid5
-    (deterministic) means a failed-then-retried gather gets a new session ID
-    that the Claude Code SDK will accept without the "already in use" error.
-
-    **Stale-orphan detection:** if the persisted ID refers to a gather run that
-    never completed (gather is not marked complete in the manifest), AND the
-    corresponding SDK ``.jsonl`` session file still exists on disk (the orphan),
-    the stored ID is treated as stale.  A new uuid4 is generated and persisted
-    so the next gather invocation succeeds without a "Session ID … already in
-    use" error.  The regeneration is logged to stderr.
-    """
-    state_dir = application_dir / ".apply-state"
-    session_file = state_dir / "session-id"
-    if session_file.exists():
-        stored = session_file.read_text(encoding="utf-8").strip()
-        if stored:
-            manifest = _load_manifest(application_dir, cwd)
-            if _phase_completed(manifest, "gather"):
-                # Gather succeeded — the session ID is legitimately reusable
-                # for phase-2/3 --resume; return it unchanged.
-                return stored
-            # Gather was not completed. Check whether an orphan SDK session
-            # file exists for this ID.
-            orphan_path = _claude_session_file_path(stored, cwd)
-            if orphan_path.exists():
-                # Stale orphan: regenerate so Claude Code SDK won't reject it.
-                import sys
-                print(
-                    f"jobsmith: regenerated session ID; previous orphan at {orphan_path}",
-                    file=sys.stderr,
-                )
-                state_dir.mkdir(parents=True, exist_ok=True)
-                new_id = str(uuid.uuid4())
-                session_file.write_text(new_id, encoding="utf-8")
-                return new_id
-            # No orphan file — the persisted ID is safe to reuse.
-            return stored
-    state_dir.mkdir(parents=True, exist_ok=True)
-    new_id = str(uuid.uuid4())
-    session_file.write_text(new_id, encoding="utf-8")
-    return new_id
 
 
 def _snapshot_phase_drafts(phase: str, slug: str, cwd: Path) -> None:
