@@ -1,7 +1,7 @@
 ---
 name: apply-relevance-inquirer
 description: Ask the user about uncovered JD requirements or anchor-bullet drops. Never invents bridges — only asks. Triggered when bullet-selector or prose-writer hits an UNCOVERED_MUST_HAVE or anchor-bullet-guard exits 1. ONE inquiry cycle per /apply.
-tools: Read, Write
+tools: Read, Write, Bash
 model: sonnet
 color: yellow
 ---

@@ -1396,12 +1396,19 @@ def _run_phase_iter_body(
     else:
         slug, _from_index = _resolve_starting_slug(url, resolved_cwd)
 
-    # Roborev job 959 HIGH: marimo single-phase reruns drive this
-    # generator with ``force=True``. Without clearing apply_state for
-    # the slug, the phase prompts' resume rule treats prior
-    # ``apply-<specialist>-result`` rows with ``status: ok`` as
-    # "already complete" and silently skips the specialists the user
-    # asked to rerun. Mirror ``run_apply``'s reset_state on this path.
+    # Roborev job 959 HIGH + job 960 HIGH: marimo single-phase reruns
+    # drive this generator with ``force=True``. Without clearing
+    # apply_state for the slug, prior ``apply-<specialist>-result``
+    # rows with ``status: ok`` cause the phase prompts to treat the
+    # specialists as "already complete" and skip them.
+    #
+    # SCOPED reset: when the caller scopes ``phases`` to a single
+    # downstream phase (e.g. ``phases=["draft"]``), we MUST NOT wipe
+    # the whole slug — the manifest, gather-phase result envelopes,
+    # and content artifacts the downstream phase reads would all be
+    # lost. Drop only the rows scoped to the target phase's
+    # specialists. The full ``reset_state`` runs only when the rerun
+    # restarts from gather (``phases is None`` or includes "gather").
     if force:
         _force_db_path = _pipeline_db_path(resolved_cwd)
         if _force_db_path is not None and _force_db_path.exists():
@@ -1409,9 +1416,33 @@ def _run_phase_iter_body(
                 from .db import open_pipeline_db as _open_pipe_db
                 from .db import reset_state as _reset_state
 
+                full_reset = phases is None or "gather" in phases
                 _conn = _open_pipe_db(_force_db_path)
                 try:
-                    _reset_state(_conn, slug=slug)
+                    if full_reset:
+                        _reset_state(_conn, slug=slug)
+                    else:
+                        # Delete only the per-specialist spec / result rows
+                        # for the targeted phases so the manifest +
+                        # upstream rows survive. ``manifest`` is always
+                        # preserved on scoped reruns.
+                        scoped_specs: set[str] = set()
+                        for ph in phases:
+                            for s in required_specialists_for_phase(ph):
+                                scoped_specs.add(s)
+                        kinds_to_drop = []
+                        for s in scoped_specs:
+                            kinds_to_drop.extend(
+                                [f"spec-{s}", f"{s}-result"]
+                            )
+                        if kinds_to_drop:
+                            placeholders = ",".join("?" for _ in kinds_to_drop)
+                            _conn.execute(
+                                f"DELETE FROM apply_state WHERE slug = ? "
+                                f"AND kind IN ({placeholders})",
+                                (slug, *kinds_to_drop),
+                            )
+                            _conn.commit()
                 finally:
                     _conn.close()
 

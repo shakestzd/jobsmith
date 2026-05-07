@@ -4135,3 +4135,63 @@ def test_run_phase_iter_force_clears_apply_state(tmp_path: Path, monkeypatch) ->
     finally:
         conn.close()
     assert rows == [], "stale Pass-3 envelope must be cleared on run_phase_iter(force=True)"
+
+
+def test_run_phase_iter_force_scoped_preserves_upstream(tmp_path: Path, monkeypatch) -> None:
+    """run_phase_iter(force=True, phases=["draft"]) preserves manifest + gather rows.
+
+    A scoped single-phase rerun must not wipe everything: the manifest
+    and the gather-phase result envelopes are inputs the downstream
+    phase needs. Only the target phase's spec/result rows should drop
+    (roborev job 960 HIGH).
+    """
+    from jobsmith.db import open_pipeline_db, put_state
+    from jobsmith.apply import run_phase_iter
+
+    plugin_fake = _scaffold_resume_project(tmp_path)
+    monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
+
+    db_path = tmp_path / "private" / "jobsmith.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = open_pipeline_db(db_path)
+    try:
+        # Manifest + gather-phase rows + draft-phase rows.
+        put_state(conn, slug="x", kind="manifest", content_blob='{"invocations":[]}')
+        put_state(conn, slug="x", kind="apply-jd-parser-result", content_blob='{"status":"ok"}')
+        put_state(conn, slug="x", kind="apply-fit-scorer-result", content_blob='{"status":"ok"}')
+        put_state(conn, slug="x", kind="apply-prose-writer-result", content_blob='{"status":"ok","stale":1}')
+        put_state(conn, slug="x", kind="spec-apply-prose-writer", content_blob='{"old_spec":1}')
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        "jobsmith.apply.headless.run_phase",
+        lambda *a, **kw: iter(_make_phase_events("draft")),
+    )
+    monkeypatch.setattr("jobsmith.apply.headless.session_exists", lambda *a, **kw: False)
+    monkeypatch.setattr("jobsmith.apply._run_step45_orchestration", lambda *a, **kw: 0)
+
+    list(run_phase_iter(
+        "https://example.com/jobs/x",
+        cwd=tmp_path,
+        force=True,
+        phases=["draft"],
+    ))
+
+    conn = open_pipeline_db(db_path)
+    try:
+        kinds = sorted(
+            r[0] for r in conn.execute("SELECT kind FROM apply_state WHERE slug = 'x'")
+        )
+    finally:
+        conn.close()
+
+    # Must preserve: manifest + gather-phase outputs.
+    assert "manifest" in kinds, "manifest must survive a scoped single-phase rerun"
+    assert "apply-jd-parser-result" in kinds, "gather-phase rows must survive"
+    assert "apply-fit-scorer-result" in kinds
+    # Must clear: target phase spec + result.
+    assert "apply-prose-writer-result" not in kinds, (
+        "target-phase result envelope must be cleared so the rerun is real"
+    )
+    assert "spec-apply-prose-writer" not in kinds

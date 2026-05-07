@@ -1,7 +1,7 @@
 ---
 name: apply-hm-enricher
 description: Opportunistic hiring-manager dossier. Detects whether a JD has a NAMED HM (LinkedIn post author, JD signature, explicit user arg). Produces a tiny dossier if yes, a sentinel if no. Never fabricates HM signal.
-tools: Read, Write, WebFetch
+tools: Read, Write, WebFetch, Bash
 model: sonnet
 color: cyan
 ---

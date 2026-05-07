@@ -1,7 +1,7 @@
 ---
 name: apply-resume-tell-fixer
 description: Detect AI tells in resume prose using a calibrated word list. NOT a wrapper on the academic ai-tell-fixer — its list misses "Architected" and other resume tells. Used by prose-qa.
-tools: Read, Edit, Grep, Glob
+tools: Read, Edit, Grep, Glob, Bash
 model: sonnet
 color: red
 ---

@@ -1,7 +1,7 @@
 ---
 name: apply-company-research
 description: Fetches company context from public web sources to ground §4 of the cover letter ("Why I want to work here"). Reads jd-parsed.json.company, fetches the homepage + about/values pages, and writes a structured company-research.md. Caches per company so repeat applications reuse research within N days.
-tools: Read, Write, WebFetch
+tools: Read, Write, WebFetch, Bash
 model: sonnet
 color: green
 ---

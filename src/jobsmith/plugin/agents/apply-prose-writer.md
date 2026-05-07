@@ -1,7 +1,7 @@
 ---
 name: apply-prose-writer
 description: Write the Professional Summary and rephrase tailored bullets per the JD. Voice — explorer not marketer, thesis not product, specific not sweeping. Never fabricates. Halts rather than invents claims not in master YAML.
-tools: Read, Write, Edit
+tools: Read, Write, Edit, Bash
 model: opus
 color: green
 ---
