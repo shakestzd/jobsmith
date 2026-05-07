@@ -20,7 +20,7 @@ remain the canonical import sites.
 """
 from __future__ import annotations
 
-from jobsmith.core import slug  # noqa: F401
+from jobsmith.core import paths, slug  # noqa: F401
 from jobsmith.core.confirm import AutoYesGate, ClickConfirmGate
 from jobsmith.core.events import PipelineEvent
 from jobsmith.core.protocols import ConfirmGate, EventSink
