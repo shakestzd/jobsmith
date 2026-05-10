@@ -407,6 +407,34 @@ def _has_render_outputs(docs: Path) -> bool:
     )
 
 
+def _resolve_app_root(slug: str, conn) -> Path | None:
+    """Return the application root directory for *slug*, trying the canonical slug on miss.
+
+    Unlike _resolve_docs_dir this does NOT require render outputs — it returns
+    the app directory as long as it exists on disk.  Used to locate
+    cover-letter-draft.md which lives at the app root rather than documents/.
+    """
+    app_dir = _get_app_dir(slug)
+    if app_dir is not None and app_dir.exists():
+        return app_dir
+
+    # Canonical slug fallback (same logic as _resolve_docs_dir).
+    run_row = conn.execute(
+        "SELECT run_id FROM apply_runs WHERE slug = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
+        (slug,),
+    ).fetchone()
+    if run_row is None:
+        return None
+    role, company, _ = _extract_jd_fields(conn, run_row["run_id"])
+    if not company or not role:
+        return None
+    canonical = f"{_to_slug(company)}-{_to_slug(role)}"
+    if canonical == slug:
+        return None
+    canonical_dir = _get_app_dir(canonical)
+    return canonical_dir if canonical_dir is not None and canonical_dir.exists() else None
+
+
 def _resolve_docs_dir(slug: str, conn) -> Path | None:
     """Return the ``documents/`` directory for *slug*, trying the canonical slug on miss.
 
@@ -449,20 +477,25 @@ def list_documents(slug: str) -> list[str]:
     conn = _open_conn(db_path)
     try:
         docs_dir = _resolve_docs_dir(slug, conn)
+        app_root = _resolve_app_root(slug, conn)
     finally:
         conn.close()
-    if docs_dir is None:
-        return []
-    names: set[str] = {
-        f.name
-        for f in docs_dir.iterdir()
-        if f.is_file() and f.suffix in _ALLOWED_DOC_SUFFIXES and not f.name.startswith(".")
-    }
-    # cover-letter-draft.md lives at the app root (parent of documents/)
-    app_root = docs_dir.parent
-    cl = app_root / "cover-letter-draft.md"
-    if cl.exists():
-        names.add(cl.name)
+
+    names: set[str] = set()
+    if docs_dir is not None:
+        names = {
+            f.name
+            for f in docs_dir.iterdir()
+            if f.is_file() and f.suffix in _ALLOWED_DOC_SUFFIXES and not f.name.startswith(".")
+        }
+
+    # cover-letter-draft.md lives at the app root — include it even when
+    # documents/ has no PDFs yet (cover-letter-only applications).
+    if app_root is not None:
+        cl = app_root / "cover-letter-draft.md"
+        if cl.is_file():
+            names.add(cl.name)
+
     return sorted(names)
 
 
@@ -478,28 +511,30 @@ def get_document(slug: str, filename: str) -> FileResponse:
     conn = _open_conn(db_path)
     try:
         docs_dir = _resolve_docs_dir(slug, conn)
+        app_root = _resolve_app_root(slug, conn)
     finally:
         conn.close()
+
+    # cover-letter-draft.md is resolved via the app root regardless of whether
+    # documents/ has any PDFs (fixes cover-letter-only applications).
+    if filename == "cover-letter-draft.md":
+        if app_root is None:
+            raise HTTPException(status_code=404, detail=f"No application directory for {slug!r}")
+        file_path = (app_root / filename).resolve()
+        if not str(file_path).startswith(str(app_root.resolve())):
+            raise HTTPException(status_code=403, detail="Access denied")
+        if not file_path.is_file():
+            raise HTTPException(status_code=404, detail=f"Document {filename!r} not found")
+        return FileResponse(str(file_path), media_type="text/plain; charset=utf-8")
 
     if docs_dir is None:
         raise HTTPException(status_code=404, detail=f"No documents directory for {slug!r}")
 
     file_path = (docs_dir / filename).resolve()
-    docs_root = docs_dir.resolve()
-    app_root = docs_root.parent
-
-    # cover-letter-draft.md lives at the app root, not inside documents/
-    if filename == "cover-letter-draft.md":
-        alt = (app_root / filename).resolve()
-        if alt.exists() and str(alt).startswith(str(app_root)):
-            file_path = alt
-        elif not file_path.exists():
-            raise HTTPException(status_code=404, detail=f"Document {filename!r} not found")
-    else:
-        if not str(file_path).startswith(str(docs_root)):
-            raise HTTPException(status_code=403, detail="Access denied")
-        if not file_path.exists() or not file_path.is_file():
-            raise HTTPException(status_code=404, detail=f"Document {filename!r} not found")
+    if not str(file_path).startswith(str(docs_dir.resolve())):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Document {filename!r} not found")
 
     media = "application/pdf" if file_path.suffix == ".pdf" else "text/plain; charset=utf-8"
     return FileResponse(str(file_path), media_type=media)
