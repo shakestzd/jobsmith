@@ -49,6 +49,7 @@ from jobsmith.api.deps import upsert_or_load_user
 from jobsmith.api.doctor import router as doctor_router
 from jobsmith.api.events import router as events_router
 from jobsmith.api.feedback import router as feedback_router
+from jobsmith.api.jd_routes import router as jd_router
 from jobsmith.api.master import router as master_router
 from jobsmith.api.snapshots import router as snapshots_router
 
@@ -279,6 +280,11 @@ def create_app() -> FastAPI:
         cache_router,
         prefix="/api",
         tags=["cache"],
+    )
+    app.include_router(
+        jd_router,
+        prefix="/api",
+        dependencies=[Depends(current_user)],
     )
 
     # OpenAPI: surface the HTTPBearer scheme so /docs has an Authorize button.
