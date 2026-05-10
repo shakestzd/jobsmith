@@ -42,7 +42,9 @@ from fastapi.responses import JSONResponse
 from jobsmith.api.applications import router as applications_router
 from jobsmith.api.artifacts import router as artifacts_router
 from jobsmith.api.auth import verify_token, verify_token_or_query
+from jobsmith.api.auth_routes import router as auth_router
 from jobsmith.api.config import router as config_router
+from jobsmith.api.deps import upsert_or_load_user
 from jobsmith.api.doctor import router as doctor_router
 from jobsmith.api.events import router as events_router
 from jobsmith.api.feedback import router as feedback_router
@@ -181,6 +183,19 @@ async def _lifespan(app: FastAPI):
             repo_root = config_path.parent
             db_path = (repo_root / config.output.jobsmith_db).resolve()
             _maybe_warn_fs_only_state(repo_root, db_path)
+            # Upsert the user from config into the users table (best-effort).
+            try:
+                from jobsmith.db import open_pipeline_db
+
+                conn = open_pipeline_db(db_path)
+                try:
+                    upsert_or_load_user(conn, config)
+                finally:
+                    conn.close()
+            except Exception:
+                _log.warning(
+                    "user upsert at startup failed (non-fatal)", exc_info=True
+                )
     except Exception:
         _log.debug("first-run check failed (non-fatal)", exc_info=True)
 
@@ -253,6 +268,11 @@ def create_app() -> FastAPI:
         config_router,
         prefix="/api",
         dependencies=[Depends(verify_token)],
+    )
+    app.include_router(
+        auth_router,
+        prefix="/api/auth",
+        tags=["auth"],
     )
 
     return app
