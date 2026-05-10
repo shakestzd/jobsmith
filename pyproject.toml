@@ -43,6 +43,10 @@ dependencies = [
     # Slice A.1 — comment-preserving YAML round-trip for `jobsmith mark-anchors`.
     # PyYAML cannot preserve comments or key order; ruamel.yaml can.
     "ruamel.yaml>=0.18",
+    # Slice 4 (feat-901b79a7) — JWT auth pipeline. PyJWT for HS256 encode/decode,
+    # bcrypt directly (passlib's bcrypt backend mishandles modern bcrypt 4.x/5.x).
+    "pyjwt>=2.8",
+    "bcrypt>=4.1",
 ]
 
 [project.optional-dependencies]

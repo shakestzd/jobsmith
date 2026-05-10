@@ -19,7 +19,7 @@ The ``/health`` endpoint is exempt so monitoring tools work without credentials.
 Router mounting
 ---------------
 Health router is mounted without auth (exempt).
-API routers are mounted with ``dependencies=[Depends(verify_token)]``.
+API routers are mounted with ``dependencies=[Depends(current_user)]``.
 
     # feat-401be81e  /api/master  (this slice — trk-9bb48a61)
     # feat-2c034b07  bearer-token auth (this slice)
@@ -41,7 +41,7 @@ from fastapi.responses import JSONResponse
 
 from jobsmith.api.applications import router as applications_router
 from jobsmith.api.artifacts import router as artifacts_router
-from jobsmith.api.auth import verify_token, verify_token_or_query
+from jobsmith.api.auth import current_user, current_user_or_query
 from jobsmith.api.auth_routes import router as auth_router
 from jobsmith.api.config import router as config_router
 from jobsmith.api.deps import upsert_or_load_user
@@ -230,44 +230,44 @@ def create_app() -> FastAPI:
     app.include_router(
         master_router,
         prefix="/api",
-        dependencies=[Depends(verify_token)],
+        dependencies=[Depends(current_user)],
     )
     app.include_router(
         artifacts_router,
         prefix="/api",
-        dependencies=[Depends(verify_token)],
+        dependencies=[Depends(current_user)],
     )
     app.include_router(
         applications_router,
         prefix="/api",
-        dependencies=[Depends(verify_token)],
+        dependencies=[Depends(current_user)],
     )
     app.include_router(
         snapshots_router,
         prefix="/api",
-        dependencies=[Depends(verify_token)],
+        dependencies=[Depends(current_user)],
     )
     # Events router uses the header-or-query auth dependency because browser
     # EventSource cannot set Authorization headers (roborev job 940 finding).
     app.include_router(
         events_router,
         prefix="/api",
-        dependencies=[Depends(verify_token_or_query)],
+        dependencies=[Depends(current_user_or_query)],
     )
     app.include_router(
         doctor_router,
         prefix="/api",
-        dependencies=[Depends(verify_token)],
+        dependencies=[Depends(current_user)],
     )
     app.include_router(
         feedback_router,
         prefix="/api",
-        dependencies=[Depends(verify_token)],
+        dependencies=[Depends(current_user)],
     )
     app.include_router(
         config_router,
         prefix="/api",
-        dependencies=[Depends(verify_token)],
+        dependencies=[Depends(current_user)],
     )
     app.include_router(
         auth_router,
@@ -275,4 +275,30 @@ def create_app() -> FastAPI:
         tags=["auth"],
     )
 
+    # OpenAPI: surface the HTTPBearer scheme so /docs has an Authorize button.
+    _install_openapi_security(app)
+
     return app
+
+
+def _install_openapi_security(app: FastAPI) -> None:
+    """Register the HTTPBearer security scheme in the generated OpenAPI doc."""
+    from fastapi.openapi.utils import get_openapi
+
+    def _custom_openapi() -> dict:
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+        schema.setdefault("components", {}).setdefault("securitySchemes", {})[
+            "HTTPBearer"
+        ] = {"type": "http", "scheme": "bearer"}
+        schema["security"] = [{"HTTPBearer": []}]
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = _custom_openapi  # type: ignore[method-assign]
