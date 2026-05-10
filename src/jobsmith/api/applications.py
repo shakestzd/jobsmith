@@ -407,18 +407,24 @@ def _has_render_outputs(docs: Path) -> bool:
     )
 
 
-def _resolve_app_root(slug: str, conn) -> Path | None:
-    """Return the application root directory for *slug*, trying the canonical slug on miss.
+_COVER_LETTER = "cover-letter-draft.md"
 
-    Unlike _resolve_docs_dir this does NOT require render outputs — it returns
-    the app directory as long as it exists on disk.  Used to locate
-    cover-letter-draft.md which lives at the app root rather than documents/.
+
+def _resolve_cover_letter(slug: str, conn) -> Path | None:
+    """Return the path to cover-letter-draft.md for *slug*, or None if not found.
+
+    Tries the original-slug directory first, then the canonical slug (same
+    fallback used by _resolve_docs_dir).  This ensures the cover letter is
+    found even when the gather phase rekeyed artifacts under a canonical slug
+    while the original slug directory also exists on disk.
     """
     app_dir = _get_app_dir(slug)
-    if app_dir is not None and app_dir.exists():
-        return app_dir
+    if app_dir is not None:
+        cl = app_dir / _COVER_LETTER
+        if cl.is_file():
+            return cl
 
-    # Canonical slug fallback (same logic as _resolve_docs_dir).
+    # Canonical slug fallback.
     run_row = conn.execute(
         "SELECT run_id FROM apply_runs WHERE slug = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
         (slug,),
@@ -432,7 +438,10 @@ def _resolve_app_root(slug: str, conn) -> Path | None:
     if canonical == slug:
         return None
     canonical_dir = _get_app_dir(canonical)
-    return canonical_dir if canonical_dir is not None and canonical_dir.exists() else None
+    if canonical_dir is None:
+        return None
+    cl = canonical_dir / _COVER_LETTER
+    return cl if cl.is_file() else None
 
 
 def _resolve_docs_dir(slug: str, conn) -> Path | None:
@@ -477,7 +486,7 @@ def list_documents(slug: str) -> list[str]:
     conn = _open_conn(db_path)
     try:
         docs_dir = _resolve_docs_dir(slug, conn)
-        app_root = _resolve_app_root(slug, conn)
+        cl_path = _resolve_cover_letter(slug, conn)
     finally:
         conn.close()
 
@@ -491,10 +500,8 @@ def list_documents(slug: str) -> list[str]:
 
     # cover-letter-draft.md lives at the app root — include it even when
     # documents/ has no PDFs yet (cover-letter-only applications).
-    if app_root is not None:
-        cl = app_root / "cover-letter-draft.md"
-        if cl.is_file():
-            names.add(cl.name)
+    if cl_path is not None:
+        names.add(cl_path.name)
 
     return sorted(names)
 
@@ -511,21 +518,16 @@ def get_document(slug: str, filename: str) -> FileResponse:
     conn = _open_conn(db_path)
     try:
         docs_dir = _resolve_docs_dir(slug, conn)
-        app_root = _resolve_app_root(slug, conn)
+        cl_path = _resolve_cover_letter(slug, conn) if filename == _COVER_LETTER else None
     finally:
         conn.close()
 
-    # cover-letter-draft.md is resolved via the app root regardless of whether
-    # documents/ has any PDFs (fixes cover-letter-only applications).
-    if filename == "cover-letter-draft.md":
-        if app_root is None:
-            raise HTTPException(status_code=404, detail=f"No application directory for {slug!r}")
-        file_path = (app_root / filename).resolve()
-        if not str(file_path).startswith(str(app_root.resolve())):
-            raise HTTPException(status_code=403, detail="Access denied")
-        if not file_path.is_file():
+    # cover-letter-draft.md is resolved directly (original or canonical slug),
+    # independent of whether documents/ has any PDFs.
+    if filename == _COVER_LETTER:
+        if cl_path is None:
             raise HTTPException(status_code=404, detail=f"Document {filename!r} not found")
-        return FileResponse(str(file_path), media_type="text/plain; charset=utf-8")
+        return FileResponse(str(cl_path), media_type="text/plain; charset=utf-8")
 
     if docs_dir is None:
         raise HTTPException(status_code=404, detail=f"No documents directory for {slug!r}")
