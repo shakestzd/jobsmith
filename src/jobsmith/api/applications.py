@@ -321,4 +321,13 @@ async def create_application(
     return ApplicationCreated(slug=slug, run_id=run_id)
 
 
+@router.post("/applications/{slug}/launch-review", status_code=status.HTTP_410_GONE)
+async def launch_review_gone(slug: str) -> dict:
+    """Removed in feat-95e9bb2d — review UI moved to React frontend."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Review UI moved to React frontend",
+    )
+
+
 __all__ = ["router"]
