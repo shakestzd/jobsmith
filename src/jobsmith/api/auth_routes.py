@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from jobsmith.api.auth import (
     DEFAULT_ACCESS_TOKEN_MINUTES,
     DEFAULT_REFRESH_TOKEN_DAYS,
-    PRIVATE_TOKEN_PATH,
+    _get_expected_token,
     create_access_token,
     create_refresh_token,
     current_user,
@@ -98,9 +98,17 @@ def _load_default_user(conn: sqlite3.Connection, request: Request) -> sqlite3.Ro
 
 
 def _issue_token_pair(
-    conn: sqlite3.Connection, user_id: str, secret: str
+    conn: sqlite3.Connection,
+    user_id: str,
+    secret: str,
+    *,
+    commit: bool = True,
 ) -> TokenPair:
-    """Mint an access + refresh token pair and persist the refresh hash."""
+    """Mint an access + refresh token pair and persist the refresh hash.
+
+    Pass ``commit=False`` when the caller already holds an open transaction
+    (e.g. the rotation path in :func:`refresh`).
+    """
     access = create_access_token(user_id, secret, expire_minutes=DEFAULT_ACCESS_TOKEN_MINUTES)
     raw_refresh, hashed_refresh = create_refresh_token()
     expires_at = (
@@ -111,7 +119,8 @@ def _issue_token_pair(
         "VALUES (?, ?, ?)",
         (user_id, hashed_refresh, expires_at),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return TokenPair(access_token=access, refresh_token=raw_refresh)
 
 
@@ -131,9 +140,13 @@ def login(body: LoginRequest, request: Request) -> TokenPair:
     """Exchange a password for an access + refresh token pair.
 
     On a fresh install (``hashed_pw == ''``) the password is matched against
-    the legacy ``private/jobsmith.token`` content so the first sign-in works
-    before the user calls ``set-password``.
+    the legacy static bearer token (env var or file, in that order) so the
+    first sign-in works before the user calls ``set-password``. Roborev job
+    972 MEDIUM: route through the same resolver as bearer auth so env-only
+    deployments can also obtain JWTs.
     """
+    import secrets as _secrets
+
     _, db_dir = _resolve_paths(request)
     conn = _open_db(request)
     try:
@@ -145,11 +158,8 @@ def login(body: LoginRequest, request: Request) -> TokenPair:
         if row["hashed_pw"]:
             ok = verify_password(body.password, row["hashed_pw"])
         else:
-            try:
-                expected = PRIVATE_TOKEN_PATH.read_text(encoding="utf-8").strip()
-            except OSError:
-                expected = ""
-            ok = bool(expected) and body.password == expected
+            expected = _get_expected_token()
+            ok = bool(expected) and _secrets.compare_digest(body.password, expected)
         if not ok:
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -161,11 +171,19 @@ def login(body: LoginRequest, request: Request) -> TokenPair:
 
 @router.post("/refresh", response_model=TokenPair)
 def refresh(body: RefreshRequest, request: Request) -> TokenPair:
+    """Rotate a refresh token.
+
+    Roborev job 972 MEDIUM: rotation must be atomic so two concurrent
+    refresh requests cannot both win. The conditional UPDATE
+    (``WHERE session_id = ? AND revoked = 0``) is guaranteed atomic by
+    SQLite — only the request whose UPDATE flips the row gets to mint
+    a new pair; the loser sees ``rowcount == 0`` and 401s.
+    """
     _, db_dir = _resolve_paths(request)
     conn = _open_db(request)
     try:
         rows = conn.execute(
-            "SELECT session_id, user_id, refresh_token_hash, expires_at, revoked "
+            "SELECT session_id, user_id, refresh_token_hash, expires_at "
             "FROM user_sessions WHERE revoked = 0"
         ).fetchall()
         match = None
@@ -175,7 +193,6 @@ def refresh(body: RefreshRequest, request: Request) -> TokenPair:
                 break
         if match is None:
             raise HTTPException(status_code=401, detail="Invalid refresh token")
-        # Reject expired sessions.
         try:
             exp_dt = datetime.strptime(match["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(
                 tzinfo=timezone.utc
@@ -185,14 +202,19 @@ def refresh(body: RefreshRequest, request: Request) -> TokenPair:
         if exp_dt < datetime.now(tz=timezone.utc):
             raise HTTPException(status_code=401, detail="Refresh token expired")
 
-        # Revoke the old row, issue a new pair (rotation).
-        conn.execute(
-            "UPDATE user_sessions SET revoked = 1 WHERE session_id = ?",
+        cur = conn.execute(
+            "UPDATE user_sessions SET revoked = 1 "
+            "WHERE session_id = ? AND revoked = 0",
             (match["session_id"],),
         )
-        conn.commit()
+        if cur.rowcount != 1:
+            # Another concurrent refresh already revoked this row.
+            conn.rollback()
+            raise HTTPException(status_code=401, detail="Refresh token already used")
         secret = load_jwt_secret(db_dir)
-        return _issue_token_pair(conn, match["user_id"], secret)
+        pair = _issue_token_pair(conn, match["user_id"], secret, commit=False)
+        conn.commit()
+        return pair
     finally:
         conn.close()
 

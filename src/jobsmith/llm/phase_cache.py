@@ -25,7 +25,12 @@ logger = logging.getLogger(__name__)
 
 # gather emits the jd-parsed artifact that downstream phases hash against —
 # caching its own output would create a chicken-and-egg dependency.
-_CACHEABLE_PHASES = {"draft", "render"}
+#
+# render is intentionally excluded (roborev job 972 HIGH): the cache only
+# covers apply-portfolio-ats-checker, but the render phase also produces PDFs,
+# index.qmd, _variables.yml, and cover letters. Skipping the headless call
+# on a cached ATS row would leave those artifacts un-rendered.
+_CACHEABLE_PHASES = {"draft"}
 
 
 def _read_jd_text(state_dir: Path) -> str | None:

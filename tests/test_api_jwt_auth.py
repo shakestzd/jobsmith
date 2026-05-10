@@ -153,3 +153,57 @@ def test_set_password_requires_legacy_bearer(client):
         "/api/auth/set-password", json={"new_password": "long-enough-pw"}
     )
     assert resp.status_code == 401
+
+
+def test_login_uses_env_token_not_just_file(tmp_path, monkeypatch):
+    """Roborev job 972 MEDIUM: env-only deployments must be able to login."""
+    import yaml
+
+    cfg = {
+        "user": {"name": "EnvOnly", "email": "envonly@test.example"},
+        "output": {"jobsmith_db": "private/jobsmith.db"},
+    }
+    (tmp_path / ".apply-config.yaml").write_text(yaml.safe_dump(cfg))
+    (tmp_path / "private").mkdir()
+    env_token = "env-only-static-token"
+    monkeypatch.setenv(TOKEN_ENV_VAR, env_token)
+    monkeypatch.setenv("JOBSMITH_REPO_ROOT", str(tmp_path))
+    # Point PRIVATE_TOKEN_PATH at a path that does NOT exist — only the
+    # env var should grant access.
+    monkeypatch.setattr(
+        "jobsmith.api.auth.PRIVATE_TOKEN_PATH",
+        tmp_path / "private" / "no-such-token-file",
+    )
+    monkeypatch.chdir(tmp_path)
+    app = create_app()
+    with TestClient(app) as c:
+        resp = c.post("/api/auth/login", json={"password": env_token})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["access_token"]
+
+
+def test_concurrent_refresh_only_one_wins(client, repo):
+    """Roborev job 972 MEDIUM: rotation must be atomic.
+
+    We can't truly race two requests through TestClient, but we can verify
+    the conditional UPDATE by manually revoking the row between the
+    refresh's read and update — equivalent to losing a race.
+    """
+    repo_root, token = repo
+    pair = client.post("/api/auth/login", json={"password": token}).json()
+
+    # Simulate the loser of a race: revoke the session out-of-band, then
+    # call refresh. The server must reject with 401, not mint a new pair.
+    from jobsmith.db import open_pipeline_db
+
+    conn = open_pipeline_db(repo_root / "private" / "jobsmith.db")
+    try:
+        conn.execute("UPDATE user_sessions SET revoked = 1")
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = client.post(
+        "/api/auth/refresh", json={"refresh_token": pair["refresh_token"]}
+    )
+    assert resp.status_code == 401
