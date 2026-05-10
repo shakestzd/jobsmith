@@ -43,17 +43,15 @@ dependencies = [
     # Slice A.1 — comment-preserving YAML round-trip for `jobsmith mark-anchors`.
     # PyYAML cannot preserve comments or key order; ruamel.yaml can.
     "ruamel.yaml>=0.18",
+    # Slice 4 (feat-901b79a7) — JWT auth pipeline. PyJWT for HS256 encode/decode,
+    # bcrypt directly (passlib's bcrypt backend mishandles modern bcrypt 4.x/5.x).
+    "pyjwt>=2.8",
+    "bcrypt>=4.1",
 ]
 
 [project.optional-dependencies]
 tui = [
     "textual>=0.60",
-]
-# Slice 3 — marimo notebook UI (slug picker + read-only section cards).
-# Install with: pip install "jobsmith[ui]"
-# Run with:     marimo edit src/jobsmith/marimo/apply.py
-ui = [
-    "marimo>=0.22.4",
 ]
 test = [
     "pytest>=7.4",

@@ -19,7 +19,7 @@ The ``/health`` endpoint is exempt so monitoring tools work without credentials.
 Router mounting
 ---------------
 Health router is mounted without auth (exempt).
-API routers are mounted with ``dependencies=[Depends(verify_token)]``.
+API routers are mounted with ``dependencies=[Depends(current_user)]``.
 
     # feat-401be81e  /api/master  (this slice — trk-9bb48a61)
     # feat-2c034b07  bearer-token auth (this slice)
@@ -41,8 +41,11 @@ from fastapi.responses import JSONResponse
 
 from jobsmith.api.applications import router as applications_router
 from jobsmith.api.artifacts import router as artifacts_router
-from jobsmith.api.auth import verify_token, verify_token_or_query
+from jobsmith.api.auth import current_user, current_user_or_query
+from jobsmith.api.auth_routes import router as auth_router
+from jobsmith.api.cache_routes import router as cache_router
 from jobsmith.api.config import router as config_router
+from jobsmith.api.deps import upsert_or_load_user
 from jobsmith.api.doctor import router as doctor_router
 from jobsmith.api.events import router as events_router
 from jobsmith.api.feedback import router as feedback_router
@@ -160,6 +163,13 @@ def _maybe_warn_fs_only_state(repo_root: Path, db_path: Path) -> None:
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """FastAPI lifespan handler: ingest master YAML and warn on FS-only state."""
+    from jobsmith.config import find_config as _find_config
+
+    _start = Path(os.environ.get("JOBSMITH_REPO_ROOT", "")).resolve() if os.environ.get("JOBSMITH_REPO_ROOT") else Path.cwd()
+    _cfg_path = _find_config(_start)
+    app.state.repo_root = _cfg_path.parent if _cfg_path is not None else _start
+    _log.info("repo_root resolved to %s", app.state.repo_root)
+
     reload_master = os.environ.get("JOBSMITH_RELOAD_MASTER", "0") == "1"
     _try_ingest_master(reload=reload_master)
 
@@ -174,6 +184,19 @@ async def _lifespan(app: FastAPI):
             repo_root = config_path.parent
             db_path = (repo_root / config.output.jobsmith_db).resolve()
             _maybe_warn_fs_only_state(repo_root, db_path)
+            # Upsert the user from config into the users table (best-effort).
+            try:
+                from jobsmith.db import open_pipeline_db
+
+                conn = open_pipeline_db(db_path)
+                try:
+                    upsert_or_load_user(conn, config)
+                finally:
+                    conn.close()
+            except Exception:
+                _log.warning(
+                    "user upsert at startup failed (non-fatal)", exc_info=True
+                )
     except Exception:
         _log.debug("first-run check failed (non-fatal)", exc_info=True)
 
@@ -208,44 +231,80 @@ def create_app() -> FastAPI:
     app.include_router(
         master_router,
         prefix="/api",
-        dependencies=[Depends(verify_token)],
+        dependencies=[Depends(current_user)],
     )
     app.include_router(
         artifacts_router,
         prefix="/api",
-        dependencies=[Depends(verify_token)],
+        dependencies=[Depends(current_user)],
     )
     app.include_router(
         applications_router,
         prefix="/api",
-        dependencies=[Depends(verify_token)],
+        dependencies=[Depends(current_user)],
     )
     app.include_router(
         snapshots_router,
         prefix="/api",
-        dependencies=[Depends(verify_token)],
+        dependencies=[Depends(current_user)],
     )
     # Events router uses the header-or-query auth dependency because browser
     # EventSource cannot set Authorization headers (roborev job 940 finding).
     app.include_router(
         events_router,
         prefix="/api",
-        dependencies=[Depends(verify_token_or_query)],
+        dependencies=[Depends(current_user_or_query)],
     )
     app.include_router(
         doctor_router,
         prefix="/api",
-        dependencies=[Depends(verify_token)],
+        dependencies=[Depends(current_user)],
     )
     app.include_router(
         feedback_router,
         prefix="/api",
-        dependencies=[Depends(verify_token)],
+        dependencies=[Depends(current_user)],
     )
     app.include_router(
         config_router,
         prefix="/api",
-        dependencies=[Depends(verify_token)],
+        dependencies=[Depends(current_user)],
+    )
+    app.include_router(
+        auth_router,
+        prefix="/api/auth",
+        tags=["auth"],
+    )
+    app.include_router(
+        cache_router,
+        prefix="/api",
+        tags=["cache"],
     )
 
+    # OpenAPI: surface the HTTPBearer scheme so /docs has an Authorize button.
+    _install_openapi_security(app)
+
     return app
+
+
+def _install_openapi_security(app: FastAPI) -> None:
+    """Register the HTTPBearer security scheme in the generated OpenAPI doc."""
+    from fastapi.openapi.utils import get_openapi
+
+    def _custom_openapi() -> dict:
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+        schema.setdefault("components", {}).setdefault("securitySchemes", {})[
+            "HTTPBearer"
+        ] = {"type": "http", "scheme": "bearer"}
+        schema["security"] = [{"HTTPBearer": []}]
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = _custom_openapi  # type: ignore[method-assign]

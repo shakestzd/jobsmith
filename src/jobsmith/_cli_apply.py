@@ -455,45 +455,70 @@ def _run_apply_phases(
             run_id=db_run_id,
         )
 
-        # Step 3f: stream events
-        phase_succeeded = False
-        try:
-            for event in headless.run_phase(
-                phase=phase_name,
-                session_id=session_id,
-                prompt=prompt_text,
-                plugin_dir=plugin_directory,
-                system_prompt=system_prompt,
-                resume=resume,
-                cwd=resolved_cwd,
-                max_turns=_PHASE_MAX_TURNS[phase_name],
-                cancel_event=cancel_event,
-            ):
-                rdr.render_event(event)
+        # Step 3e3 (feat-ff4ccde2): LLM cache hit?  Replay specialist outputs
+        # from llm_cache and skip the headless call when every cacheable
+        # specialist for this phase is already cached for the current
+        # (jd_hash, master_etag) pair.
+        cache_hit = False
+        if db_conn is not None:
+            try:
+                from jobsmith.llm.phase_cache import try_replay_phase
 
-                if event.type == "phase_complete":
-                    phase_succeeded = True
-                    break
-
-                if event.type == "phase_failed":
-                    rdr.close_transcript()
-                    rdr.print_error(
-                        "Aborting before subsequent phases. "
-                        "If the error mentions contracts not frozen, run: "
-                        "jobsmith doctor  (or set frozen_at in specialist-contracts.yaml)"
+                state_dir_for_cache = _apply_state_dir(slug, resolved_cwd)
+                if state_dir_for_cache is not None:
+                    cache_hit = try_replay_phase(
+                        db_conn,
+                        run_id=db_run_id,
+                        phase=phase_name,
+                        state_dir=state_dir_for_cache,
                     )
-                    return 3
+            except Exception:  # noqa: BLE001 — cache must never abort apply
+                logger.warning("llm_cache replay raised", exc_info=True)
+                cache_hit = False
+        if cache_hit:
+            rdr.print_info(f"Phase {phase_name} served from llm_cache.")
+            phase_succeeded = True
+            # Skip the headless block; fall through to post-phase ingest.
+        else:
+            # Step 3f: stream events
+            phase_succeeded = False
+            try:
+                for event in headless.run_phase(
+                    phase=phase_name,
+                    session_id=session_id,
+                    prompt=prompt_text,
+                    plugin_dir=plugin_directory,
+                    system_prompt=system_prompt,
+                    resume=resume,
+                    cwd=resolved_cwd,
+                    max_turns=_PHASE_MAX_TURNS[phase_name],
+                    cancel_event=cancel_event,
+                ):
+                    rdr.render_event(event)
 
-                if event.type == "error":
-                    rdr.stop_phase()
-                    rdr.close_transcript()
-                    rdr.print_error(f"Phase {phase_name} encountered an error. Aborting.")
-                    return 2
-        except Exception as exc:
-            rdr.stop_phase()
-            rdr.close_transcript()
-            rdr.print_error(f"Unexpected error in phase {phase_name}: {exc}")
-            return 2
+                    if event.type == "phase_complete":
+                        phase_succeeded = True
+                        break
+
+                    if event.type == "phase_failed":
+                        rdr.close_transcript()
+                        rdr.print_error(
+                            "Aborting before subsequent phases. "
+                            "If the error mentions contracts not frozen, run: "
+                            "jobsmith doctor  (or set frozen_at in specialist-contracts.yaml)"
+                        )
+                        return 3
+
+                    if event.type == "error":
+                        rdr.stop_phase()
+                        rdr.close_transcript()
+                        rdr.print_error(f"Phase {phase_name} encountered an error. Aborting.")
+                        return 2
+            except Exception as exc:
+                rdr.stop_phase()
+                rdr.close_transcript()
+                rdr.print_error(f"Unexpected error in phase {phase_name}: {exc}")
+                return 2
 
         rdr.close_transcript()
 
@@ -633,6 +658,23 @@ def _run_apply_phases(
                         db_conn,
                         run_id=db_run_id,
                         state_dir=state_dir_for_ingest,
+                    )
+
+        # Step 3i (feat-ff4ccde2): snapshot fresh specialist outputs into
+        # llm_cache so the next apply with the same JD + master content can
+        # short-circuit this phase. Skipped on cache-hit replays — the rows
+        # came from the cache already.
+        if db_conn is not None and not cache_hit:
+            with contextlib.suppress(Exception):
+                from jobsmith.llm.phase_cache import save_phase_outputs
+
+                state_dir_for_cache = _apply_state_dir(slug, resolved_cwd)
+                if state_dir_for_cache is not None:
+                    save_phase_outputs(
+                        db_conn,
+                        run_id=db_run_id,
+                        phase=phase_name,
+                        state_dir=state_dir_for_cache,
                     )
 
         # Step 3h: confirm gate (not after the last phase, and not after a
