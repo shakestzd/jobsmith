@@ -54,6 +54,7 @@ _PIPELINE_MIGRATIONS = [
     ("005_apply_state", _MIGRATIONS_DIR / "005_apply_state.sql"),
     ("006_apply_state_log_run_id", _MIGRATIONS_DIR / "006_apply_state_log_run_id.sql"),
     ("007_users", _MIGRATIONS_DIR / "007_users.sql"),
+    ("008_llm_cache", _MIGRATIONS_DIR / "008_llm_cache.sql"),
 ]
 _REVIEW_MIGRATIONS = [
     ("001_review_schema", _MIGRATIONS_DIR / "001_review_schema.sql"),
