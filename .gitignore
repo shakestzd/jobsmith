@@ -47,6 +47,22 @@ config.yaml
 # OS / editor
 *.bak
 *.tmp
+*.png
+*.jpg
+*.jpeg
+
+# jobsmith framework repo — consumer files that belong in the user's repo
+.apply-config.yaml
+assets/
+
+# Design sketches / WIP not yet integrated
+src/jobsmith/llm/protocol.py
+
+# Claude Code session data
+.claude/
+
+# Symlink artifacts from Quarto extensions
+templates/extensions/_extensions/_extensions
 
 # jobsmith
 .apply-state/
