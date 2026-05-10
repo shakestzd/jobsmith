@@ -662,11 +662,13 @@ function DocumentsTab({ slug }: { slug: string }) {
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>
             resume.pdf
           </div>
-          <iframe
-            src={pdfBlobUrl}
-            title="resume.pdf"
-            style={{ width: '100%', height: 700, border: 'none', display: 'block' }}
-          />
+          <div style={{ background: '#fff' }}>
+            <iframe
+              src={pdfBlobUrl}
+              title="resume.pdf"
+              style={{ width: '100%', height: 700, border: 'none', display: 'block', colorScheme: 'light' }}
+            />
+          </div>
         </div>
       )}
       {coverLetter && (
@@ -827,11 +829,13 @@ function ReviewTab({ slug }: { slug: string }) {
             resume.pdf
           </div>
           {pdfBlobUrl ? (
-            <iframe
-              src={pdfBlobUrl}
-              title="resume.pdf"
-              style={{ width: '100%', height: 780, border: 'none', display: 'block' }}
-            />
+            <div style={{ background: '#fff' }}>
+              <iframe
+                src={pdfBlobUrl}
+                title="resume.pdf"
+                style={{ width: '100%', height: 780, border: 'none', display: 'block', colorScheme: 'light' }}
+              />
+            </div>
           ) : (
             <div style={{ padding: 24, textAlign: 'center', color: 'var(--fg-muted)', fontSize: 13 }}>
               resume not yet rendered — run phase 3
