@@ -72,7 +72,7 @@ def _fetch_current_run_statuses(
         FROM apply_runs
         WHERE slug = ?
         ORDER BY rowid DESC
-        LIMIT 50
+        LIMIT 1
         """,
         (slug,),
     ).fetchall()

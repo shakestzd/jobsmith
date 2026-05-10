@@ -39,7 +39,7 @@ describe('Sidebar', () => {
 
   function renderSidebar(openNew = vi.fn()) {
     return render(
-      <Sidebar view="dashboard" setView={vi.fn()} openNew={openNew} />,
+      <Sidebar view="dashboard" open={true} setView={vi.fn()} openNew={openNew} />,
     );
   }
 

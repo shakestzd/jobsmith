@@ -30,6 +30,7 @@ Both endpoints query the SQLite pipeline DB at the path resolved from
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -53,9 +54,13 @@ router = APIRouter(tags=["artifacts"])
 def _get_db_path() -> Path:
     """Resolve the pipeline DB path from the nearest .apply-config.yaml.
 
-    Raises 404 when no config is found up the cwd tree.
+    Checks JOBSMITH_REPO_ROOT env var first (set when the server is launched
+    from a different directory than the data repo), then falls back to cwd.
+    Raises 404 when no config is found.
     """
-    config_path = find_config(Path.cwd())
+    repo_root_env = os.environ.get("JOBSMITH_REPO_ROOT", "").strip()
+    search_start = Path(repo_root_env).resolve() if repo_root_env else Path.cwd()
+    config_path = find_config(search_start)
     if config_path is None:
         raise HTTPException(status_code=404, detail="No .apply-config.yaml found")
     config = load_config(path=config_path)

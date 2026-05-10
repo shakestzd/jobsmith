@@ -18,12 +18,18 @@ POST /applications
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import logging
+import os
+import re
+import subprocess
+import sys
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import FileResponse
 
 logger = logging.getLogger(__name__)
 
@@ -105,31 +111,66 @@ def _derive_ui_phase(phase: str, status: str) -> str:
     """Map raw DB (phase, status) → UI-facing taxonomy.
 
     UI taxonomy:
-    - ``running``  — pipeline is actively executing (status='running', any phase)
-    - ``rendered`` — any completed run (status in done/backfilled). The CLI
-      records full pipeline runs with phase='unknown' and status='done', so
-      "completed" must not be gated on a specific phase value or those runs
-      vanish from the rendered filter (roborev job 940).
-    - ``failed``   — any run that ended in failure
-    - ``unknown``  — catch-all
+    - ``running``    — pipeline is actively executing (status='running', any phase)
+    - ``rendered``   — all phases completed (status in done/backfilled)
+    - ``incomplete`` — run terminated but only some phases completed (manifest check)
+    - ``failed``     — run ended in failure with no phases completed
+    - ``unknown``    — catch-all
     """
-    if status == "failed":
-        return "failed"
     if status == "running":
         return "running"
     if status in ("done", "backfilled"):
         return "rendered"
+    if status == "failed":
+        return "failed"
     return "unknown"
+
+
+def _load_manifest_for_run(conn, run_id: str, starting_slug: str) -> dict | None:
+    """Load the apply_state manifest, trying the starting slug then canonical."""
+    from jobsmith.db import get_state
+
+    blob = get_state(conn, slug=starting_slug, kind="manifest")
+    if not blob:
+        role, company, _ = _extract_jd_fields(conn, run_id)
+        if company and role:
+            canonical = f"{_to_slug(company)}-{_to_slug(role)}"
+            if canonical != starting_slug:
+                blob = get_state(conn, slug=canonical, kind="manifest")
+    if not blob:
+        return None
+    try:
+        data = json.loads(blob)
+        return data if isinstance(data, dict) else None
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _ui_phase_with_manifest(raw_ui_phase: str, conn, run_id: str, slug: str) -> str:
+    """Overlay 'incomplete' when a terminal run has only partial phase coverage."""
+    if raw_ui_phase not in ("failed", "rendered"):
+        return raw_ui_phase
+    from jobsmith.core.manifest import PHASE_REQUIRED_SPECIALISTS, phase_completed
+
+    manifest = _load_manifest_for_run(conn, run_id, slug)
+    if manifest is None:
+        return raw_ui_phase
+    phases_done = [phase_completed(manifest, p) for p in PHASE_REQUIRED_SPECIALISTS]
+    if not all(phases_done) and any(phases_done):
+        return "incomplete"
+    return raw_ui_phase
 
 
 def _row_to_application(row, conn) -> Application:
     role, company, _apply_url = _extract_jd_fields(conn, row["run_id"])
+    ui_phase = _derive_ui_phase(row["phase"], row["status"])
+    ui_phase = _ui_phase_with_manifest(ui_phase, conn, row["run_id"], row["slug"])
     return Application(
         slug=row["slug"],
         run_id=row["run_id"],
         phase=row["phase"],
         status=row["status"],
-        ui_phase=_derive_ui_phase(row["phase"], row["status"]),
+        ui_phase=ui_phase,
         started_at=row["started_at"],
         finished_at=row["finished_at"],
         role=role,
@@ -152,6 +193,7 @@ async def _launch_run(
     cwd: Path,
     force: bool = False,
     jd_text: str | None = None,
+    start_from_phase: str | None = None,
 ) -> str:
     """Register an in-process apply run and launch it. Returns run_id.
 
@@ -213,6 +255,7 @@ async def _launch_run(
                 run_id=run_id,
                 renderer=rdr,
                 cancel_event=cancel_event,
+                start_from_phase=start_from_phase,
             )
         except Exception:  # noqa: BLE001 — task must not propagate unhandled
             logger.exception(
@@ -267,6 +310,8 @@ def get_application(slug: str) -> ApplicationDetail:
             (run_id,),
         ).fetchall()
         role, company, apply_url = _extract_jd_fields(conn, run_id)
+        ui_phase = _derive_ui_phase(run_row["phase"], run_row["status"])
+        ui_phase = _ui_phase_with_manifest(ui_phase, conn, run_id, run_row["slug"])
     finally:
         conn.close()
     artifacts = [_row_to_envelope(r) for r in artifact_rows]
@@ -275,7 +320,7 @@ def get_application(slug: str) -> ApplicationDetail:
         run_id=run_row["run_id"],
         phase=run_row["phase"],
         status=run_row["status"],
-        ui_phase=_derive_ui_phase(run_row["phase"], run_row["status"]),
+        ui_phase=ui_phase,
         started_at=run_row["started_at"],
         finished_at=run_row["finished_at"],
         role=role,
@@ -313,9 +358,12 @@ async def create_application(
             detail=f"A run for slug {slug!r} is already active (run_id={active_run_id!r}).",
         )
 
-    cwd = Path.cwd()
+    repo_root_env = os.environ.get("JOBSMITH_REPO_ROOT", "").strip()
+    cwd = Path(repo_root_env).resolve() if repo_root_env else Path.cwd()
     run_id = await _launch_run(
-        supervisor, slug, body.url, cwd, force=body.force, jd_text=body.jd_text
+        supervisor, slug, body.url, cwd,
+        force=body.force, jd_text=body.jd_text,
+        start_from_phase=body.start_from_phase,
     )
 
     return ApplicationCreated(slug=slug, run_id=run_id)
@@ -328,6 +376,336 @@ async def launch_review_gone(slug: str) -> dict:
         status_code=status.HTTP_410_GONE,
         detail="Review UI moved to React frontend",
     )
+
+
+def _get_app_dir(slug: str) -> Path | None:
+    """Resolve the application directory for *slug*, or None if config missing."""
+    from jobsmith.config import find_config, load_config
+
+    repo_root_env = os.environ.get("JOBSMITH_REPO_ROOT", "").strip()
+    search_start = Path(repo_root_env).resolve() if repo_root_env else Path.cwd()
+    config_path = find_config(search_start)
+    if config_path is None:
+        return None
+    config = load_config(path=config_path)
+    repo_root = config_path.parent
+    apps_dir = (repo_root / config.output.applications_dir).resolve()
+    return apps_dir / slug
+
+
+_ALLOWED_DOC_SUFFIXES = {".pdf", ".md", ".txt", ".typ"}
+
+
+def _to_slug(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+
+
+def _has_render_outputs(docs: Path) -> bool:
+    """True if *docs* contains at least one rendered output (PDF or cover letter)."""
+    return (docs / "resume.pdf").exists() or any(
+        f.suffix == ".pdf" for f in docs.iterdir() if f.is_file()
+    )
+
+
+def _resolve_docs_dir(slug: str, conn) -> Path | None:
+    """Return the ``documents/`` directory for *slug*, trying the canonical slug on miss.
+
+    The gather phase creates documents/ early (for YAML stubs) so we must
+    check for actual render outputs, not just directory existence.
+    """
+    app_dir = _get_app_dir(slug)
+    if app_dir is not None:
+        docs = app_dir / "documents"
+        if docs.exists() and _has_render_outputs(docs):
+            return docs
+
+    # The gather phase rekeyes DB rows to a canonical slug (e.g.
+    # "performance-analytics-manager" → "catalyze-performance-analytics-manager")
+    # but apply_runs.slug stays as the starting slug.  Derive the canonical
+    # slug from jd-parsed company + position and retry.
+    run_row = conn.execute(
+        "SELECT run_id FROM apply_runs WHERE slug = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
+        (slug,),
+    ).fetchone()
+    if run_row is None:
+        return None
+    role, company, _ = _extract_jd_fields(conn, run_row["run_id"])
+    if not company or not role:
+        return None
+    canonical = f"{_to_slug(company)}-{_to_slug(role)}"
+    if canonical == slug:
+        return None
+    canonical_dir = _get_app_dir(canonical)
+    if canonical_dir is None:
+        return None
+    docs = canonical_dir / "documents"
+    return docs if docs.exists() else None
+
+
+@router.get("/applications/{slug}/documents")
+def list_documents(slug: str) -> list[str]:
+    """Return available rendered document filenames for *slug*."""
+    db_path = _get_db_path()
+    conn = _open_conn(db_path)
+    try:
+        docs_dir = _resolve_docs_dir(slug, conn)
+    finally:
+        conn.close()
+    if docs_dir is None:
+        return []
+    return sorted(
+        f.name
+        for f in docs_dir.iterdir()
+        if f.is_file() and f.suffix in _ALLOWED_DOC_SUFFIXES and not f.name.startswith(".")
+    )
+
+
+@router.get("/applications/{slug}/documents/{filename}")
+def get_document(slug: str, filename: str) -> FileResponse:
+    """Serve a rendered document (resume.pdf, cover-letter-draft.md, …)."""
+    if "/" in filename or "\\" in filename or filename.startswith("."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if Path(filename).suffix not in _ALLOWED_DOC_SUFFIXES:
+        raise HTTPException(status_code=400, detail="File type not allowed")
+
+    db_path = _get_db_path()
+    conn = _open_conn(db_path)
+    try:
+        docs_dir = _resolve_docs_dir(slug, conn)
+    finally:
+        conn.close()
+
+    if docs_dir is None:
+        raise HTTPException(status_code=404, detail=f"No documents directory for {slug!r}")
+
+    file_path = (docs_dir / filename).resolve()
+    if not str(file_path).startswith(str(docs_dir.resolve())):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Document {filename!r} not found")
+
+    media = "application/pdf" if file_path.suffix == ".pdf" else "text/plain; charset=utf-8"
+    return FileResponse(str(file_path), media_type=media)
+
+
+@router.get("/applications/{slug}/transcript")
+def get_transcript(slug: str) -> list[dict]:
+    """Return stored apply_state_log rows for the latest run of *slug*.
+
+    Tries the starting slug first, then the canonical company-position slug
+    (same resolution logic as _resolve_docs_dir). Strips ``raw`` from each
+    payload so the response stays compact — raw is the untruncated original
+    that the renderer uses only during a live run.
+    """
+    db_path = _get_db_path()
+    conn = _open_conn(db_path)
+    try:
+        run_row = conn.execute(
+            "SELECT run_id FROM apply_runs WHERE slug = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
+            (slug,),
+        ).fetchone()
+        if run_row is None:
+            # Try canonical slug (company-position derived from jd-parsed artifact).
+            canonical_run = _find_canonical_run(conn, slug)
+            if canonical_run is None:
+                return []
+            run_id = canonical_run
+        else:
+            run_id = run_row["run_id"]
+        rows = conn.execute(
+            "SELECT id, payload FROM apply_state_log WHERE run_id = ? ORDER BY id ASC",
+            (run_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    result = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"]) if row["payload"] else {}
+            if isinstance(payload, dict):
+                payload = {k: v for k, v in payload.items() if k != "raw"}
+        except (ValueError, TypeError):
+            continue
+        result.append({"run_id": run_id, "payload": payload})
+    return result
+
+
+def _find_canonical_run(conn, slug: str) -> str | None:
+    """Look up the run_id via canonical company-position slug resolution."""
+    all_rows = conn.execute(
+        "SELECT run_id FROM apply_runs ORDER BY started_at DESC, rowid DESC LIMIT 100",
+    ).fetchall()
+    for row in all_rows:
+        role, company, _ = _extract_jd_fields(conn, row["run_id"])
+        if not company or not role:
+            continue
+        if f"{_to_slug(company)}-{_to_slug(role)}" == slug:
+            return row["run_id"]
+    return None
+
+
+@router.post("/applications/{slug}/reveal")
+def reveal_application(slug: str) -> dict:
+    """Open the application directory in Finder (macOS only)."""
+    app_dir = _get_app_dir(slug)
+    if app_dir is None or not app_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Application directory not found for slug {slug!r}")
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", str(app_dir)])
+    return {"revealed": str(app_dir)}
+
+
+# ---------------------------------------------------------------------------
+# Review endpoints
+# ---------------------------------------------------------------------------
+
+_REVIEW_STATUS_KIND = "review-status"
+_COVER_LETTER_FILENAME = "cover-letter-draft.md"
+
+
+def _resolve_canonical_slug(conn, starting_slug: str, run_id: str) -> str:
+    """Return the canonical slug for an application (used for apply_state lookups)."""
+    role, company, _ = _extract_jd_fields(conn, run_id)
+    if company and role:
+        canonical = f"{_to_slug(company)}-{_to_slug(role)}"
+        if canonical != starting_slug:
+            return canonical
+    return starting_slug
+
+
+@router.get("/applications/{slug}/review")
+def get_review(slug: str) -> dict:
+    """Return review state: cover letter text, fit score, review status."""
+    db_path = _get_db_path()
+    conn = _open_conn(db_path)
+    try:
+        run_row = conn.execute(
+            "SELECT run_id, slug FROM apply_runs WHERE slug = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
+            (slug,),
+        ).fetchone()
+        if run_row is None:
+            raise HTTPException(status_code=404, detail=f"No application found for slug {slug!r}")
+        run_id = run_row["run_id"]
+        canonical = _resolve_canonical_slug(conn, slug, run_id)
+
+        # Fit score from specialist_outputs
+        fit_row = conn.execute(
+            "SELECT output_json FROM specialist_outputs WHERE run_id = ? AND kind = 'fit-score' LIMIT 1",
+            (run_id,),
+        ).fetchone()
+        fit_data: dict = {}
+        if fit_row:
+            try:
+                fit_data = json.loads(fit_row["output_json"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Review status from apply_state
+        from jobsmith.db import get_state, open_pipeline_db
+        db_conn2 = open_pipeline_db(db_path)
+        try:
+            review_blob = get_state(db_conn2, slug=canonical, kind=_REVIEW_STATUS_KIND)
+            if not review_blob:
+                review_blob = get_state(db_conn2, slug=slug, kind=_REVIEW_STATUS_KIND)
+        finally:
+            db_conn2.close()
+        review_status_data = {}
+        if review_blob:
+            try:
+                review_status_data = json.loads(review_blob)
+            except (json.JSONDecodeError, TypeError):
+                pass
+    finally:
+        conn.close()
+
+    # Cover letter from disk
+    cover_letter_text: str | None = None
+    docs_dir = _resolve_docs_dir(slug, _open_conn(db_path))
+    if docs_dir:
+        cl_path = docs_dir / _COVER_LETTER_FILENAME
+        if cl_path.exists():
+            cover_letter_text = cl_path.read_text(encoding="utf-8")
+
+    return {
+        "slug": slug,
+        "canonical_slug": canonical,
+        "cover_letter": cover_letter_text,
+        "fit_score": fit_data.get("score"),
+        "fit_rationale": fit_data.get("rationale"),
+        "fit_concerns": fit_data.get("concerns", []),
+        "review_status": review_status_data.get("status", "pending"),
+        "reviewed_at": review_status_data.get("reviewed_at"),
+    }
+
+
+@router.put("/applications/{slug}/cover-letter")
+def save_cover_letter(slug: str, body: dict) -> dict:
+    """Save edited cover letter text to disk (atomic write)."""
+    text = body.get("text", "")
+    if not isinstance(text, str):
+        raise HTTPException(status_code=422, detail="body.text must be a string")
+
+    db_path = _get_db_path()
+    conn = _open_conn(db_path)
+    try:
+        docs_dir = _resolve_docs_dir(slug, conn)
+    finally:
+        conn.close()
+
+    if docs_dir is None:
+        raise HTTPException(status_code=404, detail=f"No documents directory for {slug!r}")
+
+    cl_path = docs_dir / _COVER_LETTER_FILENAME
+    tmp_path = cl_path.with_suffix(".tmp")
+    try:
+        tmp_path.write_text(text, encoding="utf-8")
+        tmp_path.rename(cl_path)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Write failed: {exc}") from exc
+
+    words = len(text.split())
+    return {"saved": True, "words": words}
+
+
+@router.post("/applications/{slug}/review-status")
+def set_review_status(slug: str, body: dict) -> dict:
+    """Set review status ('approved', 'needs-revision', 'pending') in apply_state."""
+    new_status = body.get("status", "")
+    valid = {"approved", "needs-revision", "pending"}
+    if new_status not in valid:
+        raise HTTPException(status_code=422, detail=f"status must be one of {valid}")
+
+    db_path = _get_db_path()
+    conn = _open_conn(db_path)
+    try:
+        run_row = conn.execute(
+            "SELECT run_id, slug FROM apply_runs WHERE slug = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
+            (slug,),
+        ).fetchone()
+        if run_row is None:
+            raise HTTPException(status_code=404, detail=f"No application found for slug {slug!r}")
+        run_id = run_row["run_id"]
+        canonical = _resolve_canonical_slug(conn, slug, run_id)
+    finally:
+        conn.close()
+
+    from datetime import datetime, timezone
+    from jobsmith.db import open_pipeline_db, put_state
+    db_conn2 = open_pipeline_db(db_path)
+    try:
+        put_state(
+            db_conn2,
+            slug=canonical,
+            kind=_REVIEW_STATUS_KIND,
+            content_blob=json.dumps({
+                "status": new_status,
+                "reviewed_at": datetime.now(tz=timezone.utc).isoformat(),
+            }),
+        )
+    finally:
+        db_conn2.close()
+
+    return {"status": new_status}
 
 
 __all__ = ["router"]

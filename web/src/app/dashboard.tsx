@@ -206,13 +206,13 @@ export function Dashboard({ openApp, openNew, filter = 'all' }: DashboardProps) 
         <table className="table">
           <thead>
             <tr>
-              <th style={{ width: '30%' }}>slug</th>
+              <th>slug</th>
               <th>role</th>
               <th>company</th>
               <th>phase</th>
-              <th>anchors</th>
+              <th className="col-anchors">anchors</th>
               <th>status</th>
-              <th>updated</th>
+              <th className="col-updated">updated</th>
               <th></th>
             </tr>
           </thead>
@@ -269,9 +269,9 @@ export function Dashboard({ openApp, openNew, filter = 'all' }: DashboardProps) 
                 <td><span className="role">{a.role}</span></td>
                 <td><span className="company">{a.company}</span></td>
                 <td><span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{a.phaseLabel}</span></td>
-                <td><span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{a.anchors}</span></td>
+                <td className="col-anchors"><span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{a.anchors}</span></td>
                 <td><StatusBadge status={a.status} /></td>
-                <td><span className="mono-sm" style={{ color: 'var(--fg-subtle)' }}>{a.updated}</span></td>
+                <td className="col-updated"><span className="mono-sm" style={{ color: 'var(--fg-subtle)' }}>{a.updated}</span></td>
                 <td><Icon name="chev" size={12} style={{ opacity: 0.5 }} /></td>
               </tr>
             ))}

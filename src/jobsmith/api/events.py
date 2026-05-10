@@ -529,11 +529,16 @@ async def _stream(
                             event="phase",
                             data=json.dumps(phase_data),
                         )
+                    _safe_payload = (
+                        {k: v for k, v in payload_obj.payload.items() if k != "raw"}
+                        if isinstance(payload_obj.payload, dict)
+                        else payload_obj.payload
+                    )
                     yield ServerSentEvent(
                         event="transcript",
                         data=json.dumps({
                             "run_id": payload_obj.run_id,
-                            "payload": payload_obj.payload,
+                            "payload": _safe_payload,
                         }),
                     )
                     saw_activity = True

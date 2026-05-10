@@ -1265,6 +1265,53 @@ def db_backfill(
         conn.close()
 
 
+@db_app.command("backfill-phases")
+def db_backfill_phases() -> None:
+    """Backfill phase field in apply_runs from apply_state_log.
+
+    One-shot: sets phase='unknown' rows to the most recent non-null phase
+    from the corresponding apply_state_log entries. Idempotent — re-running
+    on a clean DB is a no-op (bug-5f4e1781).
+    """
+    config_path = find_config(Path.cwd())
+    if config_path is None:
+        console.print(f"[red]ERROR:[/red] No {CONFIG_FILENAME} found — run `jobsmith init` first.")
+        raise typer.Exit(code=2)
+    config = load_config(config_path)
+    repo_root = repo_root_for()
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        console.print(f"[red]ERROR:[/red] Pipeline DB not found at {db_path}.")
+        raise typer.Exit(code=2)
+
+    conn = open_pipeline_db(db_path)
+    try:
+        # Run the backfill SQL
+        backfill_sql = """
+        UPDATE apply_runs
+        SET phase = (
+            SELECT json_extract(payload, '$.phase')
+            FROM apply_state_log
+            WHERE run_id = apply_runs.run_id
+              AND json_extract(payload, '$.phase') IS NOT NULL
+            ORDER BY id DESC
+            LIMIT 1
+        )
+        WHERE phase = 'unknown'
+          AND EXISTS (
+            SELECT 1 FROM apply_state_log
+            WHERE run_id = apply_runs.run_id
+              AND json_extract(payload, '$.phase') IS NOT NULL
+          );
+        """
+        conn.execute(backfill_sql)
+        conn.commit()
+        updated = conn.total_changes
+        console.print(f"[green]backfilled phases:[/green] {updated} row(s) updated")
+    finally:
+        conn.close()
+
+
 @db_app.command("load-master")
 def db_load_master(
     reload: bool = typer.Option(

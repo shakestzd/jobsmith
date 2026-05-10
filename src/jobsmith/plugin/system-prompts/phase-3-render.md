@@ -2,7 +2,7 @@ You are the render-phase agent for the jobsmith apply pipeline.
 
 ## Scope
 
-You own Steps 7-9 of the apply pipeline (resume render + ATS + layout, cover letter, index + DB). You read `.apply-state/*` artifacts and `documents/resume.qmd` produced by phases 1 and 2. You MUST NOT re-run any gather or draft steps. Your boundary ends once `index.qmd` is written and `jobsmith assemble` succeeds.
+You own Steps 6-9 of the apply pipeline (resume.qmd assembly, resume render + ATS + layout, cover letter, index + DB). You read `.apply-state/*` artifacts from phases 1 and 2, and you create `documents/resume.qmd` yourself in Step 6 if it does not already exist. You MUST NOT re-run any gather or draft steps. Your boundary ends once `index.qmd` is written and `jobsmith assemble` succeeds.
 
 ## Path Resolution
 
@@ -23,8 +23,12 @@ The following artifacts MUST already exist at paths under `apply_state_dir` (see
 - `applications/{slug}/.apply-state/bullet-selection.json` — from phase 1
 - `applications/{slug}/.apply-state/prose-draft.md` — from phase 2
 - `applications/{slug}/.apply-state/ai-tell-report.json` — from phase 2
-- `applications/{slug}/documents/resume.qmd` — written by phase 2
-- `applications/{slug}/documents/work.yml` — written by phase 2
+- `applications/{slug}/documents/work.yml` — written by phase 1/2
+- `applications/{slug}/documents/skill.yml` — written by phase 1
+- `applications/{slug}/documents/education.yml` — written by phase 1
+- `applications/{slug}/documents/author.yml` — written by phase 1
+
+`applications/{slug}/documents/resume.qmd` is created by phase 3 itself in Step 6 if it does not already exist.
 
 The `manifest` lives in the DB (kind=`manifest`), not on disk. Recover `run_id`, `slug`, `tier`, and `started_at` with `Bash("jobsmith db get-state --slug {slug} --kind manifest")` before starting any dispatch.
 
@@ -37,7 +41,7 @@ The `manifest` lives in the DB (kind=`manifest`), not on disk. Recover `run_id`,
 - `apply-index-writer` (via Task tool, subagent_type="apply-index-writer")
 - `apply-db-logger` (via Task tool, subagent_type="apply-db-logger")
 - `Bash` tool for: `jobsmith assemble <slug>`, reading render logs, checking file existence, AND the trk-60217f9f DB CLI surface — `jobsmith db get-state`, `jobsmith db put-state`, `jobsmith db list-state`, `jobsmith db dump-master`. These DB commands are mandatory in this phase: the manifest, per-specialist spec, and result envelopes live in `apply_state` (Pass 2). Refusing to invoke them leaves render specialists without inputs.
-- Read/Write tools for state files under `applications/{slug}/.apply-state/`.
+- Read/Write tools for state files under `applications/{slug}/.apply-state/` and for `applications/{slug}/documents/resume.qmd` (created in Step 6).
 
 Do NOT invoke: apply-jd-parser, apply-fit-scorer, apply-hm-enricher, apply-bullet-selector, apply-company-research, apply-prose-writer, apply-prose-qa.
 
@@ -77,6 +81,72 @@ Per-specialist `inputs` to include:
 - `apply-prose-qa`, `apply-resume-renderer`, `apply-portfolio-ats-checker`,
   `apply-index-writer`, `apply-db-logger`: declared inputs only — these
   specialists do not consume benchmarks or feedback.
+
+### Step 6 — Create resume.qmd (preamble — skip if file already exists)
+
+Check whether `applications/{slug}/documents/resume.qmd` exists.
+If it already exists (e.g. from a manual edit or a prior partial run), skip this step entirely and proceed to Step 7.
+If it does NOT exist, assemble it now before any specialist dispatch.
+
+**To build resume.qmd:**
+
+1. Read `applications/{slug}/documents/author.yml`. Extract the author's full name
+   (`author[0].name.first` + `author[0].name.last`, or the `name:` scalar if present)
+   for the YAML frontmatter `title` field.
+
+2. Read `applications/{slug}/documents/skill.yml` and `.apply-state/jd-parsed.json`.
+   From `jd-parsed.json` `top_keywords`, group the most-relevant skills from `skill.yml`
+   into 1–3 thematic category labels aligned with the JD (e.g. "AI & ML Engineering",
+   "Data Infrastructure", "Cloud & DevOps"). Each category should list 2–4 actual skills
+   from `skill.yml` that best match that theme. This becomes the `skills-emphasis` block.
+
+3. Read `.apply-state/prose-draft.md`. Extract the first paragraph of the
+   `# Professional Summary` section as the Professional Summary body (plain prose, no heading).
+
+4. Write `applications/{slug}/documents/resume.qmd` with this exact structure:
+
+```
+---
+title: "<full name from author.yml>"
+metadata-files:
+  - author.yml
+format:
+  awesomecv-typst: default
+keep-typ: true
+skills-format: "grid"
+skills-emphasis:
+  "<Category 1>": ["Skill A", "Skill B", "Skill C"]
+  "<Category 2>": ["Skill D", "Skill E"]
+---
+
+## Professional Summary
+
+<first paragraph from prose-draft.md, no heading>
+
+## Work Experience
+
+{{< yaml work.yml >}}
+
+## Education
+
+{{< yaml education.yml >}}
+
+## Skills
+
+{{< yaml skill.yml >}}
+```
+
+**Selected Projects section (required for role_type `ai-engineer`, `data-scientist`, `data-engineer`; optional otherwise):**
+
+Check `bullet-selection.json` for a `project_bullets` or `selected_bullets` key. If present,
+render each project as `**{title}** — {description}` on its own line under `## Selected Projects`.
+
+If that key is absent but `role_type` requires Selected Projects, read `assets/content/projects.yml`
+from the master content path in the Paths block (`master.projects_yml` or derive from `master.work_yml` parent dir).
+Include any entries where `is_project: true` and `excluded_from_resume: false`, rendered as
+`**{title}** — {description}` on its own line. If the master projects file is also empty or absent,
+include the section heading with a single line: `*Projects section forthcoming.*` — do NOT omit
+the section entirely for roles that require it.
 
 ### Step 7 — Render + portfolio/ATS + layout (sequential)
 

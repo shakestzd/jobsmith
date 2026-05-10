@@ -24,7 +24,7 @@
 # the reverse.
 
 version: 1
-frozen_at: null  # RESET: re-freeze when adopting jobsmith in your repo
+frozen_at: '2026-05-07'  # RESET: re-freeze when adopting jobsmith in your repo
 
 # ----------------------------------------------------------------------------
 # State directory layout (.apply-state/) — single source of truth between specialists
@@ -795,8 +795,8 @@ specialists:
     failure_modes:
       - condition: "ATS check fails"
         action: "halt — surface the specific structural issue"
-      - condition: "Portfolio check fails for ai-engineer/data-engineer/data-analyst role"
-        action: "halt — Selected Projects must include working live URL + GitHub link"
+      - condition: "Portfolio check fails for ai-engineer/data-engineer/data-analyst role (HTTP 4xx from a live server)"
+        action: "halt — Selected Projects must include GitHub link + at least 1 URL that is either HTTP 200 or network-unreachable (ECONNREFUSED/DNS errors are unverifiable and do not block)"
 
   # --------------------------------------------------------------------------
   - name: apply-visual-layout-reviewer

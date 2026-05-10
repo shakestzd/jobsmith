@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
@@ -11,6 +11,7 @@ import { NewApplicationModal } from './app/new';
 import { ApplicationDetail } from './app/application';
 import { MasterContent, MarkAnchorsView } from './app/master';
 import { SiteView, FeedbackView, DoctorView, ConfigView } from './app/views';
+import { ChatPanel } from './app/chat';
 
 const TWEAK_DEFAULTS: TweakValues = {
   theme: 'light',
@@ -18,23 +19,30 @@ const TWEAK_DEFAULTS: TweakValues = {
   showSlugColumn: true,
 };
 
+const SIDEBAR_WIDTH = 248;
+const CHAT_MIN = 240;
+const CHAT_MAX = 640;
+
 function App() {
   const [tweaks, setTweak] = useTweaks<TweakValues>(TWEAK_DEFAULTS);
   const [view, setView] = useState<ViewName>('dashboard');
   const [openSlug, setOpenSlug] = useState<string | null>(null);
   const [showNew, setShowNew] = useState<boolean>(false);
+  const [chatOpen, setChatOpen] = useState<boolean>(false);
+  const [chatScopeSlug, setChatScopeSlug] = useState<string | null>(null);
+  const [chatWidth, setChatWidth] = useState<number>(320);
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
 
-  // Apply theme attribute to <html>
+  // Sync chat scope with the open application slug.
   useEffect(() => {
-    document.documentElement.dataset.theme = tweaks.theme;
-  }, [tweaks.theme]);
+    setChatScopeSlug(openSlug);
+  }, [openSlug]);
 
-  // Apply density attribute to <html>
-  useEffect(() => {
-    document.documentElement.dataset.density = tweaks.density;
-  }, [tweaks.density]);
+  // Apply theme/density to <html>
+  useEffect(() => { document.documentElement.dataset.theme = tweaks.theme; }, [tweaks.theme]);
+  useEffect(() => { document.documentElement.dataset.density = tweaks.density; }, [tweaks.density]);
 
-  // ⌘N (or Ctrl+N) opens new application modal
+  // ⌘N opens new application modal
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
@@ -51,31 +59,47 @@ function App() {
     setTweak('theme', order[(order.indexOf(tweaks.theme) + 1) % order.length]);
   };
 
+  // Chat panel drag-resize — track dragging in a ref to avoid stale closures.
+  const chatWidthRef = useRef(chatWidth);
+  chatWidthRef.current = chatWidth;
+
+  function handleChatResizeStart(e: React.MouseEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = chatWidthRef.current;
+    function onMove(ev: MouseEvent) {
+      const delta = startX - ev.clientX;
+      setChatWidth(Math.max(CHAT_MIN, Math.min(CHAT_MAX, startW + delta)));
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  // Dynamic grid template: sidebar | main | [chat]
+  const gridCols = [
+    sidebarOpen ? `${SIDEBAR_WIDTH}px` : '0px',
+    '1fr',
+    ...(chatOpen ? [`${chatWidth}px`] : []),
+  ].join(' ');
+
   // Build breadcrumbs
   let crumbs: string[];
   if (openSlug) {
     crumbs = ['jobsmith', 'applications', openSlug];
-  } else if (view === 'dashboard') {
-    crumbs = ['jobsmith', 'applications'];
-  } else if (view === 'running') {
-    crumbs = ['jobsmith', 'in progress'];
-  } else if (view === 'review') {
-    crumbs = ['jobsmith', 'needs review'];
-  } else if (view === 'master') {
-    crumbs = ['jobsmith', 'master content'];
-  } else if (view === 'anchors') {
-    crumbs = ['jobsmith', 'mark anchors'];
-  } else if (view === 'site') {
-    crumbs = ['jobsmith', 'listings site'];
-  } else if (view === 'feedback') {
-    crumbs = ['jobsmith', 'feedback'];
-  } else if (view === 'doctor') {
-    crumbs = ['jobsmith', 'doctor'];
-  } else if (view === 'config') {
-    crumbs = ['jobsmith', 'config'];
-  } else {
-    crumbs = ['jobsmith'];
-  }
+  } else if (view === 'dashboard') { crumbs = ['jobsmith', 'applications'];
+  } else if (view === 'running')   { crumbs = ['jobsmith', 'in progress'];
+  } else if (view === 'review')    { crumbs = ['jobsmith', 'needs review'];
+  } else if (view === 'master')    { crumbs = ['jobsmith', 'master content'];
+  } else if (view === 'anchors')   { crumbs = ['jobsmith', 'mark anchors'];
+  } else if (view === 'site')      { crumbs = ['jobsmith', 'listings site'];
+  } else if (view === 'feedback')  { crumbs = ['jobsmith', 'feedback'];
+  } else if (view === 'doctor')    { crumbs = ['jobsmith', 'doctor'];
+  } else if (view === 'config')    { crumbs = ['jobsmith', 'config'];
+  } else { crumbs = ['jobsmith']; }
 
   // Derive view body
   let body: React.ReactNode;
@@ -87,30 +111,27 @@ function App() {
     body = <Dashboard openApp={setOpenSlug} openNew={() => setShowNew(true)} filter="running" />;
   } else if (view === 'review') {
     body = <Dashboard openApp={setOpenSlug} openNew={() => setShowNew(true)} filter="review" />;
-  } else if (view === 'master') {
-    body = <MasterContent />;
-  } else if (view === 'anchors') {
-    body = <MarkAnchorsView />;
-  } else if (view === 'site') {
-    body = <SiteView />;
-  } else if (view === 'feedback') {
-    body = <FeedbackView />;
-  } else if (view === 'doctor') {
-    body = <DoctorView />;
-  } else if (view === 'config') {
-    body = <ConfigView />;
+  } else if (view === 'master') { body = <MasterContent />;
+  } else if (view === 'anchors') { body = <MarkAnchorsView />;
+  } else if (view === 'site')    { body = <SiteView />;
+  } else if (view === 'feedback') { body = <FeedbackView />;
+  } else if (view === 'doctor')   { body = <DoctorView />;
+  } else if (view === 'config')   { body = <ConfigView />;
   } else {
     body = <Dashboard openApp={setOpenSlug} openNew={() => setShowNew(true)} filter="all" />;
   }
 
   return (
-    <div className="shell" data-screen-label={openSlug ? `application ${openSlug}` : view}>
+    <div
+      className="shell"
+      data-screen-label={openSlug ? `application ${openSlug}` : view}
+      data-chat={chatOpen ? 'open' : undefined}
+      style={{ gridTemplateColumns: gridCols }}
+    >
       <Sidebar
         view={view}
-        setView={(v: ViewName) => {
-          setOpenSlug(null);
-          setView(v);
-        }}
+        open={sidebarOpen}
+        setView={(v: ViewName) => { setOpenSlug(null); setView(v); }}
         openNew={() => setShowNew(true)}
       />
       <div className="main">
@@ -118,6 +139,9 @@ function App() {
           crumbs={crumbs}
           onSearch={() => alert('command palette — wire ⌘K to your CLI surface')}
           onTheme={cycleTheme}
+          onToggleChat={() => setChatOpen((p) => !p)}
+          onToggleSidebar={() => setSidebarOpen((p) => !p)}
+          sidebarOpen={sidebarOpen}
           theme={tweaks.theme}
         />
         {body}
@@ -132,6 +156,17 @@ function App() {
               .then((created) => setOpenSlug(created.slug))
               .catch(() => setOpenSlug(slug));
           }}
+        />
+      )}
+
+      {chatOpen && (
+        <ChatPanel
+          slug={chatScopeSlug}
+          open={chatOpen}
+          width={chatWidth}
+          onClose={() => setChatOpen(false)}
+          onScopeChange={setChatScopeSlug}
+          onResizeStart={handleChatResizeStart}
         />
       )}
 

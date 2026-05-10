@@ -40,6 +40,7 @@ export type AppStatus =
   | 'queued'
   | 'draft'
   | 'rendered'
+  | 'incomplete'
   | 'failed'
   | 'gather'
   | 'review';

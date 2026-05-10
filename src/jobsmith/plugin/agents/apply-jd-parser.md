@@ -69,13 +69,17 @@ Use Option A first; if the GraphQL POST is unavailable (WebFetch may not support
 
 ### Unknown ATS
 
-For any URL that does not match the patterns above, fetch the HTML page directly with WebFetch and extract text content from the response body.
+For any URL that does not match the patterns above, use a two-step fetch strategy:
+
+1. **Direct fetch (preferred):** WebFetch the URL directly and extract text from the response body.
+2. **Jina Reader retry (fallback):** If the direct fetch returns < 500 characters of meaningful body (bot-block, 403, empty body, JS-only shell), retry via `https://r.jina.ai/{original_url}` — Jina renders the page in a real browser and returns clean markdown. Use this response if it contains ≥ 500 characters of meaningful content.
+3. **Halt:** If both attempts return < 500 characters of meaningful body, halt with `reason=NEED_JD_TEXT_PASTED`.
 
 ---
 
 ## Steps
 
-1. If `jd_url` is set, determine the ATS from the URL (see URL → API mapping above) and run **one** WebFetch against the appropriate JSON endpoint (or HTML fallback). If the fetch fails or returns < 500 characters of meaningful body, halt with `reason=NEED_JD_TEXT_PASTED`.
+1. If `jd_url` is set, determine the ATS from the URL (see URL → API mapping above) and run **one** WebFetch against the appropriate JSON endpoint. For Unknown ATS URLs, apply the two-step fetch strategy above (direct → Jina Reader → halt). Only halt with `reason=NEED_JD_TEXT_PASTED` after both attempts have failed.
 2. Otherwise use `jd_text` directly.
 3. Extract fields per the schema. Be literal — do not infer beyond what's printed.
 4. Classify role_type into one of: `data-analyst`, `data-engineer`, `ai-engineer`, `finance`, `renewable-energy`, `general`. Use these signals:

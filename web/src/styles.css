@@ -95,6 +95,12 @@ code, .mono { font-family: var(--font-mono); }
   grid-template-columns: 248px 1fr;
   min-height: 100vh;
 }
+/* When chat is open, hide lower-priority table columns to reclaim space */
+.shell[data-chat="open"] .col-anchors,
+.shell[data-chat="open"] .col-factcheck,
+.shell[data-chat="open"] .col-updated {
+  display: none;
+}
 .sidebar {
   background: var(--bg-sunk);
   border-right: 1px solid var(--border);
@@ -105,6 +111,8 @@ code, .mono { font-family: var(--font-mono); }
   position: sticky;
   top: 0;
   height: 100vh;
+  overflow: hidden;
+  transition: opacity 150ms ease;
 }
 .brand {
   display: flex;
@@ -371,7 +379,16 @@ code, .mono { font-family: var(--font-mono); }
 .table tr:last-child td { border-bottom: none; }
 .table tr.row-clickable { cursor: pointer; }
 .table tr.row-clickable:hover { background: var(--bg-sunk); }
-.table .slug { font-family: var(--font-mono); font-size: 12.5px; color: var(--fg); }
+.table .slug {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--fg);
+  display: block;
+  max-width: 240px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .table .role { font-weight: 500; }
 .table .company { color: var(--fg-muted); font-size: 12.5px; }
 

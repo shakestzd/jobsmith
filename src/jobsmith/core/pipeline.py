@@ -643,6 +643,9 @@ def core_run_apply(
     phase_runner: Callable | None = None,
     # Bootstrap injected so core/pipeline.py stays CLI-free.
     bootstrap: Callable[[Path], None] | None = None,
+    # When set to "gather", "draft", or "render", treat all earlier phases as
+    # done and force-run from the named phase, bypassing the all-done early exit.
+    start_from_phase: str | None = None,
 ) -> int:
     """Orchestrate the three-phase apply pipeline — business-logic entry point.
 
@@ -796,8 +799,19 @@ def core_run_apply(
         name: phase_completed(manifest, name) for name, _ in _PHASES
     }
 
-    # All phases done → exit cleanly unless --force.
-    if all(phase_done.values()) and app_dir is not None:
+    # start_from_phase override: mark earlier phases done, force-run the target.
+    if start_from_phase is not None:
+        phase_order = [name for name, _ in _PHASES]
+        if start_from_phase in phase_order:
+            target_idx = phase_order.index(start_from_phase)
+            for i, name in enumerate(phase_order):
+                if i < target_idx:
+                    phase_done[name] = True
+                elif i == target_idx:
+                    phase_done[name] = False
+
+    # All phases done → exit cleanly unless --force or start_from_phase overrides.
+    if all(phase_done.values()) and app_dir is not None and start_from_phase is None:
         if events is not None and hasattr(events, "emit"):
             events.emit(
                 PipelineEvent(
@@ -854,6 +868,7 @@ def core_run_apply(
             db_slug_ref=db_slug_ref,
             db_status_ref=db_status_ref,
             jd_text_file=jd_text_file,
+            start_from_phase=start_from_phase,
         )
         if rc != 0:
             db_final_status = "failed"

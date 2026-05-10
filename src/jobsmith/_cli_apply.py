@@ -445,6 +445,14 @@ def _run_apply_phases(
         rdr.print_header(phase_num, total_phases, phase_name)
         rdr.start_phase(phase_name)
 
+        if db_conn is not None:
+            with contextlib.suppress(Exception):
+                db_conn.execute(
+                    "UPDATE apply_runs SET phase=? WHERE run_id=?",
+                    (phase_name, db_run_id),
+                )
+                db_conn.commit()
+
         # Step 3e2: open transcript context — every event lands in
         # apply_state_log filtered by run_id; the SSE producer polls that
         # table to feed the live transcript pane.
@@ -711,6 +719,7 @@ def run_apply(
     slug: str | None = None,
     run_id: str | None = None,
     cancel_event: "threading.Event | None" = None,
+    start_from_phase: str | None = None,
 ) -> int:
     """Run the three-phase apply pipeline.
 
@@ -772,6 +781,7 @@ def run_apply(
         db_slug_ref: list,
         db_status_ref: list,
         jd_text_file,
+        start_from_phase: str | None = None,
     ) -> int:
         """CLI-coupled phase runner: constructs session_id, prints banners,
         delegates to _run_apply_phases with the Rich renderer.
@@ -847,4 +857,5 @@ def run_apply(
         run_id=run_id,
         phase_runner=_phase_runner,
         bootstrap=_bootstrap_fn,
+        start_from_phase=start_from_phase,
     )

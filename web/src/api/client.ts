@@ -72,6 +72,22 @@ export async function apiGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export async function apiGetBlob(path: string): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  if (TOKEN) headers['Authorization'] = `Bearer ${TOKEN}`;
+  const res = await fetch(`${BASE_URL}${path}`, { headers });
+  await throwIfError(res);
+  return res.blob();
+}
+
+export async function apiGetText(path: string): Promise<string> {
+  const headers: Record<string, string> = {};
+  if (TOKEN) headers['Authorization'] = `Bearer ${TOKEN}`;
+  const res = await fetch(`${BASE_URL}${path}`, { headers });
+  await throwIfError(res);
+  return res.text();
+}
+
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
@@ -147,7 +163,7 @@ export interface ApplicationCreated {
 export function postApplication(
   url: string,
   slug: string,
-  options: { force?: boolean; jdText?: string } = {},
+  options: { force?: boolean; jdText?: string; startFromPhase?: string } = {},
 ): Promise<ApplicationCreated> {
   // bug-1c800e09: when paste-text mode is active, send jd_text so the backend
   // skips URL fetching (required for JS-rendered ATS portals like Eightfold).
@@ -158,6 +174,9 @@ export function postApplication(
   };
   if (options.jdText && options.jdText.trim() !== '') {
     body.jd_text = options.jdText;
+  }
+  if (options.startFromPhase) {
+    body.start_from_phase = options.startFromPhase;
   }
   return apiPost<ApplicationCreated>('/api/applications', body);
 }
@@ -173,6 +192,25 @@ export function buildEventsUrl(slug: string): string {
     return `${base}&token=${encodeURIComponent(TOKEN)}`;
   }
   return base;
+}
+
+// ── Chat API ─────────────────────────────────────────────────────────────
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  created_at?: string;
+}
+
+export async function chatHistory(slug: string): Promise<ChatMessage[]> {
+  const data = await apiGet<{ messages: ChatMessage[] }>(
+    `/api/chat/history?slug=${encodeURIComponent(slug)}`,
+  );
+  return data.messages;
+}
+
+export async function chatResetSession(slug: string): Promise<void> {
+  await apiPost('/api/chat/session/reset', { slug });
 }
 
 /**

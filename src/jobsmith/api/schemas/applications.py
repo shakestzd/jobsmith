@@ -53,6 +53,10 @@ class ApplicationCreate(BaseModel):
     # apply pipeline uses it instead of fetching ``url`` (needed for JS-rendered
     # ATS portals like Microsoft Eightfold). bug-1c800e09.
     jd_text: str | None = None
+    # When set to "gather", "draft", or "render", treat all earlier phases as
+    # complete and run only from the named phase onward. Lets callers re-run
+    # a single phase without --force resetting the whole pipeline.
+    start_from_phase: str | None = None
 
 
 class ApplicationCreated(BaseModel):

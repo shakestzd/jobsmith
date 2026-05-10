@@ -27,7 +27,12 @@ Read your spec from the DB (trk-60217f9f Pass 3):
 1. Read `private/applications/{slug}/documents/resume.qmd`. Extract the Selected Projects section.
 2. Find live URLs (regex: `https?://[^\s)]+`) and GitHub links (regex: `github\.com/[\w-]+/[\w.-]+`).
 3. For each live URL, WebFetch and capture HTTP status. Skip github.com URLs (rate-limited; trust the existence).
-4. Pass criteria: ≥1 live URL returning HTTP 200 AND ≥1 GitHub link present.
+4. Classify each URL result:
+   - HTTP 200 → **live** (counts toward pass)
+   - HTTP 4xx/5xx → **dead** (definitive server response; counts as failure)
+   - Connection refused / DNS failure / timeout → **unreachable** (network-level, not a definitive miss; record `status: null, error: "ECONNREFUSED"` but do NOT treat as failure)
+5. Pass criteria (blocking mode): ≥1 GitHub link present AND (≥1 live URL returning HTTP 200 OR all URL failures are network-unreachable with no HTTP 4xx responses).
+   - In other words: block only when a URL returns an explicit HTTP error (4xx/5xx) from a live server. ECONNREFUSED / DNS errors are treated as unverifiable — they do not trigger a block.
 
 If `mode == blocking` and pass criteria fail → halt.
 

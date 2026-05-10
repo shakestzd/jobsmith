@@ -11,6 +11,9 @@ include_router dependency in main.py.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from fastapi import APIRouter, Request
 
 from jobsmith.doctor import run_all_checks
@@ -26,6 +29,12 @@ def _map_status(ok: bool) -> str:
     return "pass" if ok else "fail"
 
 
+def _resolve_cwd() -> Path | None:
+    """Resolve the project root from JOBSMITH_REPO_ROOT env var, if set."""
+    repo_root = os.environ.get("JOBSMITH_REPO_ROOT", "").strip()
+    return Path(repo_root).resolve() if repo_root else None
+
+
 @router.get("/doctor", response_model=list[DoctorCheckResult])
 def get_doctor() -> list[DoctorCheckResult]:
     """Run all preflight checks and return the results.
@@ -33,7 +42,7 @@ def get_doctor() -> list[DoctorCheckResult]:
     Always returns HTTP 200 with the full list — callers inspect ``status``
     per item to determine if action is required.
     """
-    results = run_all_checks()
+    results = run_all_checks(cwd=_resolve_cwd())
     return [
         DoctorCheckResult(
             name=r.name,

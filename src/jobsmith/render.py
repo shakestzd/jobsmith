@@ -392,7 +392,6 @@ class ApplyRenderer:
                     self._filtered_tool_use_ids.add(tool_use_id)
 
             # Write transcript always
-            raw_dict = event.raw if isinstance(event.raw, dict) else {}
             tool_input_preview = ""
             if event.tool_input:
                 try:
@@ -406,7 +405,6 @@ class ApplyRenderer:
                     "type": "tool_call",
                     "tool_name": name,
                     "tool_input_truncated": tool_input_preview,
-                    "raw": raw_dict,
                 }
             )
 
@@ -467,7 +465,6 @@ class ApplyRenderer:
             tool_use_id = event.tool_name
 
             # Write transcript always
-            raw_dict = event.raw if isinstance(event.raw, dict) else {}
             result_preview = (event.tool_result or "")[:200]
             self._write_transcript(
                 {
@@ -476,7 +473,6 @@ class ApplyRenderer:
                     "type": "tool_result",
                     "tool_use_id": tool_use_id,
                     "result_truncated": result_preview,
-                    "raw": raw_dict,
                 }
             )
 
@@ -520,14 +516,12 @@ class ApplyRenderer:
 
         elif event.type == "text" and event.text:
             # Write transcript always
-            raw_dict = event.raw if isinstance(event.raw, dict) else {}
             self._write_transcript(
                 {
                     "ts": _now_iso(),
                     "phase": phase,
                     "type": "text",
                     "text_truncated": (event.text or "")[:200],
-                    "raw": raw_dict,
                 }
             )
 
@@ -538,28 +532,24 @@ class ApplyRenderer:
                     self.console.print(f"[dim italic]{stripped}[/dim italic]")
 
         elif event.type == "error":
-            raw_dict = event.raw if isinstance(event.raw, dict) else {}
             self._write_transcript(
                 {
                     "ts": _now_iso(),
                     "phase": phase,
                     "type": "error",
                     "error": event.error,
-                    "raw": raw_dict,
                 }
             )
             self.stop_phase()
             self.console.print(f"[red]✗ {event.error}[/red]")
 
         elif event.type == "phase_complete":
-            raw_dict = event.raw if isinstance(event.raw, dict) else {}
             self._write_transcript(
                 {
                     "ts": _now_iso(),
                     "phase": phase,
                     "type": "phase_complete",
                     "name": event.name,
-                    "raw": raw_dict,
                 }
             )
             self.stop_phase()
@@ -573,7 +563,6 @@ class ApplyRenderer:
             )
 
         elif event.type == "phase_failed":
-            raw_dict = event.raw if isinstance(event.raw, dict) else {}
             self._write_transcript(
                 {
                     "ts": _now_iso(),
@@ -581,7 +570,6 @@ class ApplyRenderer:
                     "type": "phase_failed",
                     "name": event.name,
                     "error": event.error,
-                    "raw": raw_dict,
                 }
             )
             self.stop_phase()

@@ -1,8 +1,4 @@
-// chrome.tsx — port of design/app/chrome.jsx
-//
-// Sidebar (nav rail with brand, primary CTA, sections, footer status) and
-// Topbar (breadcrumbs, ⌘K search, theme toggle, avatar) — both pure
-// presentational components driven by props from the parent shell.
+// chrome.tsx — Sidebar + Topbar components for the jobsmith shell.
 
 import { Fragment } from 'react';
 import { Icon } from './shared';
@@ -12,6 +8,7 @@ import type { IconName, ThemeName, ViewName } from '../types';
 // ── Sidebar ──────────────────────────────────────────────────────────────
 export interface SidebarProps {
   view: ViewName;
+  open: boolean;
   setView: (next: ViewName) => void;
   openNew: () => void;
 }
@@ -38,23 +35,19 @@ function NavItem({ id, icon, label, count, view, setView }: NavItemProps) {
   );
 }
 
-export function Sidebar({ view, setView, openNew }: SidebarProps) {
+export function Sidebar({ view, open, setView, openNew }: SidebarProps) {
   const { data: apps } = useApplications();
 
-  // Counts are undefined while loading; show nothing until data arrives.
   const counts = apps
     ? {
         dashboard: apps.length,
         running: apps.filter((a) => a.ui_phase === 'running').length,
-        // "review" is always 0 today — _derive_ui_phase in
-        // src/jobsmith/api/applications.py does not emit this ui_phase yet.
-        // When a "sent/submitted" domain concept is added, wire it here.
         review: apps.filter((a) => a.ui_phase === 'review').length,
       }
     : undefined;
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" style={{ overflow: 'hidden', opacity: open ? 1 : 0 }}>
       <div className="brand">
         <span className="brand-mark"></span>
         <span>jobsmith</span>
@@ -66,14 +59,7 @@ export function Sidebar({ view, setView, openNew }: SidebarProps) {
         onClick={openNew}
       >
         <Icon name="plus" size={13} /> new application
-        <span
-          style={{
-            marginLeft: 'auto',
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            opacity: 0.7,
-          }}
-        >
+        <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 11, opacity: 0.7 }}>
           ⌘N
         </span>
       </button>
@@ -85,7 +71,6 @@ export function Sidebar({ view, setView, openNew }: SidebarProps) {
       <div className="nav-section">Authoring</div>
       <NavItem id="master" icon="yaml" label="Master content" view={view} setView={setView} />
       <NavItem id="anchors" icon="flag" label="Mark anchors" view={view} setView={setView} />
-
       <NavItem id="site" icon="site" label="Listings site" view={view} setView={setView} />
       <NavItem id="feedback" icon="msg" label="Feedback" view={view} setView={setView} />
 
@@ -106,12 +91,29 @@ export interface TopbarProps {
   crumbs: string[];
   onSearch: () => void;
   onTheme: () => void;
+  onToggleChat: () => void;
+  onToggleSidebar: () => void;
+  sidebarOpen: boolean;
   theme: ThemeName;
 }
 
-export function Topbar({ crumbs, onSearch, onTheme, theme }: TopbarProps) {
+export function Topbar({ crumbs, onSearch, onTheme, onToggleChat, onToggleSidebar, sidebarOpen, theme }: TopbarProps) {
   return (
     <div className="topbar">
+      {/* Sidebar toggle — chevron rotates to indicate collapsed state */}
+      <button
+        className="btn ghost sm"
+        onClick={onToggleSidebar}
+        title={sidebarOpen ? 'hide sidebar' : 'show sidebar'}
+        style={{ flexShrink: 0 }}
+      >
+        <Icon
+          name="chev"
+          size={13}
+          style={{ transform: sidebarOpen ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }}
+        />
+      </button>
+
       <div className="crumbs">
         {crumbs.map((c, i) => (
           <Fragment key={i}>
@@ -120,32 +122,25 @@ export function Topbar({ crumbs, onSearch, onTheme, theme }: TopbarProps) {
           </Fragment>
         ))}
       </div>
+
       <div className="topbar-right">
         <div className="search" onClick={onSearch}>
           <Icon name="search" size={13} />
           <span className="grow">jump to slug, command, file…</span>
           <span className="kbd">⌘K</span>
         </div>
-        <button
-          className="btn ghost sm"
-          onClick={onTheme}
-          title={`theme: ${theme}`}
-        >
+        <button className="btn ghost sm" onClick={onToggleChat} title="chat">
+          <Icon name="msg" size={13} />
+        </button>
+        <button className="btn ghost sm" onClick={onTheme} title={`theme: ${theme}`}>
           <Icon name="sun" size={13} />
         </button>
         <div
           style={{
-            width: 28,
-            height: 28,
-            borderRadius: '50%',
-            background:
-              'linear-gradient(135deg, oklch(0.65 0.16 268), oklch(0.5 0.18 295))',
-            display: 'grid',
-            placeItems: 'center',
-            color: 'white',
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            fontWeight: 600,
+            width: 28, height: 28, borderRadius: '50%',
+            background: 'linear-gradient(135deg, oklch(0.65 0.16 268), oklch(0.5 0.18 295))',
+            display: 'grid', placeItems: 'center',
+            color: 'white', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600,
           }}
         >
           js

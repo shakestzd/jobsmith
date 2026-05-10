@@ -146,6 +146,7 @@ const STATUS_MAP: Record<AppStatus, StatusEntry> = {
   queued: { kind: 'default', label: 'queued' },
   draft: { kind: 'warn', label: 'draft' },
   rendered: { kind: 'success', label: 'rendered' },
+  incomplete: { kind: 'warn', label: 'incomplete' },
   failed: { kind: 'danger', label: 'failed' },
   gather: { kind: 'accent', label: 'gather' },
   review: { kind: 'warn', label: 'in review' },

@@ -112,8 +112,25 @@ Skip the snippet only if the JD explicitly requires existing US citizenship/PR a
    ```bash
    jobsmith fact-check private/applications/{slug}/cover-letter-draft.md --verbose
    ```
-   - Exit 0 → done. Proceed to step 6.
+   - Exit 0 → proceed to step 7.
    - Exit non-zero → ONE revision attempt. Read stderr, swap offending claims for verified ones from master, save, re-run. If still failing → DO NOT SAVE the draft. Halt with `reason=FACT_CHECK_FAILED` + the failing claims list.
+7. **Humanizer pass** — read `cover-letter-draft.md`, then rewrite it in-place to remove AI writing patterns. Apply these checks in order:
+   - **Vocabulary:** strip "pivotal", "delve", "testament", "underscore", "vibrant", "fostering", "landscape" (abstract noun), "tapestry", "crucial", "enhance/enhancing", "showcasing", "highlight" (as verb), "align with", "garner", "interplay". Replace with direct equivalents.
+   - **Em dash overuse:** replace `—` with a comma, period, or parenthetical wherever a simpler construction works.
+   - **-ing tail phrases:** remove present-participle phrases tacked on after the period that add fake depth ("…contributing to better outcomes", "…underscoring its importance"). Either cut them or fold the content into the main clause.
+   - **Copula avoidance:** replace "serves as", "stands as", "functions as" + noun with plain "is/are".
+   - **Rule of three:** if three parallel items appear in sequence mainly for rhetorical effect (not because all three are genuinely distinct), collapse to two or one.
+   - **Sycophantic opener:** if the opening sentence contains "excited to", "passionate about", "thrilled", or "honored to", rewrite it to open on a specific claim or observation instead.
+   - **Persuasive framing:** remove "At its core", "The real question is", "What really matters", "Fundamentally" when used as rhetorical warm-ups.
+   - **Hyphenated word pairs:** remove hyphens from "data-driven", "client-facing", "cross-functional", "decision-making", "high-quality", "end-to-end", "long-term" unless modifying an immediately following noun.
+   - **Voice calibration (if benchmark available):** if `inputs.benchmark_cover_letter_md` was provided, re-read 2–3 sentences from that file and ask: does the humanized draft match that sentence-length rhythm and register? Adjust if not.
+   - **Final self-audit:** ask "What makes this still obviously AI-generated?" and make one more targeted pass on anything that stands out.
+   - Write the revised text back to `cover-letter-draft.md` — overwrite in place.
+   - Run fact-check one final time to confirm the humanizer pass introduced no fabrications:
+     ```bash
+     jobsmith fact-check private/applications/{slug}/cover-letter-draft.md --verbose
+     ```
+     If this second check fails, restore the pre-humanizer version and log `humanizer_fact_check: FAILED` in the result envelope.
 
 ## Output
 
@@ -127,6 +144,8 @@ Persist your result envelope to the DB (trk-60217f9f Pass 3):
   "action": "drafted|skipped",
   "words": <int>,
   "fact_check": "PASSED|FAILED",
+  "humanizer_pass": "APPLIED|SKIPPED",
+  "humanizer_fact_check": "PASSED|FAILED|N/A",
   "exemplars_referenced": [...],
   "salutation": "Dear {Name}|Hello",
   "summary": "..."

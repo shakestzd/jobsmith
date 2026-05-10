@@ -11,7 +11,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { SampleApp, AppPhase, AppStatus, IconName } from '../types';
 import { Icon, Badge, StatusBadge } from './shared';
 import { useApplication } from '../api/hooks';
-import { JobsmithApiError, postApplication, buildEventsUrl, redactSensitive } from '../api/client';
+import { JobsmithApiError, postApplication, buildEventsUrl, redactSensitive, apiGet, apiPost, apiGetBlob, apiGetText } from '../api/client';
 import type {
   ApplicationDetail as ApiApplicationDetail,
   ApplicationArtifact as ApiApplicationArtifact,
@@ -185,7 +185,7 @@ function phaseDuration(n: number): string {
 
 // ── Tab type ─────────────────────────────────────────────────────────────────
 
-type TabName = 'pipeline' | 'artifacts' | 'factcheck' | 'anchors' | 'config';
+type TabName = 'pipeline' | 'review' | 'documents' | 'artifacts' | 'factcheck' | 'anchors' | 'config';
 
 // ── Progress map type ────────────────────────────────────────────────────────
 
@@ -202,6 +202,15 @@ function deriveProgress(app: SampleApp): {
   if (app.status === 'rendered' || app.status === 'done') {
     return {
       progress: { 1: 100, 2: 100, 3: 100 },
+      activePhase: 3,
+      failedPhaseNum: null,
+    };
+  }
+
+  // Incomplete: phases 1+2 done, render not yet run
+  if ((app.status as string) === 'incomplete') {
+    return {
+      progress: { 1: 100, 2: 100, 3: 0 },
       activePhase: 3,
       failedPhaseNum: null,
     };
@@ -585,12 +594,325 @@ function ArtifactsTab({ artifacts }: ArtifactsTabProps) {
   );
 }
 
-// PdfPreview was removed in feat-83d6cf54 (GH#52). It previously rendered a
-// hardcoded resume mockup ("Recurly Engineering · Senior Engineer",
-// "11m → 2m20s deploy time", "$140k/yr recovered", etc.) regardless of the
-// real master/work.yml content. The new ArtifactsTab renders artifact JSON
-// directly; rendered-PDF preview will return when an API endpoint serves
-// the bytes.
+// ── DocumentsTab ─────────────────────────────────────────────────────────────
+
+function DocumentsTab({ slug }: { slug: string }) {
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [coverLetter, setCoverLetter] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [missing, setMissing] = useState(false);
+
+  useEffect(() => {
+    let blobUrl: string | null = null;
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const [pdfBlob, clText] = await Promise.allSettled([
+          apiGetBlob(`/api/applications/${slug}/documents/resume.pdf`),
+          apiGetText(`/api/applications/${slug}/documents/cover-letter-draft.md`),
+        ]);
+        if (cancelled) return;
+        if (pdfBlob.status === 'fulfilled') {
+          blobUrl = URL.createObjectURL(pdfBlob.value);
+          setPdfBlobUrl(blobUrl);
+        }
+        if (clText.status === 'fulfilled') {
+          setCoverLetter(clText.value);
+        }
+        if (pdfBlob.status === 'rejected' && clText.status === 'rejected') {
+          setMissing(true);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void load();
+
+    return () => {
+      cancelled = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
+
+  if (loading) {
+    return (
+      <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-muted)' }}>
+        loading documents…
+      </div>
+    );
+  }
+
+  if (missing) {
+    return (
+      <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-muted)' }}>
+        <div className="mono-sm" style={{ marginBottom: 6 }}>no documents yet</div>
+        <div style={{ fontSize: 13 }}>
+          the render phase must complete to produce <code>resume.pdf</code> and the cover letter.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {pdfBlobUrl && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>
+            resume.pdf
+          </div>
+          <iframe
+            src={pdfBlobUrl}
+            title="resume.pdf"
+            style={{ width: '100%', height: 700, border: 'none', display: 'block' }}
+          />
+        </div>
+      )}
+      {coverLetter && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>
+            cover letter draft
+          </div>
+          <pre style={{ margin: 0, padding: '16px', whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.7, fontFamily: 'var(--font-sans, inherit)' }}>
+            {coverLetter}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── ReviewTab ────────────────────────────────────────────────────────────────
+
+interface ReviewState {
+  cover_letter: string | null;
+  fit_score: number | null;
+  fit_rationale: string | null;
+  fit_concerns: string[];
+  review_status: 'pending' | 'approved' | 'needs-revision';
+  reviewed_at: string | null;
+  canonical_slug: string;
+}
+
+const REVIEW_STATUS_LABELS: Record<string, { label: string; color: string }> = {
+  pending:          { label: 'pending review', color: 'var(--fg-muted)' },
+  approved:         { label: 'approved',        color: 'var(--success, #27ae60)' },
+  'needs-revision': { label: 'needs revision',  color: 'var(--warn, #e67e22)' },
+};
+
+function ReviewTab({ slug }: { slug: string }) {
+  const [state, setState] = useState<ReviewState | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [statusSaving, setStatusSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let blobUrl: string | null = null;
+    async function load() {
+      try {
+        const [reviewData, pdfBlob] = await Promise.allSettled([
+          apiGet<ReviewState>(`/api/applications/${slug}/review`),
+          apiGetBlob(`/api/applications/${slug}/documents/resume.pdf`),
+        ]);
+        if (cancelled) return;
+        if (reviewData.status === 'fulfilled') {
+          setState(reviewData.value);
+        }
+        if (pdfBlob.status === 'fulfilled') {
+          blobUrl = URL.createObjectURL(pdfBlob.value);
+          setPdfBlobUrl(blobUrl);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
+
+  const handleEdit = () => {
+    setDraft(state?.cover_letter ?? '');
+    setSaveError(null);
+    setEditing(true);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const result = await apiPost<{ saved: boolean; words: number }>(
+        `/api/applications/${slug}/cover-letter`,
+        { text: draft },
+      );
+      if (result.saved) {
+        setState(s => s ? { ...s, cover_letter: draft } : s);
+        setEditing(false);
+      }
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSetStatus = async (newStatus: ReviewState['review_status']) => {
+    setStatusSaving(true);
+    try {
+      await apiPost(`/api/applications/${slug}/review-status`, { status: newStatus });
+      setState(s => s ? { ...s, review_status: newStatus, reviewed_at: new Date().toISOString() } : s);
+    } finally {
+      setStatusSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-muted)' }}>
+        loading review…
+      </div>
+    );
+  }
+
+  const wordCount = (state?.cover_letter ?? '').trim().split(/\s+/).filter(Boolean).length;
+  const statusInfo = REVIEW_STATUS_LABELS[state?.review_status ?? 'pending'];
+  const fitPct = state?.fit_score != null ? Math.round(state.fit_score * 100) : null;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Header bar */}
+      <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        {fitPct != null && (
+          <span style={{ fontWeight: 600, fontSize: 13 }}>
+            fit score: <span style={{ color: fitPct >= 75 ? 'var(--success, #27ae60)' : fitPct >= 55 ? 'var(--warn, #e67e22)' : 'var(--danger, #c0392b)' }}>{fitPct}%</span>
+          </span>
+        )}
+        <span style={{ fontSize: 13, color: statusInfo.color, fontWeight: 500 }}>
+          ● {statusInfo.label}
+        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <button
+            className="btn sm"
+            style={{ opacity: state?.review_status === 'approved' ? 0.5 : 1 }}
+            disabled={statusSaving || state?.review_status === 'approved'}
+            onClick={() => { void handleSetStatus('approved'); }}
+          >
+            ✓ approve
+          </button>
+          <button
+            className="btn sm ghost"
+            style={{ opacity: state?.review_status === 'needs-revision' ? 0.5 : 1 }}
+            disabled={statusSaving || state?.review_status === 'needs-revision'}
+            onClick={() => { void handleSetStatus('needs-revision'); }}
+          >
+            ↩ needs revision
+          </button>
+        </div>
+      </div>
+
+      {/* Split pane */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 420px', gap: 12, alignItems: 'start' }}>
+        {/* Left: resume PDF */}
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>
+            resume.pdf
+          </div>
+          {pdfBlobUrl ? (
+            <iframe
+              src={pdfBlobUrl}
+              title="resume.pdf"
+              style={{ width: '100%', height: 780, border: 'none', display: 'block' }}
+            />
+          ) : (
+            <div style={{ padding: 24, textAlign: 'center', color: 'var(--fg-muted)', fontSize: 13 }}>
+              resume not yet rendered — run phase 3
+            </div>
+          )}
+        </div>
+
+        {/* Right: cover letter + fit score */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* Cover letter card */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>cover letter</span>
+              <span className="mono-sm" style={{ color: 'var(--fg-muted)' }}>{wordCount}w</span>
+              {!editing && (
+                <button className="btn sm ghost" onClick={handleEdit}>edit</button>
+              )}
+            </div>
+            {editing ? (
+              <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <textarea
+                  value={draft}
+                  onChange={e => setDraft(e.target.value)}
+                  style={{
+                    width: '100%', minHeight: 360, padding: 10,
+                    fontSize: 13, lineHeight: 1.7, fontFamily: 'var(--font-sans, inherit)',
+                    border: '1px solid var(--border)', borderRadius: 4,
+                    background: 'var(--surface, #fff)', color: 'var(--fg)',
+                    resize: 'vertical', boxSizing: 'border-box',
+                  }}
+                />
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button className="btn primary sm" onClick={() => { void handleSave(); }} disabled={saving}>
+                    {saving ? 'saving…' : 'save'}
+                  </button>
+                  <button className="btn sm ghost" onClick={() => { setEditing(false); setSaveError(null); }} disabled={saving}>
+                    cancel
+                  </button>
+                  <span className="mono-sm" style={{ color: 'var(--fg-muted)', marginLeft: 'auto' }}>
+                    {draft.trim().split(/\s+/).filter(Boolean).length}w
+                  </span>
+                </div>
+                {saveError && (
+                  <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>{saveError}</span>
+                )}
+              </div>
+            ) : (
+              <pre style={{ margin: 0, padding: '14px 16px', whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.7, fontFamily: 'var(--font-sans, inherit)' }}>
+                {state?.cover_letter ?? 'no cover letter yet — run phase 3'}
+              </pre>
+            )}
+          </div>
+
+          {/* Fit score rationale */}
+          {state?.fit_rationale && (
+            <div className="card" style={{ padding: '12px 14px' }}>
+              <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                fit rationale
+              </div>
+              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>{state.fit_rationale}</p>
+            </div>
+          )}
+
+          {/* Concerns */}
+          {state?.fit_concerns && state.fit_concerns.length > 0 && (
+            <div className="card" style={{ padding: '12px 14px' }}>
+              <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8, color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                concerns
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {state.fit_concerns.map((c, i) => (
+                  <li key={i} style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--fg-muted)' }}>{c}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── FactCheckTab ─────────────────────────────────────────────────────────────
 
@@ -1019,6 +1341,7 @@ function fromApi(slug: string, api: ApiApplicationDetail | undefined): SampleApp
     phaseStr === 'render' ? 3 :
     api?.status === 'rendered' ? 3 :
     api?.status === 'done' ? 3 :
+    api?.status === 'incomplete' ? 2 :
     null;
   const updatedAt = api?.finished_at ?? api?.started_at ?? null;
   return {
@@ -1356,6 +1679,34 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     }
   }, [slug, app.url, isComplete, hasLaunchableUrl, subscribeToEvents]);
 
+  // ── Run render phase only ────────────────────────────────────────────
+  const handleRunRender = useCallback(async () => {
+    if (!hasLaunchableUrl) {
+      setRunError(
+        'this slug has no recorded job URL — use ' +
+        '`jobsmith apply --force <url>` from the CLI.',
+      );
+      return;
+    }
+    setRunError(null);
+    setProgress({ 1: 100, 2: 100, 3: 0 });
+    setActivePhase(3);
+    setSseStatus(null);
+    setFailedPhaseNum(null);
+    setEvents([{ ts: now(), lvl: 'info', msg: `<span class="dim">apply</span> render <span class="dim">slug=</span>${slug}` }]);
+    setRunning(true);
+    try {
+      await postApplication(app.url, slug, { startFromPhase: 'render' });
+      subscribeToEvents(slug);
+    } catch (err) {
+      setRunning(false);
+      const raw = err instanceof JobsmithApiError ? err.message : String(err);
+      const msg = redactSensitive(raw);
+      setRunError(msg);
+      setEvents(ev => [...ev, { ts: now(), lvl: 'warn', msg: `launch failed: ${msg}` }]);
+    }
+  }, [slug, app.url, hasLaunchableUrl, subscribeToEvents]);
+
   // ── Cancel handler ───────────────────────────────────────────────────
   const handleCancel = useCallback(() => {
     if (esRef.current) {
@@ -1398,6 +1749,37 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
       }
     };
   }, [slug, apiRunId, apiStatus, subscribeToEvents]);
+
+  // Seed the event log from the stored transcript for completed/failed runs.
+  // For active runs, the live SSE stream populates events; replaying the
+  // transcript would duplicate entries. Only fires when the run is done.
+  useEffect(() => {
+    if (!apiDetail) return;
+    if (apiStatus === 'running') return;
+    let cancelled = false;
+    async function loadTranscript() {
+      try {
+        const rows = await apiGet<Array<{ run_id: string; payload: Record<string, unknown> }>>(
+          `/api/applications/${slug}/transcript`,
+        );
+        if (cancelled) return;
+        const logEvents: LogEvent[] = [];
+        for (const row of rows) {
+          const ev = transcriptToLogEvent({ run_id: row.run_id, payload: row.payload });
+          if (ev) logEvents.push(ev);
+        }
+        if (logEvents.length > 0) {
+          setEvents(logEvents);
+        }
+      } catch {
+        // Transcript endpoint unavailable or empty — leave event log as-is.
+      }
+    }
+    void loadTranscript();
+    return () => { cancelled = true; };
+  // Only re-run when the slug or run_id changes — not on every render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug, apiRunId]);
 
   // Mark not-running when all phases reach 100%.
   const allDone = progress[1] >= 100 && progress[2] >= 100 && progress[3] >= 100;
@@ -1460,9 +1842,25 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
           </div>
         </div>
         <div className="actions">
-          <button className="btn"><Icon name="doc" size={13} /> open in marimo</button>
-          <button className="btn"><Icon name="folder" size={13} /> reveal in finder</button>
-          {!running && (
+          <button className="btn" onClick={() => {
+            void apiPost(`/api/applications/${slug}/launch-review`, {}).then((d: unknown) => {
+              window.open((d as {url: string}).url, '_blank');
+            }).catch(console.error);
+          }}><Icon name="doc" size={13} /> open in marimo</button>
+          <button className="btn" onClick={() => {
+            void apiPost(`/api/applications/${slug}/reveal`, {}).catch(console.error);
+          }}><Icon name="folder" size={13} /> reveal in finder</button>
+          {!running && (app.status as string) === 'incomplete' && (
+            <button
+              className="btn primary"
+              onClick={() => { void handleRunRender(); }}
+              disabled={!hasLaunchableUrl}
+              title="Run the render phase (phase 3) only — gather and draft are already complete."
+            >
+              <Icon name="play" size={12} /> run render phase
+            </button>
+          )}
+          {!running && (app.status as string) !== 'incomplete' && (
             <button
               className="btn primary"
               onClick={() => { void handleReRun(); }}
@@ -1534,12 +1932,14 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
       </div>
 
       <div className="tabs">
-        {(['pipeline', 'artifacts', 'factcheck', 'anchors', 'config'] as TabName[]).map(t => (
+        {(['pipeline', 'review', 'documents', 'artifacts', 'factcheck', 'anchors', 'config'] as TabName[]).map(t => (
           <div key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t}</div>
         ))}
       </div>
 
       {tab === 'pipeline' && <PipelineTab events={events} running={running} phase={activePhase} progress={progress} sseStatus={sseStatus} failedPhaseNum={failedPhaseNum} />}
+      {tab === 'review' && <ReviewTab slug={slug} />}
+      {tab === 'documents' && <DocumentsTab slug={slug} />}
       {tab === 'artifacts' && <ArtifactsTab artifacts={apiDetail?.artifacts ?? []} />}
       {tab === 'factcheck' && <FactCheckTab artifacts={apiDetail?.artifacts ?? []} />}
       {tab === 'anchors' && <AnchorCheckTab artifacts={apiDetail?.artifacts ?? []} />}
