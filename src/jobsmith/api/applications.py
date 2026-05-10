@@ -453,11 +453,17 @@ def list_documents(slug: str) -> list[str]:
         conn.close()
     if docs_dir is None:
         return []
-    return sorted(
+    names: set[str] = {
         f.name
         for f in docs_dir.iterdir()
         if f.is_file() and f.suffix in _ALLOWED_DOC_SUFFIXES and not f.name.startswith(".")
-    )
+    }
+    # cover-letter-draft.md lives at the app root (parent of documents/)
+    app_root = docs_dir.parent
+    cl = app_root / "cover-letter-draft.md"
+    if cl.exists():
+        names.add(cl.name)
+    return sorted(names)
 
 
 @router.get("/applications/{slug}/documents/{filename}")
@@ -479,10 +485,21 @@ def get_document(slug: str, filename: str) -> FileResponse:
         raise HTTPException(status_code=404, detail=f"No documents directory for {slug!r}")
 
     file_path = (docs_dir / filename).resolve()
-    if not str(file_path).startswith(str(docs_dir.resolve())):
-        raise HTTPException(status_code=403, detail="Access denied")
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail=f"Document {filename!r} not found")
+    docs_root = docs_dir.resolve()
+    app_root = docs_root.parent
+
+    # cover-letter-draft.md lives at the app root, not inside documents/
+    if filename == "cover-letter-draft.md":
+        alt = (app_root / filename).resolve()
+        if alt.exists() and str(alt).startswith(str(app_root)):
+            file_path = alt
+        elif not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"Document {filename!r} not found")
+    else:
+        if not str(file_path).startswith(str(docs_root)):
+            raise HTTPException(status_code=403, detail="Access denied")
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail=f"Document {filename!r} not found")
 
     media = "application/pdf" if file_path.suffix == ".pdf" else "text/plain; charset=utf-8"
     return FileResponse(str(file_path), media_type=media)
