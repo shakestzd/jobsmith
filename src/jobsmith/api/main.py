@@ -160,6 +160,10 @@ def _maybe_warn_fs_only_state(repo_root: Path, db_path: Path) -> None:
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """FastAPI lifespan handler: ingest master YAML and warn on FS-only state."""
+    val = os.environ.get("JOBSMITH_REPO_ROOT", "")
+    app.state.repo_root = Path(val).resolve() if val else Path.cwd()
+    _log.info("repo_root resolved to %s", app.state.repo_root)
+
     reload_master = os.environ.get("JOBSMITH_RELOAD_MASTER", "0") == "1"
     _try_ingest_master(reload=reload_master)
 
