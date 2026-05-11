@@ -1,0 +1,1312 @@
+meta:
+    id: plan-41b28580
+    track_id: trk-299ae137
+    title: 0.9 Job sourcing pipeline — Gmail-API + extensible parsers
+    description: |
+        Inbox-as-firehose: poll Gmail via direct API (cross-platform — no AppleScript / no MCP), route messages through a parser registry, normalize into a single JobCandidate type with provenance, dedup across sources, prescore against master, surface in CLI + web triage. Layered architecture: Source → Envelope → Parser → JobCandidate. Per-platform parsers reuse shared helpers (salary, time, location, URL canonicalization, dedup keys). Adding a new platform = one parser file + golden fixtures. MVP covers LinkedIn + JobRight; Indeed and Glassdoor land as later slices to prove the abstraction; RSS and ATS-scraper sources extend beyond email. Climatebase is treated as a first-class email source (slice 7) given the user's climate-sector career focus.
+    created_at: "2026-05-04"
+    status: active
+    created_by: claude-opus
+    version: 3
+design:
+    problem: |
+        Job sourcing today is manual: the user reads two inboxes (LinkedIn alerts + JobRight digests) for ~25 unique candidates per day after dedup, copies a URL into `jobsmith apply`, and discards the rest. There's no persisted candidate store, no cross-source merge (same job from LinkedIn and JobRight creates two manual lookups), no prescoring against master, no triage rules (block companies / titles / keywords), no feedback loop from dismissals back to master.yaml. Validation pass already confirmed: LinkedIn canonical job URLs (`/jobs/view/<id>/`) and JobRight URLs (`jobright.ai/jobs/info/<hex>`) are publicly fetchable; LinkedIn emails have plaintext alternatives, JobRight emails are HTML-only (Gmail MCP surfaces neither HTML nor raw, hence the direct Gmail API decision). Inbox audit additionally surfaces alerts@climatebase.org ships HTML-only digests every 2-3 days with SendGrid-wrapped URLs — currently dropped silently because no parser exists.
+    goals:
+        - '**Inbox → store** — Gmail messages from any registered job platform land in `job_candidates` automatically; user only triages, never copies URLs'
+        - '**Cross-platform** — runs on macOS / Linux / Windows / Docker / cron; no AppleScript, no Mail.app, no Claude session required'
+        - '**Extensible** — adding Indeed / Glassdoor / Wellfound is one parser file plus golden fixtures; the dispatcher and helpers do not change'
+        - '**Dedup-first** — same job sighted across multiple sources merges into one candidate row with provenance preserved; user makes one triage decision'
+        - '**Prescored top-N** — candidates ranked by reuse of `apply-fit-scorer` against master so the user only reviews the top 10 per day, not 25'
+        - '**Closed-loop triage** — dismissals (by company, title pattern, keyword) become master.yaml exclusion suggestions reviewed by the user'
+        - '**Halt over fabricate inherited** — no auto-apply; triage = saved / dismissed / queued for /apply pipeline'
+        - '**Climate-sector source coverage** — Climatebase emails ingested first-class with a SendGrid-redirect resolver that doubles as a reusable helper for any tracker-wrapping email source.'
+    constraints:
+        - 'Cross-platform: do NOT depend on AppleScript / Mail.app / IMAP single-vendor / MCP runtime. Direct Gmail API + OAuth refresh-token flow only.'
+        - 'Per-source PARSERS are pure functions: input = parsed `email.message.Message` envelope, output = `ParseResult(candidates, alert_metadata, warnings)`. No side effects, no I/O.'
+        - Shared HELPERS in `src/jobsmith/sources/helpers/` are the reusable core. Parsers compose helpers; parsers do not duplicate parsing logic.
+        - Master YAMLs stay read-only. The triage feedback loop SUGGESTS additions to a separate `private/triage-rules.yaml`; it never writes assets/content/*.yml.
+        - Inherits 0.6 spike Option C (skip PocketBase). All persistence in the existing `private/jobsmith.db` SQLite.
+        - 'Dedup is two-stage: source-specific external_id (when present), then `(normalized_company, normalized_title, normalized_location)` SHA1 fallback for cross-source merge.'
+        - 'Out of scope: auto-applying, sourcing from Twitter/LinkedIn DMs, auto-master-edits, multi-user concurrency, hosted/SaaS.'
+    approved: false
+    comment: ""
+slices:
+    - id: slice-1
+      num: 1
+      title: Schema — job_candidates + email_sightings + triage_decisions + triage_rules
+      what: |
+        Add three tables + Pydantic models + a numbered SQL migration. All in
+        `private/jobsmith.db` (the existing 0.8 SQLite).
+
+        Migration: `src/jobsmith/migrations/00X_job_candidates.sql` (verify next
+        number — current highest is `008_llm_cache.sql`, so 009 is next).
+        Update `src/jobsmith/db.py:_PIPELINE_MIGRATIONS` (hardcoded list — adding a
+        file alone is silently ignored, see 0.8 plan slice 4).
+
+        Tables:
+        ```
+        job_candidates (
+          id INTEGER PRIMARY KEY,
+          dedup_key TEXT NOT NULL UNIQUE,        -- SHA1(normalized_company, normalized_title, normalized_location)
+          title TEXT NOT NULL,
+          company TEXT NOT NULL,
+          company_normalized TEXT NOT NULL,
+          location TEXT,
+          url TEXT NOT NULL,                      -- canonical, tracking-stripped
+          description_snippet TEXT,
+          salary_min INT, salary_max INT,
+          salary_currency TEXT DEFAULT 'USD',
+          salary_period TEXT DEFAULT 'yr',        -- 'yr' | 'mo' | 'hr'
+          match_score REAL,                       -- aggregated max across sightings
+          prescore REAL,                          -- jobsmith-side, populated by slice 8
+          prescore_at TEXT,
+          posted_at TEXT,
+          discovered_at TEXT NOT NULL,
+          triage_status TEXT DEFAULT 'new',       -- new | saved | dismissed | queued | applied
+          triage_decided_at TEXT,
+          triage_reason TEXT
+        )
+        CREATE INDEX idx_job_candidates_dedup ON job_candidates(dedup_key);
+        CREATE INDEX idx_job_candidates_status ON job_candidates(triage_status);
+
+        email_sightings (
+          id INTEGER PRIMARY KEY,
+          candidate_id INTEGER NOT NULL REFERENCES job_candidates(id) ON DELETE CASCADE,
+          source TEXT NOT NULL,                   -- 'linkedin', 'jobright', 'indeed', ...
+          external_id TEXT,                       -- platform-specific job ID
+          envelope_id TEXT NOT NULL,              -- Gmail message id / RSS entry id
+          envelope_received_at TEXT NOT NULL,
+          match_score REAL,                       -- per-source (e.g., JobRight 0.93)
+          parser_name TEXT NOT NULL,
+          parser_version TEXT NOT NULL,
+          raw_card_text TEXT                      -- the raw extracted card for replay
+        )
+        CREATE INDEX idx_sightings_candidate ON email_sightings(candidate_id);
+        CREATE UNIQUE INDEX idx_sightings_envelope ON email_sightings(envelope_id, source, external_id);
+
+        triage_decisions (
+          id INTEGER PRIMARY KEY,
+          candidate_id INTEGER NOT NULL REFERENCES job_candidates(id) ON DELETE CASCADE,
+          decision TEXT NOT NULL,                 -- save | dismiss | queue | apply
+          reason TEXT,
+          decided_at TEXT NOT NULL,
+          rule_matched TEXT                       -- triage-rule id if auto-decision
+        )
+        ```
+
+        `private/triage-rules.yaml` (NEW, gitignored):
+        ```yaml
+        blocks:
+          - { kind: company_exact, value: "Some Bad Co", reason: "anti-employee" }
+          - { kind: title_regex, value: "(?i)senior manager", reason: "not IC" }
+          - { kind: company_keyword, value: "consulting", reason: "out of scope" }
+        ```
+
+        Pydantic models in `src/jobsmith/sources/models.py` mirror the tables.
+      why: |
+        Foundation. Every later slice writes to or reads from these tables. The
+        triage_rules YAML lives separately because it's user-editable and
+        unstructured (regex patterns); keeping it out of the DB makes the
+        feedback loop reviewable in git.
+      files:
+        - src/jobsmith/migrations/009_job_candidates.sql
+        - src/jobsmith/db.py
+        - src/jobsmith/sources/__init__.py
+        - src/jobsmith/sources/models.py
+        - tests/test_sources_schema.py
+      deps: []
+      done_when:
+        - Migration applies cleanly to a fresh DB and is idempotent on re-run
+        - _PIPELINE_MIGRATIONS in db.py includes the new migration filename
+        - Three tables exist with the columns + indexes shown
+        - Pydantic models round-trip a canonical JobCandidate / EmailSighting / TriageDecision
+        - tests/test_sources_schema.py covers the migration + each model
+      effort: M
+      risk: Low
+      tests: |
+        Unit: TestMigration_Apply — fresh DB, run migration, assert tables/indexes.
+        Unit: TestMigration_Idempotent — apply twice, no error.
+        Unit: TestModels_Roundtrip — populate, dict()->dump->load, equality.
+        Regression: existing 008 migration tests pass; existing _PIPELINE_MIGRATIONS callers don't break.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-2
+      num: 2
+      title: Gmail API OAuth client — cross-platform, headless
+      what: |
+        Direct Gmail API client (NOT MCP, NOT AppleScript) so the pipeline runs on
+        Linux / Windows / macOS / Docker / cron without a Claude session.
+
+        `src/jobsmith/sources/gmail_client.py`:
+        - `GmailClient(credentials_path: Path = Path('private/gmail-credentials.json'),
+          token_path: Path = Path('private/gmail-token.json'))` — wraps
+          `google-api-python-client` + `google-auth-oauthlib`.
+        - `authorize()` — first-run browser OAuth flow; persists refresh token to
+          `private/gmail-token.json` mode 0600. Auto-refresh on subsequent runs.
+        - `list_messages(query: str, since: datetime | None = None) -> Iterable[GmailMessageRef]`
+          — wraps `users.messages.list` with paging.
+        - `get_message_raw(message_id: str) -> bytes` — calls
+          `users.messages.get(format='raw')`, base64url-decodes the result, returns
+          RFC822 bytes parseable by `email.message_from_bytes`.
+        - `get_envelope(message_id: str) -> Envelope` — convenience: fetch raw +
+          parse + wrap as Envelope (slice 3 defines Envelope).
+
+        `jobsmith sources auth` typer subcommand triggers `authorize()`.
+
+        Add deps to `[api]` optional group: `google-api-python-client>=2.130`,
+        `google-auth-oauthlib>=1.2`, `google-auth-httplib2>=0.2`.
+
+        Scope: `https://www.googleapis.com/auth/gmail.readonly` (read-only —
+        writes are unnecessary for ingest).
+
+        Hard-fail at startup if `private/gmail-credentials.json` is missing with a
+        clear message linking to Google Cloud Console setup steps in
+        `docs/sources/gmail-setup.md` (this slice ships the doc too).
+      why: |
+        The MCP cannot return HTML bodies (validated empirically — see
+        `meta.description`). Apple Mail / AppleScript is macOS-only.
+        `q-email-source` was answered `option-gmail-api` because it's the only
+        cross-platform path that handles both LinkedIn (plaintext-multipart) and
+        JobRight (HTML-only). Token-store + auto-refresh means a one-time
+        browser login, then headless forever.
+      files:
+        - src/jobsmith/sources/gmail_client.py
+        - src/jobsmith/sources/__init__.py
+        - src/jobsmith/cli.py
+        - pyproject.toml
+        - docs/sources/gmail-setup.md
+        - tests/test_sources_gmail_client.py
+      deps: []
+      done_when:
+        - '`uv pip install -e ''.[api]''` resolves the new google-* deps'
+        - '`jobsmith sources auth` runs OAuth flow and persists token at private/gmail-token.json mode 0600'
+        - '`get_message_raw` returns RFC822 bytes parseable by stdlib email module'
+        - Refresh-token auto-refresh works without browser interaction on second run
+        - docs/sources/gmail-setup.md walks through Google Cloud Console OAuth client creation
+        - Hard-fail at startup with clear message if private/gmail-credentials.json missing (not per-call 401)
+      effort: M
+      risk: Med
+      tests: |
+        Unit: TestGmailClient_GetMessageRaw — httplib mock returns base64url-encoded RFC822, assert decoded bytes.
+        Unit: TestGmailClient_AutoRefresh — mock 401 + refresh-token flow, assert token refreshed.
+        Unit: TestGmailClient_NoCredentials — missing file, RuntimeError at startup.
+        Integration (marked @pytest.mark.requires_gmail): live OAuth flow — skipped in CI.
+        Regression: existing `[api]` deps + tests still pass.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-3
+      num: 3
+      title: Parser protocol + shared helpers (the reusable core)
+      what: |
+        The foundational abstraction. Adding a new platform later (Indeed, Glassdoor)
+        is mechanical because of this slice.
+
+        `src/jobsmith/sources/protocol.py`:
+        ```python
+        @dataclass
+        class Envelope:
+            envelope_id: str           # Gmail message id (or RSS entry id later)
+            source_kind: Literal['email', 'rss', 'http']
+            received_at: datetime
+            headers: dict[str, str]    # Subject, From, Date, ...
+            plaintext_body: str | None
+            html_body: str | None
+            raw_bytes: bytes | None
+
+        @dataclass
+        class ParseResult:
+            candidates: list[JobCandidate]
+            alert_metadata: AlertMetadata   # search keyword, alert kind (digest/instant)
+            parser_warnings: list[str]      # for golden-test regression detection
+
+        class JobAlertParser(Protocol):
+            name: str                       # 'linkedin', 'jobright', ...
+            parser_version: str
+            sender_patterns: list[re.Pattern]
+            subject_patterns: list[re.Pattern]   # optional secondary check
+
+            def matches(self, env: Envelope) -> bool: ...
+            def parse(self, env: Envelope) -> ParseResult: ...
+
+        def register_parser(parser: type[JobAlertParser]) -> None: ...
+        def parse_envelope(env: Envelope) -> ParseResult: ...   # iterates registry, picks first match
+        ```
+
+        `src/jobsmith/sources/helpers/`:
+        - `salary.py:parse_salary(text)` — handles `$160K/yr - $200K/yr`,
+          `$70/hr - $85/hr`, `$80,000 - $140,000`, `€60K - €80K`. Returns
+          `SalaryRange | None`.
+        - `time_parse.py:parse_relative_time(text, *, ref)` — handles "5 hours ago",
+          "20 minutes ago", "yesterday", "just posted", "2 days ago", "3 weeks ago".
+        - `location.py:normalize_location(loc)` — returns `NormalizedLocation`
+          with `city`, `state`, `country`, `remote_policy`. Handles "NYC Metro Area, US",
+          "Remote", "Hybrid - Austin, TX".
+        - `company.py:normalize_company_name(name)` — strips Inc/LLC/Ltd/Corp/Co.,
+          casefolds, trims; for dedup.
+        - `url.py:normalize_url(url, *, source)` — per-source canonicalization.
+          linkedin: `/jobs/view/<id>/`. jobright: `/jobs/info/<hex>`. indeed:
+          `/viewjob?jk=<key>`. glassdoor: strip `s` and `pos` params.
+        - `dedup.py:compute_dedup_key(company, title, location)` — SHA1 of
+          normalized tuple; deterministic.
+        - `html.py:extract_anchors(html)` — list of (text, href) tuples. Reuses
+          BeautifulSoup4.
+        - `email_envelope.py:envelope_from_rfc822(raw)` — builds Envelope from
+          RFC822 bytes. Walks MIME tree, extracts plaintext_body and html_body
+          regardless of structure (multipart/alternative, html-only, plaintext-only).
+
+        Add deps to `[api]`: `beautifulsoup4>=4.12`, `lxml>=5.0`, `python-dateutil>=2.8`.
+
+        No parsers ship in this slice — only the protocol + helpers + tests with
+        synthetic fixtures.
+      why: |
+        Reusable core called out in user feedback ("design reusable functions for
+        the jobparsers so that other platforms like indeed, glassdoor etc"). Slice
+        4 onward is one parser file each; without this slice, every parser would
+        reimplement salary regex, time parsing, etc.
+      files:
+        - src/jobsmith/sources/protocol.py
+        - src/jobsmith/sources/helpers/__init__.py
+        - src/jobsmith/sources/helpers/salary.py
+        - src/jobsmith/sources/helpers/time_parse.py
+        - src/jobsmith/sources/helpers/location.py
+        - src/jobsmith/sources/helpers/company.py
+        - src/jobsmith/sources/helpers/url.py
+        - src/jobsmith/sources/helpers/dedup.py
+        - src/jobsmith/sources/helpers/html.py
+        - src/jobsmith/sources/helpers/email_envelope.py
+        - pyproject.toml
+        - tests/test_sources_helpers_salary.py
+        - tests/test_sources_helpers_time.py
+        - tests/test_sources_helpers_location.py
+        - tests/test_sources_helpers_url.py
+        - tests/test_sources_helpers_dedup.py
+        - tests/test_sources_envelope.py
+      deps:
+        - 1
+      done_when:
+        - JobAlertParser protocol + register_parser + parse_envelope dispatch implemented
+        - Each helper has table-driven tests covering ≥10 representative inputs
+        - envelope_from_rfc822 correctly handles multipart/alternative, html-only, and plaintext-only emails
+        - compute_dedup_key is deterministic (same input → same SHA1) and stable across versions
+        - normalize_url(linkedin) strips trackingId/refId/lipi/midToken/midSig/trk/trkEmail/eid/otpToken params
+        - All helpers have type hints; tsc-equivalent (mypy strict) is clean
+      effort: L
+      risk: Med
+      tests: |
+        Unit: TestParseSalary — table-driven over 15+ formats including weird Unicode dashes.
+        Unit: TestParseRelativeTime — "5 hours ago", "yesterday", "just now", "3 weeks ago", invalid input.
+        Unit: TestNormalizeLocation — 10+ formats including "Remote", "Hybrid - X", "NYC Metro Area", non-US.
+        Unit: TestNormalizeCompany — strips Inc/LLC/Ltd, preserves accents.
+        Unit: TestNormalizeURL_LinkedIn — strips all 8 known LinkedIn tracking params.
+        Unit: TestNormalizeURL_JobRight — strips utm_*, imp_id.
+        Unit: TestComputeDedupKey — same input → same hash; case-insensitive on company.
+        Unit: TestEnvelopeFromRFC822 — three fixtures: multipart/alt, html-only, plaintext-only.
+        Unit: TestParserRegistry_Dispatch — register two stub parsers, parse_envelope picks the right one by sender_patterns.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-4
+      num: 4
+      title: LinkedIn digest parser (jobalerts-noreply)
+      what: |
+        First concrete parser. Validates the slice-3 abstraction.
+
+        `src/jobsmith/sources/parsers/linkedin_digest.py`:
+        - `class LinkedInDigestParser(JobAlertParser)`
+        - `name = 'linkedin'`, `parser_version = '1.0.0'`
+        - `sender_patterns = [re.compile(r'^jobalerts-noreply@linkedin\.com$', re.I)]`
+        - Subject pattern (optional fingerprint): `re.compile(r'^Your job alert')` or contains "and more"
+        - `parse(env)` walks `env.plaintext_body` (LinkedIn sends multipart/alt,
+          plaintext is canonical):
+          - Split on `r'\n-{40,}\n'` (40+ dashes) into blocks
+          - Per block: line 1 = title, line 2 = company, line 3 = location,
+            remaining lines = badges until `View job: <url>`
+          - Extract LinkedIn job ID from URL via `re.search(r'/jobs/view/(\d+)/', url)`
+          - Use `normalize_url(url, source='linkedin')` to canonicalize
+          - Use `compute_dedup_key(company, title, location)`
+        - Alert metadata: parse subject for search keyword
+          (`r'"([^"]+)":'` matches the quoted keyword in subjects like
+          '"artificial intelligence engineer": Qcells North America - …').
+        - Register via `register_parser(LinkedInDigestParser)` in
+          `src/jobsmith/sources/parsers/__init__.py`.
+
+        Golden fixtures: commit ≥3 real LinkedIn digest emails as
+        `tests/fixtures/sources/linkedin/digest_*.eml` (sanitize: keep structure,
+        strip user PII from footer if any). Each fixture has a sibling JSON file
+        `digest_*.expected.json` with the candidates the parser MUST produce.
+      why: |
+        Validates slice-3 architecture against real-world data. LinkedIn is the
+        highest-volume source per the inbox audit (~10-15 emails/day). Plaintext
+        parsing is easier than HTML, so this is the right "first parser" — it
+        shakes out helper bugs without HTML-parsing complexity.
+      files:
+        - src/jobsmith/sources/parsers/__init__.py
+        - src/jobsmith/sources/parsers/linkedin_digest.py
+        - tests/fixtures/sources/linkedin/digest_2026-05-04_durham-ai.eml
+        - tests/fixtures/sources/linkedin/digest_2026-05-04_durham-ai.expected.json
+        - tests/fixtures/sources/linkedin/digest_2026-05-02_data-eng.eml
+        - tests/fixtures/sources/linkedin/digest_2026-05-02_data-eng.expected.json
+        - tests/test_sources_linkedin_digest.py
+      deps:
+        - 3
+      done_when:
+        - 'Three real LinkedIn digest fixtures parse cleanly: candidates count + every field matches expected.json'
+        - Tracking params stripped from all candidate URLs
+        - Subject keyword extracted into AlertMetadata.search_keyword
+        - parser_warnings populated when a card is malformed (don't crash; skip with warning)
+        - register_parser wired so parse_envelope dispatches LinkedIn senders correctly
+      effort: M
+      risk: Med
+      tests: |
+        Unit: TestLinkedInDigest_Canonical — three golden fixtures.
+        Unit: TestLinkedInDigest_BadCard — fixture with one malformed block, parser yields N-1 candidates + 1 warning.
+        Unit: TestLinkedInDigest_TrackingStripped — fixture URL has trackingId/refId/lipi, output URL is clean.
+        Unit: TestLinkedInDigest_Dispatch — Envelope from jobalerts-noreply triggers this parser; from jobs-noreply does NOT.
+        Regression: shared helpers tests still pass.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-5
+      num: 5
+      title: LinkedIn saved-job nudge parser (jobs-noreply)
+      what: |
+        Second LinkedIn variant — the "apply now to '<title> at <company>'" reminder.
+        One job per email, signal that the user already saved the role.
+
+        `src/jobsmith/sources/parsers/linkedin_saved.py`:
+        - `name = 'linkedin'` (same source — different parser variant)
+        - `parser_version = '1.0.0'`
+        - `sender_patterns = [re.compile(r'^jobs-noreply@linkedin\.com$')]`
+        - `subject_patterns = [re.compile(r"apply now to [''](.+) at (.+)['']")]`
+        - `parse(env)`:
+          - Extract title + company from subject regex
+          - Extract job ID from the first `/jobs/view/<id>/` URL in body
+          - Set `EmailSighting.alert_metadata.kind = 'saved_reminder'` so dedup +
+            merge can boost candidates with this signal
+          - Add `'user_saved'` to badges
+        - Register in parsers/__init__.py.
+
+        Golden fixtures: 2 saved-job reminders.
+      why: |
+        User has already opted in to these jobs — they should rank higher in
+        triage. Without this parser, saved-job emails are silently dropped.
+      files:
+        - src/jobsmith/sources/parsers/linkedin_saved.py
+        - src/jobsmith/sources/parsers/__init__.py
+        - tests/fixtures/sources/linkedin/saved_2026-05-04_pwc.eml
+        - tests/fixtures/sources/linkedin/saved_2026-05-04_pwc.expected.json
+        - tests/fixtures/sources/linkedin/saved_2026-05-02_pwc.eml
+        - tests/fixtures/sources/linkedin/saved_2026-05-02_pwc.expected.json
+        - tests/test_sources_linkedin_saved.py
+      deps:
+        - 3
+        - 4
+      done_when:
+        - Subject regex extracts title + company correctly across smart-quote variants ('' vs '')
+        - Job ID extracted from body URL
+        - '''user_saved'' badge in candidates'
+        - Dispatcher correctly routes jobs-noreply (saved) vs jobalerts-noreply (digest)
+      effort: S
+      risk: Low
+      tests: |
+        Unit: TestLinkedInSaved_Canonical — two golden fixtures.
+        Unit: TestLinkedInSaved_SmartQuotes — fixture with curly quotes parses identically to straight.
+        Unit: TestLinkedInSaved_BadgeSet — assert 'user_saved' in candidate.badges.
+        Regression: slice-4 tests still pass.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-6
+      num: 6
+      title: JobRight digest + instant-alert parsers (HTML)
+      what: |
+        Two HTML parsers for the JobRight platform. Validates HTML-helper paths in
+        slice 3.
+
+        `src/jobsmith/sources/parsers/jobright_digest.py`:
+        - `name = 'jobright'`, `parser_version = '1.0.0'`
+        - `sender_patterns = [re.compile(r'^noreply@jobright\.ai$')]`
+        - `subject_patterns = [re.compile(r'Your job matches for')]`
+        - `parse(env)` walks `env.html_body` with BeautifulSoup:
+          - Each job card lives in a structured div block; per inbox sample:
+            company name, industry · stage line, percentage badge, title,
+            salary text, location, referral count, posted-time, "APPLY NOW" anchor
+          - Extract apply URL from `<a href="https://jobright.ai/jobs/info/<hex>?utm_*">`
+          - Use `normalize_url(url, source='jobright')` to strip utm
+          - Extract match score (e.g., `62%`) → `match_score = 0.62`
+          - Use helpers for salary, location, posted-time
+          - Set `external_id` to the 24-char hex from URL
+
+        `src/jobsmith/sources/parsers/jobright_instant.py`:
+        - Sister parser for "X just posted a Y% match Z role N minutes ago" emails
+        - Subject regex extracts company + match score; body has the apply URL
+        - One candidate per email
+        - `alert_metadata.kind = 'instant'` (vs `'digest'`) so triage UI can
+          prioritize fresh listings
+
+        Both parsers register via parsers/__init__.py.
+
+        Golden fixtures: 2 digest + 2 instant emails.
+      why: |
+        JobRight is the second highest-volume source. Match-score signal is unique
+        to JobRight and feeds prescore (slice 8). HTML parsing here proves the
+        `extract_anchors` + BeautifulSoup helpers work on real-world templates.
+      files:
+        - src/jobsmith/sources/parsers/jobright_digest.py
+        - src/jobsmith/sources/parsers/jobright_instant.py
+        - src/jobsmith/sources/parsers/__init__.py
+        - tests/fixtures/sources/jobright/digest_2026-05-04.eml
+        - tests/fixtures/sources/jobright/digest_2026-05-04.expected.json
+        - tests/fixtures/sources/jobright/digest_2026-05-03.eml
+        - tests/fixtures/sources/jobright/digest_2026-05-03.expected.json
+        - tests/fixtures/sources/jobright/instant_2026-05-04_davita.eml
+        - tests/fixtures/sources/jobright/instant_2026-05-04_davita.expected.json
+        - tests/fixtures/sources/jobright/instant_2026-05-03_capitalone.eml
+        - tests/fixtures/sources/jobright/instant_2026-05-03_capitalone.expected.json
+        - tests/test_sources_jobright_digest.py
+        - tests/test_sources_jobright_instant.py
+      deps:
+        - 3
+      done_when:
+        - Two real digest fixtures yield expected candidates with match_score, salary, location populated
+        - Two real instant fixtures yield single candidate each with alert_metadata.kind='instant'
+        - match_score is a float in [0.0, 1.0]
+        - JobRight job IDs (24-char hex) become external_id
+        - utm_* params stripped from URLs
+      effort: M
+      risk: Med
+      tests: |
+        Unit: TestJobRightDigest_Canonical — two golden fixtures.
+        Unit: TestJobRightInstant_Canonical — two golden fixtures.
+        Unit: TestJobRightDigest_MatchScore — match_score parsed as float.
+        Unit: TestJobRightDigest_NoSalary — fixture without salary, salary fields are None (not 0).
+        Unit: TestDispatch_JobRightDigest_vs_Instant — subject regex routes to right parser.
+        Regression: slice 3-5 tests still pass.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-7
+      num: 7
+      title: Climatebase email parser + SendGrid redirect helper
+      what: |
+        Climatebase is the user's highest-priority career-target source (climate
+        sector focus). Inbox audit confirmed: `alerts@climatebase.org` ships
+        "New jobs matching your profile" emails every 2-3 days, HTML-only (~50KB),
+        ~5-15 jobs per email. URLs are wrapped through SendGrid click-tracking
+        (`https://u23036105.ct.sendgrid.net/ls/click?upn=<token>`); the canonical
+        Climatebase URL or the employer ATS URL is reachable only by following
+        the redirect.
+
+        ## New shared helper
+
+        `src/jobsmith/sources/helpers/redirect.py`:
+        - `resolve_redirect(url: str, *, max_hops: int = 5, timeout: float = 10.0) -> str`
+          — uses httpx with `follow_redirects=False` in a manual loop, walks the
+          Location header chain, returns the final non-tracked URL.
+        - Recognized trackers (return final URL, not the tracker URL):
+          SendGrid (sendgrid.net/ls/click), Mailgun (email.mailgunhq.com),
+          ActiveCampaign (activehosted.com/proc.php?ix=), generic 30x chains.
+        - Honors per-tracker timeouts; on failure returns the original URL with a
+          flag so callers can mark the candidate `low_confidence_url`.
+        - This helper is part of the reusable core — JobRight, Glassdoor, and any
+          future tracker-wrapping source can use it.
+
+        ## Climatebase parser
+
+        `src/jobsmith/sources/parsers/climatebase_email.py`:
+        - `name = 'climatebase'`, `parser_version = '1.0.0'`
+        - `sender_patterns = [re.compile(r'^alerts@climatebase\.org$')]`
+        - `subject_patterns = [re.compile(r'New jobs matching')]`
+        - `parse(env)` walks `env.html_body` with BeautifulSoup:
+          - Each job card has: company logo, company name, role title, location,
+            posted-time text, "View Job" anchor (SendGrid-wrapped)
+          - Extract title, company, location, posted-time using the slice-3
+            helpers (`parse_relative_time`, `normalize_location`,
+            `normalize_company_name`)
+          - For each `<a href>` SendGrid URL, call `resolve_redirect` to get the
+            canonical destination. Cache resolution per parse run (multiple cards
+            may link to same target).
+          - If resolution fails (tracker rate-limit, DNS error), keep the SendGrid
+            URL but flag `low_confidence_url=True`. Triage UI shows a yellow
+            warning icon.
+        - Register in `src/jobsmith/sources/parsers/__init__.py`.
+
+        ## Golden fixtures
+
+        Commit ≥3 real Climatebase emails as
+        `tests/fixtures/sources/climatebase/jobs_*.eml`. Each has a sibling
+        `expected.json` listing the candidates with both the SendGrid URL and the
+        resolved canonical URL (so the parser test can mock `resolve_redirect`
+        and assert the final URL).
+
+        ## Companion in `private/triage-rules.example.yaml`
+
+        Add a recommended boost rule for climate-sector candidates so the user's
+        target sector is amplified at prescore time:
+        ```yaml
+        boosts:
+          - id: boost-climate-sector
+            kind: source_exact
+            value: "climatebase"
+            delta: 0.15
+            reason: "career focus — climate"
+        ```
+        Document this in the `why` of slice 11 (rules linter) too.
+      why: |
+        User's career focus is climate-finance / climate-infrastructure (per
+        LinkedIn footer audit: "788 MW / $4.25B portfolio optimization at Sunnova").
+        Climatebase is the dominant climate-jobs board; its emails arrive in the
+        inbox already but currently get ignored. Without this slice, the most
+        career-aligned source is dropped on the floor. The `resolve_redirect`
+        helper is also reusable for any future SendGrid/Mailgun-wrapped source —
+        it's not a Climatebase-specific cost.
+      files:
+        - src/jobsmith/sources/helpers/redirect.py
+        - src/jobsmith/sources/parsers/climatebase_email.py
+        - src/jobsmith/sources/parsers/__init__.py
+        - private/triage-rules.example.yaml
+        - tests/fixtures/sources/climatebase/jobs_2026-05-04.eml
+        - tests/fixtures/sources/climatebase/jobs_2026-05-04.expected.json
+        - tests/fixtures/sources/climatebase/jobs_2026-04-30.eml
+        - tests/fixtures/sources/climatebase/jobs_2026-04-30.expected.json
+        - tests/fixtures/sources/climatebase/jobs_2026-04-27.eml
+        - tests/fixtures/sources/climatebase/jobs_2026-04-27.expected.json
+        - tests/test_sources_redirect.py
+        - tests/test_sources_climatebase_email.py
+      deps:
+        - 3
+      done_when:
+        - Three real Climatebase fixtures parse to expected candidates with all fields populated
+        - resolve_redirect unwraps SendGrid `ct.sendgrid.net/ls/click` URLs to final destination
+        - On redirect failure, candidate URL falls back to SendGrid URL with low_confidence_url=True
+        - Sender pattern dispatches alerts@climatebase.org to this parser (not other parsers)
+        - private/triage-rules.example.yaml documents the source_exact boost rule
+      effort: M
+      risk: Med
+      tests: |
+        Unit: TestClimatebaseEmail_Canonical — three golden fixtures parse to
+        expected candidate counts and field values.
+        Unit: TestClimatebaseEmail_RedirectResolved — fixture with mocked
+        resolve_redirect, assert candidate.url == canonical destination, not
+        SendGrid URL.
+        Unit: TestClimatebaseEmail_RedirectFails — mock raises httpx.TimeoutException,
+        candidate.url == SendGrid URL, low_confidence_url=True.
+        Unit: TestResolveRedirect_SendGrid — synthetic 302 chain through SendGrid,
+        final URL returned.
+        Unit: TestResolveRedirect_MaxHops — infinite redirect loop, raises
+        RedirectLoopError after max_hops.
+        Unit: TestDispatch_Climatebase — Envelope from alerts@climatebase.org
+        routes to ClimatebaseEmailParser.
+        Regression: slice 3 helpers + slice 4-6 parsers still work unchanged.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-8
+      num: 8
+      title: Ingest pipeline + dedup + cross-source merge
+      what: |
+        Wire it all together. The end-to-end ingest service.
+
+        `src/jobsmith/sources/ingest.py`:
+        - `IngestService(db, gmail_client, parsers)` —
+          - `poll(since: datetime | None) -> IngestResult` — list Gmail messages
+            newer than cursor, fetch raw, build envelope, dispatch parser,
+            upsert candidates + sightings, persist new cursor.
+          - Cursor stored in `private/jobsmith.db` table `ingest_cursors(source TEXT, last_envelope_id TEXT, last_received_at TEXT)`.
+        - Dedup logic:
+          - If sighting's `(source, external_id)` already exists → no-op (idempotent re-run)
+          - Else check `dedup_key`: if match → INSERT sighting onto existing candidate; merge metadata (max of match_scores, union of badges, latest description_snippet)
+          - Else INSERT new candidate + sighting
+        - Cross-source merge: when LinkedIn ID `4398755649` (PwC ERP AI Engineer)
+          and JobRight hex `69abcd...` resolve to the same `(company, title, location)`
+          normalized tuple, they share one `job_candidates` row with two `email_sightings` rows.
+
+        `jobsmith sources poll [--since <ISO>] [--limit <N>]` typer subcommand.
+
+        Triage-rule auto-apply (uses `private/triage-rules.yaml` from slice 1):
+        - On INSERT, evaluate rules. If a rule matches, set `triage_status = 'dismissed'`
+          and `triage_reason = "auto: <rule.reason>"`. Insert a `triage_decisions`
+          row with `rule_matched`.
+        - User can review auto-dismissals via `jobsmith candidates list --status dismissed --auto`.
+
+        The schema migration (slice 1) already added the tables. This slice is service code +
+        CLI subcommand + tests.
+      why: |
+        The pipeline contract. Until this slice, parsers exist but nothing runs them
+        end-to-end. Triage-rule auto-apply means the user never sees blocked
+        companies / titles in the active triage queue, but auto-dismissals stay
+        reviewable so a bad rule can be caught.
+      files:
+        - src/jobsmith/sources/ingest.py
+        - src/jobsmith/sources/triage_rules.py
+        - src/jobsmith/cli.py
+        - tests/test_sources_ingest.py
+        - tests/test_sources_dedup.py
+        - tests/test_sources_triage_rules.py
+      deps:
+        - 1
+        - 2
+        - 3
+        - 4
+        - 5
+        - 6
+        - 7
+      done_when:
+        - '`jobsmith sources poll` fetches new messages, parses, persists candidates + sightings, advances cursor'
+        - 'Re-running poll is idempotent: no duplicate sightings, no duplicate candidates'
+        - Same job sighted via LinkedIn AND JobRight produces ONE candidate row with TWO sighting rows
+        - match_score on cross-source merge = max of available scores
+        - Triage-rule auto-dismiss writes triage_status + reason + decisions row
+        - Cursor survives restart
+      effort: L
+      risk: High
+      tests: |
+        Unit: TestIngest_FreshDB — empty DB, ingest 1 fixture envelope, candidate + sighting persist.
+        Unit: TestIngest_Idempotent — ingest same envelope twice, single sighting persists.
+        Unit: TestIngest_CrossSourceMerge — fixture LinkedIn + JobRight envelopes with matching (company, title, location), assert 1 candidate + 2 sightings.
+        Unit: TestIngest_TriageRule_Company — rule blocks Acme, ingest Acme job, candidate inserts with triage_status='dismissed'.
+        Unit: TestIngest_TriageRule_TitleRegex — rule blocks "(?i)senior manager", ingest Senior Manager job, dismissed.
+        Integration: TestIngest_Cursor — first poll persists cursor, second poll only fetches messages after cursor.
+        Regression: schema tests + parser tests still pass.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-9
+      num: 9
+      title: Prescorer — reuse apply-fit-scorer against ingested candidates
+      what: |
+        Score new candidates against the user's master so the triage UI can rank
+        by jobsmith-side fit, not just JobRight match-score.
+
+        `src/jobsmith/sources/prescore.py`:
+        - `prescore_candidate(candidate: JobCandidate, master: MasterContent) -> float`
+          — wraps the existing `apply-fit-scorer` agent / function. Inputs: master
+          work bullets + skills; the candidate's `(title, company, description_snippet)`.
+          Output: 0.0–1.0 fit score.
+        - When `description_snippet` is empty (LinkedIn often omits it), prescore
+          falls back to title-only signal with a `--low-confidence` flag.
+        - Caches result on the candidate row (`prescore`, `prescore_at` columns
+          from slice 1).
+        - Re-prescore triggers: master.yaml mtime newer than `prescore_at`, OR
+          explicit `jobsmith candidates prescore --rebuild`.
+
+        `q-prescore-cost`: prescore-on-ingest by default (one LLM call per new
+        candidate). Cost ceiling: skip prescore if ≥`JOBSMITH_PRESCORE_DAILY_BUDGET`
+        (default 50) calls already made in the current UTC day; remaining
+        candidates get prescored on first triage-list view (lazy).
+
+        `jobsmith candidates prescore [<id>] [--rebuild]` typer subcommand.
+      why: |
+        Without prescore, the triage queue is sorted only by JobRight's match
+        (which doesn't see master) or by recency. Adding jobsmith-side fit means
+        the user can `jobsmith candidates list --top 10` and see the actually
+        relevant roles first.
+      files:
+        - src/jobsmith/sources/prescore.py
+        - src/jobsmith/sources/ingest.py
+        - src/jobsmith/cli.py
+        - tests/test_sources_prescore.py
+      deps:
+        - 3
+        - 8
+      done_when:
+        - prescore_candidate returns float in [0, 1]
+        - Score persists to job_candidates.prescore + prescore_at
+        - Daily budget cap enforced — over-budget candidates lazy-score on triage list
+        - Master mtime change triggers re-prescore on next access
+        - Title-only fallback flagged via low_confidence when description_snippet absent
+      effort: M
+      risk: Med
+      tests: |
+        Unit: TestPrescore_HighFit — fixture master + candidate, expect score >= 0.7.
+        Unit: TestPrescore_LowFit — unrelated candidate, expect <= 0.3.
+        Unit: TestPrescore_NoSnippet — empty description, score returned with low_confidence flag.
+        Integration: TestPrescore_Cache — call twice, second returns cached value (no LLM call).
+        Integration: TestPrescore_DailyBudget — 51 candidates with budget=50, 50 prescored, 1 deferred to lazy.
+        Regression: existing apply-fit-scorer tests still pass.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-10
+      num: 10
+      title: Triage CLI — list / show / save / dismiss / queue
+      what: |
+        First user-facing surface for the candidate store.
+
+        `src/jobsmith/cli.py` (extend) — typer subcommands under
+        `jobsmith candidates`:
+        - `list [--status new|saved|dismissed|queued|applied] [--top N] [--source linkedin|jobright|...] [--since 7d]`
+          — Rich table, default sorted by prescore desc.
+        - `show <id>` — full candidate detail (title, company, location, salary,
+          description_snippet, all sightings with timestamps, triage history).
+        - `save <id> [--reason <text>]` — sets triage_status='saved'.
+        - `dismiss <id> [--reason <text>] [--block-company | --block-title-regex <r> | --block-keyword <k>]`
+          — sets triage_status='dismissed'. The optional flags ALSO add a rule to
+          `private/triage-rules.yaml` (slice 12 closes the loop more deeply).
+        - `queue <id>` — sets triage_status='queued'; the existing
+          `jobsmith apply` flow can then pick from the queue.
+        - `apply <id>` — directly invokes `jobsmith apply <candidate.url>` and
+          sets triage_status='applied' on completion.
+
+        Rich rendering matches the existing `jobsmith feedback list` style.
+      why: |
+        The triage layer turns the candidate store from "data" into "actionable
+        backlog". Without this slice, the user has rows in SQLite but no way to
+        decide on them.
+      files:
+        - src/jobsmith/cli.py
+        - src/jobsmith/sources/triage.py
+        - tests/test_sources_triage_cli.py
+      deps:
+        - 8
+        - 9
+      done_when:
+        - '`jobsmith candidates list` renders Rich table with id, title, company, prescore, source(s)'
+        - '`--top 10` returns 10 rows ordered by prescore desc'
+        - '`--source linkedin` filters correctly'
+        - '`save/dismiss/queue/apply` all transition triage_status and write triage_decisions row'
+        - '`dismiss --block-company` adds a rule to private/triage-rules.yaml'
+        - '`apply <id>` invokes existing `jobsmith apply` command'
+      effort: M
+      risk: Med
+      tests: |
+        Unit: TestCandidatesList_OrderByPrescore — three candidates, list returns them in prescore order.
+        Unit: TestCandidatesDismiss_AddsRule — dismiss with --block-company writes rule entry.
+        Unit: TestCandidatesQueue_ChainsApply — queue then apply transitions state correctly.
+        Integration: TestCandidatesApply_SubprocessSpawn — apply invokes existing apply CLI.
+        Regression: existing feedback-list tests still pass; CLI help renders.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-11
+      num: 11
+      title: Triage rules YAML + linter + dry-run
+      what: |
+        Make `private/triage-rules.yaml` a first-class artifact with a schema,
+        linter, and a way to dry-run rules against existing candidates.
+
+        Schema (Pydantic, validated on load):
+        ```yaml
+        version: 1
+        blocks:
+          - id: block-1
+            kind: company_exact          # company_exact | company_keyword | title_regex | title_keyword | location_keyword | salary_min
+            value: "Acme Co"
+            reason: "anti-employee record"
+            added_at: "2026-05-04T18:30:00Z"
+            added_via: "jobsmith candidates dismiss --block-company"
+          # ...
+        boosts:                          # optional — boost prescore by additive delta
+          - id: boost-1
+            kind: company_keyword
+            value: "climate"
+            delta: 0.15
+            reason: "career focus"
+        ```
+
+        Subcommands:
+        - `jobsmith rules check` — validate YAML against schema; print parse errors.
+        - `jobsmith rules dry-run` — apply rules to ALL existing candidates; show
+          what WOULD change without writing anything. Useful when adding a rule:
+          verify it doesn't auto-dismiss valid candidates retroactively.
+        - `jobsmith rules apply` — actually re-evaluate rules and update
+          triage_status for any new matches. Generates audit log of changes.
+        - `jobsmith rules suggest` — analyze recent dismissal patterns (slice 12);
+          suggest new rules.
+
+        Backward compat: a missing rules file is treated as "no rules" — no error.
+      why: |
+        Rules accumulate. Without a linter and dry-run, a new rule can silently
+        auto-dismiss legitimate candidates and the user never sees them. Dry-run
+        makes rule edits reversible by preview.
+      files:
+        - src/jobsmith/sources/triage_rules.py
+        - src/jobsmith/cli.py
+        - tests/test_sources_triage_rules_yaml.py
+      deps:
+        - 8
+        - 10
+      done_when:
+        - '`jobsmith rules check` reports schema errors with line numbers'
+        - '`jobsmith rules dry-run` shows a diff (what status changes WOULD happen) without persisting'
+        - '`jobsmith rules apply` updates statuses + writes triage_decisions rows + outputs an audit log'
+        - Boost rules add to prescore (additive); they're capped at 1.0
+        - Missing rules file is non-error
+      effort: M
+      risk: Med
+      tests: |
+        Unit: TestRules_SchemaValidation — invalid YAML structure surfaces structured error.
+        Unit: TestRules_DryRun_NoMutation — call dry-run, DB unchanged, output describes diffs.
+        Unit: TestRules_Apply_RetroactiveDismiss — add new title_regex rule, apply, existing matching candidates flip to dismissed.
+        Unit: TestRules_Boost_PrescoreCap — boost delta would push score >1, capped at 1.0.
+        Unit: TestRules_NoFile — empty private/triage-rules.yaml, no error.
+        Regression: slice-7 auto-dismiss tests still pass.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-12
+      num: 12
+      title: Web triage view — new Candidates route with live data
+      what: |
+        Add a new Candidates route to the web/ frontend backed by the live
+        candidate store. The existing Listings tab remains untouched.
+
+        Backend:
+        - `GET /api/candidates?status=new&source=&top=&since=` — paginated, filtered
+          list returning `{candidates: [...], total: N, cursor: ...}`.
+        - `GET /api/candidates/{id}` — full detail including all sightings.
+        - `POST /api/candidates/{id}/triage` — body: `{decision: 'save'|'dismiss'|'queue'|'apply', reason?, block_rule?}`. Returns updated candidate.
+        - `GET /api/candidates/stats` — counts by status, by source, last 7d
+          ingestion volume, prescore distribution.
+        - All routes use the bearer-auth dependency from 0.8 slice 2.
+
+        Frontend (depends on `feat-a6702b30` React Query rebuild from the 0.7
+        salvage):
+        - `web/src/api/hooks.ts` (extend) — `useCandidates(filters)`,
+          `useCandidate(id)`, `useTriageMutation()`, `useCandidateStats()`.
+        - `web/src/app/Candidates.tsx` (new) — table with columns:
+          prescore, title, company, location, source(s), match_score, posted, age.
+          Row actions: ⌘S save, ⌘D dismiss, ⌘Q queue, ⌘Enter apply.
+        - Add "Candidates" entry to sidebar in `web/src/app/main.tsx`.
+        - Register route `/candidates` in `web/src/app/main.tsx`.
+      why: |
+        Closes the prototype's biggest remaining mock surface. The user can do
+        most triage from the keyboard in a browser instead of CLI; CLI stays as
+        the headless / cron-friendly path.
+      files:
+        - src/jobsmith/api/candidates.py
+        - src/jobsmith/api/main.py
+        - src/jobsmith/api/schemas/candidates.py
+        - web/src/api/hooks.ts
+        - web/src/app/Candidates.tsx
+        - web/src/app/master.tsx
+        - tests/test_api_candidates.py
+        - web/src/api/__tests__/Candidates.test.tsx
+      deps:
+        - 10
+        - 11
+      done_when:
+        - GET /api/candidates returns paginated list with all filters working
+        - POST /api/candidates/{id}/triage transitions state and returns updated row
+        - Frontend Candidates table renders live data, keyboard shortcuts work
+        - Bearer auth required (returns 401 without token)
+        - tsc + vite build green
+      effort: L
+      risk: Med
+      tests: |
+        Unit: TestAPICandidates_List — fixture candidates + filter combinations.
+        Unit: TestAPICandidates_Triage — POST transitions state.
+        Unit: TestAPICandidates_AuthRequired — missing token → 401.
+        Frontend Unit: TestCandidates_RendersTable — msw mock, table renders with prescore-sorted rows.
+        Frontend Unit: TestCandidates_TriageMutation — keyboard shortcut S triggers save mutation.
+        Regression: existing API tests pass; existing master.tsx tests pass.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-13
+      num: 13
+      title: Triage feedback loop → master.yaml exclusion suggestions
+      what: |
+        Closes the loop. Dismissal patterns analyze into proposed master.yaml /
+        triage-rules edits, presented to the user for approval — never written
+        automatically.
+
+        `src/jobsmith/sources/feedback.py`:
+        - `analyze_dismissals(since: datetime, min_count: int = 3) -> list[Suggestion]`
+          — scans triage_decisions for dismissals; clusters by company / title
+          keyword / location / salary; emits suggestions when a pattern hits
+          `min_count` (e.g., dismissed 3 different "Senior Manager" roles → suggest
+          title_regex rule).
+        - `suggest_master_changes() -> list[MasterSuggestion]` — when patterns
+          suggest the user has shifted focus (e.g., dismissed all roles outside
+          Climate sector), suggest adding a `targeted_sectors:` field to
+          `assets/content/author.yml`.
+
+        `jobsmith candidates suggestions` typer subcommand — Rich table of
+        proposed rules + master edits with an interactive accept/reject prompt.
+        Accepting a triage-rule writes to `private/triage-rules.yaml`. Accepting a
+        master suggestion shows the EXACT diff and requires the user to confirm
+        (master.yaml writes go through 0.8's master_io ruamel round-trip, so
+        comments are preserved).
+
+        Per 0.8 q-master-canonical = file-canonical: master files stay on disk;
+        this slice writes via master_io, never bypasses.
+      why: |
+        Without this loop, the user dismisses the same kind of role 50 times.
+        Suggestion-based learning means jobsmith gets smarter over time without
+        ever modifying the user's data unilaterally. Halt-over-fabricate
+        preserved.
+      files:
+        - src/jobsmith/sources/feedback.py
+        - src/jobsmith/cli.py
+        - tests/test_sources_feedback.py
+      deps:
+        - 10
+        - 11
+      done_when:
+        - '`jobsmith candidates suggestions` analyzes dismissals from last 30d, surfaces ≥1 plausible suggestion when there''s a clear pattern'
+        - Accepting a triage-rule suggestion writes to triage-rules.yaml
+        - Accepting a master suggestion writes via master_io and preserves comments
+        - User cancels with ESC; nothing is written
+        - Pattern threshold tunable via env var (JOBSMITH_FEEDBACK_MIN_COUNT)
+      effort: M
+      risk: Med
+      tests: |
+        Unit: TestFeedback_DismissalCluster_Title — 3 "Senior Manager" dismissals → 1 title_regex suggestion.
+        Unit: TestFeedback_DismissalCluster_Company — 2 dismissals same company → suggest company_exact.
+        Unit: TestFeedback_BelowThreshold_NoSuggest — 1 dismissal, no suggestion.
+        Integration: TestFeedback_AcceptRule_WritesYAML — accept, file updated, schema valid.
+        Integration: TestFeedback_AcceptMaster_PreservesComments — fixture master with comments, accepted change writes via master_io, comments intact.
+        Regression: master_io tests pass; triage-rules tests pass.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-14
+      num: 14
+      title: Indeed digest parser (proves the abstraction)
+      what: |
+        Add Indeed support. Per the design call, this should be a SINGLE new file
+        reusing the slice-3 helpers — proving the architecture's reusability.
+
+        `src/jobsmith/sources/parsers/indeed_digest.py`:
+        - `name = 'indeed'`, `parser_version = '1.0.0'`
+        - `sender_patterns = [re.compile(r'@indeed\.com$')]`
+        - `parse(env)` walks `env.html_body`:
+          - Indeed cards live in tables (legacy markup) — exact selector TBD by
+            fixture inspection
+          - Extract title (anchor text), company, location, salary snippet,
+            posted-time text
+          - URL: `https://www.indeed.com/viewjob?jk=<key>` — `external_id` = `jk`
+          - Use `normalize_url(url, source='indeed')` — implement in
+            slice-3 helpers if not already (this slice may need to extend `url.py`)
+          - Use `parse_salary`, `parse_relative_time`, `normalize_location`,
+            `normalize_company_name`, `compute_dedup_key` — already exist
+        - Register in parsers/__init__.py.
+
+        Golden fixtures: ≥2 real Indeed digest emails forwarded by the user (or
+        synthetic if not yet receiving Indeed alerts; mark with
+        `tests/fixtures/sources/indeed/SYNTHETIC.txt` README).
+
+        Effort estimate: ~80-100 LOC parser + 50 LOC tests.
+      why: |
+        Validates that the slice-3 abstraction is real, not just sketched. If
+        adding Indeed needs ANY change to slice 3 (helpers, protocol), that's a
+        design bug surfaced cheaply now rather than at slice 16 when 4+ parsers
+        have piled on.
+      files:
+        - src/jobsmith/sources/parsers/indeed_digest.py
+        - src/jobsmith/sources/parsers/__init__.py
+        - src/jobsmith/sources/helpers/url.py
+        - tests/fixtures/sources/indeed/digest_real_or_synthetic_1.eml
+        - tests/fixtures/sources/indeed/digest_real_or_synthetic_1.expected.json
+        - tests/fixtures/sources/indeed/digest_real_or_synthetic_2.eml
+        - tests/fixtures/sources/indeed/digest_real_or_synthetic_2.expected.json
+        - tests/test_sources_indeed_digest.py
+      deps:
+        - 3
+        - 8
+      done_when:
+        - Two Indeed fixtures parse to expected candidates
+        - Slice-3 helpers handle Indeed without modification (or modifications are minimal and additive — e.g., new url canonicalization branch)
+        - Cross-source dedup catches 'Indeed + LinkedIn' pointing at the same job
+      effort: M
+      risk: Med
+      tests: |
+        Unit: TestIndeedDigest_Canonical — two fixtures.
+        Unit: TestIndeedDigest_TrackingStripped — `tk` and other Indeed tracking params removed.
+        Integration: TestIngest_LinkedInPlusIndeed_SameJob — both fixtures, single candidate, two sightings.
+        Regression: slice 3-7 tests pass.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-15
+      num: 15
+      title: Glassdoor digest parser
+      what: |
+        Same shape as slice 14. Glassdoor's wrinkle: per-job employer rating
+        (1-5 stars) — populates the `employer_rating` field on JobCandidate
+        (introduced in slice 1's models.py).
+
+        `src/jobsmith/sources/parsers/glassdoor_digest.py`:
+        - `name = 'glassdoor'`, `sender_patterns = [re.compile(r'^noreply@glassdoor\.com$')]`
+        - HTML parser; cards in `.jobsearch-card` or similar (TBD by fixture)
+        - Extract employer rating → `employer_rating: float`
+        - URL canonical form: `https://www.glassdoor.com/job-listing/<slug>?jl=<id>`
+
+        Golden fixtures: ≥2 real Glassdoor digests.
+
+        ~80-100 LOC.
+      why: |
+        Second proof of abstraction. Employer rating is a field that existed in
+        slice-1's schema specifically to anticipate Glassdoor and similar
+        platforms — this slice exercises it.
+      files:
+        - src/jobsmith/sources/parsers/glassdoor_digest.py
+        - src/jobsmith/sources/parsers/__init__.py
+        - src/jobsmith/sources/helpers/url.py
+        - tests/fixtures/sources/glassdoor/digest_1.eml
+        - tests/fixtures/sources/glassdoor/digest_1.expected.json
+        - tests/fixtures/sources/glassdoor/digest_2.eml
+        - tests/fixtures/sources/glassdoor/digest_2.expected.json
+        - tests/test_sources_glassdoor_digest.py
+      deps:
+        - 3
+        - 8
+        - 14
+      done_when:
+        - Two Glassdoor fixtures parse correctly with employer_rating populated
+        - Triage UI shows employer_rating column
+        - Helpers untouched OR additions are clearly delineated (URL canonicalization branch)
+      effort: M
+      risk: Med
+      tests: |
+        Unit: TestGlassdoorDigest_Canonical — two fixtures.
+        Unit: TestGlassdoorDigest_EmployerRating — fixture with rating "4.2★", float = 4.2.
+        Regression: slice 3-13 tests pass.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-16
+      num: 16
+      title: RSS source adapter (HN 'Who is hiring' + climate-tech newsletters)
+      what: |
+        Extend beyond email. Adds a new SOURCE type — RSS feeds — that produce
+        Envelope objects the existing parser registry can route.
+
+        Note: Climatebase is handled as a first-class email source in slice 7
+        (HTML-only digest emails with SendGrid-wrapped URLs). Climatebase does not
+        have a structured RSS feed suitable for this adapter; use slice 7's
+        `climatebase_email` parser for all Climatebase job ingestion.
+
+        `src/jobsmith/sources/rss_source.py`:
+        - `class RSSSource:` —
+          - `__init__(feeds: dict[str, str])` — name → URL.
+          - `poll(since: datetime | None) -> Iterable[Envelope]` — uses `feedparser`
+            to fetch each feed, build Envelope per entry.
+        - Feeds:
+          - HN "Who is hiring" thread RSS
+            (`https://hnrss.org/newcomments?q=who+is+hiring`)
+          - Climate Drift Substack RSS (climate-tech newsletter with job postings)
+          - Work on Climate job board RSS (if RSS available)
+          - Additional feeds listed in feeds.yaml.
+
+        `src/jobsmith/sources/parsers/hn_who_is_hiring.py`:
+        - Loose-text parser — HN comments are unstructured. Strategy:
+          - Use the existing apply pipeline's JD-parser specialist on the comment
+            body to extract title + company + remote/location + URL (if present)
+          - Cache extraction on `email_sightings.raw_card_text` (same column reused)
+        - Confidence flag `low_structured`.
+
+        Add `feedparser>=6.0` to `[api]` deps. Wire into IngestService so a
+        `jobsmith sources poll` polls Gmail AND RSS in one call.
+      why: |
+        The user is climate-focused (per LinkedIn footer audit). HN "Who is hiring"
+        and climate-tech newsletters surface roles that don't appear on LinkedIn /
+        JobRight. Without this slice, the sourcing pipeline misses a meaningful
+        corner of the user's target market. Climatebase specifically is covered by
+        the email parser in slice 7 (which handles the actual job digest emails).
+      files:
+        - src/jobsmith/sources/rss_source.py
+        - src/jobsmith/sources/parsers/hn_who_is_hiring.py
+        - src/jobsmith/sources/parsers/__init__.py
+        - src/jobsmith/sources/ingest.py
+        - private/feeds.example.yaml
+        - pyproject.toml
+        - tests/test_sources_rss.py
+      deps:
+        - 3
+        - 8
+      done_when:
+        - '`jobsmith sources poll` polls both Gmail and configured RSS feeds'
+        - HN comment ingestion produces candidates with low_structured flag
+        - Cursor-per-feed prevents duplicate ingestion
+        - feeds.example.yaml documents the format
+      effort: L
+      risk: Med
+      tests: |
+        Unit: TestRSS_HNExtract — synthetic comment text, parser yields candidate via JD specialist.
+        Integration: TestRSS_PollAndPersist — mock feed, ingest, candidates in DB.
+        Regression: Gmail polling still works after this slice.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+    - id: slice-17
+      num: 17
+      title: ATS scraper source (Greenhouse + Lever public boards)
+      what: |
+        Direct scraping for target companies the user identifies. Many
+        Greenhouse and Lever boards expose stable JSON or HTML endpoints
+        without auth — better signal than waiting for the company to send an
+        alert through LinkedIn.
+
+        `src/jobsmith/sources/ats_source.py`:
+        - `class GreenhouseSource:` —
+          - Polls `https://boards-api.greenhouse.io/v1/boards/<token>/jobs?content=true`
+            (returns JSON with title, location, content, updated_at).
+          - One Envelope per posting.
+        - `class LeverSource:` —
+          - Polls `https://api.lever.co/v0/postings/<company>?mode=json`.
+          - Same Envelope shape.
+
+        `src/jobsmith/sources/parsers/greenhouse.py` and `lever.py`:
+        - Structured JSON parsers; trivial mapping → JobCandidate.
+
+        `private/ats-targets.yaml`:
+        ```yaml
+        greenhouse:
+          - { company: "Anthropic", token: "anthropic" }
+          - { company: "Sunnova", token: "sunnova" }
+        lever:
+          - { company: "Some Climate Co", company_slug: "someclimate" }
+        ```
+
+        Wire into IngestService — same `jobsmith sources poll` runs all sources.
+      why: |
+        Strongest signal source: target-list-driven, no email middleman, no
+        LinkedIn keyword matching. The user names the companies they care about,
+        jobsmith polls their boards directly. Closes the gap that "passive
+        inbox firehose" leaves: roles the user would ONLY find by manually
+        visiting target company career pages.
+      files:
+        - src/jobsmith/sources/ats_source.py
+        - src/jobsmith/sources/parsers/greenhouse.py
+        - src/jobsmith/sources/parsers/lever.py
+        - src/jobsmith/sources/parsers/__init__.py
+        - src/jobsmith/sources/ingest.py
+        - private/ats-targets.example.yaml
+        - tests/test_sources_ats.py
+      deps:
+        - 3
+        - 8
+      done_when:
+        - '`jobsmith sources poll` polls configured Greenhouse + Lever targets'
+        - Per-target cursor (last_polled_at) prevents re-ingestion of unchanged listings
+        - 'Job removal handling: if a posting disappears from the board, mark candidate as ''expired'' (new triage_status value)'
+        - ats-targets.example.yaml documents the format
+      effort: L
+      risk: Med
+      tests: |
+        Unit: TestGreenhouse_PollAndParse — httpx mock returns JSON board response, candidates parsed.
+        Unit: TestLever_PollAndParse — same for Lever JSON.
+        Unit: TestATS_ExpireRemoved — first poll persists 5 candidates; second poll returns 4; the missing one's status flips to 'expired'.
+        Regression: existing ingest tests pass; cursor handling unaffected by new source.
+      approved: false
+      comment: ""
+      approval_status: pending
+      execution_status: not_started
+questions:
+    - id: q-email-source
+      text: Which email-access path for the source layer?
+      description: |
+        Validation pass showed Gmail MCP cannot return HTML bodies (JobRight is HTML-only); Apple Mail / AppleScript is macOS-only. Three viable cross- platform options: - Direct Gmail API with OAuth refresh-token: returns full MIME, runs
+          headless, supports Pub/Sub push for instant alerts. One-time browser
+          login.
+        - IMAP: any provider works, simpler auth (app password). Lacks push. - Hybrid: MCP for what it can do (LinkedIn plaintext) + Gmail API for
+          what it can't (JobRight HTML). Two code paths.
+      recommended: option-gmail-api
+      options:
+        - key: option-gmail-api
+          label: Direct Gmail API + OAuth refresh-token (Recommended — single code path, push-capable, headless)
+        - key: option-imap
+          label: IMAP — universal, simpler auth, no push
+        - key: option-hybrid
+          label: 'Hybrid: MCP where possible + Gmail API where MCP fails'
+      answer: option-gmail-api
+    - id: q-prescore-cost
+      text: Prescore on ingest or on triage open?
+      description: |
+        Each prescore = one LLM call (~$0.001 with Haiku). At 25 candidates/day that's $0.75/month — affordable but not free. Three options: - On ingest, with daily budget cap (Recommended) - Lazy on triage list view (cheapest, but list sort by prescore can't
+          work for un-prescored candidates)
+        - Both — try on ingest, lazy fallback when over budget
+      recommended: option-ingest-with-cap
+      options:
+        - key: option-ingest-with-cap
+          label: On ingest + JOBSMITH_PRESCORE_DAILY_BUDGET cap (default 50). Over-budget = lazy. (Recommended)
+        - key: option-lazy-only
+          label: Lazy only on triage list — cheapest; list ordering for un-prescored candidates falls back to (match_score, posted_at)
+        - key: option-both-no-cap
+          label: Both, no cap — every candidate prescored eagerly; budget is the user's monthly LLM bill
+      answer: option-ingest-with-cap
+    - id: q-cross-source-merge
+      text: Same job sighted across multiple sources — merge or keep separate?
+      description: |
+        LinkedIn job 4398755649 (PwC ERP AI Engineer) and JobRight hex 69abc... can resolve to the same dedup_key. Two approaches: - Merge: one candidate row, multiple email_sightings rows (Recommended).
+          User makes ONE triage decision; provenance preserved on sightings.
+        - Keep separate: two candidate rows; user triages twice. Simpler dedup
+          logic; less work on edge cases (e.g., LinkedIn says NYC, JobRight says
+          Manhattan — different normalized locations → not merged).
+      recommended: option-merge
+      options:
+        - key: option-merge
+          label: Merge into one candidate; preserve sightings array (Recommended — one triage decision per job)
+        - key: option-separate
+          label: Keep separate — simpler dedup, but user triages duplicates
+      answer: option-merge
+    - id: q-parser-versioning
+      text: When a parser changes, how do we handle historical envelopes?
+      description: |
+        Parsers will be revised when LinkedIn / JobRight change their email templates. Three options for how to handle previously-ingested data: - Forward-only: old data stays parsed by old version; new envelopes use
+          new version. (Recommended — simple, audit trail in parser_version
+          column.)
+        - Replay-on-bump: every parser_version bump triggers re-parse of all
+          envelopes by that parser. (Slower, more LLM calls.)
+        - Replay-on-demand: forward-only by default; explicit
+          `jobsmith candidates replay --parser <name> --since <date>` for
+          intentional re-parse.
+      recommended: option-replay-on-demand
+      options:
+        - key: option-forward-only
+          label: Forward-only — historical data stays as-is
+        - key: option-replay-on-bump
+          label: Auto-replay on every parser_version bump
+        - key: option-replay-on-demand
+          label: Forward-only default + explicit `replay` command (Recommended — intentional, auditable)
+      answer: option-replay-on-demand
+    - id: q-poll-cadence
+      text: How often does ingest run?
+      description: |
+        Three options: - Cron (every 15-30 min): simple, predictable; instant alerts may lag up
+          to 30 min.
+        - Manual only (jobsmith sources poll): user-driven; zero background process. - Pub/Sub push (Gmail watches messages → webhook): instant, but requires
+          public webhook endpoint or local tunneling — friction in single-user
+          local mode.
+      recommended: option-cron-15min
+      options:
+        - key: option-cron-15min
+          label: Cron every 15 min + manual `jobsmith sources poll` (Recommended — predictable, no public endpoint)
+        - key: option-manual-only
+          label: Manual only — user runs `jobsmith sources poll` when they want
+        - key: option-pubsub
+          label: Gmail Pub/Sub push — instant, but needs a webhook endpoint
+      answer: option-cron-15min
+    - id: q-helper-package-boundary
+      text: Are sources/helpers/* part of jobsmith or extracted as a separate package?
+      description: |
+        The helpers (parse_salary, normalize_location, etc.) are reusable beyond jobsmith — any tool that ingests job listings could use them. Two options: - Stay in-tree: `src/jobsmith/sources/helpers/`. Simplest. (Recommended for now.) - Extract to standalone package `jobalerts-helpers` on PyPI: enables
+          third-party reuse and external community parsers, but adds release/
+          maintenance burden.
+      recommended: option-in-tree
+      options:
+        - key: option-in-tree
+          label: Stay in-tree under src/jobsmith/sources/helpers/ (Recommended — defer extraction until 0.10+ when there's external demand)
+        - key: option-standalone-package
+          label: Extract to a standalone PyPI package — enables third-party parsers
+      answer: option-in-tree
