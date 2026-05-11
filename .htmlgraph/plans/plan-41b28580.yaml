@@ -7,7 +7,7 @@ meta:
     created_at: "2026-05-04"
     status: finalized
     created_by: claude-opus
-    version: 13
+    version: 14
 design:
     problem: |
         Job sourcing today is manual: the user reads two inboxes (LinkedIn alerts + JobRight digests) for ~25 unique candidates per day after dedup, copies a URL into `jobsmith apply`, and discards the rest. There's no persisted candidate store, no cross-source merge (same job from LinkedIn and JobRight creates two manual lookups), no prescoring against master, no triage rules (block companies / titles / keywords), no feedback loop from dismissals back to master.yaml. Validation pass already confirmed: LinkedIn canonical job URLs (`/jobs/view/<id>/`) and JobRight URLs (`jobright.ai/jobs/info/<hex>`) are publicly fetchable; LinkedIn emails have plaintext alternatives, JobRight emails are HTML-only (Gmail MCP surfaces neither HTML nor raw, hence the direct Gmail API decision). Inbox audit additionally surfaces alerts@climatebase.org ships HTML-only digests every 2-3 days with SendGrid-wrapped URLs — currently dropped silently because no parser exists.
@@ -748,6 +748,7 @@ slices:
       approval_status: pending
       execution_status: promoted
     - id: slice-10
+      feature_id: feat-643f73c8
       num: 10
       title: Triage CLI — list / show / save / dismiss / queue
       what: |
@@ -798,7 +799,7 @@ slices:
       approved: false
       comment: ""
       approval_status: pending
-      execution_status: not_started
+      execution_status: promoted
     - id: slice-11
       num: 11
       title: Triage rules YAML + linter + dry-run
