@@ -397,6 +397,52 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <a href="#design" class="nav-link active" data-spy="design" data-initial="D">Design</a>
   <a href="#slices" class="nav-link" data-spy="slices" data-initial="S">Slices</a>
   
+  <ul class="slice-nav-list" id="slice-nav-list">
+    
+    <li>
+      <a href="#slice-1" class="slice-nav-item" data-slice-nav="1">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="1"></span>
+        <span>#1 User-level settings file + repo-root resolution precedence</span>
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-2" class="slice-nav-item" data-slice-nav="2">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="2"></span>
+        <span>#2 Route API + master reads through the shared resolver</span>
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-3" class="slice-nav-item" data-slice-nav="3">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="3"></span>
+        <span>#3 `jobsmith onboard` command + agentic subprocess scaffold</span>
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-4" class="slice-nav-item" data-slice-nav="4">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="4"></span>
+        <span>#4 Ingest specialists: resume, LinkedIn export, URL, free-text</span>
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-5" class="slice-nav-item" data-slice-nav="5">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="5"></span>
+        <span>#5 Gap-interview + lint-gated master write</span>
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-6" class="slice-nav-item" data-slice-nav="6">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="6"></span>
+        <span>#6 Web onboarding flow (upload, paste, gap-interview, masters-ready)</span>
+      </a>
+    </li>
+    
+  </ul>
+  
   <a href="#questions" class="nav-link" data-spy="questions" data-initial="Q">Decisions</a>
   <a href="#critique" class="nav-link" data-spy="critique" data-initial="C">Critique</a>
   <a href="#feedback-summary" class="nav-link" data-spy="feedback-summary" data-initial="P">Progress</a>
@@ -404,15 +450,28 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 </nav>
 <div class="plan-layout">
 <div class="plan-content">
-<article id="plan-95ec8de7" data-type="plan" data-plan-id="plan-95ec8de7" data-feature-id="trk-211c4980" data-status="draft" data-priority="medium">
+<article id="plan-95ec8de7" data-type="plan" data-plan-id="plan-95ec8de7" data-feature-id="" data-status="draft" data-priority="medium">
 
 <!-- Plan Header -->
 <header class="plan-header">
   <h1>Plan: Location-decoupling + agentic onboarding</h1>
-  <p style="color:var(--text-dim)">Replace cwd-coupled repo discovery with a user-level settings file, and add an agentic jobsmith onboard command that bootstraps master YAMLs from an existing resume/LinkedIn and interviews for gaps</p>
+  <p style="color:var(--text-dim)">Make jobsmith installable for a single jobseeker without the "cd into a magic
+directory" friction. Two intertwined concerns:
+  (A) Decouple repo-root discovery from cwd via a user-level settings file.
+  (B) An agentic `jobsmith onboard` command that bootstraps master content
+      from what the user already has (resume PDF/DOCX, LinkedIn export, profile
+      URL, free-text paste), then interviews them for missing fields.
+Scope edge: backend + web onboarding flow only. NO native desktop shell
+(Tauri/Electron) in this plan. Stays single-tenant — no auth/DB-isolation/
+containerized sandboxing (those belong to a hosted-SaaS plan, explicitly out
+of scope here).
+Acceptance north star: `jobsmith` runs from ANY cwd via the settings file, and
+onboarding turns a real resume PDF into valid, lint-passing master YAMLs with a
+gap-interview for missing fields.
+</p>
   <div class="meta">
     <span class="badge badge-pending">Draft</span>
-    <span style="font-size:.75rem;color:var(--text-muted)">v2 · 0 slices · Created 2026-05-23</span>
+    <span style="font-size:.75rem;color:var(--text-muted)">v1 · 6 slices · Created 2026-05-23</span>
   </div>
 </header>
 <button id="themeToggle" style="position:fixed;top:16px;right:16px;z-index:100;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;color:var(--text);font-family:var(--mono);font-size:0.75rem;cursor:pointer;">
@@ -432,6 +491,12 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <section class="dep-graph" data-zone="dependency-graph">
   <h2>Dependency Graph</h2>
   <div id="graph-data" style="display:none">
+    <div data-node="1" data-name="User-level settings file + repo-root resolution precedence" data-status="pending" data-deps="" data-files="6"></div>
+    <div data-node="2" data-name="Route API + master reads through the shared resolver" data-status="pending" data-deps="1" data-files="6"></div>
+    <div data-node="3" data-name="`jobsmith onboard` command + agentic subprocess scaffold" data-status="pending" data-deps="1" data-files="6"></div>
+    <div data-node="4" data-name="Ingest specialists: resume, LinkedIn export, URL, free-text" data-status="pending" data-deps="3" data-files="6"></div>
+    <div data-node="5" data-name="Gap-interview + lint-gated master write" data-status="pending" data-deps="4" data-files="5"></div>
+    <div data-node="6" data-name="Web onboarding flow (upload, paste, gap-interview, masters-ready)" data-status="pending" data-deps="2,5" data-files="7"></div>
     
     <!--PLAN_GRAPH_NODES-->
   </div>
@@ -444,17 +509,36 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <details id="design" class="section-card" open data-phase="design" data-status="pending">
   <summary><span>Design</span><span class="badge badge-pending" data-badge-for="design">Pending</span></summary>
   <div class="section-body">
-    <!--PLAN_DESIGN_CONTENT-->
-    <div class="sub-section">
-      <h4>Open Questions</h4>
-      <!--PLAN_QUESTIONS-->
-    </div>
+    <h4>Problem</h4>
+<div data-markdown>jobsmith can only run from a directory containing .apply-config.yaml because
+repo-root discovery is cwd-coupled (find_config(cwd), config.py:262). A jobseeker
+who installs the tool has no obvious &#34;where do I run this&#34; answer, and there is no
+on-ramp that uses the resume/LinkedIn content they already have — they would have
+to author every master YAML by hand. We need an install-and-go, single-user
+experience: run from anywhere, and bootstrap master content agentically.
+</div>
+<h4>Goals</h4>
+<ol>
+<li data-markdown>Run jobsmith from any working directory via a persisted user-level settings file (repo_root).</li>
+<li data-markdown>Provide an agentic `jobsmith onboard` that seeds master YAMLs from existing resume/LinkedIn/paste, then interviews for gaps.</li>
+<li data-markdown>Guarantee onboarding output is valid: final master YAMLs pass `jobsmith lint` before persistence.</li>
+<li data-markdown>Expose the same onboarding through the existing web app (no terminal required).</li>
+</ol>
+<h4>Constraints</h4>
+<ul>
+<li data-markdown>Stay single-tenant: NO auth/registration, per-user DB isolation, or containerized sandboxing in this plan.</li>
+<li data-markdown>No native desktop shell (Tauri/Electron) — backend + existing web app only.</li>
+<li data-markdown>Preserve backward compatibility: existing JOBSMITH_REPO_ROOT env deploys and the find_config(cwd) fallback must keep working.</li>
+<li data-markdown>No fabrication: extracted content must trace to source; honor LinkedIn auth-walls (no scraping behind login).</li>
+</ul>
+
     <div class="approval-row">
       <label><input type="checkbox" data-section="design" data-action="approve"> Approve design</label>
       <textarea data-section="design" data-comment-for="design" placeholder="Comments on design decisions..."></textarea>
     </div>
   </div>
 </details>
+
 
 <!-- Structure Outline (hidden when empty) -->
 
@@ -463,23 +547,1000 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <details id="slices" class="section-card" open data-phase="slices" data-status="pending">
   <summary><span>Slices</span><span class="badge badge-pending" data-badge-for="slices">Pending</span></summary>
   <div class="section-body">
+    <details class="slice-card" id="slice-1" data-slice="1" data-slice-name="slice-1" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 1: User-level settings file &#43; repo-root resolution precedence">
+    <span class="slice-num">#1</span>
+    <span class="slice-title-col">
+      <span class="slice-name">User-level settings file &#43; repo-root resolution precedence</span>
+      <span class="slice-preview">Introduce a user-level settings store (TOML at the OS config dir, e.g.</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-1">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-1-approval" value="approved" data-section="slice-1" data-action="approve" aria-label="Approve slice 1">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-1-approval" value="changes_requested" data-section="slice-1" data-action="approve" aria-label="Request changes for slice 1">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-1-approval" value="rejected" data-section="slice-1" data-action="approve" aria-label="Reject slice 1">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
     
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-1-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Introduce a user-level settings store (TOML at the OS config dir, e.g.
+~/.config/jobsmith/settings.toml; resolved via platformdirs) holding a
+<code>repo_root</code> key. Centralize ALL repo-root resolution in paths.py
+<code>repo_root_for()</code> with a single, documented precedence chain:</p>
+<ol>
+<li>explicit --repo-root CLI flag (new global option)</li>
+<li>JOBSMITH_REPO_ROOT env var (existing API path)</li>
+<li>settings.toml repo_root</li>
+<li>find_config(cwd) walk-up (existing fallback)</li>
+<li>error with actionable message if none resolve to a dir containing
+.apply-config.yaml
+Add <code>jobsmith config set-repo-root &lt;path&gt;</code>, <code>jobsmith config show</code>, and
+<code>jobsmith config clear-repo-root</code> subcommands. Settings module is new
+(src/jobsmith/settings.py); resolution stays in paths.py so every caller
+(CLI + API) shares one code path.</li>
+</ol>
+</div>
+          <label for="slice-1-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>The cwd coupling (find_config(cwd) in config.py:262) is the root cause of
+&#34;must be run from a specific directory.&#34; A persisted user-level pointer is
+the minimum change that lets an installed app run from anywhere while keeping
+the on-disk repo model intact. User chose &#34;user-level config points to a
+chosen path&#34; over an opaque app-data dir for flexibility.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/settings.py, src/jobsmith/paths.py, src/jobsmith/config.py, src/jobsmith/cli.py, tests/test_paths.py, tests/test_settings.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Running any jobsmith command from a cwd OUTSIDE the repo resolves the repo via settings.toml repo_root</li><li>Resolution precedence is flag &gt; env &gt; settings &gt; find_config(cwd) &gt; actionable error, with a unit test asserting each tier wins over the next</li><li>`jobsmith config set-repo-root &lt;path&gt;` validates the path contains .apply-config.yaml and persists it; `config show` prints the resolved root and which tier it came from</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-1-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>State:</strong> new settings.toml under OS config dir (platformdirs.user_config_dir),
+separate from .apply-config.yaml which stays the per-repo contract.
+<strong>Trigger:</strong> every repo-root resolution funnels through paths.repo_root_for().
+<strong>Precedence:</strong> flag &gt; env &gt; settings &gt; find_config(cwd) &gt; error. Env kept above
+settings so existing API/JOBSMITH_REPO_ROOT deploys are unaffected.
+<strong>Rejected:</strong> OS app-data-dir-IS-the-repo (less flexible, user wanted a chosen
+path); storing repo_root inside .apply-config.yaml (chicken-and-egg — can&#39;t
+find the config without already knowing the root).</p>
+</div>
+        <label for="slice-1-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 3</span>
+            <ul><li>TestRepoRootPrecedence — table test, each tier set/unset, assert winner</li><li>TestSettingsRoundTrip — set-repo-root writes TOML, reload reads it back</li><li>TestRepoRootNoConfigError — no tier resolves -&gt; clear error, not silent cwd</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>TOML vs JSON for settings.toml?</p>
+          
+          
+          <textarea
+            data-section="slice-1-question-q-settings-format"
+            data-comment-for="slice-1-question-q-settings-format"
+            placeholder="Answer question q-settings-format...">TOML — human-editable, matches the &#39;power user can hand-edit&#39; intent; std-lib tomllib reads it, tomli-w (already viable) or a tiny writer emits it.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: none</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-1" data-comment-for="slice-1" placeholder="Comments on slice 1..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-2" data-slice="2" data-slice-name="slice-2" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 2: Route API &#43; master reads through the shared resolver">
+    <span class="slice-num">#2</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Route API &#43; master reads through the shared resolver</span>
+      <span class="slice-preview">Make the API resolve reporoot through paths.reporootfor() (settings-aware)</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-2">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-2-approval" value="approved" data-section="slice-2" data-action="approve" aria-label="Approve slice 2">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-2-approval" value="changes_requested" data-section="slice-2" data-action="approve" aria-label="Request changes for slice 2">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-2-approval" value="rejected" data-section="slice-2" data-action="approve" aria-label="Reject slice 2">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-2-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Make the API resolve repo_root through paths.repo_root_for() (settings-aware)
+instead of reading os.environ[&#34;JOBSMITH_REPO_ROOT&#34;] directly in scattered
+spots, and fix the master.py inconsistency where _require_config_path() calls
+find_config(Path.cwd()) rather than app.state.repo_root. After this slice the
+env var is just tier-2 of the shared chain, app.state.repo_root is the single
+cached truth, and master reads/writes use it too.</p>
+</div>
+          <label for="slice-2-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>The researcher found repo-root resolved in &gt;=4 different places
+(applications.py:574, applications.py:606, artifacts.py:61, main.py:70) plus a
+cwd-based outlier in master.py:77. Without consolidating, slice-1&#39;s settings
+tier would be honored by the CLI but silently ignored by the web app.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/api/main.py, src/jobsmith/api/applications.py, src/jobsmith/api/artifacts.py, src/jobsmith/api/master.py, tests/test_api_applications.py, tests/test_api_snapshot.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>All API repo-root reads go through paths.repo_root_for(); a grep for os.environ.get(&#39;JOBSMITH_REPO_ROOT&#39;) outside paths.py returns zero hits</li><li>master.py _require_config_path() uses request.app.state.repo_root, not find_config(cwd) — verified by a test that starts the app from an unrelated cwd</li><li>Existing API tests (test_api_applications, test_api_snapshot) still pass unchanged</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <div class="markdown-block serif-prose"><p><strong>State:</strong> app.state.repo_root remains the per-process cache, but it is now
+seeded from paths.repo_root_for() so the settings tier participates.
+<strong>Trigger:</strong> lifespan startup (main.py:70/172) computes once; helpers read cache.
+<strong>Rejected:</strong> per-request re-resolution (needless cost, and the repo can&#39;t move
+mid-process); leaving master.py on cwd (the exact bug that makes web ignore
+settings).</p>
+</div>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 2</span>
+            <ul><li>TestApiRepoRootFromSettings — start app from /tmp, settings points</li><li>TestMasterReadHonorsAppState — master read uses cached root not cwd</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 1</span>
+            <ul><li>elsewhere, assert GET /applications reads the settings repo</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>Should env var still outrank settings post-consolidation?</p>
+          
+          
+          <textarea
+            data-section="slice-2-question-q-env-precedence"
+            data-comment-for="slice-2-question-q-env-precedence"
+            placeholder="Answer question q-env-precedence...">Yes — keep env at tier 2 above settings so container/CI deploys that set JOBSMITH_REPO_ROOT keep working without a settings file.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: slices 1</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-2" data-comment-for="slice-2" placeholder="Comments on slice 2..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-3" data-slice="3" data-slice-name="slice-3" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 3: `jobsmith onboard` command &#43; agentic subprocess scaffold">
+    <span class="slice-num">#3</span>
+    <span class="slice-title-col">
+      <span class="slice-name">`jobsmith onboard` command &#43; agentic subprocess scaffold</span>
+      <span class="slice-preview">New CLI command jobsmith onboard and a headless onboarding pipeline that</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-blocked badge-sm">L</span>
+          <span class="badge badge-blocked badge-sm">High</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-3">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-3-approval" value="approved" data-section="slice-3" data-action="approve" aria-label="Approve slice 3">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-3-approval" value="changes_requested" data-section="slice-3" data-action="approve" aria-label="Request changes for slice 3">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-3-approval" value="rejected" data-section="slice-3" data-action="approve" aria-label="Reject slice 3">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-3-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>New CLI command <code>jobsmith onboard</code> and a headless onboarding pipeline that
+mirrors the apply pipeline&#39;s subprocess pattern (headless.py spawns <code>claude -p</code>
+with cwd = resolved repo root). Phase 0: ensure a repo exists at the resolved
+root — if .apply-config.yaml is absent, scaffold it (reuse <code>jobsmith init</code>
+internals) with empty master YAML stubs, then persist the location to settings
+(slice-1). The command accepts input flags: --resume-file, --linkedin-export,
+--linkedin-url, --paste/--paste-file (one or more). It writes intermediate
+artifacts to a reserved state namespace (.onboard-state/, mirroring
+.apply-state/) and dispatches the onboarding agent. This slice delivers the
+command shell, repo-bootstrap, state plumbing, and agent dispatch — NOT the
+per-input parsers (slice-4) or gap-interview (slice-5).</p>
+</div>
+          <label for="slice-3-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>User chose a first-class <code>jobsmith onboard</code> command over web-only or a thin
+upload wrapper, and wants onboarding itself to be agentic (reuse what the user
+has). Reusing the proven headless subprocess + state-file handoff keeps it
+consistent with apply and avoids a second execution model.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/cli.py, src/jobsmith/_cli_onboard.py, src/jobsmith/headless.py, src/jobsmith/core/paths.py, src/jobsmith/plugin/agents/onboard-orchestrator.md, tests/test_cli_onboard.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>`jobsmith onboard` run against a directory with NO .apply-config.yaml scaffolds the repo, persists its path to settings, and exits phase-0 cleanly</li><li>The command spawns the agentic subprocess with cwd = resolved repo root and writes a manifest under .onboard-state/</li><li>Input flags (--resume-file/--linkedin-export/--linkedin-url/--paste) are validated and inlined into the agent spec; an invalid file path errors before dispatch</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-3-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> explicit <code>jobsmith onboard</code> CLI invocation (not a hook).
+<strong>State:</strong> .onboard-state/ dir under the repo root, parallel to .apply-state/;
+reuses the db put-state/get-state mechanism keyed by a reserved slug
+(<strong>onboard</strong>) so the dashboard can observe progress.
+<strong>Payload:</strong> agent spec carries the list of provided input sources + the master
+schema so the orchestrator knows what to extract and what is missing.
+<strong>Rejected:</strong> web-only wizard (user wanted a CLI command); reusing /master upload
+as the whole flow (no agentic extraction/gap-fill); a brand-new execution
+engine (headless.py subprocess pattern already works for apply).</p>
+</div>
+        <label for="slice-3-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 2</span>
+            <ul><li>TestOnboardScaffoldsRepo — empty dir -&gt; repo &#43; settings persisted</li><li>TestOnboardDispatch — asserts subprocess invoked with correct cwd</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>TestOnboardInputValidation — bad --resume-file path -&gt; error pre-dispatch</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 1</span>
+            <ul><li>and a spec written to .onboard-state/ (subprocess mocked)</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>How to namespace onboarding state in the shared DB?</p>
+          
+          
+          <textarea
+            data-section="slice-3-question-q-onboard-slug"
+            data-comment-for="slice-3-question-q-onboard-slug"
+            placeholder="Answer question q-onboard-slug...">Reserved slug __onboard__ via the existing apply_state table — no schema change, and the SSE/dashboard observe it like any run.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: slices 1</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-3" data-comment-for="slice-3" placeholder="Comments on slice 3..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-4" data-slice="4" data-slice-name="slice-4" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 4: Ingest specialists: resume, LinkedIn export, URL, free-text">
+    <span class="slice-num">#4</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Ingest specialists: resume, LinkedIn export, URL, free-text</span>
+      <span class="slice-preview">The agent specialists/prompts that parse each input type into candidate master</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-blocked badge-sm">L</span>
+          <span class="badge badge-blocked badge-sm">High</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-4">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-4-approval" value="approved" data-section="slice-4" data-action="approve" aria-label="Approve slice 4">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-4-approval" value="changes_requested" data-section="slice-4" data-action="approve" aria-label="Request changes for slice 4">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-4-approval" value="rejected" data-section="slice-4" data-action="approve" aria-label="Reject slice 4">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-4-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>The agent specialists/prompts that parse each input type into candidate master
+content (work.yml / skill.yml / education.yml / author.yml structures):</p>
+<ul>
+<li>Resume PDF/DOCX: text extraction (PDF via existing/added extractor; DOCX
+via python-docx) then LLM-structured into the master schema.</li>
+<li>LinkedIn export: handle both the &#34;Download your data&#34; ZIP (Positions.csv,
+Education.csv, Skills.csv) and a profile PDF.</li>
+<li>LinkedIn URL: best-effort browser/HTTP fetch with an explicit caveat that
+auth-walls usually block it; degrade gracefully to &#34;couldn&#39;t fetch, please
+paste or upload.&#34;</li>
+<li>Free-text paste: LLM structures whatever the user provides.
+Each specialist emits a normalized candidate-content JSON into .onboard-state/.
+No fabrication: every extracted bullet/claim must trace to source text
+(consistent with jobsmith&#39;s no-fabrication contract).</li>
+</ul>
+</div>
+          <label for="slice-4-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>This is the &#34;use what the user already has&#34; requirement. Multiple input formats
+were all selected, so each needs a parser, with the URL path flagged as
+best-effort due to LinkedIn auth-walling.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/onboard/extract_resume.py, src/jobsmith/onboard/extract_linkedin.py, src/jobsmith/onboard/extract_text.py, src/jobsmith/plugin/agents/onboard-extractor.md, tests/test_onboard_extract.py, tests/fixtures/onboarding/</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>A sample resume PDF produces candidate work/skill/education/author JSON whose every entry traces to source text (no fabricated employers/dates)</li><li>A LinkedIn &#39;Download your data&#39; ZIP populates positions, education, and skills from its CSVs</li><li>A LinkedIn URL that is auth-walled degrades to a clear &#39;paste or upload instead&#39; result rather than failing the run</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-4-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Payload:</strong> each specialist writes candidate-<section>.json to .onboard-state/;
+a provenance map links each field to its source snippet.
+<strong>State:</strong> candidate content is staged, NOT written to master YAMLs yet — the
+gap-interview (slice-5) gates the final write.
+<strong>Rejected:</strong> scraping LinkedIn behind auth (ToS + auth-wall, privacy rules);
+merging straight into masters without a confirm step (risks importing stale or
+wrong data the user can&#39;t review).</p>
+</div>
+        <label for="slice-4-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 4</span>
+            <ul><li>TestExtractResumePdf — fixture PDF -&gt; expected structured fields</li><li>TestExtractLinkedinZip — fixture ZIP CSVs -&gt; positions/education/skills</li><li>TestExtractUrlAuthWalled — simulated 999/login redirect -&gt; graceful skip</li><li>TestNoFabrication — extracted claim absent from source -&gt; dropped/flagged</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>Which PDF text extractor for resumes?</p>
+          
+          
+          <textarea
+            data-section="slice-4-question-q-pdf-extractor"
+            data-comment-for="slice-4-question-q-pdf-extractor"
+            placeholder="Answer question q-pdf-extractor...">Prefer a maintained pure-Python lib already compatible with the stack (pdfplumber/pypdf) over a new system dep; fall back to the agent reading the file directly if extraction is poor.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: slices 3</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-4" data-comment-for="slice-4" placeholder="Comments on slice 4..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-5" data-slice="5" data-slice-name="slice-5" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 5: Gap-interview &#43; lint-gated master write">
+    <span class="slice-num">#5</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Gap-interview &#43; lint-gated master write</span>
+      <span class="slice-preview">After extraction, the orchestrator diffs candidate content against the master</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-5">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-5-approval" value="approved" data-section="slice-5" data-action="approve" aria-label="Approve slice 5">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-5-approval" value="changes_requested" data-section="slice-5" data-action="approve" aria-label="Request changes for slice 5">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-5-approval" value="rejected" data-section="slice-5" data-action="approve" aria-label="Reject slice 5">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-5-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>After extraction, the orchestrator diffs candidate content against the master
+schema&#39;s required fields, computes what&#39;s missing or low-confidence, and runs a
+conversational gap-interview (the agentic &#39;fill in what&#39;s missing&#39; step). Once
+the user answers, it merges candidate + answers into the master YAMLs at the
+repo&#39;s assets/content/ paths, then runs <code>jobsmith lint</code> as a hard gate. If lint
+fails, it loops back rather than leaving broken masters. Emits an onboarding
+summary (what was imported, what the user supplied, what&#39;s still optional).</p>
+</div>
+          <label for="slice-5-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>The user&#39;s core ask: &#34;facilitate using what the user has and then have them fill
+in what is missing instead of doing everything from scratch.&#34; The lint gate
+guarantees the masters are valid for a subsequent apply run.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/onboard/gap_analysis.py, src/jobsmith/onboard/merge_master.py, src/jobsmith/plugin/agents/onboard-orchestrator.md, src/jobsmith/lint.py, tests/test_onboard_gap_merge.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Missing required master fields are surfaced as interview questions; provided answers are merged into the correct master YAML</li><li>Final master YAMLs pass `jobsmith lint`; a lint failure loops the merge step instead of persisting broken content</li><li>An onboarding summary reports imported vs user-supplied vs still-optional fields</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-5-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> runs after slice-4 extraction within the same onboard subprocess.
+<strong>State:</strong> writes to assets/content/*.yml (the master paths from config.py:16-43)
+only AFTER lint passes; staging stays in .onboard-state/ until then.
+<strong>Payload:</strong> gap questions are derived from the master schema&#39;s required fields
+minus high-confidence extracted fields.
+<strong>Rejected:</strong> writing masters before lint (could leave a half-valid repo that
+breaks apply); free-form unbounded interview (anchor to schema-required gaps to
+keep it short).</p>
+</div>
+        <label for="slice-5-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>TestGapAnalysis — candidate missing author.email -&gt; question generated</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 2</span>
+            <ul><li>TestMergeThenLint — candidate&#43;answers -&gt; masters pass jobsmith lint</li><li>TestLintFailLoops — invalid merge -&gt; does not persist, re-prompts</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>Cap the lint-fix loop?</p>
+          
+          
+          <textarea
+            data-section="slice-5-question-q-lint-loop-cap"
+            data-comment-for="slice-5-question-q-lint-loop-cap"
+            placeholder="Answer question q-lint-loop-cap...">Yes — cap at 3 iterations, then stop and report remaining errors to the user rather than looping indefinitely.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: slices 4</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-5" data-comment-for="slice-5" placeholder="Comments on slice 5..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-6" data-slice="6" data-slice-name="slice-6" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 6: Web onboarding flow (upload, paste, gap-interview, masters-ready)">
+    <span class="slice-num">#6</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Web onboarding flow (upload, paste, gap-interview, masters-ready)</span>
+      <span class="slice-preview">Frontend onboarding wizard in the existing web app: a first-run flow that lets</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-blocked badge-sm">L</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-6">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-6-approval" value="approved" data-section="slice-6" data-action="approve" aria-label="Approve slice 6">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-6-approval" value="changes_requested" data-section="slice-6" data-action="approve" aria-label="Request changes for slice 6">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-6-approval" value="rejected" data-section="slice-6" data-action="approve" aria-label="Reject slice 6">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-6-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Frontend onboarding wizard in the existing web app: a first-run flow that lets
+the user upload a resume / LinkedIn export, paste text, or give a URL; kicks off
+the onboarding run via new API endpoints; streams progress over the existing SSE
+channel; renders the gap-interview questions; and lands on a &#34;masters ready&#34;
+screen. New API endpoints wrap the slice-3..5 pipeline (POST /onboard with
+multipart inputs, GET onboarding status, answer gap questions). Reuses the
+existing supervisor/SSE plumbing.</p>
+</div>
+          <label for="slice-6-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Scope edge chosen = &#34;backend + web onboarding only.&#34; The web flow is the
+jobseeker-facing surface that makes the agentic onboarding usable without the
+terminal, completing the install-and-go experience (minus a native shell, which
+is explicitly out of scope).</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>web/src/app/onboarding.tsx, web/src/api/hooks.ts, web/src/api/client.ts, src/jobsmith/api/onboard.py, src/jobsmith/api/main.py, tests/test_api_onboard.py, web/src/app/onboarding.test.tsx</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>A first-run user with no masters can complete onboarding entirely in the web UI: provide inputs, answer gap questions, reach &#39;masters ready&#39;</li><li>Onboarding progress streams over the existing SSE channel; a process restart re-derives status from the DB (no lost run)</li><li>POST /onboard accepts multipart resume/LinkedIn uploads and routes them to the resolved repo root from slice-2</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-6-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> web wizard POSTs to /onboard; backend reuses the slice-3 pipeline.
+<strong>State:</strong> uploads land at the slice-2 resolved repo root; run state in the
+shared DB under the <strong>onboard</strong> slug; live progress via the in-memory SSE
+supervisor (supervisor.py).
+<strong>Payload:</strong> multipart upload in, SSE events out, gap questions/answers as JSON.
+<strong>Rejected:</strong> a separate onboarding service (reuse existing API + supervisor);
+websockets (SSE already in place for apply).</p>
+</div>
+        <label for="slice-6-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 2</span>
+            <ul><li>TestApiOnboardMultipart — upload resume -&gt; run starts, status visible</li><li>TestOnboardStatusAfterRestart — status re-derived from DB</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="component">
+            <span class="test-chip">COMPONENT &middot; 1</span>
+            <ul><li>onboarding.test.tsx — wizard renders gap questions, submits answers</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>Cap upload size for resume/LinkedIn files?</p>
+          
+          
+          <textarea
+            data-section="slice-6-question-q-upload-size"
+            data-comment-for="slice-6-question-q-upload-size"
+            placeholder="Answer question q-upload-size...">Yes — enforce a sane multipart cap (e.g. 10MB) to protect the single-process server; reject oversize with a clear 413.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: slices 2,5</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-6" data-comment-for="slice-6" placeholder="Comments on slice 6..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+
     <!--PLAN_SLICE_CARDS-->
   </div>
 </details>
 
 <!-- Design Decisions (hidden for v2 plans — slice cards carry their own questions) -->
-<details id="questions" class="section-card" data-phase="questions" data-status="pending">
-  <summary><span>Design Decisions</span><span class="badge badge-pending" data-badge-for="questions">Pending</span></summary>
-  <div class="section-body">
-    <table class="q-table">
-      <thead><tr><th>Question</th><th>Selected</th><th>Status</th></tr></thead>
-      <tbody id="questionsRecap">
-        <!--PLAN_QUESTIONS_RECAP-->
-      </tbody>
-    </table>
-  </div>
-</details>
+
 
 
 
@@ -490,8 +1551,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <h2>Feedback Summary</h2>
   <div class="progress-stats">
     <div class="progress-stat"><strong id="approvedCount">0</strong> approved</div>
-    <div class="progress-stat"><strong id="totalSections">1</strong> sections</div>
-    <div class="progress-stat"><strong id="pendingCount">1</strong> pending</div>
+    <div class="progress-stat"><strong id="totalSections">7</strong> sections</div>
+    <div class="progress-stat"><strong id="pendingCount">7</strong> pending</div>
   </div>
   <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill" style="width:0%"></div></div>
   <div class="comments-summary">
@@ -571,7 +1632,7 @@ var planId=(function(){var a=document.querySelector('article[id]');return a?a.id
 
 (function(){
   'use strict';
-  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design"]/*END_PLAN_SECTIONS_JSON*/;
+  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design","slice-1","slice-2","slice-3","slice-4","slice-5","slice-6"]/*END_PLAN_SECTIONS_JSON*/;
 
   function setBadge(el,ok){
     el.className='badge badge-'+(ok?'approved':'pending');

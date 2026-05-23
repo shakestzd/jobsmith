@@ -1,18 +1,363 @@
 meta:
     id: plan-95ec8de7
-    track_id: trk-211c4980
     title: Location-decoupling + agentic onboarding
-    description: Replace cwd-coupled repo discovery with a user-level settings file, and add an agentic jobsmith onboard command that bootstraps master YAMLs from an existing resume/LinkedIn and interviews for gaps
-    created_at: "2026-05-23"
+    description: |
+        Make jobsmith installable for a single jobseeker without the "cd into a magic
+        directory" friction. Two intertwined concerns:
+          (A) Decouple repo-root discovery from cwd via a user-level settings file.
+          (B) An agentic `jobsmith onboard` command that bootstraps master content
+              from what the user already has (resume PDF/DOCX, LinkedIn export, profile
+              URL, free-text paste), then interviews them for missing fields.
+        Scope edge: backend + web onboarding flow only. NO native desktop shell
+        (Tauri/Electron) in this plan. Stays single-tenant — no auth/DB-isolation/
+        containerized sandboxing (those belong to a hosted-SaaS plan, explicitly out
+        of scope here).
+        Acceptance north star: `jobsmith` runs from ANY cwd via the settings file, and
+        onboarding turns a real resume PDF into valid, lint-passing master YAMLs with a
+        gap-interview for missing fields.
+    created_at: ""
     status: draft
-    priority: medium
     schema_version: v3
-    version: 2
+    version: 1
 design:
-    problem: ""
-    goals: []
-    constraints: []
+    problem: |
+        jobsmith can only run from a directory containing .apply-config.yaml because
+        repo-root discovery is cwd-coupled (find_config(cwd), config.py:262). A jobseeker
+        who installs the tool has no obvious "where do I run this" answer, and there is no
+        on-ramp that uses the resume/LinkedIn content they already have — they would have
+        to author every master YAML by hand. We need an install-and-go, single-user
+        experience: run from anywhere, and bootstrap master content agentically.
+    goals:
+        - Run jobsmith from any working directory via a persisted user-level settings file (repo_root).
+        - Provide an agentic `jobsmith onboard` that seeds master YAMLs from existing resume/LinkedIn/paste, then interviews for gaps.
+        - 'Guarantee onboarding output is valid: final master YAMLs pass `jobsmith lint` before persistence.'
+        - Expose the same onboarding through the existing web app (no terminal required).
+    constraints:
+        - 'Stay single-tenant: NO auth/registration, per-user DB isolation, or containerized sandboxing in this plan.'
+        - No native desktop shell (Tauri/Electron) — backend + existing web app only.
+        - 'Preserve backward compatibility: existing JOBSMITH_REPO_ROOT env deploys and the find_config(cwd) fallback must keep working.'
+        - 'No fabrication: extracted content must trace to source; honor LinkedIn auth-walls (no scraping behind login).'
     approved: false
     comment: ""
-slices: []
+slices:
+    - id: slice-1
+      num: 1
+      title: User-level settings file + repo-root resolution precedence
+      what: |
+        Introduce a user-level settings store (TOML at the OS config dir, e.g.
+        ~/.config/jobsmith/settings.toml; resolved via platformdirs) holding a
+        `repo_root` key. Centralize ALL repo-root resolution in paths.py
+        `repo_root_for()` with a single, documented precedence chain:
+          1. explicit --repo-root CLI flag (new global option)
+          2. JOBSMITH_REPO_ROOT env var (existing API path)
+          3. settings.toml repo_root
+          4. find_config(cwd) walk-up (existing fallback)
+          5. error with actionable message if none resolve to a dir containing
+             .apply-config.yaml
+        Add `jobsmith config set-repo-root <path>`, `jobsmith config show`, and
+        `jobsmith config clear-repo-root` subcommands. Settings module is new
+        (src/jobsmith/settings.py); resolution stays in paths.py so every caller
+        (CLI + API) shares one code path.
+      why: |
+        The cwd coupling (find_config(cwd) in config.py:262) is the root cause of
+        "must be run from a specific directory." A persisted user-level pointer is
+        the minimum change that lets an installed app run from anywhere while keeping
+        the on-disk repo model intact. User chose "user-level config points to a
+        chosen path" over an opaque app-data dir for flexibility.
+      files:
+        - src/jobsmith/settings.py
+        - src/jobsmith/paths.py
+        - src/jobsmith/config.py
+        - src/jobsmith/cli.py
+        - tests/test_paths.py
+        - tests/test_settings.py
+      deps: []
+      done_when:
+        - Running any jobsmith command from a cwd OUTSIDE the repo resolves the repo via settings.toml repo_root
+        - Resolution precedence is flag > env > settings > find_config(cwd) > actionable error, with a unit test asserting each tier wins over the next
+        - '`jobsmith config set-repo-root <path>` validates the path contains .apply-config.yaml and persists it; `config show` prints the resolved root and which tier it came from'
+      effort: M
+      risk: Med
+      tests: |
+        Unit: TestRepoRootPrecedence — table test, each tier set/unset, assert winner
+        Unit: TestSettingsRoundTrip — set-repo-root writes TOML, reload reads it back
+        Unit: TestRepoRootNoConfigError — no tier resolves -> clear error, not silent cwd
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-settings-format
+          text: TOML vs JSON for settings.toml?
+          answer: TOML — human-editable, matches the 'power user can hand-edit' intent; std-lib tomllib reads it, tomli-w (already viable) or a tiny writer emits it.
+      decisions_notes: |
+        **State:** new settings.toml under OS config dir (platformdirs.user_config_dir),
+          separate from .apply-config.yaml which stays the per-repo contract.
+        **Trigger:** every repo-root resolution funnels through paths.repo_root_for().
+        **Precedence:** flag > env > settings > find_config(cwd) > error. Env kept above
+          settings so existing API/JOBSMITH_REPO_ROOT deploys are unaffected.
+        **Rejected:** OS app-data-dir-IS-the-repo (less flexible, user wanted a chosen
+          path); storing repo_root inside .apply-config.yaml (chicken-and-egg — can't
+          find the config without already knowing the root).
+    - id: slice-2
+      num: 2
+      title: Route API + master reads through the shared resolver
+      what: |
+        Make the API resolve repo_root through paths.repo_root_for() (settings-aware)
+        instead of reading os.environ["JOBSMITH_REPO_ROOT"] directly in scattered
+        spots, and fix the master.py inconsistency where _require_config_path() calls
+        find_config(Path.cwd()) rather than app.state.repo_root. After this slice the
+        env var is just tier-2 of the shared chain, app.state.repo_root is the single
+        cached truth, and master reads/writes use it too.
+      why: |
+        The researcher found repo-root resolved in >=4 different places
+        (applications.py:574, applications.py:606, artifacts.py:61, main.py:70) plus a
+        cwd-based outlier in master.py:77. Without consolidating, slice-1's settings
+        tier would be honored by the CLI but silently ignored by the web app.
+      files:
+        - src/jobsmith/api/main.py
+        - src/jobsmith/api/applications.py
+        - src/jobsmith/api/artifacts.py
+        - src/jobsmith/api/master.py
+        - tests/test_api_applications.py
+        - tests/test_api_snapshot.py
+      deps:
+        - 1
+      done_when:
+        - All API repo-root reads go through paths.repo_root_for(); a grep for os.environ.get('JOBSMITH_REPO_ROOT') outside paths.py returns zero hits
+        - master.py _require_config_path() uses request.app.state.repo_root, not find_config(cwd) — verified by a test that starts the app from an unrelated cwd
+        - Existing API tests (test_api_applications, test_api_snapshot) still pass unchanged
+      effort: M
+      risk: Med
+      tests: |
+        Integration: TestApiRepoRootFromSettings — start app from /tmp, settings points
+          elsewhere, assert GET /applications reads the settings repo
+        Integration: TestMasterReadHonorsAppState — master read uses cached root not cwd
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-env-precedence
+          text: Should env var still outrank settings post-consolidation?
+          answer: Yes — keep env at tier 2 above settings so container/CI deploys that set JOBSMITH_REPO_ROOT keep working without a settings file.
+      decisions_notes: |
+        **State:** app.state.repo_root remains the per-process cache, but it is now
+          seeded from paths.repo_root_for() so the settings tier participates.
+        **Trigger:** lifespan startup (main.py:70/172) computes once; helpers read cache.
+        **Rejected:** per-request re-resolution (needless cost, and the repo can't move
+          mid-process); leaving master.py on cwd (the exact bug that makes web ignore
+          settings).
+    - id: slice-3
+      num: 3
+      title: '`jobsmith onboard` command + agentic subprocess scaffold'
+      what: |
+        New CLI command `jobsmith onboard` and a headless onboarding pipeline that
+        mirrors the apply pipeline's subprocess pattern (headless.py spawns `claude -p`
+        with cwd = resolved repo root). Phase 0: ensure a repo exists at the resolved
+        root — if .apply-config.yaml is absent, scaffold it (reuse `jobsmith init`
+        internals) with empty master YAML stubs, then persist the location to settings
+        (slice-1). The command accepts input flags: --resume-file, --linkedin-export,
+        --linkedin-url, --paste/--paste-file (one or more). It writes intermediate
+        artifacts to a reserved state namespace (.onboard-state/, mirroring
+        .apply-state/) and dispatches the onboarding agent. This slice delivers the
+        command shell, repo-bootstrap, state plumbing, and agent dispatch — NOT the
+        per-input parsers (slice-4) or gap-interview (slice-5).
+      why: |
+        User chose a first-class `jobsmith onboard` command over web-only or a thin
+        upload wrapper, and wants onboarding itself to be agentic (reuse what the user
+        has). Reusing the proven headless subprocess + state-file handoff keeps it
+        consistent with apply and avoids a second execution model.
+      files:
+        - src/jobsmith/cli.py
+        - src/jobsmith/_cli_onboard.py
+        - src/jobsmith/headless.py
+        - src/jobsmith/core/paths.py
+        - src/jobsmith/plugin/agents/onboard-orchestrator.md
+        - tests/test_cli_onboard.py
+      deps:
+        - 1
+      done_when:
+        - '`jobsmith onboard` run against a directory with NO .apply-config.yaml scaffolds the repo, persists its path to settings, and exits phase-0 cleanly'
+        - The command spawns the agentic subprocess with cwd = resolved repo root and writes a manifest under .onboard-state/
+        - Input flags (--resume-file/--linkedin-export/--linkedin-url/--paste) are validated and inlined into the agent spec; an invalid file path errors before dispatch
+      effort: L
+      risk: High
+      tests: |
+        Integration: TestOnboardScaffoldsRepo — empty dir -> repo + settings persisted
+        Unit: TestOnboardInputValidation — bad --resume-file path -> error pre-dispatch
+        Integration: TestOnboardDispatch — asserts subprocess invoked with correct cwd
+          and a spec written to .onboard-state/ (subprocess mocked)
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-onboard-slug
+          text: How to namespace onboarding state in the shared DB?
+          answer: Reserved slug __onboard__ via the existing apply_state table — no schema change, and the SSE/dashboard observe it like any run.
+      decisions_notes: |
+        **Trigger:** explicit `jobsmith onboard` CLI invocation (not a hook).
+        **State:** .onboard-state/ dir under the repo root, parallel to .apply-state/;
+          reuses the db put-state/get-state mechanism keyed by a reserved slug
+          (__onboard__) so the dashboard can observe progress.
+        **Payload:** agent spec carries the list of provided input sources + the master
+          schema so the orchestrator knows what to extract and what is missing.
+        **Rejected:** web-only wizard (user wanted a CLI command); reusing /master upload
+          as the whole flow (no agentic extraction/gap-fill); a brand-new execution
+          engine (headless.py subprocess pattern already works for apply).
+    - id: slice-4
+      num: 4
+      title: 'Ingest specialists: resume, LinkedIn export, URL, free-text'
+      what: |
+        The agent specialists/prompts that parse each input type into candidate master
+        content (work.yml / skill.yml / education.yml / author.yml structures):
+          - Resume PDF/DOCX: text extraction (PDF via existing/added extractor; DOCX
+            via python-docx) then LLM-structured into the master schema.
+          - LinkedIn export: handle both the "Download your data" ZIP (Positions.csv,
+            Education.csv, Skills.csv) and a profile PDF.
+          - LinkedIn URL: best-effort browser/HTTP fetch with an explicit caveat that
+            auth-walls usually block it; degrade gracefully to "couldn't fetch, please
+            paste or upload."
+          - Free-text paste: LLM structures whatever the user provides.
+        Each specialist emits a normalized candidate-content JSON into .onboard-state/.
+        No fabrication: every extracted bullet/claim must trace to source text
+        (consistent with jobsmith's no-fabrication contract).
+      why: |
+        This is the "use what the user already has" requirement. Multiple input formats
+        were all selected, so each needs a parser, with the URL path flagged as
+        best-effort due to LinkedIn auth-walling.
+      files:
+        - src/jobsmith/onboard/extract_resume.py
+        - src/jobsmith/onboard/extract_linkedin.py
+        - src/jobsmith/onboard/extract_text.py
+        - src/jobsmith/plugin/agents/onboard-extractor.md
+        - tests/test_onboard_extract.py
+        - tests/fixtures/onboarding/
+      deps:
+        - 3
+      done_when:
+        - A sample resume PDF produces candidate work/skill/education/author JSON whose every entry traces to source text (no fabricated employers/dates)
+        - A LinkedIn 'Download your data' ZIP populates positions, education, and skills from its CSVs
+        - A LinkedIn URL that is auth-walled degrades to a clear 'paste or upload instead' result rather than failing the run
+      effort: L
+      risk: High
+      tests: |
+        Unit: TestExtractResumePdf — fixture PDF -> expected structured fields
+        Unit: TestExtractLinkedinZip — fixture ZIP CSVs -> positions/education/skills
+        Unit: TestExtractUrlAuthWalled — simulated 999/login redirect -> graceful skip
+        Unit: TestNoFabrication — extracted claim absent from source -> dropped/flagged
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-pdf-extractor
+          text: Which PDF text extractor for resumes?
+          answer: Prefer a maintained pure-Python lib already compatible with the stack (pdfplumber/pypdf) over a new system dep; fall back to the agent reading the file directly if extraction is poor.
+      decisions_notes: |
+        **Payload:** each specialist writes candidate-<section>.json to .onboard-state/;
+          a provenance map links each field to its source snippet.
+        **State:** candidate content is staged, NOT written to master YAMLs yet — the
+          gap-interview (slice-5) gates the final write.
+        **Rejected:** scraping LinkedIn behind auth (ToS + auth-wall, privacy rules);
+          merging straight into masters without a confirm step (risks importing stale or
+          wrong data the user can't review).
+    - id: slice-5
+      num: 5
+      title: Gap-interview + lint-gated master write
+      what: |
+        After extraction, the orchestrator diffs candidate content against the master
+        schema's required fields, computes what's missing or low-confidence, and runs a
+        conversational gap-interview (the agentic 'fill in what's missing' step). Once
+        the user answers, it merges candidate + answers into the master YAMLs at the
+        repo's assets/content/ paths, then runs `jobsmith lint` as a hard gate. If lint
+        fails, it loops back rather than leaving broken masters. Emits an onboarding
+        summary (what was imported, what the user supplied, what's still optional).
+      why: |
+        The user's core ask: "facilitate using what the user has and then have them fill
+        in what is missing instead of doing everything from scratch." The lint gate
+        guarantees the masters are valid for a subsequent apply run.
+      files:
+        - src/jobsmith/onboard/gap_analysis.py
+        - src/jobsmith/onboard/merge_master.py
+        - src/jobsmith/plugin/agents/onboard-orchestrator.md
+        - src/jobsmith/lint.py
+        - tests/test_onboard_gap_merge.py
+      deps:
+        - 4
+      done_when:
+        - Missing required master fields are surfaced as interview questions; provided answers are merged into the correct master YAML
+        - Final master YAMLs pass `jobsmith lint`; a lint failure loops the merge step instead of persisting broken content
+        - An onboarding summary reports imported vs user-supplied vs still-optional fields
+      effort: M
+      risk: Med
+      tests: |
+        Unit: TestGapAnalysis — candidate missing author.email -> question generated
+        Integration: TestMergeThenLint — candidate+answers -> masters pass jobsmith lint
+        Integration: TestLintFailLoops — invalid merge -> does not persist, re-prompts
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-lint-loop-cap
+          text: Cap the lint-fix loop?
+          answer: Yes — cap at 3 iterations, then stop and report remaining errors to the user rather than looping indefinitely.
+      decisions_notes: |
+        **Trigger:** runs after slice-4 extraction within the same onboard subprocess.
+        **State:** writes to assets/content/*.yml (the master paths from config.py:16-43)
+          only AFTER lint passes; staging stays in .onboard-state/ until then.
+        **Payload:** gap questions are derived from the master schema's required fields
+          minus high-confidence extracted fields.
+        **Rejected:** writing masters before lint (could leave a half-valid repo that
+          breaks apply); free-form unbounded interview (anchor to schema-required gaps to
+          keep it short).
+    - id: slice-6
+      num: 6
+      title: Web onboarding flow (upload, paste, gap-interview, masters-ready)
+      what: |
+        Frontend onboarding wizard in the existing web app: a first-run flow that lets
+        the user upload a resume / LinkedIn export, paste text, or give a URL; kicks off
+        the onboarding run via new API endpoints; streams progress over the existing SSE
+        channel; renders the gap-interview questions; and lands on a "masters ready"
+        screen. New API endpoints wrap the slice-3..5 pipeline (POST /onboard with
+        multipart inputs, GET onboarding status, answer gap questions). Reuses the
+        existing supervisor/SSE plumbing.
+      why: |
+        Scope edge chosen = "backend + web onboarding only." The web flow is the
+        jobseeker-facing surface that makes the agentic onboarding usable without the
+        terminal, completing the install-and-go experience (minus a native shell, which
+        is explicitly out of scope).
+      files:
+        - web/src/app/onboarding.tsx
+        - web/src/api/hooks.ts
+        - web/src/api/client.ts
+        - src/jobsmith/api/onboard.py
+        - src/jobsmith/api/main.py
+        - tests/test_api_onboard.py
+        - web/src/app/onboarding.test.tsx
+      deps:
+        - 2
+        - 5
+      done_when:
+        - 'A first-run user with no masters can complete onboarding entirely in the web UI: provide inputs, answer gap questions, reach ''masters ready'''
+        - Onboarding progress streams over the existing SSE channel; a process restart re-derives status from the DB (no lost run)
+        - POST /onboard accepts multipart resume/LinkedIn uploads and routes them to the resolved repo root from slice-2
+      effort: L
+      risk: Med
+      tests: |
+        Integration: TestApiOnboardMultipart — upload resume -> run starts, status visible
+        Component: onboarding.test.tsx — wizard renders gap questions, submits answers
+        Integration: TestOnboardStatusAfterRestart — status re-derived from DB
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-upload-size
+          text: Cap upload size for resume/LinkedIn files?
+          answer: Yes — enforce a sane multipart cap (e.g. 10MB) to protect the single-process server; reject oversize with a clear 413.
+      decisions_notes: |
+        **Trigger:** web wizard POSTs to /onboard; backend reuses the slice-3 pipeline.
+        **State:** uploads land at the slice-2 resolved repo root; run state in the
+          shared DB under the __onboard__ slug; live progress via the in-memory SSE
+          supervisor (supervisor.py).
+        **Payload:** multipart upload in, SSE events out, gap questions/answers as JSON.
+        **Rejected:** a separate onboarding service (reuse existing API + supervisor);
+          websockets (SSE already in place for apply).
 questions: []
