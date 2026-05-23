@@ -416,7 +416,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-3" class="slice-nav-item" data-slice-nav="3">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="3"></span>
-        <span>#3 `jobsmith onboard` command + agentic subprocess scaffold</span>
+        <span>#3 `jobsmith onboard` command + agentic pipeline scaffold (dual entry, like apply)</span>
       </a>
     </li>
     
@@ -430,7 +430,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-5" class="slice-nav-item" data-slice-nav="5">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="5"></span>
-        <span>#5 Gap-interview + lint-gated master write</span>
+        <span>#5 Extract lint to a library, gap-interview, lint-gated master write</span>
       </a>
     </li>
     
@@ -491,11 +491,11 @@ gap-interview for missing fields.
 <section class="dep-graph" data-zone="dependency-graph">
   <h2>Dependency Graph</h2>
   <div id="graph-data" style="display:none">
-    <div data-node="1" data-name="User-level settings file + repo-root resolution precedence" data-status="pending" data-deps="" data-files="6"></div>
+    <div data-node="1" data-name="User-level settings file + repo-root resolution precedence" data-status="pending" data-deps="" data-files="9"></div>
     <div data-node="2" data-name="Route API + master reads through the shared resolver" data-status="pending" data-deps="1" data-files="6"></div>
-    <div data-node="3" data-name="`jobsmith onboard` command + agentic subprocess scaffold" data-status="pending" data-deps="1" data-files="6"></div>
-    <div data-node="4" data-name="Ingest specialists: resume, LinkedIn export, URL, free-text" data-status="pending" data-deps="3" data-files="6"></div>
-    <div data-node="5" data-name="Gap-interview + lint-gated master write" data-status="pending" data-deps="4" data-files="5"></div>
+    <div data-node="3" data-name="`jobsmith onboard` command + agentic pipeline scaffold (dual entry, like apply)" data-status="pending" data-deps="1" data-files="6"></div>
+    <div data-node="4" data-name="Ingest specialists: resume, LinkedIn export, URL, free-text" data-status="pending" data-deps="3" data-files="8"></div>
+    <div data-node="5" data-name="Extract lint to a library, gap-interview, lint-gated master write" data-status="pending" data-deps="4" data-files="7"></div>
     <div data-node="6" data-name="Web onboarding flow (upload, paste, gap-interview, masters-ready)" data-status="pending" data-deps="2,5" data-files="7"></div>
     
     <!--PLAN_GRAPH_NODES-->
@@ -560,7 +560,7 @@ experience: run from anywhere, and bootstrap master content agentically.
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-1">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="4 critic issue(s)">4 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -595,18 +595,22 @@ experience: run from anywhere, and bootstrap master content agentically.
           <div class="markdown-block reveal-content serif-prose"><p>Introduce a user-level settings store (TOML at the OS config dir, e.g.
 ~/.config/jobsmith/settings.toml; resolved via platformdirs) holding a
 <code>repo_root</code> key. Centralize ALL repo-root resolution in paths.py
-<code>repo_root_for()</code> with a single, documented precedence chain:</p>
+<code>repo_root_for()</code> — today it is a one-line wrapper over find_config(cwd)
+(paths.py:14-19); make it the multi-tier resolver with documented precedence:</p>
 <ol>
 <li>explicit --repo-root CLI flag (new global option)</li>
-<li>JOBSMITH_REPO_ROOT env var (existing API path)</li>
+<li>JOBSMITH_REPO_ROOT env var (existing path)</li>
 <li>settings.toml repo_root</li>
 <li>find_config(cwd) walk-up (existing fallback)</li>
 <li>error with actionable message if none resolve to a dir containing
 .apply-config.yaml
-Add <code>jobsmith config set-repo-root &lt;path&gt;</code>, <code>jobsmith config show</code>, and
-<code>jobsmith config clear-repo-root</code> subcommands. Settings module is new
-(src/jobsmith/settings.py); resolution stays in paths.py so every caller
-(CLI + API) shares one code path.</li>
+Add <code>jobsmith config set-repo-root &lt;path&gt;</code>, <code>jobsmith config show</code>,
+<code>jobsmith config clear-repo-root</code>. Settings module is new
+(src/jobsmith/settings.py). Because core/paths.py also calls find_config(cwd)
+at lines 26/167/176/196 and _cli_apply.py threads cwd into those helpers, both
+are in scope so every read funnels through the one resolver. Declare the new
+deps (platformdirs; tomli for Python 3.10 since tomllib is stdlib only &gt;=3.11
+and requires-python is &gt;=3.10) in pyproject.toml.</li>
 </ol>
 </div>
           <label for="slice-1-what-reveal" class="reveal-label">Show full description</label>
@@ -632,13 +636,13 @@ chosen path&#34; over an opaque app-data dir for flexibility.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/settings.py, src/jobsmith/paths.py, src/jobsmith/config.py, src/jobsmith/cli.py, tests/test_paths.py, tests/test_settings.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/settings.py, src/jobsmith/paths.py, src/jobsmith/core/paths.py, src/jobsmith/config.py, src/jobsmith/cli.py, src/jobsmith/_cli_apply.py, pyproject.toml, tests/test_paths.py, tests/test_settings.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Running any jobsmith command from a cwd OUTSIDE the repo resolves the repo via settings.toml repo_root</li><li>Resolution precedence is flag &gt; env &gt; settings &gt; find_config(cwd) &gt; actionable error, with a unit test asserting each tier wins over the next</li><li>`jobsmith config set-repo-root &lt;path&gt;` validates the path contains .apply-config.yaml and persists it; `config show` prints the resolved root and which tier it came from</li></ul>
+        <ul class="slice-done-list"><li>Running any jobsmith command from a cwd OUTSIDE the repo resolves the repo via settings.toml repo_root</li><li>Resolution precedence is flag &gt; env &gt; settings &gt; find_config(cwd) &gt; actionable error, with a unit test asserting each tier wins over the next</li><li>`jobsmith config set-repo-root &lt;path&gt;` validates the path contains .apply-config.yaml and persists it (creating settings.toml if absent); `config show` prints the resolved root and which tier it came from</li><li>platformdirs and tomli are declared in pyproject.toml; the settings read works on Python 3.10</li><li>core/paths.py helpers (apply_state_dir, applications_dir, pipeline_db_path, build_paths) resolve via repo_root_for(), not direct find_config(cwd)</li></ul>
       </div>
       
     
@@ -654,6 +658,9 @@ separate from .apply-config.yaml which stays the per-repo contract.
 <strong>Trigger:</strong> every repo-root resolution funnels through paths.repo_root_for().
 <strong>Precedence:</strong> flag &gt; env &gt; settings &gt; find_config(cwd) &gt; error. Env kept above
 settings so existing API/JOBSMITH_REPO_ROOT deploys are unaffected.
+<strong>Deps:</strong> platformdirs (config dir), tomli (TOML read on Py3.10; tomllib only
+stdlib &gt;=3.11 and requires-python is &gt;=3.10). A tiny hand-rolled writer or
+tomli-w emits the file.
 <strong>Rejected:</strong> OS app-data-dir-IS-the-repo (less flexible, user wanted a chosen
 path); storing repo_root inside .apply-config.yaml (chicken-and-egg — can&#39;t
 find the config without already knowing the root).</p>
@@ -673,8 +680,8 @@ find the config without already knowing the root).</p>
         <div class="test-strategy">
           
           <div class="test-group" data-kind="unit">
-            <span class="test-chip">UNIT &middot; 3</span>
-            <ul><li>TestRepoRootPrecedence — table test, each tier set/unset, assert winner</li><li>TestSettingsRoundTrip — set-repo-root writes TOML, reload reads it back</li><li>TestRepoRootNoConfigError — no tier resolves -&gt; clear error, not silent cwd</li></ul>
+            <span class="test-chip">UNIT &middot; 4</span>
+            <ul><li>TestRepoRootPrecedence — table test, each tier set/unset, assert winner</li><li>TestSettingsRoundTrip — set-repo-root writes TOML, reload reads it back</li><li>TestRepoRootNoConfigError — no tier resolves -&gt; clear error, not silent cwd</li><li>TestCorePathsUseResolver — core/paths helpers honor settings repo_root</li></ul>
           </div>
           
         </div>
@@ -683,6 +690,37 @@ find the config without already knowing the root).</p>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">Py3.10 compat: tomllib is stdlib only &gt;=3.11 but requires-python&gt;=3.10 (pyproject.toml:34); tomli backport must be added — RESOLVED: tomli added to files/done_when.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">platformdirs absent from pyproject.toml — RESOLVED: declared in done_when.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">core/paths.py (find_config at 26/167/176/196) and _cli_apply.py omitted from original scope — RESOLVED: both added to files &#43; a done_when.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">INFO</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">config.py:262 find_config(start) and paths.py:14-19 repo_root_for confirmed accurate; repo_root_for is currently a thin cwd wrapper as the plan assumes.</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -697,7 +735,7 @@ find the config without already knowing the root).</p>
           <textarea
             data-section="slice-1-question-q-settings-format"
             data-comment-for="slice-1-question-q-settings-format"
-            placeholder="Answer question q-settings-format...">TOML — human-editable, matches the &#39;power user can hand-edit&#39; intent; std-lib tomllib reads it, tomli-w (already viable) or a tiny writer emits it.</textarea>
+            placeholder="Answer question q-settings-format...">TOML — human-editable, matches the &#39;power user can hand-edit&#39; intent; tomli reads it on 3.10 / tomllib on 3.11&#43;, tomli-w (or a 3-line writer) emits it.</textarea>
           
         </div>
         
@@ -728,7 +766,7 @@ find the config without already knowing the root).</p>
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-2">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="4 critic issue(s)">4 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -761,11 +799,14 @@ find the config without already knowing the root).</p>
           
           <input type="checkbox" id="slice-2-what-reveal" class="reveal-toggle">
           <div class="markdown-block reveal-content serif-prose"><p>Make the API resolve repo_root through paths.repo_root_for() (settings-aware)
-instead of reading os.environ[&#34;JOBSMITH_REPO_ROOT&#34;] directly in scattered
-spots, and fix the master.py inconsistency where _require_config_path() calls
-find_config(Path.cwd()) rather than app.state.repo_root. After this slice the
-env var is just tier-2 of the shared chain, app.state.repo_root is the single
-cached truth, and master reads/writes use it too.</p>
+instead of reading os.environ[&#34;JOBSMITH_REPO_ROOT&#34;] directly in scattered spots
+(main.py:70, main.py:180, applications.py:574, applications.py:606,
+artifacts.py:61), and fix BOTH cwd-coupled reads in master.py —
+_require_config_path (master.py:77) AND _get_db_path_for_master (master.py:89) —
+to use the cached app.state.repo_root. Since master.py helpers are module-level
+and lack a Request, inject the root via a FastAPI Depends() (or pass it as a
+param) rather than reaching for a global. After this slice the env var is just
+tier-2 of the shared chain and app.state.repo_root is the single cached truth.</p>
 </div>
           <label for="slice-2-what-reveal" class="reveal-label">Show full description</label>
           
@@ -777,10 +818,9 @@ cached truth, and master reads/writes use it too.</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>The researcher found repo-root resolved in &gt;=4 different places
-(applications.py:574, applications.py:606, artifacts.py:61, main.py:70) plus a
-cwd-based outlier in master.py:77. Without consolidating, slice-1&#39;s settings
-tier would be honored by the CLI but silently ignored by the web app.</p>
+          <div class="markdown-block serif-prose"><p>Repo-root is resolved in &gt;=7 sites (5 env reads + 2 master cwd reads).
+Without consolidating, slice-1&#39;s settings tier would be honored by the CLI but
+silently ignored by the web app.</p>
 </div>
           
         </div>
@@ -795,7 +835,7 @@ tier would be honored by the CLI but silently ignored by the web app.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>All API repo-root reads go through paths.repo_root_for(); a grep for os.environ.get(&#39;JOBSMITH_REPO_ROOT&#39;) outside paths.py returns zero hits</li><li>master.py _require_config_path() uses request.app.state.repo_root, not find_config(cwd) — verified by a test that starts the app from an unrelated cwd</li><li>Existing API tests (test_api_applications, test_api_snapshot) still pass unchanged</li></ul>
+        <ul class="slice-done-list"><li>All API repo-root reads go through paths.repo_root_for(); a grep for os.environ.get(&#39;JOBSMITH_REPO_ROOT&#39;) outside paths.py returns zero hits</li><li>BOTH master.py call sites (_require_config_path:77 and _get_db_path_for_master:89) use the injected app.state.repo_root, not find_config(cwd) — verified by a test that starts the app from an unrelated cwd</li><li>A NON-mocked integration test proves a settings.toml repo_root override is live through app startup (not a stubbed resolver)</li></ul>
       </div>
       
     
@@ -805,13 +845,18 @@ tier would be honored by the CLI but silently ignored by the web app.</p>
       <div class="slice-field-label">Decisions</div>
       <div class="slice-field-value">
         
-        <div class="markdown-block serif-prose"><p><strong>State:</strong> app.state.repo_root remains the per-process cache, but it is now
-seeded from paths.repo_root_for() so the settings tier participates.
-<strong>Trigger:</strong> lifespan startup (main.py:70/172) computes once; helpers read cache.
-<strong>Rejected:</strong> per-request re-resolution (needless cost, and the repo can&#39;t move
-mid-process); leaving master.py on cwd (the exact bug that makes web ignore
-settings).</p>
+        <input type="checkbox" id="slice-2-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>State:</strong> app.state.repo_root remains the per-process cache, seeded from
+paths.repo_root_for() so the settings tier participates.
+<strong>Trigger:</strong> lifespan startup (main.py:166 _lifespan, sets state at :172)
+computes once; helpers read cache.
+<strong>Injection wrinkle:</strong> master.py helpers are module-level with no Request; thread
+repo_root via FastAPI Depends() or an explicit parameter — do NOT introduce a
+module global.
+<strong>Rejected:</strong> per-request re-resolution (needless cost, repo can&#39;t move
+mid-process); fixing only _require_config_path (misses :89, the second outlier).</p>
 </div>
+        <label for="slice-2-decisions-reveal" class="reveal-label">Show full decisions</label>
         
       </div>
     </div>
@@ -827,12 +872,12 @@ settings).</p>
           
           <div class="test-group" data-kind="integration">
             <span class="test-chip">INTEGRATION &middot; 2</span>
-            <ul><li>TestApiRepoRootFromSettings — start app from /tmp, settings points</li><li>TestMasterReadHonorsAppState — master read uses cached root not cwd</li></ul>
+            <ul><li>TestApiRepoRootFromSettings — start app from /tmp, settings points</li><li>TestMasterReadHonorsAppState — both master helpers use cached root</li></ul>
           </div>
           
           <div class="test-group" data-kind="other">
             <span class="test-chip">OTHER &middot; 1</span>
-            <ul><li>elsewhere, assert GET /applications reads the settings repo</li></ul>
+            <ul><li>elsewhere, assert GET /applications reads the settings repo (resolver NOT mocked)</li></ul>
           </div>
           
         </div>
@@ -841,6 +886,37 @@ settings).</p>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">master.py has TWO cwd reads (77 _require_config_path AND 89 _get_db_path_for_master); original done_when named only one — RESOLVED: both now required.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">INFO</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">master.py module-level helpers can&#39;t read request.app.state without a Request; needs Depends()/param injection — captured in decisions.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">SUCCESS</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">All five env-read sites (main.py:70/180, applications.py:574/606, artifacts.py:61) confirmed real; consolidation goal is grounded.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">done_when &#39;existing tests pass unchanged&#39; is weak if they mock the resolver — RESOLVED: added a non-mocked live-override integration test.</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -874,11 +950,11 @@ settings).</p>
   </div>
 </details>
 <details class="slice-card" id="slice-3" data-slice="3" data-slice-name="slice-3" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 3: `jobsmith onboard` command &#43; agentic subprocess scaffold">
+  <summary class="slice-summary" aria-label="Slice 3: `jobsmith onboard` command &#43; agentic pipeline scaffold (dual entry, like apply)">
     <span class="slice-num">#3</span>
     <span class="slice-title-col">
-      <span class="slice-name">`jobsmith onboard` command &#43; agentic subprocess scaffold</span>
-      <span class="slice-preview">New CLI command jobsmith onboard and a headless onboarding pipeline that</span>
+      <span class="slice-name">`jobsmith onboard` command &#43; agentic pipeline scaffold (dual entry, like apply)</span>
+      <span class="slice-preview">New jobsmith onboard command &#43; an onboarding pipeline that REUSES apply&#39;s real</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-blocked badge-sm">L</span>
@@ -886,8 +962,8 @@ settings).</p>
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-3">Pending</span>
-          
-          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+          <span class="badge badge-sm badge-issues" title="5 critic issue(s)">5 issues</span>
+          <span class="badge badge-sm badge-questions" title="2 open question(s)">2 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
           <span class="approval-segmented" role="group" aria-label="Approval action">
@@ -918,17 +994,25 @@ settings).</p>
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-3-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>New CLI command <code>jobsmith onboard</code> and a headless onboarding pipeline that
-mirrors the apply pipeline&#39;s subprocess pattern (headless.py spawns <code>claude -p</code>
-with cwd = resolved repo root). Phase 0: ensure a repo exists at the resolved
-root — if .apply-config.yaml is absent, scaffold it (reuse <code>jobsmith init</code>
-internals) with empty master YAML stubs, then persist the location to settings
-(slice-1). The command accepts input flags: --resume-file, --linkedin-export,
---linkedin-url, --paste/--paste-file (one or more). It writes intermediate
-artifacts to a reserved state namespace (.onboard-state/, mirroring
-.apply-state/) and dispatches the onboarding agent. This slice delivers the
-command shell, repo-bootstrap, state plumbing, and agent dispatch — NOT the
-per-input parsers (slice-4) or gap-interview (slice-5).</p>
+          <div class="markdown-block reveal-content serif-prose"><p>New <code>jobsmith onboard</code> command + an onboarding pipeline that REUSES apply&#39;s real
+dual-entry model, not a single CLI subprocess:</p>
+<ul>
+<li>CLI path: spawns the agentic run via headless.py run_phase (Popen with
+cwd = resolved repo root, headless.py:348/393) and writes state to the DB;
+NO live SSE (CLI is not in the API event loop).</li>
+<li>API path: runs in-process via asyncio.to_thread + supervisor.register_run
+(the same path apply&#39;s API uses) so the web flow (slice-6) gets live SSE.
+Phase 0: ensure a repo exists at the resolved root — if .apply-config.yaml is
+absent, scaffold it. NOTE: <code>jobsmith init</code> is a Typer command (cli.py:244), so
+first extract its scaffold logic into a callable library function, then call it.
+Clobber policy: if masters already exist and are non-empty, ABORT with guidance
+unless --force (overwrite) or --merge is passed. Accept input flags
+(--resume-file, --linkedin-export, --linkedin-url, --paste/--paste-file; one or
+more), write artifacts to .onboard-state/ (mirrors .apply-state/, core/paths.py:64),
+and dispatch the onboarding agent. Delivers command shell, repo-bootstrap,
+clobber guard, state plumbing, and dispatch — NOT the parsers (slice-4) or
+gap-interview (slice-5).</li>
+</ul>
 </div>
           <label for="slice-3-what-reveal" class="reveal-label">Show full description</label>
           
@@ -940,10 +1024,10 @@ per-input parsers (slice-4) or gap-interview (slice-5).</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>User chose a first-class <code>jobsmith onboard</code> command over web-only or a thin
-upload wrapper, and wants onboarding itself to be agentic (reuse what the user
-has). Reusing the proven headless subprocess + state-file handoff keeps it
-consistent with apply and avoids a second execution model.</p>
+          <div class="markdown-block serif-prose"><p>User chose a first-class <code>jobsmith onboard</code> command and wants onboarding itself
+to be agentic. Reusing apply&#39;s PROVEN dual-path execution (CLI subprocess +
+in-process API path) is what actually makes live web progress work; the original
+&#34;CLI subprocess + <strong>onboard</strong> slug = free SSE&#34; assumption was falsified (A1).</p>
 </div>
           
         </div>
@@ -958,7 +1042,7 @@ consistent with apply and avoids a second execution model.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>`jobsmith onboard` run against a directory with NO .apply-config.yaml scaffolds the repo, persists its path to settings, and exits phase-0 cleanly</li><li>The command spawns the agentic subprocess with cwd = resolved repo root and writes a manifest under .onboard-state/</li><li>Input flags (--resume-file/--linkedin-export/--linkedin-url/--paste) are validated and inlined into the agent spec; an invalid file path errors before dispatch</li></ul>
+        <ul class="slice-done-list"><li>`jobsmith onboard` against a directory with NO .apply-config.yaml scaffolds the repo (via the extracted init library fn), persists its path to settings, and exits phase-0 cleanly</li><li>Running onboard against a repo whose masters are already non-empty ABORTS with guidance unless --force or --merge is given</li><li>CLI path writes a manifest &#43; state under .onboard-state/ keyed by the __onboard__ slug; the API path registers with supervisor.register_run so SSE events stream</li><li>Input flags are validated and inlined into the agent spec; an invalid file path errors before dispatch</li></ul>
       </div>
       
     
@@ -969,15 +1053,19 @@ consistent with apply and avoids a second execution model.</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-3-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> explicit <code>jobsmith onboard</code> CLI invocation (not a hook).
-<strong>State:</strong> .onboard-state/ dir under the repo root, parallel to .apply-state/;
-reuses the db put-state/get-state mechanism keyed by a reserved slug
-(<strong>onboard</strong>) so the dashboard can observe progress.
-<strong>Payload:</strong> agent spec carries the list of provided input sources + the master
-schema so the orchestrator knows what to extract and what is missing.
-<strong>Rejected:</strong> web-only wizard (user wanted a CLI command); reusing /master upload
-as the whole flow (no agentic extraction/gap-fill); a brand-new execution
-engine (headless.py subprocess pattern already works for apply).</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> explicit <code>jobsmith onboard</code> CLI invocation; web triggers the API path.
+<strong>Execution model (revised per A1):</strong> mirror apply — CLI uses headless.py Popen and
+writes DB state only; the API path runs in-process (asyncio.to_thread +
+supervisor.register_run, supervisor.py:265) for live SSE. A CLI subprocess CANNOT
+feed the in-memory supervisor, so live web progress comes from the API path.
+<strong>State:</strong> .onboard-state/ dir parallel to .apply-state/; db put-state/get-state
+keyed by reserved slug <strong>onboard</strong> (apply_state table accepts arbitrary slug TEXT,
+migration 005 — no schema change).
+<strong>Bootstrap:</strong> extract jobsmith init scaffold (cli.py:244) into a library fn first;
+calling a Typer command programmatically is awkward.
+<strong>Clobber:</strong> abort if masters non-empty unless --force/--merge.
+<strong>Rejected:</strong> &#34;CLI subprocess + slug = free SSE&#34; (falsified — supervisor is in-proc);
+web-only wizard (user wanted a CLI command); brand-new execution engine.</p>
 </div>
         <label for="slice-3-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -994,8 +1082,8 @@ engine (headless.py subprocess pattern already works for apply).</p>
         <div class="test-strategy">
           
           <div class="test-group" data-kind="integration">
-            <span class="test-chip">INTEGRATION &middot; 2</span>
-            <ul><li>TestOnboardScaffoldsRepo — empty dir -&gt; repo &#43; settings persisted</li><li>TestOnboardDispatch — asserts subprocess invoked with correct cwd</li></ul>
+            <span class="test-chip">INTEGRATION &middot; 3</span>
+            <ul><li>TestOnboardScaffoldsRepo — empty dir -&gt; repo &#43; settings persisted</li><li>TestOnboardAbortsOnPopulated — non-empty masters -&gt; abort w/o --force</li><li>TestOnboardDispatch — CLI path Popen cwd correct &#43; state written;</li></ul>
           </div>
           
           <div class="test-group" data-kind="unit">
@@ -1005,7 +1093,7 @@ engine (headless.py subprocess pattern already works for apply).</p>
           
           <div class="test-group" data-kind="other">
             <span class="test-chip">OTHER &middot; 1</span>
-            <ul><li>and a spec written to .onboard-state/ (subprocess mocked)</li></ul>
+            <ul><li>API path calls register_run (subprocess/thread mocked)</li></ul>
           </div>
           
         </div>
@@ -1015,11 +1103,59 @@ engine (headless.py subprocess pattern already works for apply).</p>
     
 
     
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">A1 falsified: CLI-spawned subprocess cannot drive the in-memory supervisor (supervisor.py:265 needs an asyncio task) — RESOLVED: adopt apply&#39;s dual-path model; API path uses to_thread &#43; register_run.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">`jobsmith init` is a Typer command (cli.py:244), not a library fn; &#39;reuse init internals&#39; needs an extraction step — RESOLVED: noted in what/decisions.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">INFO</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">headless.py run_phase (348) passes cwd to Popen (393-400); subprocess reuse for the CLI path is accurate. .apply-state pattern (core/paths.py:64) confirmed reusable.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">No clobber/merge policy for an existing populated repo — RESOLVED: abort-unless-(--force|--merge) added to what &#43; done_when &#43; a test.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">--resume-file validation straddles slice-3/4 boundary; kept pre-dispatch validation in slice-3 (existence/format only), semantic parsing stays in slice-4.</span>
+        </div>
+        
+      </div>
+    </div>
+    
 
     
     <div class="slice-field slice-questions">
       <div class="slice-field-label">Open Questions</div>
       <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>How does the web flow get live progress if onboard is a CLI subprocess?</p>
+          
+          
+          <textarea
+            data-section="slice-3-question-q-exec-model"
+            data-comment-for="slice-3-question-q-exec-model"
+            placeholder="Answer question q-exec-model...">It doesn&#39;t via the CLI path — the API path runs onboard in-process (asyncio.to_thread &#43; supervisor.register_run), exactly as apply&#39;s API does. The CLI path only writes DB state.</textarea>
+          
+        </div>
         
         <div class="question-block slice-question-block">
           <p>How to namespace onboarding state in the shared DB?</p>
@@ -1028,7 +1164,7 @@ engine (headless.py subprocess pattern already works for apply).</p>
           <textarea
             data-section="slice-3-question-q-onboard-slug"
             data-comment-for="slice-3-question-q-onboard-slug"
-            placeholder="Answer question q-onboard-slug...">Reserved slug __onboard__ via the existing apply_state table — no schema change, and the SSE/dashboard observe it like any run.</textarea>
+            placeholder="Answer question q-onboard-slug...">Reserved slug __onboard__ via the existing apply_state table — verified no slug-format constraint in migration 005, so no schema change.</textarea>
           
         </div>
         
@@ -1051,7 +1187,7 @@ engine (headless.py subprocess pattern already works for apply).</p>
     <span class="slice-num">#4</span>
     <span class="slice-title-col">
       <span class="slice-name">Ingest specialists: resume, LinkedIn export, URL, free-text</span>
-      <span class="slice-preview">The agent specialists/prompts that parse each input type into candidate master</span>
+      <span class="slice-preview">The agent specialists/parsers that turn each input type into candidate master</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-blocked badge-sm">L</span>
@@ -1059,7 +1195,7 @@ engine (headless.py subprocess pattern already works for apply).</p>
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-4">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="4 critic issue(s)">4 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1091,20 +1227,21 @@ engine (headless.py subprocess pattern already works for apply).</p>
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-4-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>The agent specialists/prompts that parse each input type into candidate master
-content (work.yml / skill.yml / education.yml / author.yml structures):</p>
+          <div class="markdown-block reveal-content serif-prose"><p>The agent specialists/parsers that turn each input type into candidate master
+content (work/skill/education/author structures):</p>
 <ul>
-<li>Resume PDF/DOCX: text extraction (PDF via existing/added extractor; DOCX
-via python-docx) then LLM-structured into the master schema.</li>
+<li>Resume PDF/DOCX: text extraction (PDF via pdfplumber; DOCX via python-docx)
+then LLM-structured into the master schema. Fall back to the agent reading
+the file directly if extraction is poor.</li>
 <li>LinkedIn export: handle both the &#34;Download your data&#34; ZIP (Positions.csv,
 Education.csv, Skills.csv) and a profile PDF.</li>
-<li>LinkedIn URL: best-effort browser/HTTP fetch with an explicit caveat that
-auth-walls usually block it; degrade gracefully to &#34;couldn&#39;t fetch, please
-paste or upload.&#34;</li>
+<li>LinkedIn URL: best-effort fetch with explicit caveat that auth-walls usually
+block it; degrade gracefully to &#34;couldn&#39;t fetch, please paste or upload.&#34;</li>
 <li>Free-text paste: LLM structures whatever the user provides.
-Each specialist emits a normalized candidate-content JSON into .onboard-state/.
-No fabrication: every extracted bullet/claim must trace to source text
-(consistent with jobsmith&#39;s no-fabrication contract).</li>
+Each specialist emits candidate-<section>.json into .onboard-state/ plus a
+provenance map linking each field to its source snippet. No fabrication: every
+claim must trace to source text. Declare pdfplumber + python-docx in
+pyproject.toml; create the src/jobsmith/onboard/ package (with <strong>init</strong>.py).</li>
 </ul>
 </div>
           <label for="slice-4-what-reveal" class="reveal-label">Show full description</label>
@@ -1117,9 +1254,9 @@ No fabrication: every extracted bullet/claim must trace to source text
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>This is the &#34;use what the user already has&#34; requirement. Multiple input formats
-were all selected, so each needs a parser, with the URL path flagged as
-best-effort due to LinkedIn auth-walling.</p>
+          <div class="markdown-block serif-prose"><p>This is the &#34;use what the user already has&#34; requirement. All input formats were
+selected, so each needs a parser, with the URL path flagged best-effort due to
+LinkedIn auth-walling.</p>
 </div>
           
         </div>
@@ -1128,13 +1265,13 @@ best-effort due to LinkedIn auth-walling.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/onboard/extract_resume.py, src/jobsmith/onboard/extract_linkedin.py, src/jobsmith/onboard/extract_text.py, src/jobsmith/plugin/agents/onboard-extractor.md, tests/test_onboard_extract.py, tests/fixtures/onboarding/</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/onboard/__init__.py, src/jobsmith/onboard/extract_resume.py, src/jobsmith/onboard/extract_linkedin.py, src/jobsmith/onboard/extract_text.py, src/jobsmith/plugin/agents/onboard-extractor.md, pyproject.toml, tests/test_onboard_extract.py, tests/fixtures/onboarding/</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>A sample resume PDF produces candidate work/skill/education/author JSON whose every entry traces to source text (no fabricated employers/dates)</li><li>A LinkedIn &#39;Download your data&#39; ZIP populates positions, education, and skills from its CSVs</li><li>A LinkedIn URL that is auth-walled degrades to a clear &#39;paste or upload instead&#39; result rather than failing the run</li></ul>
+        <ul class="slice-done-list"><li>pdfplumber and python-docx are declared in pyproject.toml; a fixture resume PDF AND DOCX both extract</li><li>A sample resume produces candidate work/skill/education/author JSON where each entry has a provenance entry pointing at source text; a fixture asserts an injected non-source claim is dropped</li><li>A LinkedIn &#39;Download your data&#39; ZIP populates positions, education, and skills from its CSVs</li><li>A LinkedIn URL that is auth-walled (403/login-redirect/999) degrades to a clear &#39;paste or upload instead&#39; result rather than failing the run</li></ul>
       </div>
       
     
@@ -1145,13 +1282,14 @@ best-effort due to LinkedIn auth-walling.</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-4-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Payload:</strong> each specialist writes candidate-<section>.json to .onboard-state/;
-a provenance map links each field to its source snippet.
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Payload:</strong> each specialist writes candidate-<section>.json to .onboard-state/
+plus a provenance map (field -&gt; source snippet) so no-fabrication is testable.
 <strong>State:</strong> candidate content is staged, NOT written to master YAMLs yet — the
 gap-interview (slice-5) gates the final write.
+<strong>Deps:</strong> pdfplumber (PDF; pulls pdfminer.six) chosen over pypdf for table-aware
+extraction; python-docx for DOCX. Both new in pyproject.toml.
 <strong>Rejected:</strong> scraping LinkedIn behind auth (ToS + auth-wall, privacy rules);
-merging straight into masters without a confirm step (risks importing stale or
-wrong data the user can&#39;t review).</p>
+merging straight into masters without a confirm step.</p>
 </div>
         <label for="slice-4-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1169,7 +1307,12 @@ wrong data the user can&#39;t review).</p>
           
           <div class="test-group" data-kind="unit">
             <span class="test-chip">UNIT &middot; 4</span>
-            <ul><li>TestExtractResumePdf — fixture PDF -&gt; expected structured fields</li><li>TestExtractLinkedinZip — fixture ZIP CSVs -&gt; positions/education/skills</li><li>TestExtractUrlAuthWalled — simulated 999/login redirect -&gt; graceful skip</li><li>TestNoFabrication — extracted claim absent from source -&gt; dropped/flagged</li></ul>
+            <ul><li>TestExtractResumePdf / TestExtractResumeDocx — fixtures -&gt; structured fields</li><li>TestExtractLinkedinZip — fixture ZIP CSVs -&gt; positions/education/skills</li><li>TestExtractUrlAuthWalled — 403/login-redirect fixture -&gt; graceful skip</li><li>TestNoFabrication — fixture pairs (source &#43; expected); injected claim absent</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 1</span>
+            <ul><li>from source is dropped/flagged via the provenance map</li></ul>
           </div>
           
         </div>
@@ -1178,6 +1321,37 @@ wrong data the user can&#39;t review).</p>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">pdfplumber/pypdf and python-docx absent from pyproject.toml — RESOLVED: pyproject.toml added to files; pdfplumber&#43;python-docx in done_when, extractor choice resolved.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">src/jobsmith/onboard/ subpackage doesn&#39;t exist and needs __init__.py — RESOLVED: added to files.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">&#39;traces to source&#39; had no test mechanism — RESOLVED: provenance map &#43; paired source/expected fixtures &#43; TestNoFabrication.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">INFO</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Auth-wall test should reflect real LinkedIn responses (403/login-redirect), not just 999 — RESOLVED: broadened in done_when/tests.</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1192,7 +1366,7 @@ wrong data the user can&#39;t review).</p>
           <textarea
             data-section="slice-4-question-q-pdf-extractor"
             data-comment-for="slice-4-question-q-pdf-extractor"
-            placeholder="Answer question q-pdf-extractor...">Prefer a maintained pure-Python lib already compatible with the stack (pdfplumber/pypdf) over a new system dep; fall back to the agent reading the file directly if extraction is poor.</textarea>
+            placeholder="Answer question q-pdf-extractor...">pdfplumber — maintained, pure-Python, table-aware (resumes are columnar); pypdf is the fallback. Declared in pyproject.toml; agent direct-read is the last resort.</textarea>
           
         </div>
         
@@ -1211,11 +1385,11 @@ wrong data the user can&#39;t review).</p>
   </div>
 </details>
 <details class="slice-card" id="slice-5" data-slice="5" data-slice-name="slice-5" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 5: Gap-interview &#43; lint-gated master write">
+  <summary class="slice-summary" aria-label="Slice 5: Extract lint to a library, gap-interview, lint-gated master write">
     <span class="slice-num">#5</span>
     <span class="slice-title-col">
-      <span class="slice-name">Gap-interview &#43; lint-gated master write</span>
-      <span class="slice-preview">After extraction, the orchestrator diffs candidate content against the master</span>
+      <span class="slice-name">Extract lint to a library, gap-interview, lint-gated master write</span>
+      <span class="slice-preview">PREREQUISITE (per A2): jobsmith lint currently lives inside cli.py:606-685 as a</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-revision badge-sm">M</span>
@@ -1223,7 +1397,7 @@ wrong data the user can&#39;t review).</p>
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-5">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="3 critic issue(s)">3 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1255,13 +1429,17 @@ wrong data the user can&#39;t review).</p>
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-5-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>After extraction, the orchestrator diffs candidate content against the master
-schema&#39;s required fields, computes what&#39;s missing or low-confidence, and runs a
-conversational gap-interview (the agentic &#39;fill in what&#39;s missing&#39; step). Once
-the user answers, it merges candidate + answers into the master YAMLs at the
-repo&#39;s assets/content/ paths, then runs <code>jobsmith lint</code> as a hard gate. If lint
-fails, it loops back rather than leaving broken masters. Emits an onboarding
-summary (what was imported, what the user supplied, what&#39;s still optional).</p>
+          <div class="markdown-block reveal-content serif-prose"><p>PREREQUISITE (per A2): <code>jobsmith lint</code> currently lives inside cli.py:606-685 as a
+Typer command and validates only work.yml. Extract its logic into a callable
+src/jobsmith/lint.py and extend it to validate all four master sections
+(work/skill/education/author). Then: the orchestrator diffs candidate content
+against the master schema&#39;s required fields, runs a conversational gap-interview
+for what&#39;s missing or low-confidence, merges candidate + answers into the master
+YAMLs at assets/content/ (config.py:18-43 paths), and calls the extracted lint as
+a hard gate. On failure it loops (cap 3) then stops and reports remaining errors
+rather than persisting broken masters or looping forever. Honors slice-3&#39;s
+--merge vs --force semantics when masters pre-exist. Emits an onboarding summary
+(imported vs user-supplied vs still-optional).</p>
 </div>
           <label for="slice-5-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1273,9 +1451,10 @@ summary (what was imported, what the user supplied, what&#39;s still optional).<
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>The user&#39;s core ask: &#34;facilitate using what the user has and then have them fill
-in what is missing instead of doing everything from scratch.&#34; The lint gate
-guarantees the masters are valid for a subsequent apply run.</p>
+          <div class="markdown-block serif-prose"><p>The user&#39;s core ask: &#34;use what the user has, then have them fill the gaps.&#34;
+The lint gate makes the masters valid for a subsequent apply — but only after the
+lint logic is extracted and widened beyond work.yml (the original plan overstated
+what today&#39;s lint guarantees).</p>
 </div>
           
         </div>
@@ -1284,13 +1463,13 @@ guarantees the masters are valid for a subsequent apply run.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/onboard/gap_analysis.py, src/jobsmith/onboard/merge_master.py, src/jobsmith/plugin/agents/onboard-orchestrator.md, src/jobsmith/lint.py, tests/test_onboard_gap_merge.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/lint.py, src/jobsmith/cli.py, src/jobsmith/onboard/gap_analysis.py, src/jobsmith/onboard/merge_master.py, src/jobsmith/plugin/agents/onboard-orchestrator.md, tests/test_lint.py, tests/test_onboard_gap_merge.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Missing required master fields are surfaced as interview questions; provided answers are merged into the correct master YAML</li><li>Final master YAMLs pass `jobsmith lint`; a lint failure loops the merge step instead of persisting broken content</li><li>An onboarding summary reports imported vs user-supplied vs still-optional fields</li></ul>
+        <ul class="slice-done-list"><li>lint logic is extracted from cli.py into a callable src/jobsmith/lint.py; the `jobsmith lint` CLI command now calls it, and it validates work/skill/education/author (test asserts a malformed skill.yml fails)</li><li>Missing required master fields are surfaced as interview questions; provided answers merge into the correct master YAML</li><li>Final master YAMLs pass the extended lint; a lint failure loops the merge step (max 3) then stops and reports, never persisting broken content</li><li>An onboarding summary reports imported vs user-supplied vs still-optional fields</li></ul>
       </div>
       
     
@@ -1301,14 +1480,16 @@ guarantees the masters are valid for a subsequent apply run.</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-5-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> runs after slice-4 extraction within the same onboard subprocess.
-<strong>State:</strong> writes to assets/content/*.yml (the master paths from config.py:16-43)
-only AFTER lint passes; staging stays in .onboard-state/ until then.
-<strong>Payload:</strong> gap questions are derived from the master schema&#39;s required fields
-minus high-confidence extracted fields.
-<strong>Rejected:</strong> writing masters before lint (could leave a half-valid repo that
-breaks apply); free-form unbounded interview (anchor to schema-required gaps to
-keep it short).</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Prerequisite:</strong> extract lint from cli.py:606-685 into src/jobsmith/lint.py
+(callable) and widen coverage to all four master sections; CLI delegates to it.
+<strong>Trigger:</strong> runs after slice-4 extraction within the same onboard run.
+<strong>State:</strong> writes to assets/content/*.yml only AFTER lint passes; staging stays in
+.onboard-state/ until then. Terminal state after 3 failed lint loops = stop +
+report, do NOT persist broken masters.
+<strong>Payload:</strong> gap questions derived from schema-required fields minus
+high-confidence extracted fields.
+<strong>Rejected:</strong> writing masters before lint; relying on the old work.yml-only lint
+(would falsely pass incomplete skill/education/author); unbounded interview.</p>
 </div>
         <label for="slice-5-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1325,13 +1506,13 @@ keep it short).</p>
         <div class="test-strategy">
           
           <div class="test-group" data-kind="unit">
-            <span class="test-chip">UNIT &middot; 1</span>
-            <ul><li>TestGapAnalysis — candidate missing author.email -&gt; question generated</li></ul>
+            <span class="test-chip">UNIT &middot; 2</span>
+            <ul><li>TestLintLibraryAllSections — malformed skill/education/author each fail</li><li>TestGapAnalysis — candidate missing author.email -&gt; question generated</li></ul>
           </div>
           
           <div class="test-group" data-kind="integration">
             <span class="test-chip">INTEGRATION &middot; 2</span>
-            <ul><li>TestMergeThenLint — candidate&#43;answers -&gt; masters pass jobsmith lint</li><li>TestLintFailLoops — invalid merge -&gt; does not persist, re-prompts</li></ul>
+            <ul><li>TestMergeThenLint — candidate&#43;answers -&gt; masters pass extended lint</li><li>TestLintFailLoopsCapped — invalid merge -&gt; no persist, stops at 3</li></ul>
           </div>
           
         </div>
@@ -1340,6 +1521,31 @@ keep it short).</p>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">A2 falsified: src/jobsmith/lint.py doesn&#39;t exist (lint is cli.py:606-685) and only checks work.yml — RESOLVED: slice now extracts lint to a library &#43; extends to all 4 sections.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">&#39;lint gate guarantees validity for apply&#39; overstated given work.yml-only coverage — RESOLVED: widened coverage &#43; softened claim.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">INFO</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Lint-loop terminal state was unspecified — RESOLVED: after 3 failures, stop &#43; report, no persist; added to done_when &#43; test.</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1354,7 +1560,7 @@ keep it short).</p>
           <textarea
             data-section="slice-5-question-q-lint-loop-cap"
             data-comment-for="slice-5-question-q-lint-loop-cap"
-            placeholder="Answer question q-lint-loop-cap...">Yes — cap at 3 iterations, then stop and report remaining errors to the user rather than looping indefinitely.</textarea>
+            placeholder="Answer question q-lint-loop-cap...">Yes — cap at 3 iterations, then stop and report remaining errors; never persist broken masters.</textarea>
           
         </div>
         
@@ -1377,7 +1583,7 @@ keep it short).</p>
     <span class="slice-num">#6</span>
     <span class="slice-title-col">
       <span class="slice-name">Web onboarding flow (upload, paste, gap-interview, masters-ready)</span>
-      <span class="slice-preview">Frontend onboarding wizard in the existing web app: a first-run flow that lets</span>
+      <span class="slice-preview">Frontend onboarding wizard in the existing web app: first-run flow to upload a</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-blocked badge-sm">L</span>
@@ -1385,7 +1591,7 @@ keep it short).</p>
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-6">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="3 critic issue(s)">3 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1417,13 +1623,14 @@ keep it short).</p>
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-6-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>Frontend onboarding wizard in the existing web app: a first-run flow that lets
-the user upload a resume / LinkedIn export, paste text, or give a URL; kicks off
-the onboarding run via new API endpoints; streams progress over the existing SSE
-channel; renders the gap-interview questions; and lands on a &#34;masters ready&#34;
-screen. New API endpoints wrap the slice-3..5 pipeline (POST /onboard with
-multipart inputs, GET onboarding status, answer gap questions). Reuses the
-existing supervisor/SSE plumbing.</p>
+          <div class="markdown-block reveal-content serif-prose"><p>Frontend onboarding wizard in the existing web app: first-run flow to upload a
+resume / LinkedIn export, paste text, or give a URL; kicks off onboarding via the
+slice-3 API path (in-process asyncio.to_thread + supervisor.register_run, NOT a
+detached CLI subprocess); streams progress over the existing SSE channel
+(supervisor.py); renders the gap-interview questions; lands on &#34;masters ready&#34;.
+New API endpoints wrap the slice-3..5 pipeline: POST /onboard (multipart inputs,
+reusing slice-3&#39;s validator — not a duplicate), GET onboarding status, answer gap
+questions. Enforce a multipart size cap (e.g. 10MB, 413 on oversize).</p>
 </div>
           <label for="slice-6-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1436,9 +1643,8 @@ existing supervisor/SSE plumbing.</p>
         <div class="slice-field-value">
           
           <div class="markdown-block serif-prose"><p>Scope edge chosen = &#34;backend + web onboarding only.&#34; The web flow is the
-jobseeker-facing surface that makes the agentic onboarding usable without the
-terminal, completing the install-and-go experience (minus a native shell, which
-is explicitly out of scope).</p>
+jobseeker-facing surface that makes onboarding usable without a terminal,
+completing install-and-go (minus a native shell, explicitly out of scope).</p>
 </div>
           
         </div>
@@ -1453,7 +1659,7 @@ is explicitly out of scope).</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>A first-run user with no masters can complete onboarding entirely in the web UI: provide inputs, answer gap questions, reach &#39;masters ready&#39;</li><li>Onboarding progress streams over the existing SSE channel; a process restart re-derives status from the DB (no lost run)</li><li>POST /onboard accepts multipart resume/LinkedIn uploads and routes them to the resolved repo root from slice-2</li></ul>
+        <ul class="slice-done-list"><li>A first-run user with no masters completes onboarding entirely in the web UI: provide inputs, answer gap questions, reach &#39;masters ready&#39;</li><li>Onboarding runs via the in-process API path and streams over the existing SSE channel; a process restart re-derives status from the DB (__onboard__ slug)</li><li>POST /onboard accepts multipart resume/LinkedIn uploads (size-capped, 413 on oversize), routes them to the slice-2 resolved repo root, and reuses slice-3&#39;s input validator</li></ul>
       </div>
       
     
@@ -1464,13 +1670,15 @@ is explicitly out of scope).</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-6-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> web wizard POSTs to /onboard; backend reuses the slice-3 pipeline.
-<strong>State:</strong> uploads land at the slice-2 resolved repo root; run state in the
-shared DB under the <strong>onboard</strong> slug; live progress via the in-memory SSE
-supervisor (supervisor.py).
-<strong>Payload:</strong> multipart upload in, SSE events out, gap questions/answers as JSON.
-<strong>Rejected:</strong> a separate onboarding service (reuse existing API + supervisor);
-websockets (SSE already in place for apply).</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> web wizard POSTs to /onboard; backend uses the slice-3 API path
+(asyncio.to_thread + register_run), NOT the detached CLI path — this is what
+makes live SSE work (per A1).
+<strong>State:</strong> uploads land at the slice-2 resolved repo root; run state in the shared
+DB under <strong>onboard</strong>; live progress via the in-memory SSE supervisor.
+<strong>Payload:</strong> multipart upload in (size-capped), SSE events out, gap Q/A as JSON.
+Validation reuses slice-3&#39;s validator rather than duplicating it.
+<strong>Rejected:</strong> a separate onboarding service; websockets (SSE already in place);
+the detached CLI path for the web flow (no live SSE — A1).</p>
 </div>
         <label for="slice-6-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1487,8 +1695,8 @@ websockets (SSE already in place for apply).</p>
         <div class="test-strategy">
           
           <div class="test-group" data-kind="integration">
-            <span class="test-chip">INTEGRATION &middot; 2</span>
-            <ul><li>TestApiOnboardMultipart — upload resume -&gt; run starts, status visible</li><li>TestOnboardStatusAfterRestart — status re-derived from DB</li></ul>
+            <span class="test-chip">INTEGRATION &middot; 3</span>
+            <ul><li>TestApiOnboardMultipart — upload resume -&gt; run starts via API path, status visible</li><li>TestApiOnboardOversize — &gt;cap upload -&gt; 413</li><li>TestOnboardStatusAfterRestart — status re-derived from DB</li></ul>
           </div>
           
           <div class="test-group" data-kind="component">
@@ -1503,6 +1711,31 @@ websockets (SSE already in place for apply).</p>
     
 
     
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">Web flow needs the in-process API path, not the detached CLI subprocess, or SSE won&#39;t stream (A1) — RESOLVED: what/decisions pin the API path &#43; register_run.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">SUCCESS</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">supervisor SSE infra confirmed (supervisor.py) and reuse is sound IF onboard runs in-process like apply&#39;s API path.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">&#39;status visible&#39; was ambiguous (SSE vs poll) and validator reuse boundary unclear — RESOLVED: SSE via API path &#43; explicit &#39;reuses slice-3 validator&#39;.</span>
+        </div>
+        
+      </div>
+    </div>
+    
 
     
     <div class="slice-field slice-questions">
@@ -1516,7 +1749,7 @@ websockets (SSE already in place for apply).</p>
           <textarea
             data-section="slice-6-question-q-upload-size"
             data-comment-for="slice-6-question-q-upload-size"
-            placeholder="Answer question q-upload-size...">Yes — enforce a sane multipart cap (e.g. 10MB) to protect the single-process server; reject oversize with a clear 413.</textarea>
+            placeholder="Answer question q-upload-size...">Yes — enforce ~10MB multipart cap to protect the single-process server; reject oversize with 413.</textarea>
           
         </div>
         
