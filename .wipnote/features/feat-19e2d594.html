@@ -10,32 +10,20 @@
 <body>
     <article id="feat-19e2d594"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-05-23T06:32:19.753792"
-             data-updated="2026-05-23T23:49:33.408222" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
+             data-updated="2026-05-23T23:57:59.438584" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
 
         <header>
             <h1>`jobsmith onboard` command &#43; agentic pipeline scaffold (dual entry, like apply)</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
 
         <nav data-graph-edges>
-            <section data-edge-type="part_of">
-                <h3>Part Of:</h3>
-                <ul>
-                    <li><a href="trk-ac5661e4.html" data-relationship="part_of" data-since="2026-05-23T06:32:19.763531">trk-ac5661e4</a></li>
-                </ul>
-            </section>
-            <section data-edge-type="blocked_by">
-                <h3>Blocked By:</h3>
-                <ul>
-                    <li><a href="feat-f85f4815.html" data-relationship="blocked_by">feat-f85f4815</a></li>
-                </ul>
-            </section>
             <section data-edge-type="implemented_in">
                 <h3>Implemented In:</h3>
                 <ul>
@@ -48,7 +36,26 @@
                     <li><a href="plan-95ec8de7.html" data-relationship="planned_in" data-since="2026-05-23T06:32:19.758897">plan-95ec8de7</a></li>
                 </ul>
             </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-ac5661e4.html" data-relationship="part_of" data-since="2026-05-23T06:32:19.763531">trk-ac5661e4</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-f85f4815.html" data-relationship="blocked_by">feat-f85f4815</a></li>
+                </ul>
+            </section>
         </nav>
+
+        <section data-steps>
+            <h3>Implementation Steps</h3>
+            <ol>
+                <li data-completed="true" data-step-id="step-feat-19e2d594-0" data-agent="claude-code" data-created-by-agent="claude-code">✅ implement onboard command &#43; pipeline scaffold; commit 3ef97dd on feat-19e2d594-impl</li>
+            </ol>
+        </section>
 
         <section data-content>
             <h3>Description</h3>
@@ -68,7 +75,8 @@ unless --force (overwrite) or --merge is passed. Accept input flags
 more), write artifacts to .onboard-state/ (mirrors .apply-state/, core/paths.py:64),
 and dispatch the onboarding agent. Delivers command shell, repo-bootstrap,
 clobber guard, state plumbing, and dispatch — NOT the parsers (slice-4) or
-gap-interview (slice-5).</p>
+gap-interview (slice-5).
+[2026-05-23 23:57 claude-code] accepted-advisory (provenance override): implementation committed at 3ef97dd on feat-19e2d594-impl</p>
         </section>
     </article>
 </body>
