@@ -1669,6 +1669,76 @@ def db_migrate_slugs() -> None:
         console.print(f"  {old} -> {new}")
 
 
+# ---------- config subcommand group (feat-f85f4815) ----------
+
+
+config_app = typer.Typer(
+    name="config",
+    help="User-level jobsmith configuration (repo-root, etc.).",
+    no_args_is_help=True,
+)
+app.add_typer(config_app, name="config")
+
+
+@config_app.command("set-repo-root")
+def config_set_repo_root(
+    path: Path = typer.Argument(..., help="Absolute path to the jobsmith repo root."),
+) -> None:
+    """Persist a repo root in the user-level settings file.
+
+    Equivalent to setting JOBSMITH_REPO_ROOT persistently without touching
+    the shell profile.  The path is stored in
+    ``~/.config/jobsmith/settings.toml`` (or the OS equivalent).
+
+    After setting, ``jobsmith status`` and all pipeline commands resolve
+    the repo root without requiring ``JOBSMITH_REPO_ROOT`` to be set in
+    the environment.
+    """
+    from .settings import write_repo_root
+
+    resolved = path.resolve()
+    write_repo_root(resolved)
+    console.print(f"[green]set repo_root:[/green] {resolved}")
+    console.print("  (stored in ~/.config/jobsmith/settings.toml)")
+
+
+@config_app.command("show")
+def config_show() -> None:
+    """Print current user-level settings."""
+    from .settings import read_settings, settings_config_path
+
+    path = settings_config_path()
+    console.print(f"[bold]Settings file:[/bold] {path}")
+    if not path.exists():
+        console.print("  (file does not exist — no settings stored yet)")
+        return
+
+    data = read_settings()
+    if not data:
+        console.print("  (empty — no settings stored yet)")
+        return
+
+    for key, value in sorted(data.items()):
+        console.print(f"  {key} = {value!r}")
+
+
+@config_app.command("clear-repo-root")
+def config_clear_repo_root() -> None:
+    """Remove the stored repo_root from user settings.
+
+    After clearing, ``jobsmith`` will fall back to walking the directory
+    tree from the current working directory to find ``.apply-config.yaml``.
+    """
+    from .settings import clear_repo_root, read_repo_root
+
+    prior = read_repo_root()
+    clear_repo_root()
+    if prior is not None:
+        console.print(f"[green]cleared repo_root[/green] (was {prior})")
+    else:
+        console.print("[yellow]repo_root was not set[/yellow]")
+
+
 # ---------- site subcommand group ----------
 
 
