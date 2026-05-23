@@ -200,3 +200,27 @@ def pipeline_db_path(cwd: Path) -> Path | None:
     config = load_config(config_path)
     repo_root = config_path.parent
     return (repo_root / config.output.jobsmith_db).resolve()
+
+
+def onboard_state_dir(cwd: Path) -> Path:
+    """Resolve the ``.onboard-state`` directory under the project root.
+
+    Parallel to :func:`apply_state_dir` but for the onboarding pipeline.
+    The onboard pipeline stores its intermediate state under
+    ``<repo_root>/.onboard-state/`` (rather than per-slug, since onboarding
+    produces the master content, not per-application artifacts).
+
+    Unlike ``apply_state_dir``, this always returns a path (never ``None``)
+    because onboarding may need to run before a config file exists —
+    the repo root falls back to *cwd* in that case (mirroring
+    ``repo_root_for(require=False)`` behaviour).
+
+    Parameters
+    ----------
+    cwd:
+        Directory from which to locate the repo root.
+    """
+    from jobsmith.paths import repo_root_for
+
+    root = repo_root_for(cwd=cwd, require=False)
+    return root / ".onboard-state"

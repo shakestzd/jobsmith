@@ -434,6 +434,100 @@ def apply(
 
 
 @app.command()
+def onboard(
+    repo_root: Path | None = typer.Option(
+        None,
+        "--repo-root",
+        help="Repo root (default: walk up from cwd, then JOBSMITH_REPO_ROOT, then settings.toml)",
+    ),
+    resume_file: Path | None = typer.Option(
+        None,
+        "--resume-file",
+        help="Path to an existing resume (PDF, DOCX, TXT, or Markdown)",
+    ),
+    linkedin_export: Path | None = typer.Option(
+        None,
+        "--linkedin-export",
+        help="Path to a LinkedIn data export ZIP",
+    ),
+    linkedin_url: str | None = typer.Option(
+        None,
+        "--linkedin-url",
+        help="Public LinkedIn profile URL (scraped during onboarding)",
+    ),
+    paste: str | None = typer.Option(
+        None,
+        "--paste",
+        help="Raw pasted resume / profile text",
+    ),
+    paste_file: Path | None = typer.Option(
+        None,
+        "--paste-file",
+        help="Path to a file containing pasted resume / profile text",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing master YAML content",
+    ),
+    merge: bool = typer.Option(
+        False,
+        "--merge",
+        help="Merge new content with existing master YAML content",
+    ),
+) -> None:
+    """Onboard a new user by scaffolding the repo and running the ingestion pipeline.
+
+    Accepts a resume file, LinkedIn export, LinkedIn URL, or pasted text as
+    input sources. At least one input source is recommended (though not required
+    if you want to scaffold a blank repo first).
+
+    Phase 0: Ensures a repo exists at the resolved root. If ``.apply-config.yaml``
+    is absent, scaffolds it (and master YAML stubs) automatically.
+
+    Clobber guard: If master YAMLs already contain real content, aborts with
+    guidance unless --force (overwrite) or --merge is passed.
+
+    Artifacts are written to ``.onboard-state/`` under the repo root.
+    """
+    from ._init import scaffold_repo
+    from .onboard.pipeline import _masters_have_content, dispatch_onboard_pipeline
+    from .paths import repo_root_for
+
+    # Resolve repo root (may not exist yet for brand-new setups)
+    resolved_root = repo_root_for(repo_root=repo_root, require=False)
+
+    # --- Phase 0: ensure repo is bootstrapped ---
+    config_file = resolved_root / ".apply-config.yaml"
+    if not config_file.exists():
+        console.print(f"[bold]jobsmith onboard[/bold]: bootstrapping repo at {resolved_root}")
+        scaffold_repo(resolved_root, force=False)
+        console.print(f"  [green]BOOTSTRAPPED[/green] {config_file}")
+    else:
+        console.print(f"[bold]jobsmith onboard[/bold]: repo at {resolved_root}")
+
+    # --- Clobber guard ---
+    if not force and not merge:
+        if _masters_have_content(resolved_root):
+            console.print(
+                "[red]ABORT:[/red] Master YAML files already contain content.\n"
+                "  Pass [bold]--force[/bold] to overwrite, or [bold]--merge[/bold] to merge."
+            )
+            raise typer.Exit(code=1)
+
+    # --- Dispatch pipeline ---
+    rc = dispatch_onboard_pipeline(
+        repo_root=resolved_root,
+        resume_file=resume_file,
+        linkedin_export=linkedin_export,
+        linkedin_url=linkedin_url,
+        paste=paste,
+        paste_file=paste_file,
+    )
+    raise typer.Exit(rc)
+
+
+@app.command()
 def assemble(
     slug: str | None = typer.Argument(
         None,
