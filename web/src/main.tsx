@@ -5,7 +5,7 @@ import './styles.css';
 import type { ViewName, TweakValues } from './types';
 import { useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle } from './tweaks-panel';
 import { Sidebar, Topbar } from './app/chrome';
-import { postApplication } from './api/client';
+import { getAccessToken, hasStaticToken, login, postApplication } from './api/client';
 import { Dashboard } from './app/dashboard';
 import { NewApplicationModal } from './app/new';
 import { ApplicationDetail } from './app/application';
@@ -32,6 +32,9 @@ function App() {
   const [chatScopeSlug, setChatScopeSlug] = useState<string | null>(null);
   const [chatWidth, setChatWidth] = useState<number>(320);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
+  const [authenticated, setAuthenticated] = useState<boolean>(() => hasStaticToken() || Boolean(getAccessToken()));
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   // Sync chat scope with the open application slug.
   useEffect(() => {
@@ -85,6 +88,36 @@ function App() {
     '1fr',
     ...(chatOpen ? [`${chatWidth}px`] : []),
   ].join(' ');
+
+  if (!authenticated) {
+    return (
+      <div className="content" style={{ maxWidth: 420, margin: '80px auto' }}>
+        <form
+          className="card"
+          style={{ padding: 24, display: 'grid', gap: 14 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            setLoginError(null);
+            login(loginPassword)
+              .then(() => setAuthenticated(true))
+              .catch((err: unknown) => setLoginError(err instanceof Error ? err.message : String(err)));
+          }}
+        >
+          <h2 style={{ margin: 0 }}>jobsmith</h2>
+          <input
+            className="input"
+            type="password"
+            value={loginPassword}
+            onChange={(e) => setLoginPassword(e.target.value)}
+            autoFocus
+            placeholder="password"
+          />
+          {loginError && <div style={{ color: 'var(--danger, #c0392b)', fontSize: 12 }}>{loginError}</div>}
+          <button className="btn primary" type="submit">sign in</button>
+        </form>
+      </div>
+    );
+  }
 
   // Build breadcrumbs
   let crumbs: string[];

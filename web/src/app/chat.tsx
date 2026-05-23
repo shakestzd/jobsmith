@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Icon } from './shared';
-import { chatHistory, chatResetSession } from '../api/client';
+import { BASE_URL, authHeaders, chatHistory, chatResetSession } from '../api/client';
 import type { ChatMessage } from '../api/client';
 
 function escapeHtml(s: string): string {
@@ -53,19 +53,6 @@ function renderMarkdown(text: string): string {
   return joined.replace(/(<tr>.*?<\/tr>)+/gs, (m) =>
     `<table style="border-collapse:collapse;font-size:12px;margin:4px 0">${m}</table>`
   );
-}
-
-const BASE_URL: string =
-  (import.meta.env.VITE_JOBSMITH_API_URL as string | undefined) ?? 'http://localhost:8000';
-const TOKEN: string =
-  (import.meta.env.VITE_JOBSMITH_API_TOKEN as string | undefined) ?? '';
-
-function authHeaders(): Record<string, string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (TOKEN) {
-    headers['Authorization'] = `Bearer ${TOKEN}`;
-  }
-  return headers;
 }
 
 export interface ChatPanelProps {

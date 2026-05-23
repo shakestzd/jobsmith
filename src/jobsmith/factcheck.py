@@ -17,6 +17,7 @@ The CLI surface is `jobsmith fact-check`. The Python API is
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,7 +66,7 @@ _YEAR_COUNT_RE = re.compile(
 
 # Multi-word proper nouns: two+ capitalized words in a row, min 4 chars
 # each to avoid two-letter false positives.
-_MULTI_CAP_RE = re.compile(r"\b[A-Z][a-zA-Z]{3,}(?:\s+[A-Z][a-zA-Z]{3,})+\b")
+_MULTI_CAP_RE = re.compile(r"\b[A-Z][a-zA-Z]{3,}(?:[ \t]+[A-Z][a-zA-Z]{3,})+\b")
 
 # CamelCase company names — catches "SunStrong", "DagsterLabs", etc.
 _CAMEL_NAME_RE = re.compile(r"\b[A-Z][a-z]+[A-Z][a-zA-Z]+\b")
@@ -83,9 +84,9 @@ _COUNT_RE = re.compile(
 # "State of Massachusetts", "Bureau of Labor Statistics".
 _CONNECTED_CAP_RE = re.compile(
     r"\b[A-Z][a-zA-Z]{3,}"
-    r"(?:\s+(?:and|of|the|in|for|at|on|to|de|la|le|du|van|von)\s+)"
+    r"(?:[ \t]+(?:and|of|the|in|for|at|on|to|de|la|le|du|van|von)[ \t]+)"
     r"[A-Z][a-zA-Z]{3,}"
-    r"(?:\s+[A-Z][a-zA-Z]{3,})*"
+    r"(?:[ \t]+[A-Z][a-zA-Z]{3,})*"
     r"\b"
 )
 
@@ -115,6 +116,8 @@ _PROPER_NOUN_STOPLIST = {
     "CEO", "CTO", "CFO", "VP", "COO", "CIO",
     "USA", "US", "UK", "EU",
     "HR", "HQ", "IT", "QA", "PR",
+    # Draft/letter boilerplate
+    "Cover Letter", "Hiring Team",
 }
 
 
@@ -177,6 +180,69 @@ def _load_master_content(content_dir: Path) -> dict[str, str]:
     return out
 
 
+def load_db_master_content() -> dict[str, str]:
+    """Load canonical master blobs from ``master_content`` when a repo DB exists.
+
+    Disk YAMLs can lag behind edits made in the web UI. The fact checker should
+    still work in standalone fixture tests, so failures here intentionally return
+    an empty mapping and let the caller fall back to file-backed sources.
+    """
+    try:
+        from .config import find_config, load_config
+        from .db import open_pipeline_db
+        from .paths import repo_root_for
+
+        config_path = find_config(Path.cwd())
+        if config_path is None:
+            return {}
+        config = load_config(config_path)
+        repo_root = repo_root_for()
+        db_path = (repo_root / config.output.jobsmith_db).resolve()
+        if not db_path.exists():
+            return {}
+        conn = open_pipeline_db(db_path)
+        try:
+            rows = conn.execute(
+                "SELECT section, content_blob FROM master_content"
+            ).fetchall()
+        finally:
+            conn.close()
+        return {
+            f"db:master_content:{row['section']}": row["content_blob"]
+            for row in rows
+            if row["content_blob"]
+        }
+    except Exception:
+        return {}
+
+
+def load_jd_context_for_draft(draft: Path) -> dict[str, str]:
+    """Find the sibling ``jd-parsed.json`` for an application draft, if present."""
+    candidates: list[Path] = []
+    if draft.parent.name == ".apply-state":
+        candidates.append(draft.parent / "jd-parsed.json")
+    candidates.append(draft.parent / ".apply-state" / "jd-parsed.json")
+    candidates.append(draft.parent.parent / ".apply-state" / "jd-parsed.json")
+
+    out: dict[str, str] = {}
+    seen: set[Path] = set()
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        if not path.exists():
+            continue
+        try:
+            raw = path.read_text()
+            parsed = json.loads(raw)
+            compact = json.dumps(parsed, ensure_ascii=False, sort_keys=True)
+            out[f"jd:{path.name}"] = raw + "\n" + compact
+            return out
+        except (OSError, json.JSONDecodeError):
+            continue
+    return out
+
+
 def _auto_detect_kind(claim: str) -> str:
     """Infer the claim kind from its shape."""
     s = claim.strip()
@@ -202,6 +268,7 @@ def verify_claim(
     claim: str,
     content_dir: Path,
     kind: str | None = None,
+    extra_sources: dict[str, str] | None = None,
 ) -> VerificationResult:
     """Check a single claim against every master YAML file.
 
@@ -212,6 +279,8 @@ def verify_claim(
     """
     effective_kind = kind or _auto_detect_kind(claim)
     master = _load_master_content(content_dir)
+    if extra_sources:
+        master.update(extra_sources)
     for name, body in master.items():
         if _claim_matches(claim, body, effective_kind):
             return VerificationResult(
@@ -223,6 +292,7 @@ def verify_claim(
 def check_draft(
     draft_text: str,
     content_dir: Path,
+    extra_sources: dict[str, str] | None = None,
 ) -> FactCheckResult:
     """Extract every hard claim from the draft and verify against master files."""
     claims = extract_hard_claims(draft_text)
@@ -234,7 +304,12 @@ def check_draft(
         if key in seen:
             continue
         seen.add(key)
-        v = verify_claim(claim.text, content_dir, kind=claim.kind)
+        v = verify_claim(
+            claim.text,
+            content_dir,
+            kind=claim.kind,
+            extra_sources=extra_sources,
+        )
         verified.append(v)
         if not v.verified:
             failed.append(claim.text)
@@ -251,5 +326,7 @@ __all__ = [
     "VerificationResult",
     "check_draft",
     "extract_hard_claims",
+    "load_db_master_content",
+    "load_jd_context_for_draft",
     "verify_claim",
 ]

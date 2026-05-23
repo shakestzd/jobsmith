@@ -60,6 +60,61 @@ _PHASE_FAILED_RE = re.compile(r"<<PHASE_FAILED:\s*(\w+)\s*(?::\s*(.+?)\s*)?>>+",
 _TOOL_RESULT_TYPE = "tool_result"
 
 
+def _parse_agent_file(path: Path) -> tuple[str, dict[str, str]] | None:
+    """Return a Claude ``--agents`` entry parsed from a plugin agent file."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not text.startswith("---\n"):
+        return None
+    try:
+        _empty, frontmatter, prompt = text.split("---", 2)
+    except ValueError:
+        return None
+
+    meta: dict[str, str] = {}
+    for raw_line in frontmatter.splitlines():
+        if ":" not in raw_line:
+            continue
+        key, _, value = raw_line.partition(":")
+        meta[key.strip()] = value.strip().strip('"').strip("'")
+
+    name = meta.get("name", "").strip()
+    if not name:
+        return None
+    description = meta.get("description", "").strip()
+    body = prompt.strip()
+    if not body:
+        return None
+    return name, {"description": description, "prompt": body}
+
+
+def _agents_json(plugin_dir: Path) -> str | None:
+    """Build a ``--agents`` JSON payload from embedded plugin agents.
+
+    Apply runs execute from the user's content repo, whose project-local
+    ``.claude/agents`` can lag the packaged plugin. Passing the embedded agents
+    explicitly makes the specialist set deterministic for every run.
+    """
+    agents_dir = plugin_dir / "agents"
+    if not agents_dir.is_dir():
+        return None
+
+    agents: dict[str, dict[str, str]] = {}
+    for path in sorted(agents_dir.glob("*.md")):
+        if path.name == "README.md":
+            continue
+        parsed = _parse_agent_file(path)
+        if parsed is None:
+            continue
+        name, spec = parsed
+        agents[name] = spec
+    if not agents:
+        return None
+    return json.dumps(agents, ensure_ascii=False)
+
+
 # ---------------------------------------------------------------------------
 # Event dataclass
 # ---------------------------------------------------------------------------
@@ -204,6 +259,9 @@ def _build_command(
         "--max-turns",
         str(max_turns),
     ]
+    agents_json = _agents_json(plugin_dir)
+    if agents_json is not None:
+        cmd += ["--agents", agents_json]
     # --session-id and --resume are mutually exclusive with claude.
     # On fresh runs (resume=False): claim the session ID.
     # On resuming (resume=True): continue the existing session.

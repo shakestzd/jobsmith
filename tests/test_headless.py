@@ -109,6 +109,46 @@ def test_command_construction_no_resume(monkeypatch):
     assert args[-1] == PROMPT
 
 
+def test_command_includes_embedded_agents_json(monkeypatch, tmp_path: Path):
+    """Embedded plugin agents are passed explicitly to avoid stale cwd agents."""
+    plugin_dir = tmp_path / "plugin"
+    agents_dir = plugin_dir / "agents"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "apply-company-research.md").write_text(
+        """---
+name: apply-company-research
+description: Company research specialist.
+tools: Read, Bash
+model: sonnet
+color: green
+---
+
+You are the company research specialist.
+""",
+        encoding="utf-8",
+    )
+    mock_popen_cls = _mock_popen_with_lines(monkeypatch, [])
+
+    list(
+        run_phase(
+            PHASE,
+            SESSION_ID,
+            PROMPT,
+            plugin_dir,
+            SYSTEM_PROMPT,
+            resume=False,
+            max_turns=30,
+        )
+    )
+
+    args = mock_popen_cls.call_args[0][0]
+    assert "--agents" in args
+    agents = json.loads(args[args.index("--agents") + 1])
+    assert "apply-company-research" in agents
+    assert agents["apply-company-research"]["description"] == "Company research specialist."
+    assert "company research specialist" in agents["apply-company-research"]["prompt"]
+
+
 # ---------------------------------------------------------------------------
 # 2. Command construction — with resume
 # ---------------------------------------------------------------------------

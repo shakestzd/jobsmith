@@ -43,6 +43,8 @@ config.yaml
 .htmlgraph/plans/*
 !.htmlgraph/plans/plan-807d44a7.yaml
 !.htmlgraph/plans/plan-807d44a7.html
+!.htmlgraph/plans/plan-41b28580.yaml
+!.htmlgraph/plans/plan-41b28580.html
 
 # OS / editor
 *.bak

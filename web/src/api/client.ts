@@ -10,8 +10,14 @@
 //   postApplication   — POST /api/applications → { slug, run_id }
 //   buildEventsUrl    — construct the SSE URL for a slug
 
-const BASE_URL = import.meta.env.VITE_JOBSMITH_API_URL ?? 'http://localhost:8000';
-const TOKEN = import.meta.env.VITE_JOBSMITH_API_TOKEN ?? '';
+const DEFAULT_BASE_URL = window.location.hostname === 'host.docker.internal'
+  ? 'http://host.docker.internal:8000'
+  : 'http://localhost:8000';
+export const BASE_URL = import.meta.env.VITE_JOBSMITH_API_URL ?? DEFAULT_BASE_URL;
+const STATIC_TOKEN = import.meta.env.VITE_JOBSMITH_API_TOKEN ?? '';
+const ACCESS_TOKEN_KEY = 'jobsmith.access_token';
+const REFRESH_TOKEN_KEY = 'jobsmith.refresh_token';
+export const JOBSMITH_DATA_CHANGED = 'jobsmith:data-changed';
 
 // ── Error class ──────────────────────────────────────────────────────────
 
@@ -26,12 +32,76 @@ export class JobsmithApiError extends Error {
 
 // ── Internal helpers ─────────────────────────────────────────────────────
 
-function authHeaders(): Record<string, string> {
+export function getAccessToken(): string {
+  return window.localStorage.getItem(ACCESS_TOKEN_KEY) ?? '';
+}
+
+export function hasStaticToken(): boolean {
+  return Boolean(STATIC_TOKEN);
+}
+
+export function getRefreshToken(): string {
+  return window.localStorage.getItem(REFRESH_TOKEN_KEY) ?? '';
+}
+
+export function setAuthTokens(accessToken: string, refreshToken: string): void {
+  window.localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  window.localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+}
+
+export function clearAuthTokens(): void {
+  window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+  window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+export function notifyDataChanged(path: string): void {
+  window.dispatchEvent(new CustomEvent(JOBSMITH_DATA_CHANGED, { detail: { path } }));
+}
+
+export function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (TOKEN) {
-    headers['Authorization'] = `Bearer ${TOKEN}`;
+  const token = getAccessToken() || STATIC_TOKEN;
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
   }
   return headers;
+}
+
+function authOnlyHeaders(): Record<string, string> {
+  const token = getAccessToken() || STATIC_TOKEN;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export interface TokenPair {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+}
+
+export async function login(password: string): Promise<TokenPair> {
+  const res = await fetch(`${BASE_URL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+  await throwIfError(res);
+  const pair = await res.json() as TokenPair;
+  setAuthTokens(pair.access_token, pair.refresh_token);
+  notifyDataChanged('/api/auth/login');
+  return pair;
+}
+
+export async function refreshAuth(): Promise<TokenPair> {
+  const res = await fetch(`${BASE_URL}/api/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: getRefreshToken() }),
+  });
+  await throwIfError(res);
+  const pair = await res.json() as TokenPair;
+  setAuthTokens(pair.access_token, pair.refresh_token);
+  notifyDataChanged('/api/auth/refresh');
+  return pair;
 }
 
 export function formatDetail(rawDetail: unknown, fallback: string): string {
@@ -67,23 +137,22 @@ async function throwIfError(res: Response): Promise<void> {
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: authHeaders(),
+    cache: 'no-store',
   });
   await throwIfError(res);
   return res.json() as Promise<T>;
 }
 
 export async function apiGetBlob(path: string): Promise<Blob> {
-  const headers: Record<string, string> = {};
-  if (TOKEN) headers['Authorization'] = `Bearer ${TOKEN}`;
-  const res = await fetch(`${BASE_URL}${path}`, { headers });
+  const headers = authOnlyHeaders();
+  const res = await fetch(`${BASE_URL}${path}`, { headers, cache: 'no-store' });
   await throwIfError(res);
   return res.blob();
 }
 
 export async function apiGetText(path: string): Promise<string> {
-  const headers: Record<string, string> = {};
-  if (TOKEN) headers['Authorization'] = `Bearer ${TOKEN}`;
-  const res = await fetch(`${BASE_URL}${path}`, { headers });
+  const headers = authOnlyHeaders();
+  const res = await fetch(`${BASE_URL}${path}`, { headers, cache: 'no-store' });
   await throwIfError(res);
   return res.text();
 }
@@ -95,7 +164,9 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   await throwIfError(res);
-  return res.json() as Promise<T>;
+  const data = await res.json() as T;
+  notifyDataChanged(path);
+  return data;
 }
 
 export async function apiPut<T>(
@@ -115,7 +186,9 @@ export async function apiPut<T>(
     body: JSON.stringify(body),
   });
   await throwIfError(res);
-  return res.json() as Promise<T>;
+  const data = await res.json() as T;
+  notifyDataChanged(path);
+  return data;
 }
 
 export async function apiGetWithMeta<T>(
@@ -123,6 +196,7 @@ export async function apiGetWithMeta<T>(
 ): Promise<{ data: T; etag: string | null; status: number }> {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: authHeaders(),
+    cache: 'no-store',
   });
   await throwIfError(res);
   const data = (await res.json()) as T;
@@ -142,7 +216,9 @@ export async function apiDelete<T>(path: string, body?: unknown): Promise<T> {
   }
   const res = await fetch(`${BASE_URL}${path}`, init);
   await throwIfError(res);
-  return res.json() as Promise<T>;
+  const data = await res.json() as T;
+  notifyDataChanged(path);
+  return data;
 }
 
 // ── Applications API ─────────────────────────────────────────────────────
@@ -188,8 +264,9 @@ export function postApplication(
  */
 export function buildEventsUrl(slug: string): string {
   const base = `${BASE_URL}/api/applications/${encodeURIComponent(slug)}/events?verbosity=verbose`;
-  if (TOKEN) {
-    return `${base}&token=${encodeURIComponent(TOKEN)}`;
+  const token = getAccessToken() || STATIC_TOKEN;
+  if (token) {
+    return `${base}&token=${encodeURIComponent(token)}`;
   }
   return base;
 }
@@ -231,9 +308,10 @@ export function redactSensitive(text: string): string {
   // bracket — not a narrow alphanumeric class — so we never leave a trailing
   // suffix in the rendered string. Case-insensitive to also catch `bearer …`.
   out = out.replace(/(Bearer\s+)[^\s"'<>]+/gi, '$1[redacted]');
-  if (TOKEN && TOKEN.length >= 8) {
+  const token = getAccessToken() || STATIC_TOKEN;
+  if (token && token.length >= 8) {
     // Escape regex metacharacters in the token before matching it as a literal.
-    const escaped = TOKEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     out = out.replace(new RegExp(escaped, 'g'), '[redacted]');
   }
   return out;

@@ -629,6 +629,30 @@ def _run_apply_phases(
                     _rekey_slug(
                         db_conn, from_slug=pre_reconcile_slug, to_slug=slug
                     )
+                # Propagate canonical slug to apply_runs immediately so the
+                # SSE events endpoint and frontend detail view stop hammering
+                # the stale URL-derived slug (which no longer matches the
+                # renamed application dir → 404 → EventSource reconnect loop).
+                # run_apply's finally-block also writes slug at completion;
+                # this UPDATE makes the rekey visible mid-run. Silent failure
+                # leaves the row stale until pipeline-end — log a WARNING so
+                # an operator can see why the SSE thrash persists.
+                try:
+                    db_conn.execute(
+                        "UPDATE apply_runs SET slug=? WHERE run_id=?",
+                        (slug, db_run_id),
+                    )
+                    db_conn.commit()
+                except Exception as exc:
+                    logger.warning(
+                        "apply_runs slug rekey UPDATE failed (run_id=%s, "
+                        "from=%s, to=%s): %s — frontend will continue hitting "
+                        "the stale slug until pipeline finally-block writes it",
+                        db_run_id,
+                        pre_reconcile_slug,
+                        slug,
+                        exc,
+                    )
 
             # Render per-phase summary panel before the confirm gate
             state_dir = _apply_state_dir(slug, resolved_cwd)

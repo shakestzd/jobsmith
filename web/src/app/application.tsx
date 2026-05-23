@@ -11,7 +11,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { SampleApp, AppPhase, AppStatus, IconName } from '../types';
 import { Icon, Badge, StatusBadge } from './shared';
 import { useApplication } from '../api/hooks';
-import { JobsmithApiError, postApplication, buildEventsUrl, redactSensitive, apiGet, apiPost, apiGetBlob, apiGetText } from '../api/client';
+import { JobsmithApiError, postApplication, buildEventsUrl, redactSensitive, apiGet, apiPost, apiPut, apiGetBlob, apiGetText, notifyDataChanged } from '../api/client';
 import type {
   ApplicationDetail as ApiApplicationDetail,
   ApplicationArtifact as ApiApplicationArtifact,
@@ -29,6 +29,8 @@ export interface ApplicationDetailProps {
 // ── Phase-related helpers ────────────────────────────────────────────────────
 
 type PhaseStatus = 'done' | 'running' | 'queued' | 'failed';
+type SpecialistRunStatus = 'queued' | 'running' | 'done' | 'failed';
+type SpecialistStatusMap = Record<string, SpecialistRunStatus>;
 
 interface PhaseSpec {
   num: 1 | 2 | 3;
@@ -186,6 +188,7 @@ function phaseDuration(n: number): string {
 // ── Tab type ─────────────────────────────────────────────────────────────────
 
 type TabName = 'pipeline' | 'review' | 'documents' | 'artifacts' | 'factcheck' | 'anchors' | 'config';
+const TAB_ORDER: TabName[] = ['pipeline', 'review', 'documents', 'artifacts', 'factcheck', 'anchors', 'config'];
 
 // ── Progress map type ────────────────────────────────────────────────────────
 
@@ -289,6 +292,28 @@ function deriveProgress(app: SampleApp): {
     activePhase: 1,
     failedPhaseNum: null,
   };
+}
+
+function mergeArtifactProgress(
+  api: ApiApplicationDetail | undefined,
+  base: ProgressMap,
+): ProgressMap {
+  const doneSpecialists = new Set(
+    (api?.artifacts ?? [])
+      .map(a => a.specialist)
+      .filter((s): s is string => Boolean(s)),
+  );
+  if (doneSpecialists.size === 0) return base;
+
+  const progress: ProgressMap = { ...base };
+  for (const phase of PHASES) {
+    const doneCount = phase.specs.filter(s => doneSpecialists.has(s)).length;
+    if (doneCount === 0) continue;
+    progress[phase.num] = doneCount >= phase.specs.length
+      ? 100
+      : Math.max(progress[phase.num], Math.min(90, 10 + doneCount * 15));
+  }
+  return progress;
 }
 
 // ── PhaseCard ────────────────────────────────────────────────────────────────
@@ -422,9 +447,10 @@ interface PipelineTabProps {
    * yet (closes roborev job 953 LOW).
    */
   failedPhaseNum: 1 | 2 | 3 | null;
+  specialistStatuses: SpecialistStatusMap;
 }
 
-function PipelineTab({ events, running, phase, progress, sseStatus, failedPhaseNum }: PipelineTabProps) {
+function PipelineTab({ events, running, phase, progress, sseStatus, failedPhaseNum, specialistStatuses }: PipelineTabProps) {
   const logRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (logRef.current) {
@@ -468,26 +494,16 @@ function PipelineTab({ events, running, phase, progress, sseStatus, failedPhaseN
           </div>
           <div style={{ padding: '8px 4px' }}>
             {phaseSpec.specs.map(s => {
-              const pct = phaseDone ? 100 : Math.min(100, progress[phaseNum] * (1 + Math.random() * 0.4));
-              void pct; // computed but used only implicitly via done/running/queued label
-              // bug-8ade6f70: when the SSE stream reports a terminal failure
-              // and the active phase did not complete, the specialists in
-              // that phase are NOT still running — render them as 'failed'.
-              // Only the phase the SSE failure pinned to renders as
-              // failed — queued downstream phases stay 'queued' so a
-              // gather failure does not mis-paint the draft + render
-              // specialists (closes roborev job 953 LOW).
-              const phaseFailed =
-                sseStatus === 'failed'
-                && !phaseDone
-                && failedPhaseNum === phaseNum;
-              const iconName: IconName = phaseDone ? 'check' : (phaseFailed ? 'x' : 'dot');
-              const iconColor = phaseDone
+              const phaseFailed = sseStatus === 'failed' && !phaseDone && failedPhaseNum === phaseNum;
+              const status = specialistStatuses[s] ?? (phaseDone ? 'done' : 'queued');
+              const effectiveStatus = status === 'queued' && phaseFailed ? 'queued' : status;
+              const iconName: IconName = effectiveStatus === 'done' ? 'check' : (effectiveStatus === 'failed' ? 'x' : 'dot');
+              const iconColor = effectiveStatus === 'done'
                 ? 'var(--success)'
-                : (phaseFailed ? 'var(--danger, #e55)' : 'var(--accent)');
-              const label = phaseDone
-                ? `${(Math.random() * 1.5 + 0.4).toFixed(1)}s`
-                : (phaseFailed ? 'failed' : (progress[phaseNum] > 0 ? 'running' : 'queued'));
+                : (effectiveStatus === 'failed' ? 'var(--danger, #e55)' : 'var(--accent)');
+              const label = effectiveStatus === 'done' && phaseDone
+                ? 'complete'
+                : effectiveStatus;
               return (
                 <div key={s} style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
                   <Icon name={iconName} size={12} style={{ color: iconColor }} />
@@ -599,6 +615,7 @@ function ArtifactsTab({ artifacts }: ArtifactsTabProps) {
 function DocumentsTab({ slug }: { slug: string }) {
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const [coverLetter, setCoverLetter] = useState<string | null>(null);
+  const [coverLetterName, setCoverLetterName] = useState<string>('cover-letter.md');
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState(false);
 
@@ -608,9 +625,19 @@ function DocumentsTab({ slug }: { slug: string }) {
 
     async function load() {
       try {
+        const names: string[] = await apiGet<string[]>(`/api/applications/${slug}/documents`).catch((): string[] => []);
+        const resumeName = names.includes('resume.pdf') ? 'resume.pdf' : null;
+        const coverName = names.includes('cover-letter.md')
+          ? 'cover-letter.md'
+          : (names.includes('cover-letter-draft.md') ? 'cover-letter-draft.md' : null);
+        setCoverLetterName(coverName ?? 'cover-letter.md');
         const [pdfBlob, clText] = await Promise.allSettled([
-          apiGetBlob(`/api/applications/${slug}/documents/resume.pdf`),
-          apiGetText(`/api/applications/${slug}/documents/cover-letter-draft.md`),
+          resumeName
+            ? apiGetBlob(`/api/applications/${slug}/documents/${resumeName}`)
+            : Promise.reject(new Error('resume.pdf not found')),
+          coverName
+            ? apiGetText(`/api/applications/${slug}/documents/${coverName}`)
+            : Promise.reject(new Error('cover letter not found')),
         ]);
         if (cancelled) return;
         if (pdfBlob.status === 'fulfilled') {
@@ -674,7 +701,7 @@ function DocumentsTab({ slug }: { slug: string }) {
       {coverLetter && (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>
-            cover letter draft
+            {coverLetterName}
           </div>
           <pre style={{ margin: 0, padding: '16px', whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.7, fontFamily: 'var(--font-sans, inherit)' }}>
             {coverLetter}
@@ -752,7 +779,7 @@ function ReviewTab({ slug }: { slug: string }) {
     setSaving(true);
     setSaveError(null);
     try {
-      const result = await apiPost<{ saved: boolean; words: number }>(
+      const result = await apiPut<{ saved: boolean; words: number }>(
         `/api/applications/${slug}/cover-letter`,
         { text: draft },
       );
@@ -1433,6 +1460,13 @@ function specialistToPhaseNum(specialist: string): 1 | 2 | 3 | null {
   return null;
 }
 
+function specialistEventStatus(status: string): SpecialistRunStatus {
+  if (status === 'failed') return 'failed';
+  if (status === 'done' || status === 'backfilled' || status === 'complete') return 'done';
+  if (status === 'running' || status === 'started') return 'running';
+  return 'done';
+}
+
 export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   const { data: apiDetail, isLoading, error } = useApplication(slug);
 
@@ -1467,6 +1501,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   const [failedPhaseNum, setFailedPhaseNum] = useState<1 | 2 | 3 | null>(
     initialFailedPhaseNum,
   );
+  const [specialistStatuses, setSpecialistStatuses] = useState<SpecialistStatusMap>({});
 
   // Ref to hold the active EventSource so we can close it on cancel/unmount.
   const esRef = useRef<EventSource | null>(null);
@@ -1481,8 +1516,18 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   useEffect(() => {
     if (apiDetail === undefined) return;
     const next = deriveProgress(app);
-    setProgress(next.progress);
-    setActivePhase(next.activePhase);
+    const fromArtifacts: SpecialistStatusMap = {};
+    for (const artifact of apiDetail.artifacts ?? []) {
+      if (artifact.specialist) fromArtifacts[artifact.specialist] = 'done';
+    }
+    const mergedProgress = mergeArtifactProgress(apiDetail, next.progress);
+    setProgress(mergedProgress);
+    if (app.status === 'running') {
+      const firstIncomplete = ([1, 2, 3] as const).find(n => mergedProgress[n] < 100);
+      setActivePhase(firstIncomplete ?? next.activePhase);
+    } else {
+      setActivePhase(next.activePhase);
+    }
     setFailedPhaseNum(next.failedPhaseNum);
     if (app.status === 'failed') {
       setSseStatus('failed');
@@ -1493,6 +1538,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     } else if (app.status === 'running') {
       setRunning(true);
     }
+    setSpecialistStatuses(fromArtifacts);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiDetail]);
 
@@ -1542,9 +1588,21 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
             setFailedPhaseNum(phaseNum as 1 | 2 | 3);
           }
         }
-        // Add a log entry for the phase event.
+        notifyDataChanged(`/api/applications/${targetSlug}`);
+        // Add a log entry for the phase event. Backend resends phase state on
+        // every SSE poll, so dedup identical phase+status against the most
+        // recent phase row and cap the list (mirrors specialist/log handlers).
         const msg = `&lt;&lt;PHASE&gt;&gt; ${data.phase} status=${data.status}`;
-        setEvents(ev => [...ev, { ts: now(), lvl: 'done', msg }]);
+        setEvents(ev => {
+          if (ev.length > 400) return ev;
+          for (let i = ev.length - 1; i >= 0; i--) {
+            if (ev[i].lvl === 'done' && ev[i].msg?.startsWith('&lt;&lt;PHASE&gt;&gt;')) {
+              if (ev[i].msg === msg) return ev;
+              break;
+            }
+          }
+          return [...ev, { ts: now(), lvl: 'done', msg }];
+        });
       } catch { /* ignore malformed event */ }
     });
 
@@ -1555,6 +1613,13 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         const kindLabel = redactSensitive(String(data.kind_label ?? ''));
         const msg = `<span class="dim">specialist=</span>${specialist} <span class="dim">kind=</span>${kindLabel}`;
         setEvents(ev => ev.length > 400 ? ev : [...ev, { ts: now(), lvl: 'spec', msg }]);
+        if (specialist) {
+          setSpecialistStatuses(prev => ({
+            ...prev,
+            [specialist]: specialistEventStatus(String(data.status ?? 'done')),
+          }));
+          notifyDataChanged(`/api/applications/${targetSlug}`);
+        }
         // Advance phase bar progress incrementally for each specialist.
         // Roborev job 961 MEDIUM: ``events_poll`` forwards
         // ``apply_runs.phase`` on specialist events, but apply.py records
@@ -1632,6 +1697,17 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     };
   }, []);
 
+  // While a run is active, keep the detail query fresh even if the SSE stream
+  // only carries transcript rows. This lets artifact-derived UI state catch up
+  // for failed phases that wrote files but never reached post-phase DB ingest.
+  useEffect(() => {
+    if (!running) return;
+    const id = window.setInterval(() => {
+      notifyDataChanged(`/api/applications/${slug}`);
+    }, 3000);
+    return () => window.clearInterval(id);
+  }, [running, slug]);
+
   // A slug is "complete" when its latest run finished successfully or was
   // backfilled. Re-running such a slug requires --force on the server side or
   // the apply pipeline aborts with "Application already complete." (GH#50).
@@ -1648,6 +1724,8 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   // available, the re-run button is disabled and the user is pointed at the
   // CLI. Re-enable here once /api/applications/{slug} returns a `url` field.
   const hasLaunchableUrl = Boolean(app.url);
+  const apiStatus = apiDetail?.status;
+  const apiRunId = apiDetail?.run_id;
 
   // ── Re-run apply handler (real API) ──────────────────────────────────
   const handleReRun = useCallback(async () => {
@@ -1665,6 +1743,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     setActivePhase(1);
     setSseStatus(null);
     setFailedPhaseNum(null);
+    setSpecialistStatuses({});
     setEvents([{ ts: now(), lvl: 'info', msg: `<span class="dim">apply</span> start <span class="dim">slug=</span>${slug}` }]);
     setRunning(true);
 
@@ -1697,6 +1776,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     setActivePhase(3);
     setSseStatus(null);
     setFailedPhaseNum(null);
+    setSpecialistStatuses({});
     setEvents([{ ts: now(), lvl: 'info', msg: `<span class="dim">apply</span> render <span class="dim">slug=</span>${slug}` }]);
     setRunning(true);
     try {
@@ -1712,14 +1792,23 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   }, [slug, app.url, hasLaunchableUrl, subscribeToEvents]);
 
   // ── Cancel handler ───────────────────────────────────────────────────
-  const handleCancel = useCallback(() => {
+  const handleCancel = useCallback(async () => {
     if (esRef.current) {
       esRef.current.close();
       esRef.current = null;
     }
-    setRunning(false);
-    setEvents(ev => [...ev, { ts: now(), lvl: 'warn', msg: 'run cancelled by user' }]);
-  }, []);
+    try {
+      if (apiRunId) {
+        await apiPost(`/api/applications/${slug}/runs/${apiRunId}/cancel`, {});
+      }
+      setRunning(false);
+      setEvents(ev => [...ev, { ts: now(), lvl: 'warn', msg: 'run cancelled by user' }]);
+    } catch (err) {
+      const msg = redactSensitive(err instanceof Error ? err.message : String(err));
+      setRunError(msg);
+      setEvents(ev => [...ev, { ts: now(), lvl: 'warn', msg: `cancel failed: ${msg}` }]);
+    }
+  }, [apiRunId, slug]);
 
   // Close SSE on unmount.
   useEffect(() => {
@@ -1739,8 +1828,6 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   // (e.g. user clicks force re-run, server returns a new run_id) drops the
   // stale stream and resubscribes; cleanup runs on slug change or unmount.
   // Roborev job 945 fix.
-  const apiStatus = apiDetail?.status;
-  const apiRunId = apiDetail?.run_id;
   useEffect(() => {
     if (apiStatus !== 'running') return;
     if (!apiRunId) return;
@@ -1775,8 +1862,11 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         if (logEvents.length > 0) {
           setEvents(logEvents);
         }
-      } catch {
-        // Transcript endpoint unavailable or empty — leave event log as-is.
+      } catch (err) {
+        const msg = redactSensitive(err instanceof Error ? err.message : String(err));
+        setEvents(ev => ev.length > 0 ? ev : [
+          { ts: now(), lvl: 'warn', msg: `transcript unavailable: ${msg}` },
+        ]);
       }
     }
     void loadTranscript();
@@ -1796,6 +1886,26 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
       }
     }
   }, [allDone]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        back();
+        return;
+      }
+      const idx = Number(e.key);
+      if (Number.isInteger(idx) && idx >= 1 && idx <= TAB_ORDER.length) {
+        e.preventDefault();
+        setTab(TAB_ORDER[idx - 1]);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [back]);
 
   if (isLoading || error) {
     return (
@@ -1847,11 +1957,6 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         </div>
         <div className="actions">
           <button className="btn" onClick={() => {
-            void apiPost(`/api/applications/${slug}/launch-review`, {}).then((d: unknown) => {
-              window.open((d as {url: string}).url, '_blank');
-            }).catch(console.error);
-          }}><Icon name="doc" size={13} /> open in marimo</button>
-          <button className="btn" onClick={() => {
             void apiPost(`/api/applications/${slug}/reveal`, {}).catch(console.error);
           }}><Icon name="folder" size={13} /> reveal in finder</button>
           {!running && (app.status as string) === 'incomplete' && (
@@ -1881,7 +1986,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
             </button>
           )}
           {running && (
-            <button className="btn danger" onClick={handleCancel}>
+            <button className="btn danger" onClick={() => { void handleCancel(); }}>
               <Icon name="x" size={12} /> cancel run
             </button>
           )}
@@ -1936,12 +2041,12 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
       </div>
 
       <div className="tabs">
-        {(['pipeline', 'review', 'documents', 'artifacts', 'factcheck', 'anchors', 'config'] as TabName[]).map(t => (
+        {TAB_ORDER.map(t => (
           <div key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t}</div>
         ))}
       </div>
 
-      {tab === 'pipeline' && <PipelineTab events={events} running={running} phase={activePhase} progress={progress} sseStatus={sseStatus} failedPhaseNum={failedPhaseNum} />}
+      {tab === 'pipeline' && <PipelineTab events={events} running={running} phase={activePhase} progress={progress} sseStatus={sseStatus} failedPhaseNum={failedPhaseNum} specialistStatuses={specialistStatuses} />}
       {tab === 'review' && <ReviewTab slug={slug} />}
       {tab === 'documents' && <DocumentsTab slug={slug} />}
       {tab === 'artifacts' && <ArtifactsTab artifacts={apiDetail?.artifacts ?? []} />}

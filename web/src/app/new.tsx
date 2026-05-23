@@ -7,7 +7,6 @@
 import { useState } from 'react';
 import { Icon } from './shared';
 import { useDoctor } from '../api/hooks';
-import { apiGet } from '../api/client';
 
 // ── Prop interface ───────────────────────────────────────────────────────────
 
@@ -38,7 +37,6 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
   const [jdText, setJdText] = useState('');
   const [verbose, setVerbose] = useState<VerbosityFlag>('-v');
   const [skipConfirm, setSkipConfirm] = useState(true);
-  const [isFetchingJd, setIsFetchingJd] = useState(false);
 
   const { data: doctorChecks, isLoading: doctorLoading, error: doctorError } = useDoctor();
 
@@ -219,32 +217,15 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
             : <button
                 type="submit"
                 className="btn primary"
-                disabled={isFetchingJd}
-                onClick={async () => {
+                onClick={() => {
                   if (jdMode === 'paste') {
                     onLaunch(slug, url, jdText);
-                    return;
-                  }
-                  if (jdMode === 'fetch') {
-                    setIsFetchingJd(true);
-                    let resolvedJdText: string | undefined;
-                    try {
-                      const result = await apiGet<{ text: string; method: string; char_count: number }>(
-                        `/api/jd/fetch?url=${encodeURIComponent(url)}`
-                      );
-                      resolvedJdText = result.text;
-                    } catch (err) {
-                      console.warn('jd-fetch failed, falling back to WebFetch in gather agent:', err);
-                    } finally {
-                      setIsFetchingJd(false);
-                    }
-                    onLaunch(slug, url, resolvedJdText);
                     return;
                   }
                   onLaunch(slug, url, undefined);
                 }}
               >
-                <Icon name="play" size={12} /> {isFetchingJd ? 'fetching JD…' : 'apply'}
+                <Icon name="play" size={12} /> apply
               </button>
           }
         </div>

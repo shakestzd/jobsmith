@@ -67,6 +67,12 @@ def test_extract_skips_generic_acronyms() -> None:
     assert "ML" not in proper_nouns
 
 
+def test_extract_does_not_join_proper_nouns_across_newlines() -> None:
+    claims = extract_hard_claims('Thandolwethu "Shakes" Dlamini\nDurham, NC')
+    proper_nouns = [c.text for c in claims if c.kind == "proper_noun"]
+    assert "Dlamini\nDurham" not in proper_nouns
+
+
 # ---------- verify_claim ----------
 
 
@@ -141,3 +147,18 @@ def test_check_draft_dedupes_identical_claims(tmp_path: Path) -> None:
     result = check_draft(draft, content)
     money_claims = [v for v in result.verified_claims if v.kind == "money"]
     assert len(money_claims) == 1
+
+
+def test_check_draft_accepts_extra_jd_sources(tmp_path: Path) -> None:
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "work.yml").write_text("Unlocked $95M in qualified credits")
+    draft = "GitLab needs Marketing Analytics work; I have unlocked $95M."
+
+    result = check_draft(
+        draft,
+        content,
+        extra_sources={"jd:jd-parsed.json": '{"company":"GitLab","position":"Senior Data Analyst, Marketing Analytics"}'},
+    )
+
+    assert result.passed is True

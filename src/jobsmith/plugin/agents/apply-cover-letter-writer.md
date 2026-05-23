@@ -24,7 +24,7 @@ Read your spec from the DB (trk-60217f9f Pass 3):
 - `inputs.jd_parsed`, `inputs.fit_score`
 - `inputs.hm_snippet` = `.apply-state/hm-snippet.md` (sentinel if no HM)
 - `inputs.exemplars`: list of 2-3 paths to positive exemplars (from index_exemplars / retrieve_exemplars)
-- `inputs.master_yamls` (READ-ONLY)
+- `inputs.master_yamls` (READ-ONLY; fetch via `jobsmith db dump-master`, not disk)
 - `inputs.gap_resolutions` (if exists)
 - `inputs.benchmark_cover_letter_md` = path to benchmark cover letter .md file, or null
 - `inputs.feedback_dir` = absolute path to `private/feedback/` directory, or null
@@ -100,7 +100,14 @@ Skip the snippet only if the JD explicitly requires existing US citizenship/PR a
 ## Steps
 
 1. Read all exemplars first. Note tone, paragraph count, opening style. Do NOT copy — match voice.
-2. Read master YAMLs. Every dollar amount, percentage, year count, project name, or proper noun in your draft must trace to master or to gap-resolutions.
+2. Read master content from the canonical DB, not from disk YAML snapshots:
+   ```bash
+   jobsmith db dump-master --section work
+   jobsmith db dump-master --section skill
+   jobsmith db dump-master --section education
+   jobsmith db dump-master --section author
+   ```
+   Every dollar amount, percentage, year count, project name, or personal-history proper noun in your draft must trace to DB master content or to gap-resolutions. Role/company facts may trace to `jd_parsed`.
 3. Read `voice_profile_json` (path injected via Paths block, typically `.apply-state/voice-profile.json`) for the user's banned verbs/adjectives/marketer phrases. Treat it as authoritative — when the JSON disagrees with examples in this prompt, trust the JSON.
 4. Draft 3-4 paragraphs:
    - **Opening (2-3 sentences):** Specific hook. Name the role + what the user uniquely brings to it. NEVER any phrase in `voice_profile_json.banned_marketer_phrases` (e.g. "I'm excited to apply", "I'm passionate about").
@@ -112,6 +119,7 @@ Skip the snippet only if the JD explicitly requires existing US citizenship/PR a
    ```bash
    jobsmith fact-check private/applications/{slug}/cover-letter-draft.md --verbose
    ```
+   The fact checker automatically includes canonical DB master content and the application `jd-parsed.json` as trusted sources. Do not pass `--master-content-dir` unless debugging a fixture.
    - Exit 0 → proceed to step 7.
    - Exit non-zero → ONE revision attempt. Read stderr, swap offending claims for verified ones from master, save, re-run. If still failing → DO NOT SAVE the draft. Halt with `reason=FACT_CHECK_FAILED` + the failing claims list.
 7. **Humanizer pass** — read `cover-letter-draft.md`, then rewrite it in-place to remove AI writing patterns. Apply these checks in order:

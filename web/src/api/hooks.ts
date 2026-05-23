@@ -32,6 +32,8 @@ export { JobsmithApiError };
 
 // ── Hook return shape ────────────────────────────────────────────────────
 
+const JOBSMITH_DATA_CHANGED = 'jobsmith:data-changed';
+
 interface UseQueryResult<T> {
   data: T | undefined;
   isLoading: boolean;
@@ -44,6 +46,14 @@ function useFetch<T>(path: string | null): UseQueryResult<T> {
   const [data, setData] = useState<T | undefined>(undefined);
   const [isLoading, setIsLoading] = useState<boolean>(path !== null);
   const [error, setError] = useState<Error | null>(null);
+  const [version, setVersion] = useState(0);
+
+  useEffect(() => {
+    if (path === null) return;
+    const onChanged = () => setVersion((v) => v + 1);
+    window.addEventListener(JOBSMITH_DATA_CHANGED, onChanged);
+    return () => window.removeEventListener(JOBSMITH_DATA_CHANGED, onChanged);
+  }, [path]);
 
   useEffect(() => {
     if (path === null) return;
@@ -64,7 +74,7 @@ function useFetch<T>(path: string | null): UseQueryResult<T> {
         }
       });
     return () => { cancelled = true; };
-  }, [path]);
+  }, [path, version]);
 
   return { data, isLoading, error };
 }
@@ -131,6 +141,13 @@ export function useApplication(slug: string): UseQueryResult<ApplicationDetail> 
   const [data, setData] = useState<ApplicationDetail | undefined>(undefined);
   const [isLoading, setIsLoading] = useState<boolean>(Boolean(slug));
   const [error, setError] = useState<Error | null>(null);
+  const [version, setVersion] = useState(0);
+
+  useEffect(() => {
+    const onChanged = () => setVersion((v) => v + 1);
+    window.addEventListener(JOBSMITH_DATA_CHANGED, onChanged);
+    return () => window.removeEventListener(JOBSMITH_DATA_CHANGED, onChanged);
+  }, []);
 
   useEffect(() => {
     // Reset on every slug change so the component never renders the previous
@@ -163,7 +180,7 @@ export function useApplication(slug: string): UseQueryResult<ApplicationDetail> 
       });
 
     return () => { signal.cancelled = true; };
-  }, [slug]);
+  }, [slug, version]);
 
   return { data, isLoading, error };
 }

@@ -95,6 +95,47 @@ class TestListApplicationsRoleCompany:
         assert row["role"] == "Senior SWE"
         assert row["company"] == "Acme Corp"
 
+    def test_list_hides_superseded_starting_slug(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db_path = tmp_path / "jobsmith.db"
+        conn = open_pipeline_db(db_path)
+        rows = [
+            ("run-start", "job-boards-8472178002-2026-05", "gather", "2026-05-11T19:30:00Z", None, "failed"),
+            ("run-canon", "gitlab-senior-data-analyst-marketing-analytics", "render", "2026-05-12T01:00:00Z", "2026-05-12T01:04:00Z", "done"),
+        ]
+        conn.executemany(
+            "INSERT INTO apply_runs (run_id, slug, phase, started_at, finished_at, status) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        for run_id, *_ in rows:
+            conn.execute(
+                "INSERT INTO specialist_outputs "
+                "(run_id, specialist, kind, output_json, transcript_ref, finished_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    run_id,
+                    "apply-jd-parser",
+                    "jd-parsed",
+                    json.dumps({"company": "GitLab", "position": "Senior Data Analyst, Marketing Analytics"}),
+                    None,
+                    "2026-05-12T01:02:00Z",
+                ),
+            )
+        conn.commit()
+        conn.close()
+        monkeypatch.setattr("jobsmith.api.applications._get_db_path", lambda: db_path)
+        app = FastAPI()
+        app.include_router(applications_router, prefix="/api")
+
+        resp = TestClient(app, raise_server_exceptions=True).get("/api/applications")
+
+        assert resp.status_code == 200, resp.text
+        slugs = [row["slug"] for row in resp.json()]
+        assert "gitlab-senior-data-analyst-marketing-analytics" in slugs
+        assert "job-boards-8472178002-2026-05" not in slugs
+
     def test_role_company_null_when_no_jd_parsed(
         self, client_no_jd: tuple[TestClient, str, str]
     ) -> None:
@@ -136,6 +177,119 @@ class TestGetApplicationRoleCompany:
         data = resp.json()
         assert data["role"] is None
         assert data["company"] is None
+
+    def test_detail_reads_canonical_disk_artifacts_when_db_ingest_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Failed in-flight runs can have files but no specialist_outputs rows."""
+        db_path = tmp_path / "jobsmith.db"
+        conn = open_pipeline_db(db_path)
+        starting_slug = "job-boards-8472178002-2026-05"
+        canonical_slug = "gitlab-senior-data-analyst-marketing-analytics"
+        run_id = "run-gitlab"
+        conn.execute(
+            "INSERT INTO apply_runs (run_id, slug, phase, started_at, finished_at, status) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (run_id, starting_slug, "gather", "2026-05-11T17:33:17Z", None, "running"),
+        )
+        conn.execute(
+            "INSERT INTO apply_state_log (run_id, slug, ts, payload) VALUES (?, ?, ?, ?)",
+            (
+                run_id,
+                canonical_slug,
+                "2026-05-11T17:34:00Z",
+                json.dumps({
+                    "type": "tool_result",
+                    "content": (
+                        "jobsmith db rekey-slug --from job-boards-8472178002-2026-05 "
+                        "--to gitlab-senior-data-analyst-marketing-analytics"
+                    ),
+                }),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        apps_root = tmp_path / "applications"
+        canonical_state = apps_root / canonical_slug / ".apply-state"
+        canonical_state.mkdir(parents=True)
+        (canonical_state / "jd-parsed.json").write_text(
+            json.dumps({
+                "company": "GitLab",
+                "position": "Senior Data Analyst, Marketing Analytics",
+                "apply_url": "https://job-boards.greenhouse.io/gitlab/jobs/8472178002",
+            }),
+            encoding="utf-8",
+        )
+        (canonical_state / "fit-score.json").write_text(
+            json.dumps({"score": 0.28, "rationale": "domain miss"}),
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr("jobsmith.api.applications._get_db_path", lambda: db_path)
+        monkeypatch.setattr(
+            "jobsmith.api.applications._get_app_dir",
+            lambda requested_slug: apps_root / requested_slug,
+        )
+        app = FastAPI()
+        app.include_router(applications_router, prefix="/api")
+
+        resp = TestClient(app, raise_server_exceptions=True).get(
+            f"/api/applications/{starting_slug}"
+        )
+
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["role"] == "Senior Data Analyst, Marketing Analytics"
+        assert data["company"] == "GitLab"
+        artifacts = {(a["specialist"], a["kind"]) for a in data["artifacts"]}
+        assert ("apply-jd-parser", "jd-parsed") in artifacts
+        assert ("apply-fit-scorer", "fit-score") in artifacts
+
+
+class TestReviewCoverLetterResolution:
+    def test_review_reads_root_cover_letter(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db_path, slug, _ = _make_db(tmp_path, with_jd_parsed=True)
+        app_dir = tmp_path / "applications" / slug
+        app_dir.mkdir(parents=True)
+        (app_dir / "cover-letter-draft.md").write_text("Dear Acme,\n", encoding="utf-8")
+        monkeypatch.setattr("jobsmith.api.applications._get_db_path", lambda: db_path)
+        monkeypatch.setattr(
+            "jobsmith.api.applications._get_app_dir",
+            lambda requested_slug: app_dir if requested_slug == slug else None,
+        )
+        app = FastAPI()
+        app.include_router(applications_router, prefix="/api")
+
+        resp = TestClient(app, raise_server_exceptions=True).get(f"/api/applications/{slug}/review")
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["cover_letter"] == "Dear Acme,\n"
+
+    def test_review_reads_apply_state_cover_letter_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db_path, slug, _ = _make_db(tmp_path, with_jd_parsed=True)
+        app_dir = tmp_path / "applications" / slug
+        (app_dir / ".apply-state").mkdir(parents=True)
+        (app_dir / ".apply-state" / "cover-letter-draft.md").write_text(
+            "Hello from state,\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("jobsmith.api.applications._get_db_path", lambda: db_path)
+        monkeypatch.setattr(
+            "jobsmith.api.applications._get_app_dir",
+            lambda requested_slug: app_dir if requested_slug == slug else None,
+        )
+        app = FastAPI()
+        app.include_router(applications_router, prefix="/api")
+
+        resp = TestClient(app, raise_server_exceptions=True).get(f"/api/applications/{slug}/review")
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["cover_letter"] == "Hello from state,\n"
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +365,38 @@ class TestUiPhaseMapping:
         assert resp.status_code == 200, resp.text
         row = resp.json()[0]
         assert row["ui_phase"] == "failed"
+
+    def test_failed_specialist_halt_maps_to_review(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Specialist halt results are user-review work, not a generic failure."""
+        db_path, slug, _run_id = _make_db_with_phase(
+            tmp_path, phase="gather", status="failed", suffix="-halt"
+        )
+        conn = open_pipeline_db(db_path)
+        conn.execute(
+            "INSERT INTO apply_state (slug, kind, content_blob, updated_at) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                slug,
+                "apply-bullet-selector-result",
+                json.dumps({
+                    "status": "halt",
+                    "reason": "UNCOVERED_MUST_HAVE",
+                    "must_have": "Hands-on dbt expertise",
+                }),
+                "2026-05-11T15:05:00Z",
+            ),
+        )
+        conn.commit()
+        conn.close()
+        monkeypatch.setattr("jobsmith.api.applications._get_db_path", lambda: db_path)
+        app = FastAPI()
+        app.include_router(applications_router, prefix="/api")
+
+        row = TestClient(app, raise_server_exceptions=True).get("/api/applications").json()[0]
+        assert row["ui_phase"] == "review"
+        assert row["status"] == "review"
 
     def test_detail_endpoint_exposes_ui_phase(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

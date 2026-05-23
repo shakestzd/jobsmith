@@ -214,10 +214,15 @@ def create_app() -> FastAPI:
         lifespan=_lifespan,
     )
 
-    # CORS — only allow the Vite dev server origin in development.
+    # CORS — allow local Vite dev server origins used by humans and browser automation.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173"],
+        allow_origins=[
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://host.docker.internal:5173",
+            "http://host.docker.internal:5174",
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

@@ -34,6 +34,7 @@ from fastapi.responses import FileResponse
 logger = logging.getLogger(__name__)
 
 from jobsmith.api.artifacts import _get_db_path, _row_to_envelope
+from jobsmith.api.schemas.artifacts import ArtifactEnvelope
 from jobsmith.api.supervisor import RunSupervisor, get_supervisor
 from jobsmith.apply import derive_slug
 from jobsmith.db import open_pipeline_db
@@ -87,8 +88,32 @@ def _latest_run_per_slug(conn) -> list:
     ).fetchall()
 
 
-def _extract_jd_fields(conn, run_id: str) -> tuple[str | None, str | None, str | None]:
-    """Return (role, company, apply_url) from the jd-parsed artifact for *run_id*.
+def _is_empty_scaffold_row(row, conn) -> bool:
+    """True for pre-canonical slug rows that have no user-visible payload."""
+    role, company, _ = _extract_jd_fields(conn, row["run_id"])
+    if role or company:
+        return False
+    app_dir = _get_app_dir(row["slug"])
+    if app_dir is None or not app_dir.exists() or not app_dir.is_dir():
+        return False
+    files = [
+        p for p in app_dir.rglob("*")
+        if p.is_file() and not p.name.startswith(".DS_Store")
+    ]
+    return len(files) == 0
+
+
+def _is_superseded_starting_slug(row, conn, slugs: set[str]) -> bool:
+    """True when a starting URL slug has been replaced by its canonical slug."""
+    role, company, _ = _extract_jd_fields(conn, row["run_id"])
+    if not role or not company:
+        return False
+    canonical = f"{_to_slug(company)}-{_to_slug(role)}"
+    return canonical != row["slug"] and canonical in slugs
+
+
+def _extract_jd_fields_from_db(conn, run_id: str) -> tuple[str | None, str | None, str | None]:
+    """Return (role, company, apply_url) from specialist_outputs for *run_id*.
 
     All three values are None when the artifact is absent or unparseable.
     ``apply_url`` is read from the ``apply_url`` field in jd-parsed.json,
@@ -105,6 +130,125 @@ def _extract_jd_fields(conn, run_id: str) -> tuple[str | None, str | None, str |
         return data.get("position"), data.get("company"), data.get("apply_url")
     except (json.JSONDecodeError, KeyError):
         return None, None, None
+
+
+def _extract_jd_fields(conn, run_id: str) -> tuple[str | None, str | None, str | None]:
+    """Return (role, company, apply_url), falling back to in-flight disk state.
+
+    Failed gather runs can produce ``.apply-state/jd-parsed.json`` before the
+    post-phase DB ingest step runs. The frontend still needs the real company
+    and role in that state, so we resolve the canonical slug from the rekey log
+    and read the file directly when ``specialist_outputs`` is empty.
+    """
+    role, company, apply_url = _extract_jd_fields_from_db(conn, run_id)
+    if role or company or apply_url:
+        return role, company, apply_url
+
+    row = conn.execute("SELECT slug FROM apply_runs WHERE run_id = ?", (run_id,)).fetchone()
+    if row is None:
+        return None, None, None
+
+    for candidate in _slug_candidates_for_run(conn, run_id, row["slug"]):
+        app_dir = _get_app_dir(candidate)
+        if app_dir is None:
+            continue
+        jd_path = app_dir / ".apply-state" / "jd-parsed.json"
+        if not jd_path.is_file():
+            continue
+        try:
+            data = json.loads(jd_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(data, dict):
+            return data.get("position"), data.get("company"), data.get("apply_url")
+
+    return None, None, None
+
+
+def _slug_from_rekey_log(conn, run_id: str) -> str | None:
+    """Infer the canonical slug from apply_state_log rekey messages."""
+    rows = conn.execute(
+        "SELECT payload FROM apply_state_log WHERE run_id = ? ORDER BY id ASC",
+        (run_id,),
+    ).fetchall()
+    for row in rows:
+        payload = row["payload"] or ""
+        match = re.search(r"--to\s+([a-z0-9][a-z0-9-]*)", payload)
+        if match:
+            return match.group(1)
+        match = re.search(r"→\s*'([^']+)'", payload)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _slug_candidates_for_run(conn, run_id: str, starting_slug: str) -> list[str]:
+    """Return likely filesystem slugs for a run, preserving priority order."""
+    candidates: list[str] = [starting_slug]
+
+    role, company, _ = _extract_jd_fields_from_db(conn, run_id)
+    if company and role:
+        candidates.append(f"{_to_slug(company)}-{_to_slug(role)}")
+
+    rekeyed = _slug_from_rekey_log(conn, run_id)
+    if rekeyed:
+        candidates.append(rekeyed)
+
+    result: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in result:
+            result.append(candidate)
+    return result
+
+
+def _disk_artifact_envelopes(conn, run_id: str, starting_slug: str) -> list[ArtifactEnvelope]:
+    """Read in-flight artifact files when DB ingest has not run yet."""
+    from jobsmith._state_readers import ARTIFACT_READERS, SPECIALIST_TO_ARTIFACT
+
+    envelopes: list[ArtifactEnvelope] = []
+    seen: set[tuple[str, str]] = set()
+
+    for candidate in _slug_candidates_for_run(conn, run_id, starting_slug):
+        app_dir = _get_app_dir(candidate)
+        if app_dir is None:
+            continue
+        state_dir = app_dir / ".apply-state"
+        if not state_dir.is_dir():
+            continue
+        for specialist, filename in SPECIALIST_TO_ARTIFACT.items():
+            path = state_dir / filename
+            if not path.is_file():
+                continue
+            reader_entry = ARTIFACT_READERS.get(filename)
+            if reader_entry is None:
+                continue
+            kind, reader = reader_entry
+            key = (specialist, kind)
+            if key in seen:
+                continue
+            try:
+                data = reader(state_dir)
+            except Exception:  # noqa: BLE001
+                logger.debug("failed to read disk artifact %s", path, exc_info=True)
+                continue
+            if data is None:
+                continue
+            output = {"text": data} if isinstance(data, str) else data
+            if not isinstance(output, dict):
+                output = {"value": output}
+            envelopes.append(
+                ArtifactEnvelope(
+                    run_id=run_id,
+                    specialist=specialist,
+                    kind=kind,
+                    output=output,
+                    finished_at=None,
+                    transcript_ref=None,
+                    version=1,
+                )
+            )
+            seen.add(key)
+    return envelopes
 
 
 def _derive_ui_phase(phase: str, status: str) -> str:
@@ -124,6 +268,62 @@ def _derive_ui_phase(phase: str, status: str) -> str:
     if status == "failed":
         return "failed"
     return "unknown"
+
+
+def _is_review_halt_blob(blob: str | None) -> bool:
+    """True when a specialist result says the run needs human review."""
+    if not blob:
+        return False
+    try:
+        data = json.loads(blob)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    status = str(data.get("status") or "").lower()
+    reason = str(data.get("reason") or data.get("error") or "").lower()
+    return status == "halt" or reason in {
+        "uncovered_must_have",
+        "restoration_stale",
+        "restoration_limit",
+    }
+
+
+def _has_review_halt(conn, run_id: str, slug: str) -> bool:
+    """Detect terminal specialist halts that should be shown as review work."""
+    for candidate in _slug_candidates_for_run(conn, run_id, slug):
+        rows = conn.execute(
+            """
+            SELECT content_blob
+            FROM apply_state
+            WHERE slug = ?
+              AND (kind LIKE 'apply-%-result' OR kind LIKE '%-result')
+            """,
+            (candidate,),
+        ).fetchall()
+        if any(_is_review_halt_blob(row["content_blob"]) for row in rows):
+            return True
+
+        app_dir = _get_app_dir(candidate)
+        if app_dir is None:
+            continue
+        state_dir = app_dir / ".apply-state"
+        if not state_dir.is_dir():
+            continue
+        for path in state_dir.glob("*-result.json"):
+            try:
+                if _is_review_halt_blob(path.read_text(encoding="utf-8")):
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def _display_status(raw_status: str, ui_phase: str) -> str:
+    """Return the user-facing status badge value for API consumers."""
+    if ui_phase in {"incomplete", "review"}:
+        return ui_phase
+    return raw_status
 
 
 def _load_manifest_for_run(conn, run_id: str, starting_slug: str) -> dict | None:
@@ -148,6 +348,8 @@ def _load_manifest_for_run(conn, run_id: str, starting_slug: str) -> dict | None
 
 def _ui_phase_with_manifest(raw_ui_phase: str, conn, run_id: str, slug: str) -> str:
     """Overlay 'incomplete' when a terminal run has only partial phase coverage."""
+    if raw_ui_phase == "failed" and _has_review_halt(conn, run_id, slug):
+        return "review"
     if raw_ui_phase not in ("failed", "rendered"):
         return raw_ui_phase
     from jobsmith.core.manifest import PHASE_REQUIRED_SPECIALISTS, phase_completed
@@ -169,7 +371,7 @@ def _row_to_application(row, conn) -> Application:
         slug=row["slug"],
         run_id=row["run_id"],
         phase=row["phase"],
-        status=row["status"],
+        status=_display_status(row["status"], ui_phase),
         ui_phase=ui_phase,
         started_at=row["started_at"],
         finished_at=row["finished_at"],
@@ -282,7 +484,13 @@ def list_applications() -> list[Application]:
     conn = _open_conn(db_path)
     try:
         rows = _latest_run_per_slug(conn)
-        return [_row_to_application(r, conn) for r in rows]
+        slugs = {r["slug"] for r in rows}
+        return [
+            _row_to_application(r, conn)
+            for r in rows
+            if not _is_empty_scaffold_row(r, conn)
+            and not _is_superseded_starting_slug(r, conn, slugs)
+        ]
     finally:
         conn.close()
 
@@ -309,17 +517,22 @@ def get_application(slug: str) -> ApplicationDetail:
             "SELECT * FROM specialist_outputs WHERE run_id = ?",
             (run_id,),
         ).fetchall()
+        disk_artifacts = _disk_artifact_envelopes(conn, run_id, run_row["slug"])
         role, company, apply_url = _extract_jd_fields(conn, run_id)
         ui_phase = _derive_ui_phase(run_row["phase"], run_row["status"])
         ui_phase = _ui_phase_with_manifest(ui_phase, conn, run_id, run_row["slug"])
     finally:
         conn.close()
     artifacts = [_row_to_envelope(r) for r in artifact_rows]
+    present = {(a.specialist, a.kind) for a in artifacts}
+    artifacts.extend(
+        a for a in disk_artifacts if (a.specialist, a.kind) not in present
+    )
     return ApplicationDetail(
         slug=run_row["slug"],
         run_id=run_row["run_id"],
         phase=run_row["phase"],
-        status=run_row["status"],
+        status=_display_status(run_row["status"], ui_phase),
         ui_phase=ui_phase,
         started_at=run_row["started_at"],
         finished_at=run_row["finished_at"],
@@ -369,6 +582,14 @@ async def create_application(
     return ApplicationCreated(slug=slug, run_id=run_id)
 
 
+@router.post("/applications/{slug}/runs/{run_id}/cancel")
+async def cancel_application_run(slug: str, run_id: str, request: Request) -> dict:
+    """Cancel an active in-process apply run."""
+    supervisor = _resolve_supervisor(request)
+    cancelled = await supervisor.kill(run_id)
+    return {"slug": slug, "run_id": run_id, "cancelled": cancelled}
+
+
 @router.post("/applications/{slug}/launch-review", status_code=status.HTTP_410_GONE)
 async def launch_review_gone(slug: str) -> dict:
     """Removed in feat-95e9bb2d — review UI moved to React frontend."""
@@ -408,6 +629,15 @@ def _has_render_outputs(docs: Path) -> bool:
 
 
 _COVER_LETTER = "cover-letter-draft.md"
+_FINAL_COVER_LETTER = "cover-letter.md"
+
+
+def _cover_letter_candidates(app_dir: Path) -> list[Path]:
+    return [
+        app_dir / _COVER_LETTER,
+        app_dir / ".apply-state" / _COVER_LETTER,
+        app_dir / "documents" / _FINAL_COVER_LETTER,
+    ]
 
 
 def _resolve_cover_letter(slug: str, conn) -> Path | None:
@@ -420,9 +650,9 @@ def _resolve_cover_letter(slug: str, conn) -> Path | None:
     """
     app_dir = _get_app_dir(slug)
     if app_dir is not None:
-        cl = app_dir / _COVER_LETTER
-        if cl.is_file():
-            return cl
+        for cl in _cover_letter_candidates(app_dir):
+            if cl.is_file():
+                return cl
 
     # Canonical slug fallback.
     run_row = conn.execute(
@@ -440,8 +670,10 @@ def _resolve_cover_letter(slug: str, conn) -> Path | None:
     canonical_dir = _get_app_dir(canonical)
     if canonical_dir is None:
         return None
-    cl = canonical_dir / _COVER_LETTER
-    return cl if cl.is_file() else None
+    for cl in _cover_letter_candidates(canonical_dir):
+        if cl.is_file():
+            return cl
+    return None
 
 
 def _resolve_docs_dir(slug: str, conn) -> Path | None:
@@ -672,13 +904,14 @@ def get_review(slug: str) -> dict:
     finally:
         conn.close()
 
-    # Cover letter from disk
     cover_letter_text: str | None = None
-    docs_dir = _resolve_docs_dir(slug, _open_conn(db_path))
-    if docs_dir:
-        cl_path = docs_dir / _COVER_LETTER_FILENAME
-        if cl_path.exists():
+    conn = _open_conn(db_path)
+    try:
+        cl_path = _resolve_cover_letter(slug, conn)
+        if cl_path is not None and cl_path.exists():
             cover_letter_text = cl_path.read_text(encoding="utf-8")
+    finally:
+        conn.close()
 
     return {
         "slug": slug,
@@ -702,14 +935,17 @@ def save_cover_letter(slug: str, body: dict) -> dict:
     db_path = _get_db_path()
     conn = _open_conn(db_path)
     try:
-        docs_dir = _resolve_docs_dir(slug, conn)
+        cl_path = _resolve_cover_letter(slug, conn)
+        if cl_path is None:
+            app_dir = _get_app_dir(slug)
+            if app_dir is not None and app_dir.exists():
+                cl_path = app_dir / _COVER_LETTER_FILENAME
     finally:
         conn.close()
 
-    if docs_dir is None:
-        raise HTTPException(status_code=404, detail=f"No documents directory for {slug!r}")
+    if cl_path is None:
+        raise HTTPException(status_code=404, detail=f"No application directory for {slug!r}")
 
-    cl_path = docs_dir / _COVER_LETTER_FILENAME
     tmp_path = cl_path.with_suffix(".tmp")
     try:
         tmp_path.write_text(text, encoding="utf-8")

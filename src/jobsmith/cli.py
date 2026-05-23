@@ -33,7 +33,7 @@ from .assemble import PACKAGE_ROOT, assemble_all, assemble_application
 from .config import CONFIG_FILENAME, find_config, load_config
 from .db import open_pipeline_db
 from .db_ingest import backfill_all, backfill_slug, iter_backfillable_slugs
-from .factcheck import check_draft
+from .factcheck import check_draft, load_db_master_content, load_jd_context_for_draft
 from .guard import check_anchors, render_diff_md
 from .paths import all_master_paths, repo_root_for, resolve
 from .site import discover_applications, init_site, render_site
@@ -510,7 +510,9 @@ def fact_check_cmd(
         repo_root = repo_root_for()
         content_dir = resolve(config.master.work_yml, repo_root).parent
 
-    result = check_draft(draft.read_text(), content_dir)
+    extra_sources = load_db_master_content()
+    extra_sources.update(load_jd_context_for_draft(draft))
+    result = check_draft(draft.read_text(), content_dir, extra_sources=extra_sources)
 
     if result.passed:
         console.print(

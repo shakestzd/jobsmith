@@ -31,6 +31,8 @@ import { ApplicationDetail } from './application';
 
 vi.mock('../api/client', () => ({
   apiGet: vi.fn(),
+  apiGetBlob: vi.fn(),
+  apiGetText: vi.fn(),
   apiPost: vi.fn(),
   apiPut: vi.fn(),
   postApplication: vi.fn(),
@@ -41,7 +43,7 @@ vi.mock('../api/client', () => ({
   },
 }));
 
-import { apiGet, postApplication } from '../api/client';
+import { apiGet, apiGetBlob, apiGetText, postApplication } from '../api/client';
 
 // Mock EventSource — jsdom doesn't ship one, and we don't need real SSE here.
 // `constructorCalls` lets a test assert whether (and with what URL) the
@@ -102,6 +104,10 @@ describe('ApplicationDetail anti-regression: no fabricated fixtures (feat-83d6cf
     vi.clearAllMocks();
     constructorCalls.length = 0;
     (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue(BASE_API_DETAIL);
+    (apiGetBlob as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('not loaded'));
+    (apiGetText as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('not loaded'));
+    URL.createObjectURL = vi.fn(() => 'blob:resume');
+    URL.revokeObjectURL = vi.fn();
   });
 
   it('does not render any of the fabricated event-log timestamps', async () => {
@@ -136,6 +142,27 @@ describe('ApplicationDetail anti-regression: no fabricated fixtures (feat-83d6cf
     // The fake applicant identity from PdfPreview.
     expect(text).not.toMatch(/jordan smith/i);
     expect(text).not.toContain('jordan@smith.dev');
+  });
+
+  it('documents tab loads the rendered cover-letter.md when listed by the API', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockImplementation((path: string) => {
+      if (path.endsWith('/documents')) return Promise.resolve(['resume.pdf', 'cover-letter.md']);
+      return Promise.resolve(BASE_API_DETAIL);
+    });
+    (apiGetBlob as ReturnType<typeof vi.fn>).mockResolvedValue(new Blob(['pdf'], { type: 'application/pdf' }));
+    (apiGetText as ReturnType<typeof vi.fn>).mockResolvedValue('Rendered cover letter');
+
+    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByText('documents')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('documents'));
+
+    await waitFor(() => {
+      expect(apiGetText).toHaveBeenCalledWith('/api/applications/acme-eng-2026-04/documents/cover-letter.md');
+    });
+    expect(await screen.findByText('cover-letter.md')).toBeInTheDocument();
+    expect(screen.getByText('Rendered cover letter')).toBeInTheDocument();
   });
 
   it('does not render any of the fabricated anchor IDs in the anchors tab', async () => {
@@ -816,6 +843,40 @@ describe('ApplicationDetail SSE phase wiring (feat-6e148975)', () => {
       const texts = Array.from(phaseStatuses).map(el => el.textContent ?? '');
       const allQueued = texts.every(t => t.includes('queued'));
       expect(allQueued).toBe(false);
+    });
+  });
+
+  it('derives phase-card progress from completed specialist artifacts while a run is still active', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'running',
+      phase: 'gather',
+      ui_phase: 'running',
+      finished_at: null,
+      run_id: 'run-artifact-progress',
+      artifacts: [
+        'apply-jd-parser',
+        'apply-fit-scorer',
+        'apply-hm-enricher',
+        'apply-bullet-selector',
+        'apply-company-research',
+      ].map((specialist, i) => ({
+        run_id: 'run-artifact-progress',
+        specialist,
+        kind: `kind-${i}`,
+        output: {},
+        finished_at: null,
+        transcript_ref: null,
+      })),
+    });
+    render(<ApplicationDetail slug="sse-test-artifact-progress" back={() => {}} />);
+
+    await waitFor(() => {
+      const phaseStatuses = document.querySelectorAll('.phase-status');
+      const texts = Array.from(phaseStatuses).map(el => el.textContent ?? '');
+      expect(texts[0]).toMatch(/done/i);
+      expect(texts[1]).toMatch(/running/i);
+      expect(texts[2]).toMatch(/queued/i);
     });
   });
 });

@@ -127,6 +127,12 @@ class TestSnapshotHappyPath:
         resp = tc.post(f"/api/applications/{slug}/runs/{run_id}/snapshot")
         assert resp.status_code == 200, resp.text
 
+    def test_get_returns_snapshot(self, client_snapshot) -> None:
+        tc, apps_dir, slug, run_id = client_snapshot
+        resp = tc.get(f"/api/applications/{slug}/runs/{run_id}/snapshot")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["run_id"] == run_id
+
     def test_result_schema(self, client_snapshot) -> None:
         tc, apps_dir, slug, run_id = client_snapshot
         data = tc.post(f"/api/applications/{slug}/runs/{run_id}/snapshot").json()

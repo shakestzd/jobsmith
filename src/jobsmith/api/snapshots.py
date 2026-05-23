@@ -229,6 +229,11 @@ def _get_apps_dir() -> Path:
     response_model=SnapshotResult,
     status_code=200,
 )
+@router.get(
+    "/applications/{slug}/runs/{run_id}/snapshot",
+    response_model=SnapshotResult,
+    status_code=200,
+)
 def create_snapshot(
     slug: str,
     run_id: str,
