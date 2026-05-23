@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Route API &#43; master reads through the shared resolver</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-e3dd986e"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-05-23T06:32:19.732797"
+             data-updated="2026-05-23T23:49:11.568123" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
+
+        <header>
+            <h1>Route API &#43; master reads through the shared resolver</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="e5e22c3d-7fa8-42e8-88bc-4f100d837fa2.html" data-relationship="implemented_in" data-since="2026-05-23T23:49:11.568025">session e5e22c3d-7fa8-42e8-88bc-4f100d837fa2</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-ac5661e4.html" data-relationship="part_of" data-since="2026-05-23T06:32:19.744743">trk-ac5661e4</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-f85f4815.html" data-relationship="blocked_by">feat-f85f4815</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-95ec8de7.html" data-relationship="planned_in" data-since="2026-05-23T06:32:19.738863">plan-95ec8de7</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Make the API resolve repo_root through paths.repo_root_for() (settings-aware)
+instead of reading os.environ["JOBSMITH_REPO_ROOT"] directly in scattered spots
+(main.py:70, main.py:180, applications.py:574, applications.py:606,
+artifacts.py:61), and fix BOTH cwd-coupled reads in master.py —
+_require_config_path (master.py:77) AND _get_db_path_for_master (master.py:89) —
+to use the cached app.state.repo_root. Since master.py helpers are module-level
+and lack a Request, inject the root via a FastAPI Depends() (or pass it as a
+param) rather than reaching for a global. After this slice the env var is just
+tier-2 of the shared chain and app.state.repo_root is the single cached truth.</p>
+        </section>
+    </article>
+</body>
+</html>
