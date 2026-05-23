@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>`jobsmith onboard` command &#43; agentic pipeline scaffold (dual entry, like apply)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-19e2d594"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-05-23T06:32:19.753792"
+             data-updated="2026-05-23T23:49:33.408222" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
+
+        <header>
+            <h1>`jobsmith onboard` command &#43; agentic pipeline scaffold (dual entry, like apply)</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-ac5661e4.html" data-relationship="part_of" data-since="2026-05-23T06:32:19.763531">trk-ac5661e4</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-f85f4815.html" data-relationship="blocked_by">feat-f85f4815</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="e5e22c3d-7fa8-42e8-88bc-4f100d837fa2.html" data-relationship="implemented_in" data-since="2026-05-23T23:49:33.407986">session e5e22c3d-7fa8-42e8-88bc-4f100d837fa2</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-95ec8de7.html" data-relationship="planned_in" data-since="2026-05-23T06:32:19.758897">plan-95ec8de7</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>New `jobsmith onboard` command + an onboarding pipeline that REUSES apply's real
+dual-entry model, not a single CLI subprocess:
+  - CLI path: spawns the agentic run via headless.py run_phase (Popen with
+    cwd = resolved repo root, headless.py:348/393) and writes state to the DB;
+    NO live SSE (CLI is not in the API event loop).
+  - API path: runs in-process via asyncio.to_thread + supervisor.register_run
+    (the same path apply's API uses) so the web flow (slice-6) gets live SSE.
+Phase 0: ensure a repo exists at the resolved root — if .apply-config.yaml is
+absent, scaffold it. NOTE: `jobsmith init` is a Typer command (cli.py:244), so
+first extract its scaffold logic into a callable library function, then call it.
+Clobber policy: if masters already exist and are non-empty, ABORT with guidance
+unless --force (overwrite) or --merge is passed. Accept input flags
+(--resume-file, --linkedin-export, --linkedin-url, --paste/--paste-file; one or
+more), write artifacts to .onboard-state/ (mirrors .apply-state/, core/paths.py:64),
+and dispatch the onboarding agent. Delivers command shell, repo-bootstrap,
+clobber guard, state plumbing, and dispatch — NOT the parsers (slice-4) or
+gap-interview (slice-5).</p>
+        </section>
+    </article>
+</body>
+</html>
