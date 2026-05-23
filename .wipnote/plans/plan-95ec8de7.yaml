@@ -1,5 +1,6 @@
 meta:
     id: plan-95ec8de7
+    track_id: trk-ac5661e4
     title: Location-decoupling + agentic onboarding
     description: |
         Make jobsmith installable for a single jobseeker without the "cd into a magic
@@ -16,9 +17,9 @@ meta:
         onboarding turns a real resume PDF into valid, lint-passing master YAMLs with a
         gap-interview for missing fields.
     created_at: ""
-    status: draft
+    status: finalized
     schema_version: v3
-    version: 1
+    version: 2
 design:
     problem: |
         jobsmith can only run from a directory containing .apply-config.yaml because
@@ -41,6 +42,7 @@ design:
     comment: ""
 slices:
     - id: slice-1
+      feature_id: feat-f85f4815
       num: 1
       title: User-level settings file + repo-root resolution precedence
       what: |
@@ -93,8 +95,9 @@ slices:
         Unit: TestRepoRootNoConfigError — no tier resolves -> clear error, not silent cwd
         Unit: TestCorePathsUseResolver — core/paths helpers honor settings repo_root
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       questions:
         - id: q-settings-format
           text: TOML vs JSON for settings.toml?
@@ -125,6 +128,7 @@ slices:
           path); storing repo_root inside .apply-config.yaml (chicken-and-egg — can't
           find the config without already knowing the root).
     - id: slice-2
+      feature_id: feat-e3dd986e
       num: 2
       title: Route API + master reads through the shared resolver
       what: |
@@ -161,8 +165,9 @@ slices:
           elsewhere, assert GET /applications reads the settings repo (resolver NOT mocked)
         Integration: TestMasterReadHonorsAppState — both master helpers use cached root
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       questions:
         - id: q-env-precedence
           text: Should env var still outrank settings post-consolidation?
@@ -191,6 +196,7 @@ slices:
         **Rejected:** per-request re-resolution (needless cost, repo can't move
           mid-process); fixing only _require_config_path (misses :89, the second outlier).
     - id: slice-3
+      feature_id: feat-19e2d594
       num: 3
       title: '`jobsmith onboard` command + agentic pipeline scaffold (dual entry, like apply)'
       what: |
@@ -239,8 +245,9 @@ slices:
         Integration: TestOnboardDispatch — CLI path Popen cwd correct + state written;
           API path calls register_run (subprocess/thread mocked)
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       questions:
         - id: q-exec-model
           text: How does the web flow get live progress if onboard is a CLI subprocess?
@@ -279,6 +286,7 @@ slices:
         **Rejected:** "CLI subprocess + slug = free SSE" (falsified — supervisor is in-proc);
           web-only wizard (user wanted a CLI command); brand-new execution engine.
     - id: slice-4
+      feature_id: feat-bd145368
       num: 4
       title: 'Ingest specialists: resume, LinkedIn export, URL, free-text'
       what: |
@@ -325,8 +333,9 @@ slices:
         Unit: TestNoFabrication — fixture pairs (source + expected); injected claim absent
           from source is dropped/flagged via the provenance map
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       questions:
         - id: q-pdf-extractor
           text: Which PDF text extractor for resumes?
@@ -354,6 +363,7 @@ slices:
         **Rejected:** scraping LinkedIn behind auth (ToS + auth-wall, privacy rules);
           merging straight into masters without a confirm step.
     - id: slice-5
+      feature_id: feat-01cad829
       num: 5
       title: Extract lint to a library, gap-interview, lint-gated master write
       what: |
@@ -396,8 +406,9 @@ slices:
         Integration: TestMergeThenLint — candidate+answers -> masters pass extended lint
         Integration: TestLintFailLoopsCapped — invalid merge -> no persist, stops at 3
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       questions:
         - id: q-lint-loop-cap
           text: Cap the lint-fix loop?
@@ -424,6 +435,7 @@ slices:
         **Rejected:** writing masters before lint; relying on the old work.yml-only lint
           (would falsely pass incomplete skill/education/author); unbounded interview.
     - id: slice-6
+      feature_id: feat-c6ee77d4
       num: 6
       title: Web onboarding flow (upload, paste, gap-interview, masters-ready)
       what: |
@@ -462,8 +474,9 @@ slices:
         Component: onboarding.test.tsx — wizard renders gap questions, submits answers
         Integration: TestOnboardStatusAfterRestart — status re-derived from DB
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       questions:
         - id: q-upload-size
           text: Cap upload size for resume/LinkedIn files?
