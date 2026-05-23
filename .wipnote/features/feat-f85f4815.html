@@ -10,26 +10,20 @@
 <body>
     <article id="feat-f85f4815"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-05-23T06:32:19.705623"
-             data-updated="2026-05-23T23:41:54.976637" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
+             data-updated="2026-05-23T23:45:28.267007" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
 
         <header>
             <h1>User-level settings file &#43; repo-root resolution precedence</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
 
         <nav data-graph-edges>
-            <section data-edge-type="implemented_in">
-                <h3>Implemented In:</h3>
-                <ul>
-                    <li><a href="e5e22c3d-7fa8-42e8-88bc-4f100d837fa2.html" data-relationship="implemented_in" data-since="2026-05-23T23:41:54.976528">session e5e22c3d-7fa8-42e8-88bc-4f100d837fa2</a></li>
-                </ul>
-            </section>
             <section data-edge-type="planned_in">
                 <h3>Planned In:</h3>
                 <ul>
@@ -40,6 +34,12 @@
                 <h3>Part Of:</h3>
                 <ul>
                     <li><a href="trk-ac5661e4.html" data-relationship="part_of" data-since="2026-05-23T06:32:19.722466">trk-ac5661e4</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="e5e22c3d-7fa8-42e8-88bc-4f100d837fa2.html" data-relationship="implemented_in" data-since="2026-05-23T23:41:54.976528">session e5e22c3d-7fa8-42e8-88bc-4f100d837fa2</a></li>
                 </ul>
             </section>
         </nav>
@@ -63,7 +63,8 @@ Add `jobsmith config set-repo-root `, `jobsmith config show`,
 at lines 26/167/176/196 and _cli_apply.py threads cwd into those helpers, both
 are in scope so every read funnels through the one resolver. Declare the new
 deps (platformdirs; tomli for Python 3.10 since tomllib is stdlib only >=3.11
-and requires-python is >=3.10) in pyproject.toml.</p>
+and requires-python is >=3.10) in pyproject.toml.
+[2026-05-23 23:45 claude-code] accepted-advisory (provenance override): implementation committed at cacfc08 on branch feat-f85f4815-impl</p>
         </section>
     </article>
 </body>
