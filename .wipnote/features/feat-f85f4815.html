@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>User-level settings file &#43; repo-root resolution precedence</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-f85f4815"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-05-23T06:32:19.705623"
+             data-updated="2026-05-23T23:41:54.976637" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
+
+        <header>
+            <h1>User-level settings file &#43; repo-root resolution precedence</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="e5e22c3d-7fa8-42e8-88bc-4f100d837fa2.html" data-relationship="implemented_in" data-since="2026-05-23T23:41:54.976528">session e5e22c3d-7fa8-42e8-88bc-4f100d837fa2</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-95ec8de7.html" data-relationship="planned_in" data-since="2026-05-23T06:32:19.716998">plan-95ec8de7</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-ac5661e4.html" data-relationship="part_of" data-since="2026-05-23T06:32:19.722466">trk-ac5661e4</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Introduce a user-level settings store (TOML at the OS config dir, e.g.
+~/.config/jobsmith/settings.toml; resolved via platformdirs) holding a
+`repo_root` key. Centralize ALL repo-root resolution in paths.py
+`repo_root_for()` — today it is a one-line wrapper over find_config(cwd)
+(paths.py:14-19); make it the multi-tier resolver with documented precedence:
+  1. explicit --repo-root CLI flag (new global option)
+  2. JOBSMITH_REPO_ROOT env var (existing path)
+  3. settings.toml repo_root
+  4. find_config(cwd) walk-up (existing fallback)
+  5. error with actionable message if none resolve to a dir containing
+     .apply-config.yaml
+Add `jobsmith config set-repo-root `, `jobsmith config show`,
+`jobsmith config clear-repo-root`. Settings module is new
+(src/jobsmith/settings.py). Because core/paths.py also calls find_config(cwd)
+at lines 26/167/176/196 and _cli_apply.py threads cwd into those helpers, both
+are in scope so every read funnels through the one resolver. Declare the new
+deps (platformdirs; tomli for Python 3.10 since tomllib is stdlib only >=3.11
+and requires-python is >=3.10) in pyproject.toml.</p>
+        </section>
+    </article>
+</body>
+</html>
