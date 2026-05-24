@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Fix roborev round-2 findings (job 981)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-3b510661"
+             data-type="feature"
+             data-status="todo"
+             data-priority="medium"
+             data-created="2026-05-24T01:26:54.797929"
+             data-updated="2026-05-24T01:26:54.817014" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-7[1m]" data-created-by-cli-version="0.60.17">
+
+        <header>
+            <h1>Fix roborev round-2 findings (job 981)</h1>
+            <div class="metadata">
+                <span class="badge status-todo">Todo</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-ac5661e4.html" data-relationship="part_of" data-since="2026-05-24T01:26:54.816903">trk-ac5661e4</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>4 deeper findings from roborev job 981: (1 HIGH) merge writes candidate-shaped data into master YAMLs (wrong schema → downstream data loss); (2 HIGH) onboard.tsx reads payload.kind not payload.type + closes SSE on subphase done; (3) shared .onboard-state across runs causes stale/cross-run candidate reuse; (4) postOnboard ignores static token.</p>
+        </section>
+    </article>
+</body>
+</html>
