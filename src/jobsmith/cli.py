@@ -700,24 +700,55 @@ def anchor_check_cmd(
 def lint(
     master: Path = typer.Option(
         Path("master"),
-        help="Path to master/ directory containing *.yml files",
+        help="Path to master/ directory containing *.yml files (legacy; use --repo-root for new layout)",
     ),
     benchmark: Path | None = typer.Option(
         None,
         help="Path to benchmark resume.qmd (optional)",
     ),
+    repo_root: Path | None = typer.Option(
+        None,
+        help="Repo root containing .apply-config.yaml (new layout). When set, validates all four master YAMLs.",
+    ),
 ) -> None:
     """Validate master YAML schema and benchmark before assemble.
 
-    Checks:
-      - Each *.yml in master/ parses as a valid YAML list of positions
-      - Each position has the expected keys (title, details list)
-      - benchmark.qmd (if given) contains at least one bullet line
-    Prints errors with filename; exits non-zero on any error.
+    When --repo-root is provided, validates all four master YAMLs
+    (work / skill / education / author) via jobsmith.lint library.
+
+    Legacy mode (--master directory) checks *.yml files for structural
+    validity and optionally validates a benchmark.qmd.
+
+    Exits non-zero on any error.
     """
+    from jobsmith.lint import validate_masters
+
     errors: list[str] = []
 
-    # Validate master YAML files
+    # New layout: validate all four master sections via the lint library
+    if repo_root is not None:
+        result = validate_masters(repo_root)
+        if result.ok:
+            console.print("[green]lint passed[/green]")
+        else:
+            for err in result.errors:
+                console.print(f"[red]LINT ERROR:[/red] {err}")
+            raise typer.Exit(code=1)
+
+        # Benchmark check still runs if supplied
+        if benchmark is not None:
+            if not benchmark.exists():
+                console.print(f"[red]LINT ERROR:[/red] benchmark: file not found — {benchmark}")
+                raise typer.Exit(code=1)
+            bullets = _extract_bullets_from_qmd(benchmark)
+            if not bullets:
+                console.print(
+                    f"[red]LINT ERROR:[/red] benchmark {benchmark}: no bullet lines found."
+                )
+                raise typer.Exit(code=1)
+        return
+
+    # Legacy mode: scan master/ directory
     if not master.exists():
         console.print(f"[red]ERROR:[/red] master directory not found: {master}")
         raise typer.Exit(code=1)
