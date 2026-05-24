@@ -57,6 +57,10 @@ dependencies = [
     # feat-bd145368 — resume/LinkedIn ingest specialists.
     "pdfplumber>=0.11",
     "python-docx>=1.0",
+    # trk-ac5661e4 — API server runtime deps.
+    "fastapi>=0.111",
+    "sse-starlette>=2.1",
+    "uvicorn>=0.30",
 ]
 
 [project.optional-dependencies]
