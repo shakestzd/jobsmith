@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Web onboarding flow (upload, paste, gap-interview, masters-ready)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-c6ee77d4"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-05-23T06:32:19.810794"
+             data-updated="2026-05-24T00:30:37.911449" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
+
+        <header>
+            <h1>Web onboarding flow (upload, paste, gap-interview, masters-ready)</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="e5e22c3d-7fa8-42e8-88bc-4f100d837fa2.html" data-relationship="implemented_in" data-since="2026-05-24T00:30:37.911353">session e5e22c3d-7fa8-42e8-88bc-4f100d837fa2</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-ac5661e4.html" data-relationship="part_of" data-since="2026-05-23T06:32:19.820733">trk-ac5661e4</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-e3dd986e.html" data-relationship="blocked_by">feat-e3dd986e</a></li>
+                    <li><a href="feat-01cad829.html" data-relationship="blocked_by">feat-01cad829</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-95ec8de7.html" data-relationship="planned_in" data-since="2026-05-23T06:32:19.815769">plan-95ec8de7</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Frontend onboarding wizard in the existing web app: first-run flow to upload a
+resume / LinkedIn export, paste text, or give a URL; kicks off onboarding via the
+slice-3 API path (in-process asyncio.to_thread + supervisor.register_run, NOT a
+detached CLI subprocess); streams progress over the existing SSE channel
+(supervisor.py); renders the gap-interview questions; lands on "masters ready".
+New API endpoints wrap the slice-3..5 pipeline: POST /onboard (multipart inputs,
+reusing slice-3's validator — not a duplicate), GET onboarding status, answer gap
+questions. Enforce a multipart size cap (e.g. 10MB, 413 on oversize).</p>
+        </section>
+    </article>
+</body>
+</html>
