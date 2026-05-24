@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from fastapi import APIRouter, Body, Header, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Body, Header, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, ValidationError
 
 from jobsmith.config import find_config, load_config
@@ -39,7 +39,7 @@ from jobsmith.master_io import (
     mark_anchor_in_blob,
     remove_bullet_in_blob,
 )
-from jobsmith.paths import resolve
+from jobsmith.paths import repo_root_for, resolve
 
 from .schemas.master import (
     Author,
@@ -72,27 +72,36 @@ router = APIRouter(tags=["master"])
 # ---------------------------------------------------------------------------
 
 
-def _require_config_path() -> Path:
-    """Return the .apply-config.yaml path or raise 404."""
-    config_path = find_config(Path.cwd())
+def _require_config_path(repo_root: Path | None = None) -> Path:
+    """Return the .apply-config.yaml path or raise 404.
+
+    When *repo_root* is provided (e.g. from ``app.state.repo_root``), the
+    search starts there.  Otherwise the shared resolver chain is used so
+    the function remains callable from non-request contexts (tests, CLI).
+    """
+    search_start = repo_root if repo_root is not None else repo_root_for()
+    config_path = find_config(search_start)
     if config_path is None:
         raise HTTPException(status_code=404, detail="No .apply-config.yaml found")
     return config_path
 
 
-def _get_db_path_for_master() -> Path | None:
+def _get_db_path_for_master(repo_root: Path | None = None) -> Path | None:
     """Resolve the pipeline DB path for master content reads.
 
+    When *repo_root* is provided (e.g. from ``app.state.repo_root``), the
+    search starts there.  Otherwise the shared resolver chain is used.
     Returns None when no config is found (DB path is config-derived).
     Module-level so tests can monkeypatch it.
     """
-    config_path = find_config(Path.cwd())
+    search_start = repo_root if repo_root is not None else repo_root_for()
+    config_path = find_config(search_start)
     if config_path is None:
         return None
     try:
         config = load_config(path=config_path)
-        repo_root = config_path.parent
-        return (repo_root / config.output.jobsmith_db).resolve()
+        root = config_path.parent
+        return (root / config.output.jobsmith_db).resolve()
     except Exception:
         return None
 
@@ -529,9 +538,9 @@ def _benchmark_load_text(config_path: Path) -> str:
     return ""
 
 
-def _benchmark_save_db(text: str) -> None:
+def _benchmark_save_db(text: str, *, repo_root: Path | None = None) -> None:
     """Upsert the benchmark text into ``master_content``. Raises 503 on no DB."""
-    db_path = _get_db_path_for_master()
+    db_path = _get_db_path_for_master(repo_root=repo_root)
     if db_path is None or not db_path.exists():
         raise HTTPException(503, "pipeline DB unavailable — cannot persist benchmark")
     etag_short = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
@@ -550,13 +559,14 @@ def _benchmark_save_db(text: str) -> None:
 
 
 @router.get("/master/benchmark", response_model=BenchmarkResponse)
-def get_benchmark(response: Response) -> BenchmarkResponse:
+def get_benchmark(request: Request, response: Response) -> BenchmarkResponse:
     """Return the current benchmark text + version, DB-preferred.
 
     Returns ``{text: '', version: ''}`` when neither the DB row nor the
     file exist, so the frontend can show an empty editor.
     """
-    config_path = _require_config_path()
+    repo_root: Path | None = getattr(request.app.state, "repo_root", None)
+    config_path = _require_config_path(repo_root=repo_root)
     text = _benchmark_load_text(config_path)
     if not text:
         response.headers["ETag"] = '""'
@@ -568,6 +578,7 @@ def get_benchmark(response: Response) -> BenchmarkResponse:
 
 @router.put("/master/benchmark", response_model=BenchmarkResponse)
 def put_benchmark(
+    request: Request,
     body: BenchmarkPayload,
     response: Response,
     if_match: str | None = Header(default=None, alias="If-Match"),  # noqa: B008
@@ -584,7 +595,8 @@ def put_benchmark(
     The header is optional for backwards compatibility — omitting it
     accepts last-writer-wins.
     """
-    config_path = _require_config_path()
+    repo_root: Path | None = getattr(request.app.state, "repo_root", None)
+    config_path = _require_config_path(repo_root=repo_root)
     if if_match is not None:
         current_text = _benchmark_load_text(config_path)
         current_version = _content_version(current_text) if current_text else ""
@@ -598,7 +610,7 @@ def put_benchmark(
                     f"current is {current_version!r}"
                 ),
             )
-    _benchmark_save_db(body.text)
+    _benchmark_save_db(body.text, repo_root=repo_root)
     new_version = _content_version(body.text)
     response.headers["ETag"] = f'"{new_version}"'
     return BenchmarkResponse(text=body.text, version=new_version)
@@ -620,6 +632,8 @@ def _put_section(
     body: Any,
     if_match: str | None = None,
     response: Response | None = None,
+    *,
+    repo_root: Path | None = None,
 ) -> WriteResponse:
     """Validate *body* and persist it to the master_content DB table (S5).
 
@@ -660,7 +674,7 @@ def _put_section(
     except ValidationError as exc:
         raise HTTPException(400, f"schema validation failed: {exc.errors()[:3]}") from exc
 
-    db_path = _get_db_path_for_master()
+    db_path = _get_db_path_for_master(repo_root=repo_root)
     if db_path is None or not db_path.exists():
         raise HTTPException(503, "pipeline DB unavailable — cannot persist section")
 
@@ -732,7 +746,7 @@ def _load_work_blob_for_bullet_op() -> str:
     return blob
 
 
-def _persist_work_blob(new_blob: str) -> None:
+def _persist_work_blob(new_blob: str, *, repo_root: Path | None = None) -> None:
     """Write *new_blob* to the master_content table for the work section.
 
     S5 contract: writes go to DB only, never to disk.  Closes ultrareview
@@ -740,7 +754,7 @@ def _persist_work_blob(new_blob: str) -> None:
     """
     from datetime import datetime, timezone
 
-    db_path = _get_db_path_for_master()
+    db_path = _get_db_path_for_master(repo_root=repo_root)
     if db_path is None or not db_path.exists():
         raise HTTPException(503, "pipeline DB unavailable — cannot persist bullet edit")
 
@@ -762,6 +776,7 @@ def _persist_work_blob(new_blob: str) -> None:
     response_model=BulletWriteResponse,
 )
 def post_anchor_bullet(
+    request: Request,
     role_index: int,
     bullet_index: int,
     body: AnchorPayload,
@@ -770,6 +785,7 @@ def post_anchor_bullet(
 
     DB-only: edits the master_content row, never the YAML file (S5).
     """
+    repo_root: Path | None = getattr(request.app.state, "repo_root", None)
     blob = _load_work_blob_for_bullet_op()
     try:
         new_blob = mark_anchor_in_blob(
@@ -780,7 +796,7 @@ def post_anchor_bullet(
         )
     except IndexError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
-    _persist_work_blob(new_blob)
+    _persist_work_blob(new_blob, repo_root=repo_root)
     action = "drop" if body.drop_reason is not None else "anchor"
     return BulletWriteResponse(
         role_index=role_index,
@@ -794,10 +810,12 @@ def post_anchor_bullet(
     response_model=BulletWriteResponse,
 )
 def post_add_bullet(
+    request: Request,
     role_index: int,
     body: AddBulletPayload,
 ) -> BulletWriteResponse:
     """Append or insert a new bullet (DB-only, S5)."""
+    repo_root: Path | None = getattr(request.app.state, "repo_root", None)
     blob = _load_work_blob_for_bullet_op()
     try:
         new_blob, effective_index = add_bullet_in_blob(
@@ -808,7 +826,7 @@ def post_add_bullet(
         )
     except IndexError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
-    _persist_work_blob(new_blob)
+    _persist_work_blob(new_blob, repo_root=repo_root)
     return BulletWriteResponse(
         role_index=role_index,
         bullet_index=effective_index,
@@ -821,11 +839,13 @@ def post_add_bullet(
     response_model=BulletWriteResponse,
 )
 def delete_bullet(
+    request: Request,
     role_index: int,
     bullet_index: int,
     body: RemoveBulletPayload,
 ) -> BulletWriteResponse:
     """Remove or soft-drop bullet (DB-only, S5)."""
+    repo_root: Path | None = getattr(request.app.state, "repo_root", None)
     blob = _load_work_blob_for_bullet_op()
     try:
         new_blob = remove_bullet_in_blob(
@@ -836,7 +856,7 @@ def delete_bullet(
         )
     except IndexError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
-    _persist_work_blob(new_blob)
+    _persist_work_blob(new_blob, repo_root=repo_root)
     return BulletWriteResponse(
         role_index=role_index,
         bullet_index=bullet_index,
@@ -846,6 +866,7 @@ def delete_bullet(
 
 @router.put("/master/{section}", response_model=WriteResponse)
 def put_master_section(
+    request: Request,
     section: Section,
     body: Any = Body(...),  # noqa: B008
     response: Response = Response(),  # noqa: B008
@@ -860,11 +881,14 @@ def put_master_section(
     checked first; a mismatch returns HTTP 412 Precondition Failed without
     modifying the file.
     """
-    return _put_section(section, body, if_match=if_match, response=response)
+    repo_root: Path | None = getattr(request.app.state, "repo_root", None)
+    return _put_section(section, body, if_match=if_match, response=response, repo_root=repo_root)
 
 
 @router.post("/master/{section}/upload", response_model=WriteResponse)
-async def upload_master_section(section: Section, file: UploadFile) -> WriteResponse:
+async def upload_master_section(
+    request: Request, section: Section, file: UploadFile
+) -> WriteResponse:
     """Upload a raw YAML file replacing *section*.
 
     The upload is parsed, validated against the section schema, and atomically
@@ -881,7 +905,8 @@ async def upload_master_section(section: Section, file: UploadFile) -> WriteResp
         parsed = yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise HTTPException(400, f"YAML parse failed: {exc}") from exc
-    return _put_section(section, parsed)
+    repo_root: Path | None = getattr(request.app.state, "repo_root", None)
+    return _put_section(section, parsed, repo_root=repo_root)
 
 
 __all__ = ["router"]

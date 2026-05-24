@@ -21,7 +21,6 @@ import asyncio
 import importlib.util
 import json
 import logging
-import os
 import re
 import subprocess
 import sys
@@ -38,6 +37,7 @@ from jobsmith.api.schemas.artifacts import ArtifactEnvelope
 from jobsmith.api.supervisor import RunSupervisor, get_supervisor
 from jobsmith.apply import derive_slug
 from jobsmith.db import open_pipeline_db
+from jobsmith.paths import repo_root_for
 
 from .schemas.applications import (
     Application,
@@ -571,8 +571,7 @@ async def create_application(
             detail=f"A run for slug {slug!r} is already active (run_id={active_run_id!r}).",
         )
 
-    repo_root_env = os.environ.get("JOBSMITH_REPO_ROOT", "").strip()
-    cwd = Path(repo_root_env).resolve() if repo_root_env else Path.cwd()
+    cwd = repo_root_for()
     run_id = await _launch_run(
         supervisor, slug, body.url, cwd,
         force=body.force, jd_text=body.jd_text,
@@ -603,8 +602,7 @@ def _get_app_dir(slug: str) -> Path | None:
     """Resolve the application directory for *slug*, or None if config missing."""
     from jobsmith.config import find_config, load_config
 
-    repo_root_env = os.environ.get("JOBSMITH_REPO_ROOT", "").strip()
-    search_start = Path(repo_root_env).resolve() if repo_root_env else Path.cwd()
+    search_start = repo_root_for()
     config_path = find_config(search_start)
     if config_path is None:
         return None

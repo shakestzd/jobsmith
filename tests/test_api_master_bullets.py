@@ -62,7 +62,7 @@ def client(repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     finally:
         conn.close()
     monkeypatch.setattr(
-        "jobsmith.api.master._get_db_path_for_master", lambda: db_path
+        "jobsmith.api.master._get_db_path_for_master", lambda repo_root=None: db_path
     )
 
     app = FastAPI()

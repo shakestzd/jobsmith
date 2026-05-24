@@ -30,7 +30,6 @@ Both endpoints query the SQLite pipeline DB at the path resolved from
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +39,7 @@ from pydantic import BaseModel
 from jobsmith.config import find_config, load_config
 from jobsmith.db import open_pipeline_db
 from jobsmith.db_models import KIND_MODELS
+from jobsmith.paths import repo_root_for
 
 from .schemas.artifacts import ArtifactEnvelope
 
@@ -54,12 +54,10 @@ router = APIRouter(tags=["artifacts"])
 def _get_db_path() -> Path:
     """Resolve the pipeline DB path from the nearest .apply-config.yaml.
 
-    Checks JOBSMITH_REPO_ROOT env var first (set when the server is launched
-    from a different directory than the data repo), then falls back to cwd.
+    Uses the shared ``repo_root_for()`` resolver (settings-aware, env-tier-2).
     Raises 404 when no config is found.
     """
-    repo_root_env = os.environ.get("JOBSMITH_REPO_ROOT", "").strip()
-    search_start = Path(repo_root_env).resolve() if repo_root_env else Path.cwd()
+    search_start = repo_root_for()
     config_path = find_config(search_start)
     if config_path is None:
         raise HTTPException(status_code=404, detail="No .apply-config.yaml found")
