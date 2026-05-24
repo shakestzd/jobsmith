@@ -13,7 +13,7 @@
              data-status="done"
              data-priority="medium"
              data-created="2026-05-23T06:32:19.772781"
-             data-updated="2026-05-24T00:13:32.046367" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
+             data-updated="2026-05-24T00:14:56.549555" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
 
         <header>
             <h1>Ingest specialists: resume, LinkedIn export, URL, free-text</h1>
@@ -24,12 +24,6 @@
         </header>
 
         <nav data-graph-edges>
-            <section data-edge-type="blocked_by">
-                <h3>Blocked By:</h3>
-                <ul>
-                    <li><a href="feat-19e2d594.html" data-relationship="blocked_by">feat-19e2d594</a></li>
-                </ul>
-            </section>
             <section data-edge-type="implemented_in">
                 <h3>Implemented In:</h3>
                 <ul>
@@ -46,6 +40,12 @@
                 <h3>Part Of:</h3>
                 <ul>
                     <li><a href="trk-ac5661e4.html" data-relationship="part_of" data-since="2026-05-23T06:32:19.781702">trk-ac5661e4</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-19e2d594.html" data-relationship="blocked_by">feat-19e2d594</a></li>
                 </ul>
             </section>
         </nav>
@@ -74,7 +74,8 @@ Each specialist emits candidate-
 provenance map linking each field to its source snippet. No fabrication: every
 claim must trace to source text. Declare pdfplumber + python-docx in
 pyproject.toml; create the src/jobsmith/onboard/ package (with __init__.py).
-[2026-05-24 00:13 claude-code] accepted-advisory (provenance override): implementation committed as 3bf86e9 on feat-bd145368-impl; 49 tests passing, 0 new failures</p>
+[2026-05-24 00:13 claude-code] accepted-advisory (provenance override): implementation committed as 3bf86e9 on feat-bd145368-impl; 49 tests passing, 0 new failures
+[2026-05-24 00:14 claude-code] accepted-advisory (provenance override): Implementation committed as 3bf86e9 on feat-bd145368-impl (subagent WIP session), merged into trk-ac5661e4. parsers/ subpackage (extract.py, ingest.py) + both pipeline STUB boundaries wired + pdfplumber/python-docx deps. 49 new tests in test_onboard_parsers.py pass; full suite 1132 passed, 9 pre-existing failures, 0 new. Auto-link skipped: commit authored in subagent session, completion run from orchestrator post-merge.</p>
         </section>
     </article>
 </body>
