@@ -10,15 +10,15 @@
 <body>
     <article id="feat-c6ee77d4"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-05-23T06:32:19.810794"
-             data-updated="2026-05-24T00:30:37.911449" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
+             data-updated="2026-05-24T00:42:30.200672" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
 
         <header>
             <h1>Web onboarding flow (upload, paste, gap-interview, masters-ready)</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
@@ -60,7 +60,8 @@ detached CLI subprocess); streams progress over the existing SSE channel
 (supervisor.py); renders the gap-interview questions; lands on "masters ready".
 New API endpoints wrap the slice-3..5 pipeline: POST /onboard (multipart inputs,
 reusing slice-3's validator — not a duplicate), GET onboarding status, answer gap
-questions. Enforce a multipart size cap (e.g. 10MB, 413 on oversize).</p>
+questions. Enforce a multipart size cap (e.g. 10MB, 413 on oversize).
+[2026-05-24 00:42 claude-code] accepted-advisory (provenance override): Implementation committed as c06290a (backend API: POST /onboard, GET /onboard/{run_id}, POST /onboard/{run_id}/answers) + 4267ec5 (web wizard onboard.tsx) on feat-c6ee77d4-impl, merged into trk-ac5661e4. 11 backend tests pass (test_api_onboard_routes.py); frontend typechecks clean; full suite 1176 passed, 9 pre-existing failures, 0 new. Auto-link skipped: commits authored in subagent session, completion from orchestrator post-merge. NOTE: frontend visual QA (browser screenshot) still recommended before release.</p>
         </section>
     </article>
 </body>
