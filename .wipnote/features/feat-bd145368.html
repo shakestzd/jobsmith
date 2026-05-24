@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Ingest specialists: resume, LinkedIn export, URL, free-text</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-bd145368"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-05-23T06:32:19.772781"
+             data-updated="2026-05-24T00:04:50.948471" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
+
+        <header>
+            <h1>Ingest specialists: resume, LinkedIn export, URL, free-text</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-95ec8de7.html" data-relationship="planned_in" data-since="2026-05-23T06:32:19.777046">plan-95ec8de7</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-ac5661e4.html" data-relationship="part_of" data-since="2026-05-23T06:32:19.781702">trk-ac5661e4</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-19e2d594.html" data-relationship="blocked_by">feat-19e2d594</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="e5e22c3d-7fa8-42e8-88bc-4f100d837fa2.html" data-relationship="implemented_in" data-since="2026-05-24T00:04:50.948359">session e5e22c3d-7fa8-42e8-88bc-4f100d837fa2</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>The agent specialists/parsers that turn each input type into candidate master
+content (work/skill/education/author structures):
+  - Resume PDF/DOCX: text extraction (PDF via pdfplumber; DOCX via python-docx)
+    then LLM-structured into the master schema. Fall back to the agent reading
+    the file directly if extraction is poor.
+  - LinkedIn export: handle both the "Download your data" ZIP (Positions.csv,
+    Education.csv, Skills.csv) and a profile PDF.
+  - LinkedIn URL: best-effort fetch with explicit caveat that auth-walls usually
+    block it; degrade gracefully to "couldn't fetch, please paste or upload."
+  - Free-text paste: LLM structures whatever the user provides.
+Each specialist emits candidate-
+.json into .onboard-state/ plus a
+provenance map linking each field to its source snippet. No fabrication: every
+claim must trace to source text. Declare pdfplumber + python-docx in
+pyproject.toml; create the src/jobsmith/onboard/ package (with __init__.py).</p>
+        </section>
+    </article>
+</body>
+</html>
