@@ -36,6 +36,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from jobsmith.onboard.parsers import run_ingestion
+
 logger = logging.getLogger(__name__)
 
 # Sentinel constants for clobber policy
@@ -188,22 +190,29 @@ def dispatch_onboard_pipeline(
     )
 
     # -----------------------------------------------------------------
-    # STUB: agentic dispatch boundary
-    # Slice-4 (parsers) plugs in here — e.g.:
-    #   from jobsmith.onboard.parsers import run_ingestion
-    #   rc = run_ingestion(state_dir, repo_root, ...)
+    # Slice-4: ingest specialists (parsers)
     # Slice-5 (gap-interview) plugs in after parsers:
     #   from jobsmith.onboard.gap_interview import run_gap_interview
     #   rc = run_gap_interview(state_dir, repo_root, ...)
-    # For now we write a completion marker so callers can assert success.
     # -----------------------------------------------------------------
+    ingest_rc = run_ingestion(
+        state_dir,
+        repo_root,
+        resume_file=resume_file,
+        linkedin_export=linkedin_export,
+        linkedin_url=linkedin_url,
+        paste=paste,
+        paste_file=paste_file,
+    )
+    logger.info("dispatch_onboard_pipeline: ingest rc=%d", ingest_rc)
+
     metadata_path = state_dir / "run.json"
     if metadata_path.exists():
         data = json.loads(metadata_path.read_text())
         data["status"] = "dispatched"
         metadata_path.write_text(json.dumps(data, indent=2))
 
-    return 0
+    return ingest_rc
 
 
 # ---------------------------------------------------------------------------
@@ -297,9 +306,22 @@ def run_onboard_pipeline(
     )
 
     # -----------------------------------------------------------------
-    # STUB: in-process agentic dispatch boundary
-    # Slice-4 plugs in parsers here; slice-5 plugs in gap-interview.
+    # Slice-4: ingest specialists (parsers)
+    # Slice-5 (gap-interview) plugs in after parsers.
     # -----------------------------------------------------------------
+    _emit("phase_start", "ingest", message="ingesting profile sources")
+    ingest_rc = run_ingestion(
+        state_dir,
+        repo_root,
+        resume_file=resume_file,
+        linkedin_export=linkedin_export,
+        linkedin_url=linkedin_url,
+        paste=paste,
+        paste_file=paste_file,
+    )
+    logger.info("run_onboard_pipeline: ingest rc=%d", ingest_rc)
+    _emit("phase_complete", "ingest", message="ingest complete", rc=ingest_rc)
+
     metadata_path = state_dir / "run.json"
     if metadata_path.exists():
         data = json.loads(metadata_path.read_text())
@@ -307,4 +329,4 @@ def run_onboard_pipeline(
         metadata_path.write_text(json.dumps(data, indent=2))
 
     _emit("phase_complete", "onboard", message="onboard pipeline complete")
-    return 0
+    return ingest_rc
