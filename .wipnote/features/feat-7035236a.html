@@ -10,15 +10,15 @@
 <body>
     <article id="feat-7035236a"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-05-24T02:23:08.282761"
-             data-updated="2026-05-24T02:23:13.082899" data-agent-assigned="claude-code" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-7[1m]" data-created-by-cli-version="0.60.17">
+             data-updated="2026-05-24T02:25:40.484444" data-agent-assigned="claude-code" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-7[1m]" data-created-by-cli-version="0.60.17">
 
         <header>
             <h1>Fix application-detail view jitter (3s poll blanks to loading)</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
@@ -31,6 +31,11 @@
                 </ul>
             </section>
         </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>[2026-05-24 02:25 claude-code] accepted-advisory (provenance override): Committed as b919629 on trk-ac5661e4. Root cause: useApplication cleared data + set isLoading on every notifyDataChanged poll (3s while running), blanking the detail view to 'loading…' — the reported jitter. Fix: loadedSlugRef distinguishes slug-change (reset+loading) from same-slug background refresh (stale-while-revalidate, no blank). Verified live in Chrome (stable during run); tsc clean; 202 vitest pass. Auto-link skipped: same collector limitation as the rest of this branch.</p>
+        </section>
     </article>
 </body>
 </html>
