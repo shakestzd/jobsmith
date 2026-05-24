@@ -9,7 +9,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Icon } from './shared';
-import { BASE_URL, getAccessToken, authHeaders, buildEventsUrl, JobsmithApiError } from '../api/client';
+import { BASE_URL, authHeaders, buildEventsUrl, JobsmithApiError } from '../api/client';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -52,10 +52,11 @@ function buildOnboardEventsUrl(_runId: string): string {
 
 /** POST /api/onboard with multipart form data. */
 async function postOnboard(formData: FormData): Promise<{ run_id: string; status: string }> {
-  const token = getAccessToken();
-  const headers: Record<string, string> = {};
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  // Do NOT set Content-Type — let browser set multipart boundary automatically.
+  // Reuse the shared auth header (getAccessToken() || STATIC_TOKEN) so
+  // static-token deployments authenticate, but DROP Content-Type so the
+  // browser sets the multipart boundary automatically.
+  const headers = authHeaders();
+  delete headers['Content-Type'];
 
   const res = await fetch(`${BASE_URL}/api/onboard`, {
     method: 'POST',
@@ -514,7 +515,9 @@ export function OnboardWizard({ onComplete, onSkip }: OnboardWizardProps) {
         if (data.run_id && data.run_id !== currentRunId) return;
 
         const payload = data.payload ?? {};
-        const kind = String(payload.kind ?? '');
+        // The supervisor serializes the event kind as `payload.type`
+        // (see _pipeline_event_to_payload); fall back to `kind` defensively.
+        const kind = String(payload.type ?? payload.kind ?? '');
         const message = String(payload.message ?? payload.msg ?? '');
 
         if (kind === 'gap_questions') {
@@ -562,7 +565,11 @@ export function OnboardWizard({ onComplete, onSkip }: OnboardWizardProps) {
         const phaseMsg = `phase ${data.phase ?? '?'} → ${data.status ?? '?'}`;
         appendLog(phaseMsg, 'phase');
 
-        if (data.status === 'done' || data.status === 'backfilled') {
+        // Only the terminal "onboard" phase completion ends the flow. A
+        // subphase done (ingest/merge) must NOT close the stream — otherwise
+        // gap questions, which arrive after ingest, are never handled.
+        const isTerminal = data.phase === 'onboard';
+        if (isTerminal && (data.status === 'done' || data.status === 'backfilled')) {
           setStep('done');
           if (esRef.current) {
             esRef.current.close();

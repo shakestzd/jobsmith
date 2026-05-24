@@ -419,10 +419,12 @@ class TestClobberSemantics:
         content_dir = repo / "assets" / "content"
         content_dir.mkdir(parents=True)
 
+        # Existing master uses the master schema (location holds the company).
         (content_dir / "work.yml").write_text(
-            "- title: Engineer\n  company: Acme\n  details: []\n"
+            "- title: Engineer\n  location: Acme\n  details: []\n"
         )
-        # Same title+company — should not be duplicated
+        # Same title+company (candidate company maps to master location) —
+        # should not be duplicated after schema conversion.
         self._make_state(state, [{"title": "Engineer", "company": "Acme", "details": []}])
 
         result = merge_candidates_to_masters(state, repo, {}, clobber="merge")

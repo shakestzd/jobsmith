@@ -109,11 +109,15 @@ def _init_onboard_state(
     paste: str | None = None,
     paste_file: Path | None = None,
 ) -> Path:
-    """Create .onboard-state/ and write initial run metadata.
+    """Create a per-run .onboard-state/{run_id}/ dir and write run metadata.
+
+    Each run gets its own isolated state directory so candidate-*.json files
+    from a prior (or concurrent) run are never silently merged/reused — see
+    ingest._write_candidate_files which accumulates within a state dir.
 
     Returns the state directory path.
     """
-    state_dir = repo_root / ".onboard-state"
+    state_dir = repo_root / ".onboard-state" / run_id
     state_dir.mkdir(parents=True, exist_ok=True)
 
     metadata = {
@@ -412,6 +416,16 @@ def run_onboard_pipeline(
         if not merge_result.ok:
             data["lint_errors"] = merge_result.lint_errors
         metadata_path.write_text(json.dumps(data, indent=2))
+
+    # Terminal event: a single phase_complete for the "onboard" phase marks the
+    # whole pipeline done. Subscribers (slice-6 web wizard) close the SSE stream
+    # only on this event — never on a subphase (ingest/merge) completion.
+    _emit(
+        "phase_complete",
+        "onboard",
+        message="onboarding complete" if merge_result.ok else "onboarding finished with lint errors",
+        ok=merge_result.ok,
+    )
 
     _emit("phase_complete", "onboard", message="onboard pipeline complete")
     return 0 if merge_result.ok else 1

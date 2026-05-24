@@ -123,68 +123,156 @@ def _resolve_master_paths(repo_root: Path):
 # ---------------------------------------------------------------------------
 
 
+def _format_date_range(start: str, end: str) -> str:
+    """Combine candidate start/end dates into a master ``date`` string."""
+    start = (start or "").strip()
+    end = (end or "").strip()
+    if start and end:
+        return f"{start} – {end}"
+    return start or end or ""
+
+
+def _candidate_work_to_master(entry: dict) -> dict:
+    """Map a candidate work entry to the master WorkEntry schema.
+
+    Candidate: ``{company, title, start_date, end_date, location, bullets}``.
+    Master:    ``{title, location(=company), date, description, details}`` —
+    note the master ``location`` field holds the *company* name by convention
+    and ``description`` holds the work place/mode (e.g. "Remote").
+    """
+    bullets = entry.get("bullets") or entry.get("details") or []
+    if not isinstance(bullets, list):
+        bullets = [str(bullets)]
+    return {
+        "title": str(entry.get("title", "")),
+        "location": str(entry.get("company", entry.get("location", ""))),
+        "date": _format_date_range(entry.get("start_date", ""), entry.get("end_date", "")),
+        "description": str(entry.get("location", "")) if entry.get("company") else "",
+        "details": [b for b in bullets if b],
+    }
+
+
 def _build_work_yaml(data: dict | None, answers: dict[str, str]) -> Any:
-    """Build the work.yml content from candidate data + answers."""
+    """Build work.yml: a master-schema list of position dicts."""
     if data:
         entries = data.get("entries", [])
         if entries:
-            return entries
-    # Answers can provide raw YAML if user typed it
+            return [_candidate_work_to_master(e) for e in entries if isinstance(e, dict)]
+    # Answers can provide raw YAML if the user typed it
     raw = answers.get("work.entries", "")
     if raw:
         try:
             parsed = yaml.safe_load(raw)
             if isinstance(parsed, list):
-                return parsed
+                return [
+                    _candidate_work_to_master(e) if isinstance(e, dict) else {"title": str(e), "details": []}
+                    for e in parsed
+                ]
         except yaml.YAMLError:
             pass
-        # Treat as a single free-text bullet
-        return [{"title": raw, "details": []}]
+        return [{"title": raw, "location": "", "date": "", "description": "", "details": []}]
     return []
 
 
 def _build_skill_yaml(data: dict | None, answers: dict[str, str]) -> Any:
-    """Build the skill.yml content from candidate data + answers."""
+    """Build skill.yml: a master-schema list of category dicts.
+
+    Candidate skills ``[{name, category}]`` are grouped by category into the
+    master ``{title(=category), description(comma string), details(list)}``
+    shape (a list, not a ``{skills: ...}`` mapping).
+    """
+    grouped: dict[str, list[str]] = {}
+
     if data:
-        skills = data.get("skills", [])
-        if skills:
-            return {"skills": skills}
-    raw = answers.get("skill.skills", "")
-    if raw:
-        skill_list = [s.strip() for s in raw.replace(",", "\n").splitlines() if s.strip()]
-        return {"skills": [{"name": s, "category": "technical"} for s in skill_list]}
-    return {"skills": []}
+        for item in data.get("skills", []) or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            if not name:
+                continue
+            category = str(item.get("category", "technical")).strip() or "technical"
+            grouped.setdefault(category, []).append(name)
+
+    if not grouped:
+        raw = answers.get("skill.skills", "")
+        if raw:
+            names = [s.strip() for s in raw.replace(",", "\n").splitlines() if s.strip()]
+            if names:
+                grouped["technical"] = names
+
+    return [
+        {"title": category, "description": ", ".join(names), "details": names}
+        for category, names in grouped.items()
+    ]
+
+
+def _candidate_education_to_master(entry: dict) -> dict:
+    """Map a candidate education entry to the master EducationEntry schema.
+
+    Candidate: ``{institution, degree, field, start_date, end_date}``.
+    Master:    ``{title(=institution), location, date, description(=degree), details}``.
+    """
+    degree = str(entry.get("degree", "")).strip()
+    field = str(entry.get("field", "")).strip()
+    description = ", ".join(p for p in (degree, field) if p)
+    return {
+        "title": str(entry.get("institution", "")),
+        "location": "",
+        "date": _format_date_range(entry.get("start_date", ""), entry.get("end_date", "")),
+        "description": description,
+        "details": [],
+    }
 
 
 def _build_education_yaml(data: dict | None, answers: dict[str, str]) -> Any:
-    """Build the education.yml content from candidate data + answers."""
+    """Build education.yml: a master-schema list of institution dicts."""
     if data:
         entries = data.get("entries", [])
         if entries:
-            return {"entries": entries}
+            return [_candidate_education_to_master(e) for e in entries if isinstance(e, dict)]
     raw = answers.get("education.entries", "")
     if raw:
-        return {"entries": [{"institution": raw, "degree": "", "field": "", "end_date": ""}]}
-    return {"entries": []}
+        return [{"title": raw, "location": "", "date": "", "description": "", "details": []}]
+    return []
+
+
+def _split_name(full: str) -> tuple[str, str]:
+    """Split a full name into (firstname, lastname); last token is the surname."""
+    parts = [p for p in str(full).split() if p]
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return parts[0], ""
+    return " ".join(parts[:-1]), parts[-1]
 
 
 def _build_author_yaml(data: dict | None, answers: dict[str, str]) -> Any:
-    """Build the author.yml content from candidate data + answers."""
-    author: dict[str, str] = {}
-    if data:
-        for key in ("name", "email", "phone", "location", "github", "linkedin"):
-            val = data.get(key, "")
-            if val:
-                author[key] = str(val)
+    """Build author.yml in the master shape: ``{author: [ {firstname, ...} ]}``.
 
-    # Fill missing from gap answers
-    for key in ("name", "email", "phone", "location", "github", "linkedin"):
-        if not author.get(key):
+    Candidate author is a flat ``{name, email, phone, location, github,
+    linkedin, summary}`` dict; the master file wraps a single author dict in an
+    ``author:`` list and uses ``firstname/lastname/address/homepage`` fields.
+    """
+    def _pick(key: str) -> str:
+        val = (data or {}).get(key, "") if data else ""
+        if not val:
             val = answers.get(f"author.{key}", "")
-            if val:
-                author[key] = val
+        return str(val).strip()
 
-    return author
+    firstname, lastname = _split_name(_pick("name"))
+    homepage = _pick("github") or _pick("linkedin")
+
+    author: dict[str, str] = {
+        "firstname": firstname,
+        "lastname": lastname,
+        "email": _pick("email"),
+        "phone": _pick("phone"),
+        "address": _pick("location"),
+        "homepage": homepage,
+    }
+    # Drop empty fields so the YAML stays clean.
+    author = {k: v for k, v in author.items() if v}
+    return {"author": [author]} if author else {"author": []}
 
 
 # ---------------------------------------------------------------------------
@@ -263,63 +351,97 @@ def _read_existing(path: Path) -> Any:
 
 
 def _merge_work(existing: Any, incoming: Any) -> Any:
-    """Merge existing work.yml (list) with incoming (list), deduping by title+company."""
+    """Merge existing + incoming work lists (master shape), dedupe by title+location.
+
+    Master work entries use ``location`` for the company name; dedup on
+    ``title|location`` so the same role at the same company isn't duplicated.
+    """
     if not isinstance(existing, list):
         return incoming if isinstance(incoming, list) else []
     if not isinstance(incoming, list):
         return existing
 
-    seen: set[str] = set()
-    result = []
-    for item in existing:
-        key = f"{item.get('title','')}|{item.get('company', item.get('employer',''))}"
-        seen.add(key)
-        result.append(item)
+    def _key(item: dict) -> str:
+        return f"{item.get('title','')}|{item.get('location','')}"
+
+    seen = {_key(item) for item in existing if isinstance(item, dict)}
+    result = list(existing)
     for item in incoming:
-        key = f"{item.get('title','')}|{item.get('company', item.get('employer',''))}"
-        if key not in seen:
-            seen.add(key)
+        if isinstance(item, dict) and _key(item) not in seen:
+            seen.add(_key(item))
             result.append(item)
     return result
 
 
 def _merge_skill(existing: Any, incoming: Any) -> Any:
-    """Merge skill dicts — union of skills lists by name."""
-    ex_skills = (existing or {}).get("skills", []) if isinstance(existing, dict) else []
-    in_skills = (incoming or {}).get("skills", []) if isinstance(incoming, dict) else []
-    seen: set[str] = {s.get("name", "") for s in ex_skills}
-    merged = list(ex_skills)
-    for s in in_skills:
-        if s.get("name", "") not in seen:
-            seen.add(s.get("name", ""))
-            merged.append(s)
-    return {"skills": merged}
+    """Merge two master-shape skill lists by category title, unioning details."""
+    ex = existing if isinstance(existing, list) else []
+    inc = incoming if isinstance(incoming, list) else []
+
+    by_title: dict[str, dict] = {}
+    order: list[str] = []
+    for item in [*ex, *inc]:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title", ""))
+        details = [d for d in (item.get("details") or []) if d]
+        if title not in by_title:
+            by_title[title] = {"title": title, "details": list(details)}
+            order.append(title)
+        else:
+            for d in details:
+                if d not in by_title[title]["details"]:
+                    by_title[title]["details"].append(d)
+    # Recompute the comma-joined description from the unioned details.
+    return [
+        {
+            "title": by_title[t]["title"],
+            "description": ", ".join(by_title[t]["details"]),
+            "details": by_title[t]["details"],
+        }
+        for t in order
+    ]
 
 
 def _merge_education(existing: Any, incoming: Any) -> Any:
-    """Merge education dicts — union of entries by institution."""
-    ex_entries = (existing or {}).get("entries", []) if isinstance(existing, dict) else []
-    in_entries = (incoming or {}).get("entries", []) if isinstance(incoming, dict) else []
-    seen: set[str] = {e.get("institution", "") for e in ex_entries}
-    merged = list(ex_entries)
-    for e in in_entries:
-        if e.get("institution", "") not in seen:
-            seen.add(e.get("institution", ""))
-            merged.append(e)
-    return {"entries": merged}
+    """Merge two master-shape education lists, dedupe by title (institution)."""
+    if not isinstance(existing, list):
+        return incoming if isinstance(incoming, list) else []
+    if not isinstance(incoming, list):
+        return existing
+
+    seen = {item.get("title", "") for item in existing if isinstance(item, dict)}
+    result = list(existing)
+    for item in incoming:
+        if isinstance(item, dict) and item.get("title", "") not in seen:
+            seen.add(item.get("title", ""))
+            result.append(item)
+    return result
 
 
 def _merge_author(existing: Any, incoming: Any) -> Any:
-    """Merge author dicts — incoming fills only missing keys."""
-    if not isinstance(existing, dict):
-        return incoming or {}
-    if not isinstance(incoming, dict):
-        return existing
-    result = dict(existing)
-    for key, val in incoming.items():
-        if not result.get(key):
-            result[key] = val
-    return result
+    """Merge ``{author: [dict]}`` masters — incoming fills only missing fields.
+
+    Operates on the inner author dict (first list item) so the existing
+    author's populated fields win and incoming only fills the gaps.
+    """
+    def _first(blob: Any) -> dict:
+        if isinstance(blob, dict):
+            authors = blob.get("author")
+            if isinstance(authors, list) and authors and isinstance(authors[0], dict):
+                return dict(authors[0])
+            if isinstance(authors, dict):
+                return dict(authors)
+        return {}
+
+    ex = _first(existing)
+    inc = _first(incoming)
+    if not ex:
+        return {"author": [inc]} if inc else {"author": []}
+    for key, val in inc.items():
+        if not ex.get(key):
+            ex[key] = val
+    return {"author": [ex]}
 
 
 def merge_candidates_to_masters(
