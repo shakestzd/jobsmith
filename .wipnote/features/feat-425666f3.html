@@ -10,37 +10,38 @@
 <body>
     <article id="feat-425666f3"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-05-24T01:38:22.058948"
-             data-updated="2026-05-24T01:38:26.400538" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-7[1m]" data-created-by-cli-version="0.60.17">
+             data-updated="2026-05-24T01:43:21.528014" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-7[1m]" data-created-by-cli-version="0.60.17">
 
         <header>
             <h1>Fix roborev round-3 findings (job 982)</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
 
         <nav data-graph-edges>
-            <section data-edge-type="part_of">
-                <h3>Part Of:</h3>
-                <ul>
-                    <li><a href="trk-ac5661e4.html" data-relationship="part_of" data-since="2026-05-24T01:38:22.076777">trk-ac5661e4</a></li>
-                </ul>
-            </section>
             <section data-edge-type="implemented_in">
                 <h3>Implemented In:</h3>
                 <ul>
                     <li><a href="e5e22c3d-7fa8-42e8-88bc-4f100d837fa2.html" data-relationship="implemented_in" data-since="2026-05-24T01:38:26.400408">session e5e22c3d-7fa8-42e8-88bc-4f100d837fa2</a></li>
                 </ul>
             </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-ac5661e4.html" data-relationship="part_of" data-since="2026-05-24T01:38:22.076777">trk-ac5661e4</a></li>
+                </ul>
+            </section>
         </nav>
 
         <section data-content>
             <h3>Description</h3>
-            <p>5 findings from job 982: (1 HIGH) onboard aborts on fresh repo because scaffold writes example masters; (2) lint-gate temp files (.yml.tmp) skip section validators (filename-based dispatch); (3 HIGH) SSRF in LinkedIn URL fetch (substring check + follow redirects); (4) .onboard-state/.onboard-uploads not gitignored + raw paste in run.json; (5) no concurrent-run guard for onboard slug.</p>
+            <p>5 findings from job 982: (1 HIGH) onboard aborts on fresh repo because scaffold writes example masters; (2) lint-gate temp files (.yml.tmp) skip section validators (filename-based dispatch); (3 HIGH) SSRF in LinkedIn URL fetch (substring check + follow redirects); (4) .onboard-state/.onboard-uploads not gitignored + raw paste in run.json; (5) no concurrent-run guard for onboard slug.
+[2026-05-24 01:43 claude-code] accepted-advisory (provenance override): Committed as 77114e0 on trk-ac5661e4. Fixes all 5 roborev job-982 findings: HIGH fresh-repo onboard abort (scaffold_repo examples=False stubs); lint-gate real-filename staging (section validators now run); HIGH SSRF in LinkedIn URL fetch (_is_safe_linkedin_url https+exact-domain, no redirects); privacy (no raw paste in run.json, .onboard-state/.onboard-uploads gitignored); 409 concurrency guard on onboard slug. 14 new tests; suite 1206 passed, 9 pre-existing, 0 new. Auto-link skipped: same collector limitation across this track.</p>
         </section>
     </article>
 </body>
