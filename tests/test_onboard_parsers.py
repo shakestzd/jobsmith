@@ -554,17 +554,28 @@ class TestPipelineWiresIngestion:
         scaffold_repo(tmp_path)
         return tmp_path
 
+    def _mock_merge_ok(self):
+        """Return a patcher that makes merge_candidates_to_masters succeed."""
+        from jobsmith.onboard.merge import MergeResult, OnboardSummary
+        return patch(
+            "jobsmith.onboard.pipeline.merge_candidates_to_masters",
+            return_value=MergeResult(ok=True, summary=OnboardSummary()),
+        )
+
     def test_dispatch_onboard_pipeline_calls_run_ingestion(self, tmp_path: Path):
         repo_root = self._make_repo(tmp_path)
         from jobsmith.onboard import pipeline
 
-        with patch(
-            "jobsmith.onboard.pipeline.run_ingestion"
-        ) as mock_ingest:
+        with (
+            patch("jobsmith.onboard.pipeline.run_ingestion") as mock_ingest,
+            patch("jobsmith.onboard.pipeline.run_gap_interview_cli", return_value={}),
+            self._mock_merge_ok(),
+        ):
             mock_ingest.return_value = 0
             rc = pipeline.dispatch_onboard_pipeline(
                 repo_root=repo_root,
                 paste="Jane Doe engineer",
+                input_fn=lambda _: "",
             )
         assert rc == 0
         mock_ingest.assert_called_once()
@@ -573,9 +584,11 @@ class TestPipelineWiresIngestion:
         repo_root = self._make_repo(tmp_path)
         from jobsmith.onboard import pipeline
 
-        with patch(
-            "jobsmith.onboard.pipeline.run_ingestion"
-        ) as mock_ingest:
+        with (
+            patch("jobsmith.onboard.pipeline.run_ingestion") as mock_ingest,
+            patch("jobsmith.onboard.pipeline.build_gap_questions", return_value=[]),
+            self._mock_merge_ok(),
+        ):
             mock_ingest.return_value = 0
             rc = pipeline.run_onboard_pipeline(
                 repo_root=repo_root,
@@ -594,11 +607,16 @@ class TestPipelineWiresIngestion:
             captured_kwargs.append(kwargs)
             return 0
 
-        with patch("jobsmith.onboard.pipeline.run_ingestion", side_effect=capture):
+        with (
+            patch("jobsmith.onboard.pipeline.run_ingestion", side_effect=capture),
+            patch("jobsmith.onboard.pipeline.run_gap_interview_cli", return_value={}),
+            self._mock_merge_ok(),
+        ):
             pipeline.dispatch_onboard_pipeline(
                 repo_root=repo_root,
                 paste="Jane Doe",
                 linkedin_url="https://www.linkedin.com/in/janedoe/",
+                input_fn=lambda _: "",
             )
 
         assert len(captured_kwargs) == 1
@@ -612,7 +630,11 @@ class TestPipelineWiresIngestion:
         from jobsmith.onboard import pipeline
 
         events = MagicMock()
-        with patch("jobsmith.onboard.pipeline.run_ingestion", return_value=0):
+        with (
+            patch("jobsmith.onboard.pipeline.run_ingestion", return_value=0),
+            patch("jobsmith.onboard.pipeline.build_gap_questions", return_value=[]),
+            self._mock_merge_ok(),
+        ):
             pipeline.run_onboard_pipeline(
                 repo_root=repo_root,
                 paste="Jane Doe",

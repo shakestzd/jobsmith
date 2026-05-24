@@ -18,24 +18,35 @@ Phase 0 (ensured by the CLI command before dispatch)
     Repo bootstrap: ensure ``.apply-config.yaml`` exists. If absent, scaffold
     it via ``scaffold_repo()``. Done in the CLI command, not here.
 
-Stub note
----------
-The actual agentic dispatch (parsers, gap-interview) is deliberately stubbed.
-Slice-4 adds the parsers; slice-5 adds gap-interview. This slice delivers:
-  - Command shell (in cli.py)
-  - Repo bootstrap (phase 0, via scaffold_repo)
-  - Clobber guard
-  - State plumbing (.onboard-state/)
-  - Dispatch boundary (this module)
+Gap-interview I/O design
+------------------------
+Neither entry point calls raw ``input()``.
+
+CLI path:
+    ``dispatch_onboard_pipeline`` accepts an ``input_fn`` keyword argument
+    (default: built-in ``input``).  Tests and non-interactive callers pass a
+    mock to avoid blocking.  The ``input_fn`` is forwarded to
+    ``run_gap_interview_cli``.
+
+API path:
+    ``run_onboard_pipeline`` accepts an ``answer_callback`` keyword argument.
+    When provided it is called with the question list and must return an
+    ``answers`` dict (``{section.field: str}``).  This is how slice-6 will
+    inject web-layer answers.  When ``None``, the API path emits
+    ``gap_questions`` events and proceeds with empty answers (slice-6 wires
+    the callback).
 """
 from __future__ import annotations
 
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from jobsmith.onboard.gap import build_gap_questions, run_gap_interview_cli
+from jobsmith.onboard.merge import merge_candidates_to_masters
 from jobsmith.onboard.parsers import run_ingestion
 
 logger = logging.getLogger(__name__)
@@ -135,12 +146,13 @@ def dispatch_onboard_pipeline(
     paste: str | None = None,
     paste_file: Path | None = None,
     run_id: str | None = None,
+    input_fn: Callable[[str], str] | None = None,
 ) -> int:
     """CLI entry point: dispatch the onboarding pipeline agentic run.
 
-    Spawns the agentic run with ``cwd = repo_root`` and writes state to the
-    ``.onboard-state/`` directory. This is the non-SSE CLI path (no live event
-    streaming — the CLI is not in the API event loop).
+    Runs in-process: ingest → gap-interview → merge → lint-gate.
+    Does not call raw ``input()``; all user I/O goes through ``input_fn``
+    so callers and tests can inject a mock without blocking.
 
     Parameters
     ----------
@@ -159,17 +171,14 @@ def dispatch_onboard_pipeline(
         Optional path to a file containing pasted text.
     run_id:
         Optional run ID override. Auto-generated if not provided.
+    input_fn:
+        Callable(prompt: str) -> str used for gap-interview prompts.
+        Defaults to built-in ``input``.  Pass a mock in tests.
 
     Returns
     -------
     int
         Exit code: 0 on success, non-zero on failure.
-
-    Stub note
-    ---------
-    The agentic dispatch body is a stub — slice-4 (parsers) and slice-5
-    (gap-interview) will wire in the real agent invocations. This function
-    establishes the state directory and plumbing so those slices can plug in.
     """
     effective_run_id = run_id or uuid.uuid4().hex
 
@@ -190,10 +199,7 @@ def dispatch_onboard_pipeline(
     )
 
     # -----------------------------------------------------------------
-    # Slice-4: ingest specialists (parsers)
-    # Slice-5 (gap-interview) plugs in after parsers:
-    #   from jobsmith.onboard.gap_interview import run_gap_interview
-    #   rc = run_gap_interview(state_dir, repo_root, ...)
+    # Phase 1: ingest specialists (parsers — slice-4)
     # -----------------------------------------------------------------
     ingest_rc = run_ingestion(
         state_dir,
@@ -206,11 +212,35 @@ def dispatch_onboard_pipeline(
     )
     logger.info("dispatch_onboard_pipeline: ingest rc=%d", ingest_rc)
 
+    # -----------------------------------------------------------------
+    # Phase 2: gap-interview (CLI path — injectable input_fn, no raw input)
+    # -----------------------------------------------------------------
+    answers = run_gap_interview_cli(state_dir, input_fn=input_fn)
+
+    # -----------------------------------------------------------------
+    # Phase 3: merge + lint-gate
+    # -----------------------------------------------------------------
+    merge_result = merge_candidates_to_masters(
+        state_dir,
+        repo_root,
+        answers,
+        clobber=CLOBBER_MERGE,
+    )
+
     metadata_path = state_dir / "run.json"
     if metadata_path.exists():
         data = json.loads(metadata_path.read_text())
-        data["status"] = "dispatched"
+        data["status"] = "complete" if merge_result.ok else "lint_failed"
+        if not merge_result.ok:
+            data["lint_errors"] = merge_result.lint_errors
         metadata_path.write_text(json.dumps(data, indent=2))
+
+    if not merge_result.ok:
+        logger.error(
+            "dispatch_onboard_pipeline: lint gate failed — %d errors",
+            len(merge_result.lint_errors),
+        )
+        return 1
 
     return ingest_rc
 
@@ -230,6 +260,7 @@ def run_onboard_pipeline(
     paste_file: Path | None = None,
     run_id: str | None = None,
     events=None,
+    answer_callback: Callable[[list], dict[str, str]] | None = None,
 ) -> int:
     """In-process onboarding pipeline callable for the API path.
 
@@ -237,6 +268,18 @@ def run_onboard_pipeline(
     (mirroring how apply's API path uses ``apply.run_apply``). The ``events``
     argument accepts an EventSink (e.g. a ``_SupervisorEventSink``) so SSE
     subscribers receive live pipeline events.
+
+    Gap-interview I/O
+    -----------------
+    The API path NEVER blocks on ``input()``.  Instead:
+
+    1. Gap questions are emitted as a ``gap_questions`` event so slice-6 can
+       render them over SSE.
+    2. If ``answer_callback`` is provided it is called with the question list
+       and must return an ``answers`` dict (``{section.field: str}``).  This
+       is how slice-6 will inject web-layer answers once it has collected them.
+    3. If ``answer_callback`` is ``None`` the pipeline proceeds with empty
+       answers (all optional merges use whatever the candidate files contain).
 
     Parameters
     ----------
@@ -249,6 +292,9 @@ def run_onboard_pipeline(
     events:
         Optional EventSink. When provided, pipeline events are emitted so
         SSE subscribers receive them. Pass ``None`` for tests / CLI use.
+    answer_callback:
+        Optional callable(questions: list[GapQuestion]) -> dict[str, str].
+        Slice-6 injects this to feed web-collected answers into the merge step.
 
     Returns
     -------
@@ -271,6 +317,7 @@ def run_onboard_pipeline(
                 resume_file=resume_file,
                 run_id=run_id,
                 events=sink,
+                answer_callback=my_answer_callback,
             )
         )
         supervisor.set_task(run_id, task)
@@ -306,8 +353,7 @@ def run_onboard_pipeline(
     )
 
     # -----------------------------------------------------------------
-    # Slice-4: ingest specialists (parsers)
-    # Slice-5 (gap-interview) plugs in after parsers.
+    # Phase 1: ingest specialists (parsers — slice-4)
     # -----------------------------------------------------------------
     _emit("phase_start", "ingest", message="ingesting profile sources")
     ingest_rc = run_ingestion(
@@ -322,11 +368,48 @@ def run_onboard_pipeline(
     logger.info("run_onboard_pipeline: ingest rc=%d", ingest_rc)
     _emit("phase_complete", "ingest", message="ingest complete", rc=ingest_rc)
 
+    # -----------------------------------------------------------------
+    # Phase 2: gap-interview (API path — no blocking input, emit questions)
+    # -----------------------------------------------------------------
+    questions = build_gap_questions(state_dir)
+    _emit(
+        "gap_questions",
+        "gap",
+        message="gap interview questions",
+        questions=[q.to_dict() for q in questions],
+    )
+
+    # Collect answers: use callback if provided, else empty (slice-6 wires this)
+    if answer_callback is not None:
+        answers: dict[str, str] = answer_callback(questions)
+    else:
+        answers = {}
+
+    # -----------------------------------------------------------------
+    # Phase 3: merge + lint-gate
+    # -----------------------------------------------------------------
+    _emit("phase_start", "merge", message="merging candidates to masters")
+    merge_result = merge_candidates_to_masters(
+        state_dir,
+        repo_root,
+        answers,
+        clobber=CLOBBER_MERGE,
+    )
+    _emit(
+        "phase_complete",
+        "merge",
+        message="merge complete",
+        ok=merge_result.ok,
+        lint_errors=merge_result.lint_errors,
+    )
+
     metadata_path = state_dir / "run.json"
     if metadata_path.exists():
         data = json.loads(metadata_path.read_text())
-        data["status"] = "dispatched"
+        data["status"] = "complete" if merge_result.ok else "lint_failed"
+        if not merge_result.ok:
+            data["lint_errors"] = merge_result.lint_errors
         metadata_path.write_text(json.dumps(data, indent=2))
 
     _emit("phase_complete", "onboard", message="onboard pipeline complete")
-    return ingest_rc
+    return 0 if merge_result.ok else 1
