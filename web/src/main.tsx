@@ -11,6 +11,7 @@ import { NewApplicationModal } from './app/new';
 import { ApplicationDetail } from './app/application';
 import { MasterContent, MarkAnchorsView } from './app/master';
 import { SiteView, FeedbackView, DoctorView, ConfigView } from './app/views';
+import { OnboardWizard } from './app/onboard';
 import { ChatPanel } from './app/chat';
 
 const TWEAK_DEFAULTS: TweakValues = {
@@ -132,6 +133,7 @@ function App() {
   } else if (view === 'feedback')  { crumbs = ['jobsmith', 'feedback'];
   } else if (view === 'doctor')    { crumbs = ['jobsmith', 'doctor'];
   } else if (view === 'config')    { crumbs = ['jobsmith', 'config'];
+  } else if (view === 'onboard')   { crumbs = ['jobsmith', 'onboarding'];
   } else { crumbs = ['jobsmith']; }
 
   // Derive view body
@@ -150,6 +152,13 @@ function App() {
   } else if (view === 'feedback') { body = <FeedbackView />;
   } else if (view === 'doctor')   { body = <DoctorView />;
   } else if (view === 'config')   { body = <ConfigView />;
+  } else if (view === 'onboard')  {
+    body = (
+      <OnboardWizard
+        onComplete={() => { setView('master'); }}
+        onSkip={() => { setView('dashboard'); }}
+      />
+    );
   } else {
     body = <Dashboard openApp={setOpenSlug} openNew={() => setShowNew(true)} filter="all" />;
   }

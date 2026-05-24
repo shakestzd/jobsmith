@@ -101,7 +101,8 @@ export type ViewName =
   | 'site'
   | 'feedback'
   | 'doctor'
-  | 'config';
+  | 'config'
+  | 'onboard';
 
 // ── Status-badge mapping (used by `StatusBadge` in shared.tsx) ───────────
 export type BadgeKind =
