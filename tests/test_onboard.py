@@ -10,16 +10,13 @@ Coverage:
 """
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 from typer.testing import CliRunner
 
-from jobsmith.cli import app
 from jobsmith._init import scaffold_repo
-
+from jobsmith.cli import app
 
 # ---------------------------------------------------------------------------
 # (c) Extracted init scaffold lib fn

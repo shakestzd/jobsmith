@@ -15,7 +15,6 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 import yaml
 
 # ---------------------------------------------------------------------------
@@ -161,7 +160,7 @@ class TestGapInterview:
     """build_gap_questions returns structured GapQuestion objects."""
 
     def test_all_sections_missing_returns_questions(self, tmp_path: Path):
-        from jobsmith.onboard.gap import GapQuestion, build_gap_questions
+        from jobsmith.onboard.gap import build_gap_questions
 
         questions = build_gap_questions(tmp_path)
         assert len(questions) > 0
@@ -528,8 +527,8 @@ class TestPipelineWiring:
         return repo
 
     def test_dispatch_calls_gap_and_merge(self, tmp_path: Path):
-        from jobsmith.onboard.pipeline import dispatch_onboard_pipeline
         from jobsmith.onboard.merge import MergeResult, OnboardSummary
+        from jobsmith.onboard.pipeline import dispatch_onboard_pipeline
 
         repo = self._make_repo(tmp_path)
 
@@ -548,8 +547,8 @@ class TestPipelineWiring:
         mock_merge.assert_called_once()
 
     def test_run_pipeline_emits_gap_questions_event(self, tmp_path: Path):
-        from jobsmith.onboard.pipeline import run_onboard_pipeline
         from jobsmith.onboard.merge import MergeResult, OnboardSummary
+        from jobsmith.onboard.pipeline import run_onboard_pipeline
 
         repo = self._make_repo(tmp_path)
         events = MagicMock()
@@ -573,8 +572,8 @@ class TestPipelineWiring:
         assert "gap_questions" in emitted_kinds
 
     def test_pipeline_returns_1_on_lint_failure(self, tmp_path: Path):
-        from jobsmith.onboard.pipeline import dispatch_onboard_pipeline
         from jobsmith.onboard.merge import MergeResult, OnboardSummary
+        from jobsmith.onboard.pipeline import dispatch_onboard_pipeline
 
         repo = self._make_repo(tmp_path)
 

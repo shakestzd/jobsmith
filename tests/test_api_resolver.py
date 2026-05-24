@@ -70,11 +70,10 @@ class TestRepoRootForPrecedence:
             os.environ.pop("JOBSMITH_REPO_ROOT", None)
             with patch(
                 "jobsmith.paths.find_config", return_value=None
+            ), patch(
+                "jobsmith.settings.read_repo_root", return_value=settings_dir
             ):
-                with patch(
-                    "jobsmith.settings.read_repo_root", return_value=settings_dir
-                ):
-                    result = repo_root_for(cwd=tmp_path)
+                result = repo_root_for(cwd=tmp_path)
         assert result == settings_dir
 
     def test_fallback_to_cwd_when_nothing_set(self, tmp_path: Path) -> None:
@@ -114,7 +113,6 @@ class TestAppStateRepoRoot:
             return {"root": str(root)}
 
         # Wire Depends correctly
-        from fastapi import Depends
 
         app2 = FastAPI()
         app2.state.repo_root = tmp_path
@@ -158,15 +156,13 @@ class TestArtifactsResolverSmoke:
 
         with patch(
             "jobsmith.api.artifacts.repo_root_for", return_value=tmp_path
+        ), patch(
+            "jobsmith.api.artifacts.find_config",
+            return_value=fake_config_path,
+        ), patch(
+            "jobsmith.api.artifacts.load_config", return_value=fake_cfg
         ):
-            with patch(
-                "jobsmith.api.artifacts.find_config",
-                return_value=fake_config_path,
-            ):
-                with patch(
-                    "jobsmith.api.artifacts.load_config", return_value=fake_cfg
-                ):
-                    result = art_module._get_db_path()
+            result = art_module._get_db_path()
         assert isinstance(result, Path)
 
 
@@ -184,15 +180,13 @@ class TestApplicationsResolverSmoke:
         # so patch at the source module level.
         with patch(
             "jobsmith.api.applications.repo_root_for", return_value=tmp_path
+        ), patch(
+            "jobsmith.config.find_config",
+            return_value=fake_config_path,
+        ), patch(
+            "jobsmith.config.load_config", return_value=fake_cfg
         ):
-            with patch(
-                "jobsmith.config.find_config",
-                return_value=fake_config_path,
-            ):
-                with patch(
-                    "jobsmith.config.load_config", return_value=fake_cfg
-                ):
-                    result = app_module._get_app_dir("some-slug")
+            result = app_module._get_app_dir("some-slug")
         assert result is not None
         assert result == tmp_path / fake_cfg.output.applications_dir / "some-slug"
 

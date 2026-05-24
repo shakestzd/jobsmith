@@ -24,7 +24,6 @@ from jobsmith.api.auth import TOKEN_ENV_VAR, _get_expected_token, verify_token
 from jobsmith.api.onboard_routes import router as onboard_router
 from jobsmith.api.supervisor import RunSupervisor
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
