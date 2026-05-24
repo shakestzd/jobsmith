@@ -10,32 +10,20 @@
 <body>
     <article id="feat-bd145368"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-05-23T06:32:19.772781"
-             data-updated="2026-05-24T00:04:50.948471" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
+             data-updated="2026-05-24T00:13:32.046367" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
 
         <header>
             <h1>Ingest specialists: resume, LinkedIn export, URL, free-text</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
 
         <nav data-graph-edges>
-            <section data-edge-type="planned_in">
-                <h3>Planned In:</h3>
-                <ul>
-                    <li><a href="plan-95ec8de7.html" data-relationship="planned_in" data-since="2026-05-23T06:32:19.777046">plan-95ec8de7</a></li>
-                </ul>
-            </section>
-            <section data-edge-type="part_of">
-                <h3>Part Of:</h3>
-                <ul>
-                    <li><a href="trk-ac5661e4.html" data-relationship="part_of" data-since="2026-05-23T06:32:19.781702">trk-ac5661e4</a></li>
-                </ul>
-            </section>
             <section data-edge-type="blocked_by">
                 <h3>Blocked By:</h3>
                 <ul>
@@ -48,7 +36,26 @@
                     <li><a href="e5e22c3d-7fa8-42e8-88bc-4f100d837fa2.html" data-relationship="implemented_in" data-since="2026-05-24T00:04:50.948359">session e5e22c3d-7fa8-42e8-88bc-4f100d837fa2</a></li>
                 </ul>
             </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-95ec8de7.html" data-relationship="planned_in" data-since="2026-05-23T06:32:19.777046">plan-95ec8de7</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-ac5661e4.html" data-relationship="part_of" data-since="2026-05-23T06:32:19.781702">trk-ac5661e4</a></li>
+                </ul>
+            </section>
         </nav>
+
+        <section data-steps>
+            <h3>Implementation Steps</h3>
+            <ol>
+                <li data-completed="true" data-step-id="step-feat-bd145368-0" data-agent="claude-code" data-created-by-agent="claude-code">✅ implement parsers subpackage &#43; wire pipeline; commit 3bf86e9 on feat-bd145368-impl</li>
+            </ol>
+        </section>
 
         <section data-content>
             <h3>Description</h3>
@@ -66,7 +73,8 @@ Each specialist emits candidate-
 .json into .onboard-state/ plus a
 provenance map linking each field to its source snippet. No fabrication: every
 claim must trace to source text. Declare pdfplumber + python-docx in
-pyproject.toml; create the src/jobsmith/onboard/ package (with __init__.py).</p>
+pyproject.toml; create the src/jobsmith/onboard/ package (with __init__.py).
+[2026-05-24 00:13 claude-code] accepted-advisory (provenance override): implementation committed as 3bf86e9 on feat-bd145368-impl; 49 tests passing, 0 new failures</p>
         </section>
     </article>
 </body>
