@@ -10,20 +10,26 @@
 <body>
     <article id="feat-01cad829"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-05-23T06:32:19.790559"
-             data-updated="2026-05-24T00:15:45.895671" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
+             data-updated="2026-05-24T00:29:25.150863" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
 
         <header>
             <h1>Extract lint to a library, gap-interview, lint-gated master write</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
 
         <nav data-graph-edges>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="e5e22c3d-7fa8-42e8-88bc-4f100d837fa2.html" data-relationship="implemented_in" data-since="2026-05-24T00:15:45.895566">session e5e22c3d-7fa8-42e8-88bc-4f100d837fa2</a></li>
+                </ul>
+            </section>
             <section data-edge-type="planned_in">
                 <h3>Planned In:</h3>
                 <ul>
@@ -42,12 +48,6 @@
                     <li><a href="feat-bd145368.html" data-relationship="blocked_by">feat-bd145368</a></li>
                 </ul>
             </section>
-            <section data-edge-type="implemented_in">
-                <h3>Implemented In:</h3>
-                <ul>
-                    <li><a href="e5e22c3d-7fa8-42e8-88bc-4f100d837fa2.html" data-relationship="implemented_in" data-since="2026-05-24T00:15:45.895566">session e5e22c3d-7fa8-42e8-88bc-4f100d837fa2</a></li>
-                </ul>
-            </section>
         </nav>
 
         <section data-content>
@@ -62,7 +62,8 @@ YAMLs at assets/content/ (config.py:18-43 paths), and calls the extracted lint a
 a hard gate. On failure it loops (cap 3) then stops and reports remaining errors
 rather than persisting broken masters or looping forever. Honors slice-3's
 --merge vs --force semantics when masters pre-exist. Emits an onboarding summary
-(imported vs user-supplied vs still-optional).</p>
+(imported vs user-supplied vs still-optional).
+[2026-05-24 00:29 claude-code] accepted-advisory (provenance override): Implementation committed as 5e8f188 on feat-01cad829-impl (subagent WIP session), merged into trk-ac5661e4. Extracted src/jobsmith/lint.py (all 4 master sections), added onboard/gap.py + merge.py with injectable I/O (CLI input_fn, API events sink), wired into both pipeline entry points with lint-gate (cap 3 loop). 5e8f188: test_lint_gap_merge.py + updated test_onboard_parsers.py pass; full suite 1165 passed, 9 pre-existing failures, 0 new. Auto-link skipped: commit authored in subagent session, completion from orchestrator post-merge.</p>
         </section>
     </article>
 </body>
