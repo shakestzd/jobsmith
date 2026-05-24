@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Extract lint to a library, gap-interview, lint-gated master write</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-01cad829"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-05-23T06:32:19.790559"
+             data-updated="2026-05-24T00:15:45.895671" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
+
+        <header>
+            <h1>Extract lint to a library, gap-interview, lint-gated master write</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-95ec8de7.html" data-relationship="planned_in" data-since="2026-05-23T06:32:19.795826">plan-95ec8de7</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-ac5661e4.html" data-relationship="part_of" data-since="2026-05-23T06:32:19.799687">trk-ac5661e4</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-bd145368.html" data-relationship="blocked_by">feat-bd145368</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="e5e22c3d-7fa8-42e8-88bc-4f100d837fa2.html" data-relationship="implemented_in" data-since="2026-05-24T00:15:45.895566">session e5e22c3d-7fa8-42e8-88bc-4f100d837fa2</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>PREREQUISITE (per A2): `jobsmith lint` currently lives inside cli.py:606-685 as a
+Typer command and validates only work.yml. Extract its logic into a callable
+src/jobsmith/lint.py and extend it to validate all four master sections
+(work/skill/education/author). Then: the orchestrator diffs candidate content
+against the master schema's required fields, runs a conversational gap-interview
+for what's missing or low-confidence, merges candidate + answers into the master
+YAMLs at assets/content/ (config.py:18-43 paths), and calls the extracted lint as
+a hard gate. On failure it loops (cap 3) then stops and reports remaining errors
+rather than persisting broken masters or looping forever. Honors slice-3's
+--merge vs --force semantics when masters pre-exist. Emits an onboarding summary
+(imported vs user-supplied vs still-optional).</p>
+        </section>
+    </article>
+</body>
+</html>
