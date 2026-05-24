@@ -176,6 +176,22 @@ def test_post_onboard_registers_run_with_supervisor(client_and_sup):
     assert handle.slug == "onboard"
 
 
+def test_post_onboard_409_when_onboard_run_already_active(client_and_sup):
+    """Concurrency guard (roborev job 982 #5): a second start returns 409 while
+    an onboard run is active, since onboarding writes the shared master YAMLs."""
+    client, sup = client_and_sup
+    # Mark an onboard run as active.
+    sup.register_run(run_id="already-running", slug="onboard")
+    assert sup.get_active_for_slug("onboard") == "already-running"
+
+    resp = client.post(
+        "/api/onboard",
+        data={"paste": "second run"},
+        headers=AUTH_HEADER,
+    )
+    assert resp.status_code == 409
+
+
 # ---------------------------------------------------------------------------
 # GET /onboard/{run_id} — status endpoint
 # ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -506,64 +507,62 @@ def merge_candidates_to_masters(
         education_content = _merge_education(existing_education, education_content)
         author_content = _merge_author(existing_author, author_content)
 
-    # Lint-gate loop: write to tmp paths, lint, move on success
+    # Lint-gate loop: stage into a temp DIRECTORY using the REAL master
+    # filenames so jobsmith.lint (which dispatches section validators by
+    # ``path.name``) actually runs work/skill/education/author validation.
+    # A ``*.yml.tmp`` name would bypass section validation entirely.
     summary = _build_summary(work_data, skill_data, education_data, author_data, answers)
-
-    # Use temp directory alongside the masters to avoid partial writes
-    tmp_work = work_path.with_suffix(".yml.tmp")
-    tmp_skill = skill_path.with_suffix(".yml.tmp")
-    tmp_education = education_path.with_suffix(".yml.tmp")
-    tmp_author = author_path.with_suffix(".yml.tmp")
+    from jobsmith.lint import MasterPathSet, validate_masters_from_paths
 
     last_errors: list[str] = []
 
-    for attempt in range(1, max_attempts + 1):
-        logger.info("merge: lint attempt %d/%d", attempt, max_attempts)
+    # Stage in a temp dir on the SAME filesystem as the masters so the final
+    # commit is an atomic rename (Path.replace) rather than a cross-device move.
+    staging_parent = work_path.parent
+    staging_parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".jobsmith-merge-", dir=staging_parent) as tmp_dir_name:
+        tmp_dir = Path(tmp_dir_name)
+        staged = {
+            work_path: tmp_dir / "work.yml",
+            skill_path: tmp_dir / "skill.yml",
+            education_path: tmp_dir / "education.yml",
+            author_path: tmp_dir / "author.yml",
+        }
 
-        # Write to temp files first
-        _write_yaml(tmp_work, work_content)
-        _write_yaml(tmp_skill, skill_content)
-        _write_yaml(tmp_education, education_content)
-        _write_yaml(tmp_author, author_content)
+        for attempt in range(1, max_attempts + 1):
+            logger.info("merge: lint attempt %d/%d", attempt, max_attempts)
 
-        # Lint the tmp files using a custom path set.
-        from jobsmith.lint import MasterPathSet, validate_masters_from_paths
+            _write_yaml(staged[work_path], work_content)
+            _write_yaml(staged[skill_path], skill_content)
+            _write_yaml(staged[education_path], education_content)
+            _write_yaml(staged[author_path], author_content)
 
-        tmp_paths = MasterPathSet(
-            work_yml=tmp_work,
-            skill_yml=tmp_skill,
-            education_yml=tmp_education,
-            author_yml=tmp_author,
-        )
+            tmp_paths = MasterPathSet(
+                work_yml=staged[work_path],
+                skill_yml=staged[skill_path],
+                education_yml=staged[education_path],
+                author_yml=staged[author_path],
+            )
 
-        if _custom_lint_fn is not None:
-            # Injected function (tests): called with tmp MasterPathSet so it
-            # receives the same input as the default path-based validator.
-            lint_result = _custom_lint_fn(tmp_paths)
-        else:
-            lint_result = validate_masters_from_paths(tmp_paths)
+            if _custom_lint_fn is not None:
+                lint_result = _custom_lint_fn(tmp_paths)
+            else:
+                lint_result = validate_masters_from_paths(tmp_paths)
 
-        if lint_result.ok:
-            # Atomically commit the writes
-            tmp_work.replace(work_path)
-            tmp_skill.replace(skill_path)
-            tmp_education.replace(education_path)
-            tmp_author.replace(author_path)
-            logger.info("merge: lint passed on attempt %d", attempt)
-            return MergeResult(ok=True, lint_errors=[], summary=summary)
+            if lint_result.ok:
+                # Commit: move staged files to their real master paths.
+                for real_path, staged_path in staged.items():
+                    real_path.parent.mkdir(parents=True, exist_ok=True)
+                    staged_path.replace(real_path)
+                logger.info("merge: lint passed on attempt %d", attempt)
+                return MergeResult(ok=True, lint_errors=[], summary=summary)
 
-        last_errors = lint_result.errors
-        logger.warning(
-            "merge: lint failed on attempt %d — %d errors",
-            attempt,
-            len(last_errors),
-        )
-        # On subsequent attempts there is no automated fix; we just stop.
-        break
-
-    # Clean up temp files without persisting
-    for tmp in (tmp_work, tmp_skill, tmp_education, tmp_author):
-        tmp.unlink(missing_ok=True)
+            last_errors = lint_result.errors
+            logger.warning(
+                "merge: lint failed on attempt %d — %d errors", attempt, len(last_errors)
+            )
+            # No automated fix between attempts; stop on first failure.
+            break
 
     logger.error("merge: stopping after %d attempt(s) — lint errors remain", max_attempts)
     return MergeResult(ok=False, lint_errors=last_errors, summary=summary)

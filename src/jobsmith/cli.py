@@ -132,6 +132,9 @@ GITIGNORE_ADDITIONS = dedent(
 
     # jobsmith
     .apply-state/
+    # Onboarding scratch + uploads — contain raw resume/profile PII; never commit.
+    .onboard-state/
+    .onboard-uploads/
     private/applications/*/documents/*.pdf
     private/applications/*/documents/*.typ
     private/job_search.db
@@ -506,7 +509,9 @@ def onboard(
     config_file = resolved_root / ".apply-config.yaml"
     if not config_file.exists():
         console.print(f"[bold]jobsmith onboard[/bold]: bootstrapping repo at {resolved_root}")
-        scaffold_repo(resolved_root, force=False)
+        # examples=False → empty master stubs so the clobber guard below does
+        # not mistake scaffolded example content for the user's real masters.
+        scaffold_repo(resolved_root, force=False, examples=False)
         console.print(f"  [green]BOOTSTRAPPED[/green] {config_file}")
     else:
         console.print(f"[bold]jobsmith onboard[/bold]: repo at {resolved_root}")

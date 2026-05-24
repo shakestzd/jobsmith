@@ -19,7 +19,7 @@ import click
 from .config import CONFIG_FILENAME
 
 
-def scaffold_repo(target: Path, *, force: bool = False) -> None:
+def scaffold_repo(target: Path, *, force: bool = False, examples: bool = True) -> None:
     """Scaffold a jobsmith repo at *target*.
 
     This is the canonical library function for repo bootstrapping. It is
@@ -35,6 +35,12 @@ def scaffold_repo(target: Path, *, force: bool = False) -> None:
     force:
         When ``True``, overwrite existing files (e.g. ``.apply-config.yaml``).
         Default ``False`` preserves existing files (idempotent/safe re-run).
+    examples:
+        When ``True`` (default, used by ``jobsmith init``) seed the master
+        YAMLs from the bundled example content. When ``False`` (used by
+        ``jobsmith onboard``) write empty comment-only stubs instead, so the
+        onboarding clobber guard does not mistake scaffolded examples for real
+        user content and abort on a brand-new repo.
     """
     from .cli import CONFIG_TEMPLATE, EXAMPLES_DIR, GITIGNORE_ADDITIONS, PROFILE_TEMPLATE
 
@@ -43,13 +49,15 @@ def scaffold_repo(target: Path, *, force: bool = False) -> None:
     # Master YAML stubs from examples (or empty stubs if examples missing)
     content_dir = target / "assets" / "content"
     content_dir.mkdir(parents=True, exist_ok=True)
-    if EXAMPLES_DIR.exists():
+    if examples and EXAMPLES_DIR.exists():
         import shutil
         for src in EXAMPLES_DIR.glob("*.yml"):
             dst = content_dir / src.name
             if not dst.exists() or force:
                 shutil.copy(src, dst)
     else:
+        # Empty comment-only stubs (no real content → onboarding clobber guard
+        # treats the repo as fresh and proceeds).
         for name in ("work.yml", "skill.yml", "education.yml", "author.yml", "publication.yml"):
             stub = content_dir / name
             if not stub.exists() or force:

@@ -128,7 +128,8 @@ def _init_onboard_state(
             "resume_file": str(resume_file) if resume_file else None,
             "linkedin_export": str(linkedin_export) if linkedin_export else None,
             "linkedin_url": linkedin_url,
-            "paste": paste,
+            # Do NOT persist raw pasted text (PII) — record only that it was given.
+            "paste_provided": bool(paste),
             "paste_file": str(paste_file) if paste_file else None,
         },
     }

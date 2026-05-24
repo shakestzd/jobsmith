@@ -141,6 +141,14 @@ async def start_onboard(  # noqa: B008
     supervisor = _resolve_supervisor(request)
     repo_root = _get_repo_root(request)
 
+    # Concurrency guard: onboarding writes the shared master YAMLs, so only one
+    # run may be active at a time. Mirror apply's launch guard → 409 Conflict.
+    if supervisor.get_active_for_slug("onboard") is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An onboarding run is already in progress; wait for it to finish.",
+        )
+
     # Read and size-check uploaded files
     resume_bytes: bytes | None = None
     linkedin_bytes: bytes | None = None

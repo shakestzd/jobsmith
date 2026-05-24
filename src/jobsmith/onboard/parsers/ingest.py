@@ -426,9 +426,10 @@ def ingest_linkedin_url(
         "author": {"name": ""},
     }
 
-    # Detect obvious non-LinkedIn URLs early
-    if "linkedin.com" not in url:
-        logger.info("ingest_linkedin_url: non-LinkedIn URL %s — skipping fetch", url)
+    # Strict validation (SSRF guard): only https://(*.)linkedin.com hosts.
+    # A substring check would allow `https://linkedin.com.evil/...`.
+    if not _is_safe_linkedin_url(url):
+        logger.info("ingest_linkedin_url: rejected non-LinkedIn/unsafe URL %s", url)
         _write_url_fallback(state_dir, url, "not_linkedin_url")
         _write_candidate_files(state_dir, empty_candidate, {}, "linkedin_url")
         return empty_candidate
@@ -648,12 +649,35 @@ def _linkedin_data_to_candidate(li_data) -> dict:
     }
 
 
+def _is_safe_linkedin_url(url: str) -> bool:
+    """Return True only for https URLs whose host is (a subdomain of) linkedin.com.
+
+    SSRF guard: rejects non-https schemes and look-alike hosts such as
+    ``linkedin.com.evil`` or ``evil.com/linkedin.com``. Callers must also
+    disable redirect-following so a 3xx cannot bounce to an internal host.
+    """
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme != "https":
+        return False
+    host = (parsed.hostname or "").lower()
+    return host == "linkedin.com" or host.endswith(".linkedin.com")
+
+
 def _fetch_url_text(url: str, timeout: float = 15.0) -> str:
-    """Attempt to fetch URL text via httpx.
+    """Attempt to fetch URL text via httpx (LinkedIn-host URLs only).
 
     Returns empty string on any failure (auth wall, network error, redirect
-    to login, etc.).
+    to login, etc.). Redirects are NOT followed: a redirect to a non-LinkedIn
+    or internal host must not be fetched (SSRF guard), and LinkedIn's
+    unauth redirect-to-login is treated as a fetch failure anyway.
     """
+    if not _is_safe_linkedin_url(url):
+        return ""
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (compatible; jobsmith/1.0; +https://jobsmith.dev)"
@@ -662,7 +686,7 @@ def _fetch_url_text(url: str, timeout: float = 15.0) -> str:
     }
     try:
         with httpx.Client(
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=timeout,
             headers=headers,
         ) as client:
