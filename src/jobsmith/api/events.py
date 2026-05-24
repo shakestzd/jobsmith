@@ -188,9 +188,20 @@ def _resolve_supervisor(request: Request) -> RunSupervisor:
 # Slug guard (consistent with the detail endpoint's contract)
 # ---------------------------------------------------------------------------
 
+# Synthetic supervisor slugs that never have a backing application directory.
+# Onboarding registers its run under slug "onboard" so the web flow can stream
+# progress/gap-question events over the same SSE channel as apply; it must not
+# be rejected by the application-directory existence guard.
+_SYNTHETIC_SLUGS: frozenset[str] = frozenset({"onboard"})
+
 
 def _validate_slug_or_404(apps_dir: Path, slug: str) -> Path:
-    """Return the slug dir; raise 404 if missing or 400 if path-suspicious."""
+    """Return the slug dir; raise 404 if missing or 400 if path-suspicious.
+
+    Synthetic slugs (see ``_SYNTHETIC_SLUGS``) bypass the directory-existence
+    404 — they are tracked by the run supervisor, not by an on-disk app dir —
+    but still pass the invalid/path-traversal checks.
+    """
     if not slug or "/" in slug or ".." in slug or slug.startswith("."):
         raise HTTPException(status_code=400, detail=f"Invalid slug: {slug!r}")
 
@@ -202,6 +213,9 @@ def _validate_slug_or_404(apps_dir: Path, slug: str) -> Path:
             raise HTTPException(status_code=400, detail="Path traversal detected")
     except OSError as err:
         raise HTTPException(status_code=400, detail="Cannot resolve slug path") from err
+
+    if slug in _SYNTHETIC_SLUGS:
+        return slug_dir
 
     if not slug_dir.is_dir():
         raise HTTPException(status_code=404, detail=f"Slug not found: {slug}")

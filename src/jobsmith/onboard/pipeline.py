@@ -147,6 +147,7 @@ def dispatch_onboard_pipeline(
     paste_file: Path | None = None,
     run_id: str | None = None,
     input_fn: Callable[[str], str] | None = None,
+    clobber: str = CLOBBER_MERGE,
 ) -> int:
     """CLI entry point: dispatch the onboarding pipeline agentic run.
 
@@ -224,7 +225,7 @@ def dispatch_onboard_pipeline(
         state_dir,
         repo_root,
         answers,
-        clobber=CLOBBER_MERGE,
+        clobber=clobber,
     )
 
     metadata_path = state_dir / "run.json"
@@ -261,6 +262,7 @@ def run_onboard_pipeline(
     run_id: str | None = None,
     events=None,
     answer_callback: Callable[[list], dict[str, str]] | None = None,
+    clobber: str = CLOBBER_MERGE,
 ) -> int:
     """In-process onboarding pipeline callable for the API path.
 
@@ -393,7 +395,7 @@ def run_onboard_pipeline(
         state_dir,
         repo_root,
         answers,
-        clobber=CLOBBER_MERGE,
+        clobber=clobber,
     )
     _emit(
         "phase_complete",

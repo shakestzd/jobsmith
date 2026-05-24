@@ -106,14 +106,17 @@ def _get_db_path_for_master(repo_root: Path | None = None) -> Path | None:
         return None
 
 
-def _db_load_section(section: str) -> str | None:
+def _db_load_section(section: str, repo_root: Path | None = None) -> str | None:
     """Query ``master_content`` for *section*.  Returns raw YAML text or None.
 
     Returns None when the DB path cannot be resolved, when the DB has no row
     for the section, or when any DB error occurs.  Callers fall back to the
     filesystem when None is returned.
+
+    When *repo_root* is provided (e.g. from ``app.state.repo_root``) it is
+    threaded to the DB resolver so reads and writes target the same repo.
     """
-    db_path = _get_db_path_for_master()
+    db_path = _get_db_path_for_master(repo_root=repo_root)
     if db_path is None or not db_path.exists():
         return None
     try:
@@ -298,11 +301,12 @@ def _set_db_etag(response: Response, blob: str) -> None:
 
 
 @router.get("/master", response_model=MasterPayload)
-def get_master(response: Response) -> MasterPayload:
+def get_master(request: Request, response: Response) -> MasterPayload:
     """Return all master content sections in one payload (DB-only)."""
+    repo_root: Path | None = getattr(request.app.state, "repo_root", None)
     sections: dict[str, Any] = {}
     for section in _SECTIONS:
-        blob = _db_load_section(section)
+        blob = _db_load_section(section, repo_root=repo_root)
         if blob is None:
             _raise_missing_section(section)
         sections[section] = blob
@@ -318,9 +322,10 @@ def get_master(response: Response) -> MasterPayload:
 
 
 @router.get("/master/work", response_model=list[WorkEntry])
-def get_master_work(response: Response) -> list[WorkEntry]:
+def get_master_work(request: Request, response: Response) -> list[WorkEntry]:
     """Return the work history list (DB-only)."""
-    blob = _db_load_section("work")
+    repo_root: Path | None = getattr(request.app.state, "repo_root", None)
+    blob = _db_load_section("work", repo_root=repo_root)
     if blob is None:
         _raise_missing_section("work")
     _set_db_etag(response, blob)
@@ -328,9 +333,10 @@ def get_master_work(response: Response) -> list[WorkEntry]:
 
 
 @router.get("/master/skill", response_model=list[SkillEntry])
-def get_master_skill(response: Response) -> list[SkillEntry]:
+def get_master_skill(request: Request, response: Response) -> list[SkillEntry]:
     """Return the skill categories list (DB-only)."""
-    blob = _db_load_section("skill")
+    repo_root: Path | None = getattr(request.app.state, "repo_root", None)
+    blob = _db_load_section("skill", repo_root=repo_root)
     if blob is None:
         _raise_missing_section("skill")
     _set_db_etag(response, blob)
@@ -338,9 +344,10 @@ def get_master_skill(response: Response) -> list[SkillEntry]:
 
 
 @router.get("/master/education", response_model=list[EducationEntry])
-def get_master_education(response: Response) -> list[EducationEntry]:
+def get_master_education(request: Request, response: Response) -> list[EducationEntry]:
     """Return the education list (DB-only)."""
-    blob = _db_load_section("education")
+    repo_root: Path | None = getattr(request.app.state, "repo_root", None)
+    blob = _db_load_section("education", repo_root=repo_root)
     if blob is None:
         _raise_missing_section("education")
     _set_db_etag(response, blob)
@@ -348,9 +355,10 @@ def get_master_education(response: Response) -> list[EducationEntry]:
 
 
 @router.get("/master/author", response_model=Author | None)
-def get_master_author(response: Response) -> Author | None:
+def get_master_author(request: Request, response: Response) -> Author | None:
     """Return the author block (DB-only)."""
-    blob = _db_load_section("author")
+    repo_root: Path | None = getattr(request.app.state, "repo_root", None)
+    blob = _db_load_section("author", repo_root=repo_root)
     if blob is None:
         _raise_missing_section("author")
     _set_db_etag(response, blob)
@@ -529,7 +537,7 @@ def _benchmark_load_text(config_path: Path) -> str:
     the DB has no row (fresh project before first ingest). Returns ``""``
     when neither source has content.
     """
-    db_text = _db_load_section("benchmark")
+    db_text = _db_load_section("benchmark", repo_root=config_path.parent)
     if db_text is not None:
         return db_text
     path = _benchmark_path(config_path)
@@ -651,7 +659,7 @@ def _put_section(
     master_section = _SECTION_MAP[section]
     payload = _normalise_author_payload(body) if section == "author" else body
 
-    existing_blob = _db_load_section(section)
+    existing_blob = _db_load_section(section, repo_root=repo_root)
 
     # ETag / If-Match check (DB-derived)
     current_etag = (
@@ -738,9 +746,9 @@ class BulletWriteResponse(BaseModel):
     action: str
 
 
-def _load_work_blob_for_bullet_op() -> str:
+def _load_work_blob_for_bullet_op(repo_root: Path | None = None) -> str:
     """Return the work section blob from master_content, or 404 with backfill hint."""
-    blob = _db_load_section("work")
+    blob = _db_load_section("work", repo_root=repo_root)
     if blob is None:
         _raise_missing_section("work")
     return blob
@@ -786,7 +794,7 @@ def post_anchor_bullet(
     DB-only: edits the master_content row, never the YAML file (S5).
     """
     repo_root: Path | None = getattr(request.app.state, "repo_root", None)
-    blob = _load_work_blob_for_bullet_op()
+    blob = _load_work_blob_for_bullet_op(repo_root=repo_root)
     try:
         new_blob = mark_anchor_in_blob(
             blob,
@@ -816,7 +824,7 @@ def post_add_bullet(
 ) -> BulletWriteResponse:
     """Append or insert a new bullet (DB-only, S5)."""
     repo_root: Path | None = getattr(request.app.state, "repo_root", None)
-    blob = _load_work_blob_for_bullet_op()
+    blob = _load_work_blob_for_bullet_op(repo_root=repo_root)
     try:
         new_blob, effective_index = add_bullet_in_blob(
             blob,
@@ -846,7 +854,7 @@ def delete_bullet(
 ) -> BulletWriteResponse:
     """Remove or soft-drop bullet (DB-only, S5)."""
     repo_root: Path | None = getattr(request.app.state, "repo_root", None)
-    blob = _load_work_blob_for_bullet_op()
+    blob = _load_work_blob_for_bullet_op(repo_root=repo_root)
     try:
         new_blob = remove_bullet_in_blob(
             blob,

@@ -9,7 +9,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Icon } from './shared';
-import { BASE_URL, getAccessToken, authHeaders, JobsmithApiError } from '../api/client';
+import { BASE_URL, getAccessToken, authHeaders, buildEventsUrl, JobsmithApiError } from '../api/client';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -38,12 +38,16 @@ interface LogLine {
 
 // ── API helpers ──────────────────────────────────────────────────────────
 
-/** Build the SSE URL for the "onboard" slug. */
+/** Build the SSE URL for the "onboard" slug.
+ *
+ * Delegates to the shared ``buildEventsUrl`` so token resolution matches the
+ * rest of the app — including the static Vite token path
+ * (``getAccessToken() || STATIC_TOKEN``) used in static-token deployments.
+ * The SSE endpoint uses slug="onboard"; events are filtered by run_id in the
+ * handler.
+ */
 function buildOnboardEventsUrl(_runId: string): string {
-  const token = getAccessToken();
-  // The SSE endpoint uses slug="onboard"; events are filtered by run_id in the handler.
-  const base = `${BASE_URL}/api/applications/onboard/events?verbosity=verbose`;
-  return token ? `${base}&token=${encodeURIComponent(token)}` : base;
+  return buildEventsUrl('onboard');
 }
 
 /** POST /api/onboard with multipart form data. */

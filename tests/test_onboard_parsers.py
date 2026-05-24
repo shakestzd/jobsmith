@@ -515,7 +515,7 @@ class TestRunIngestion:
             llm_call=_mock_llm_call,
         )
         assert rc == 0
-        # LinkedIn export should overwrite resume candidate files
+        # Sources accumulate (merge), not overwrite — work file holds combined data
         assert (state_dir / "candidate-work.json").exists()
 
     def test_linkedin_url_processed(self, tmp_path: Path):

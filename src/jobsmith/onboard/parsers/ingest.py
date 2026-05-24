@@ -189,32 +189,94 @@ def _default_provenance_call(
 # Helper: write candidate-*.json and provenance-*.json
 # ---------------------------------------------------------------------------
 
+def _is_empty(value: object) -> bool:
+    """True when *value* carries no usable content (None / empty container)."""
+    if value is None:
+        return True
+    if isinstance(value, (str, list, dict, tuple, set)):
+        return len(value) == 0
+    return False
+
+
+def _merge_section_data(existing: dict, new: dict) -> dict:
+    """Merge *new* section data into *existing* without discarding content.
+
+    Multiple ingest sources (resume, LinkedIn, paste, …) each contribute to
+    the same ``candidate-<section>.json``.  Earlier sources must never be
+    silently clobbered — especially not by an empty later source.  Rules:
+
+    - empty *new* value → keep *existing* (never overwrite with nothing);
+    - missing/empty *existing* value → take *new*;
+    - both lists → concatenate, dropping items already present (dedup);
+    - both dicts → recurse field-by-field;
+    - both non-empty scalars → keep *existing* (first-source-wins).
+    """
+    if not existing:
+        return dict(new)
+    merged = dict(existing)
+    for key, new_val in new.items():
+        if _is_empty(new_val):
+            continue
+        cur = merged.get(key)
+        if _is_empty(cur):
+            merged[key] = new_val
+        elif isinstance(cur, list) and isinstance(new_val, list):
+            merged[key] = cur + [item for item in new_val if item not in cur]
+        elif isinstance(cur, dict) and isinstance(new_val, dict):
+            merged[key] = _merge_section_data(cur, new_val)
+        # else: both non-empty scalars — keep the earlier source's value.
+    return merged
+
+
 def _write_candidate_files(
     state_dir: Path,
     candidate: dict,
     provenance: dict,
     source_name: str,
 ) -> None:
-    """Atomically write candidate and provenance JSON files to state_dir."""
+    """Merge candidate data into per-section files; write provenance.
+
+    Accumulates across sources: each section file is merged with any data a
+    prior source wrote (see :func:`_merge_section_data`) so a later source
+    (e.g. a LinkedIn export following a resume) augments rather than discards
+    earlier content.  ``source`` records the most-recent writer; ``sources``
+    accumulates every contributing source for traceability.
+    """
     state_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write per-section candidate files
+    # Write per-section candidate files, merging with any prior source's data
     for section in ("work", "skill", "education", "author"):
-        section_data = candidate.get(section, {})
+        new_data = candidate.get(section, {})
         out_path = state_dir / f"candidate-{section}.json"
+
+        existing_data: dict = {}
+        sources: list[str] = []
+        if out_path.exists():
+            try:
+                prior = json.loads(out_path.read_text())
+                existing_data = prior.get("data", {}) or {}
+                sources = list(prior.get("sources", []))
+            except (OSError, json.JSONDecodeError):
+                existing_data, sources = {}, []
+
+        merged_data = _merge_section_data(existing_data, new_data)
+        if source_name not in sources:
+            sources.append(source_name)
+
         out_path.write_text(
             json.dumps(
                 {
                     "source": source_name,
+                    "sources": sources,
                     "section": section,
-                    "data": section_data,
+                    "data": merged_data,
                 },
                 indent=2,
             )
         )
         logger.debug("wrote %s", out_path)
 
-    # Write combined provenance map
+    # Write per-source provenance map (uniquely named — never collides)
     prov_path = state_dir / f"provenance-{source_name}.json"
     prov_path.write_text(json.dumps(provenance, indent=2))
     logger.debug("wrote %s", prov_path)
@@ -462,8 +524,11 @@ def run_ingestion(
     """Orchestrate all ingest specialists for a single onboarding run.
 
     Calls each provided input source's specialist and writes candidate-*.json
-    + provenance-*.json into state_dir. Multiple sources are merged with
-    later sources taking precedence (resume → linkedin → url → paste).
+    + provenance-*.json into state_dir. Multiple sources accumulate: each
+    section file is merged across sources (non-empty content is preserved,
+    lists are unioned, earlier sources win scalar conflicts) so a later source
+    augments rather than discards earlier data. Order: resume → linkedin →
+    url → paste.
 
     Parameters
     ----------

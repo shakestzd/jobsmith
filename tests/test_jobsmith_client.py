@@ -145,7 +145,7 @@ class TestMasterReads:
         )
         _seed_master_content(db_path, "work", blob)
         monkeypatch.setattr(
-            "jobsmith.api.master._get_db_path_for_master", lambda: db_path
+            "jobsmith.api.master._get_db_path_for_master", lambda repo_root=None: db_path
         )
 
         result = sdk_client.get_master_work()
@@ -164,7 +164,7 @@ class TestMasterReads:
         blob = "- title: Languages\n  description: Python, Go\n  details: [Python, Go]\n"
         _seed_master_content(db_path, "skill", blob)
         monkeypatch.setattr(
-            "jobsmith.api.master._get_db_path_for_master", lambda: db_path
+            "jobsmith.api.master._get_db_path_for_master", lambda repo_root=None: db_path
         )
 
         result = sdk_client.get_master_skill()
@@ -186,7 +186,7 @@ class TestMasterReads:
         )
         _seed_master_content(db_path, "education", blob)
         monkeypatch.setattr(
-            "jobsmith.api.master._get_db_path_for_master", lambda: db_path
+            "jobsmith.api.master._get_db_path_for_master", lambda repo_root=None: db_path
         )
 
         result = sdk_client.get_master_education()
@@ -205,7 +205,7 @@ class TestMasterReads:
         blob = "author:\n  - name: Jane Doe\n    email: jane@example.com\n"
         _seed_master_content(db_path, "author", blob)
         monkeypatch.setattr(
-            "jobsmith.api.master._get_db_path_for_master", lambda: db_path
+            "jobsmith.api.master._get_db_path_for_master", lambda repo_root=None: db_path
         )
 
         result = sdk_client.get_master_author()

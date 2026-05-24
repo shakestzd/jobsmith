@@ -491,7 +491,12 @@ def onboard(
     Artifacts are written to ``.onboard-state/`` under the repo root.
     """
     from ._init import scaffold_repo
-    from .onboard.pipeline import _masters_have_content, dispatch_onboard_pipeline
+    from .onboard.pipeline import (
+        CLOBBER_FORCE,
+        CLOBBER_MERGE,
+        _masters_have_content,
+        dispatch_onboard_pipeline,
+    )
     from .paths import repo_root_for
 
     # Resolve repo root (may not exist yet for brand-new setups)
@@ -516,6 +521,9 @@ def onboard(
             raise typer.Exit(code=1)
 
     # --- Dispatch pipeline ---
+    # --force overwrites existing master entries; --merge (or the default
+    # post-guard path) preserves them and fills gaps.
+    clobber = CLOBBER_FORCE if force else CLOBBER_MERGE
     rc = dispatch_onboard_pipeline(
         repo_root=resolved_root,
         resume_file=resume_file,
@@ -523,6 +531,7 @@ def onboard(
         linkedin_url=linkedin_url,
         paste=paste,
         paste_file=paste_file,
+        clobber=clobber,
     )
     raise typer.Exit(rc)
 
