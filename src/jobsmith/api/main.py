@@ -45,6 +45,7 @@ from jobsmith.api.auth import current_user, current_user_or_query
 from jobsmith.api.auth_routes import router as auth_router
 from jobsmith.api.cache_routes import router as cache_router
 from jobsmith.api.chat import router as chat_router
+from jobsmith.api.onboard_routes import router as onboard_router
 from jobsmith.api.config import router as config_router
 from jobsmith.api.deps import upsert_or_load_user
 from jobsmith.api.doctor import router as doctor_router
@@ -292,6 +293,11 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         chat_router,
+        prefix="/api",
+        dependencies=[Depends(current_user)],
+    )
+    app.include_router(
+        onboard_router,
         prefix="/api",
         dependencies=[Depends(current_user)],
     )
