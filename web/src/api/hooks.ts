@@ -11,7 +11,7 @@
 //   useMasterSection         — GET /api/master/{section} → section data
 //   useMasterSectionWithMeta — GET /api/master/{section} → { data, etag, isLoading, error, refetch }
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiGetWithMeta, JobsmithApiError } from './client';
 import type {
   ApplicationRow,
@@ -142,6 +142,9 @@ export function useApplication(slug: string): UseQueryResult<ApplicationDetail> 
   const [isLoading, setIsLoading] = useState<boolean>(Boolean(slug));
   const [error, setError] = useState<Error | null>(null);
   const [version, setVersion] = useState(0);
+  // Track the slug the current `data` belongs to, so a `version`-triggered
+  // background refresh (same slug) revalidates WITHOUT blanking the view.
+  const loadedSlugRef = useRef<string | null>(null);
 
   useEffect(() => {
     const onChanged = () => setVersion((v) => v + 1);
@@ -150,31 +153,50 @@ export function useApplication(slug: string): UseQueryResult<ApplicationDetail> 
   }, []);
 
   useEffect(() => {
-    // Reset on every slug change so the component never renders the previous
-    // slug's data under the new slug while the new fetch is in flight
-    // (roborev job 947 HIGH). The empty-slug branch also clears state — a
-    // route that briefly drops the slug must not retain prior detail.
-    setData(undefined);
-    setError(null);
+    // Distinguish an actual slug change from a same-slug background refresh
+    // (fired every few seconds by notifyDataChanged while a run is live).
+    //
+    // - Slug change: reset data/error and show the loading state so the
+    //   previous slug's detail never renders under the new slug (job 947 HIGH).
+    // - Same-slug refresh: stale-while-revalidate — keep showing current data
+    //   and DON'T flip isLoading, otherwise the whole detail view blanks to
+    //   "loading…" on every poll (visible 3s jitter during a running pipeline).
+    const slugChanged = loadedSlugRef.current !== slug;
+
+    if (slugChanged) {
+      setData(undefined);
+      setError(null);
+    }
 
     if (!slug) {
+      loadedSlugRef.current = null;
       setIsLoading(false);
       return;
     }
 
-    setIsLoading(true);
+    // Only surface the full-screen loading state on a genuine (slug-change)
+    // initial load; background refreshes revalidate silently.
+    if (slugChanged) {
+      setIsLoading(true);
+    }
     const signal = { cancelled: false };
 
     fetchApplicationWithRetry(slug, signal)
       .then((result) => {
         if (!signal.cancelled) {
+          loadedSlugRef.current = slug;
           setData(result);
+          setError(null);
           setIsLoading(false);
         }
       })
       .catch((err: unknown) => {
         if (!signal.cancelled) {
-          setError(err instanceof Error ? err : new Error(String(err)));
+          // Don't blow away good stale data on a transient background-refresh
+          // failure; only surface an error when we have nothing to show.
+          if (loadedSlugRef.current !== slug) {
+            setError(err instanceof Error ? err : new Error(String(err)));
+          }
           setIsLoading(false);
         }
       });
