@@ -45,6 +45,7 @@ from jobsmith.api.auth import current_user, current_user_or_query
 from jobsmith.api.auth_routes import router as auth_router
 from jobsmith.api.cache_routes import router as cache_router
 from jobsmith.api.chat import router as chat_router
+from jobsmith.api.onboard_routes import router as onboard_router
 from jobsmith.api.config import router as config_router
 from jobsmith.api.deps import upsert_or_load_user
 from jobsmith.api.doctor import router as doctor_router
@@ -53,6 +54,7 @@ from jobsmith.api.feedback import router as feedback_router
 from jobsmith.api.jd_routes import router as jd_router
 from jobsmith.api.master import router as master_router
 from jobsmith.api.snapshots import router as snapshots_router
+from jobsmith.paths import repo_root_for
 
 _log = logging.getLogger(__name__)
 
@@ -60,14 +62,14 @@ _log = logging.getLogger(__name__)
 def _try_ingest_master(*, reload: bool = False) -> None:
     """Best-effort master YAML ingest at startup.
 
-    Resolves the DB path and repo root from the running environment.
+    Resolves the DB path and repo root via the shared resolver chain.
     Logs and swallows all errors so a missing config never prevents startup.
     """
     from jobsmith.config import find_config, load_config
     from jobsmith.master_ingest import ensure_master_loaded
 
     try:
-        cwd = Path(os.environ.get("JOBSMITH_REPO_ROOT", ".")).resolve()
+        cwd = repo_root_for()
         config_path = find_config(cwd)
         if config_path is None:
             _log.debug("main: no .apply-config.yaml found, skipping master ingest")
@@ -165,11 +167,8 @@ def _maybe_warn_fs_only_state(repo_root: Path, db_path: Path) -> None:
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """FastAPI lifespan handler: ingest master YAML and warn on FS-only state."""
-    from jobsmith.config import find_config as _find_config
-
-    _start = Path(os.environ.get("JOBSMITH_REPO_ROOT", "")).resolve() if os.environ.get("JOBSMITH_REPO_ROOT") else Path.cwd()
-    _cfg_path = _find_config(_start)
-    app.state.repo_root = _cfg_path.parent if _cfg_path is not None else _start
+    # Cache the resolved root on app.state so all request handlers read from here.
+    app.state.repo_root = repo_root_for()
     _log.info("repo_root resolved to %s", app.state.repo_root)
 
     reload_master = os.environ.get("JOBSMITH_RELOAD_MASTER", "0") == "1"
@@ -177,7 +176,7 @@ async def _lifespan(app: FastAPI):
 
     # First-run UX: warn if .apply-state/ dirs exist without DB rows (S7).
     try:
-        cwd = Path(os.environ.get("JOBSMITH_REPO_ROOT", ".")).resolve()
+        cwd = app.state.repo_root
         from jobsmith.config import find_config, load_config
 
         config_path = find_config(cwd)
@@ -294,6 +293,11 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         chat_router,
+        prefix="/api",
+        dependencies=[Depends(current_user)],
+    )
+    app.include_router(
+        onboard_router,
         prefix="/api",
         dependencies=[Depends(current_user)],
     )

@@ -50,6 +50,13 @@ dependencies = [
     # feat-8842ad01 — server-side JD fetching with httpx fast-path and Playwright fallback.
     "httpx>=0.27",
     "playwright>=1.44",
+    # feat-f85f4815 — user-level settings store (OS config dir).
+    "platformdirs>=4.0",
+    # tomllib is stdlib on py>=3.11; tomli is needed for py3.10.
+    "tomli>=2.0 ; python_full_version < '3.11'",
+    # feat-bd145368 — resume/LinkedIn ingest specialists.
+    "pdfplumber>=0.11",
+    "python-docx>=1.0",
 ]
 
 [project.optional-dependencies]

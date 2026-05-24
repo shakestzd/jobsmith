@@ -132,6 +132,9 @@ GITIGNORE_ADDITIONS = dedent(
 
     # jobsmith
     .apply-state/
+    # Onboarding scratch + uploads — contain raw resume/profile PII; never commit.
+    .onboard-state/
+    .onboard-uploads/
     private/applications/*/documents/*.pdf
     private/applications/*/documents/*.typ
     private/job_search.db
@@ -434,6 +437,111 @@ def apply(
 
 
 @app.command()
+def onboard(
+    repo_root: Path | None = typer.Option(
+        None,
+        "--repo-root",
+        help="Repo root (default: walk up from cwd, then JOBSMITH_REPO_ROOT, then settings.toml)",
+    ),
+    resume_file: Path | None = typer.Option(
+        None,
+        "--resume-file",
+        help="Path to an existing resume (PDF, DOCX, TXT, or Markdown)",
+    ),
+    linkedin_export: Path | None = typer.Option(
+        None,
+        "--linkedin-export",
+        help="Path to a LinkedIn data export ZIP",
+    ),
+    linkedin_url: str | None = typer.Option(
+        None,
+        "--linkedin-url",
+        help="Public LinkedIn profile URL (scraped during onboarding)",
+    ),
+    paste: str | None = typer.Option(
+        None,
+        "--paste",
+        help="Raw pasted resume / profile text",
+    ),
+    paste_file: Path | None = typer.Option(
+        None,
+        "--paste-file",
+        help="Path to a file containing pasted resume / profile text",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing master YAML content",
+    ),
+    merge: bool = typer.Option(
+        False,
+        "--merge",
+        help="Merge new content with existing master YAML content",
+    ),
+) -> None:
+    """Onboard a new user by scaffolding the repo and running the ingestion pipeline.
+
+    Accepts a resume file, LinkedIn export, LinkedIn URL, or pasted text as
+    input sources. At least one input source is recommended (though not required
+    if you want to scaffold a blank repo first).
+
+    Phase 0: Ensures a repo exists at the resolved root. If ``.apply-config.yaml``
+    is absent, scaffolds it (and master YAML stubs) automatically.
+
+    Clobber guard: If master YAMLs already contain real content, aborts with
+    guidance unless --force (overwrite) or --merge is passed.
+
+    Artifacts are written to ``.onboard-state/`` under the repo root.
+    """
+    from ._init import scaffold_repo
+    from .onboard.pipeline import (
+        CLOBBER_FORCE,
+        CLOBBER_MERGE,
+        _masters_have_content,
+        dispatch_onboard_pipeline,
+    )
+    from .paths import repo_root_for
+
+    # Resolve repo root (may not exist yet for brand-new setups)
+    resolved_root = repo_root_for(repo_root=repo_root, require=False)
+
+    # --- Phase 0: ensure repo is bootstrapped ---
+    config_file = resolved_root / ".apply-config.yaml"
+    if not config_file.exists():
+        console.print(f"[bold]jobsmith onboard[/bold]: bootstrapping repo at {resolved_root}")
+        # examples=False → empty master stubs so the clobber guard below does
+        # not mistake scaffolded example content for the user's real masters.
+        scaffold_repo(resolved_root, force=False, examples=False)
+        console.print(f"  [green]BOOTSTRAPPED[/green] {config_file}")
+    else:
+        console.print(f"[bold]jobsmith onboard[/bold]: repo at {resolved_root}")
+
+    # --- Clobber guard ---
+    if not force and not merge:
+        if _masters_have_content(resolved_root):
+            console.print(
+                "[red]ABORT:[/red] Master YAML files already contain content.\n"
+                "  Pass [bold]--force[/bold] to overwrite, or [bold]--merge[/bold] to merge."
+            )
+            raise typer.Exit(code=1)
+
+    # --- Dispatch pipeline ---
+    # --force overwrites existing master entries; --merge (or the default
+    # post-guard path) preserves them and fills gaps.
+    clobber = CLOBBER_FORCE if force else CLOBBER_MERGE
+    rc = dispatch_onboard_pipeline(
+        repo_root=resolved_root,
+        resume_file=resume_file,
+        linkedin_export=linkedin_export,
+        linkedin_url=linkedin_url,
+        paste=paste,
+        paste_file=paste_file,
+        clobber=clobber,
+    )
+    raise typer.Exit(rc)
+
+
+@app.command()
 def assemble(
     slug: str | None = typer.Argument(
         None,
@@ -606,24 +714,55 @@ def anchor_check_cmd(
 def lint(
     master: Path = typer.Option(
         Path("master"),
-        help="Path to master/ directory containing *.yml files",
+        help="Path to master/ directory containing *.yml files (legacy; use --repo-root for new layout)",
     ),
     benchmark: Path | None = typer.Option(
         None,
         help="Path to benchmark resume.qmd (optional)",
     ),
+    repo_root: Path | None = typer.Option(
+        None,
+        help="Repo root containing .apply-config.yaml (new layout). When set, validates all four master YAMLs.",
+    ),
 ) -> None:
     """Validate master YAML schema and benchmark before assemble.
 
-    Checks:
-      - Each *.yml in master/ parses as a valid YAML list of positions
-      - Each position has the expected keys (title, details list)
-      - benchmark.qmd (if given) contains at least one bullet line
-    Prints errors with filename; exits non-zero on any error.
+    When --repo-root is provided, validates all four master YAMLs
+    (work / skill / education / author) via jobsmith.lint library.
+
+    Legacy mode (--master directory) checks *.yml files for structural
+    validity and optionally validates a benchmark.qmd.
+
+    Exits non-zero on any error.
     """
+    from jobsmith.lint import validate_masters
+
     errors: list[str] = []
 
-    # Validate master YAML files
+    # New layout: validate all four master sections via the lint library
+    if repo_root is not None:
+        result = validate_masters(repo_root)
+        if result.ok:
+            console.print("[green]lint passed[/green]")
+        else:
+            for err in result.errors:
+                console.print(f"[red]LINT ERROR:[/red] {err}")
+            raise typer.Exit(code=1)
+
+        # Benchmark check still runs if supplied
+        if benchmark is not None:
+            if not benchmark.exists():
+                console.print(f"[red]LINT ERROR:[/red] benchmark: file not found — {benchmark}")
+                raise typer.Exit(code=1)
+            bullets = _extract_bullets_from_qmd(benchmark)
+            if not bullets:
+                console.print(
+                    f"[red]LINT ERROR:[/red] benchmark {benchmark}: no bullet lines found."
+                )
+                raise typer.Exit(code=1)
+        return
+
+    # Legacy mode: scan master/ directory
     if not master.exists():
         console.print(f"[red]ERROR:[/red] master directory not found: {master}")
         raise typer.Exit(code=1)
@@ -1667,6 +1806,76 @@ def db_migrate_slugs() -> None:
     console.print(f"[green]rewrote {len(rewritten)} slug(s):[/green]")
     for old, new in rewritten.items():
         console.print(f"  {old} -> {new}")
+
+
+# ---------- config subcommand group (feat-f85f4815) ----------
+
+
+config_app = typer.Typer(
+    name="config",
+    help="User-level jobsmith configuration (repo-root, etc.).",
+    no_args_is_help=True,
+)
+app.add_typer(config_app, name="config")
+
+
+@config_app.command("set-repo-root")
+def config_set_repo_root(
+    path: Path = typer.Argument(..., help="Absolute path to the jobsmith repo root."),
+) -> None:
+    """Persist a repo root in the user-level settings file.
+
+    Equivalent to setting JOBSMITH_REPO_ROOT persistently without touching
+    the shell profile.  The path is stored in
+    ``~/.config/jobsmith/settings.toml`` (or the OS equivalent).
+
+    After setting, ``jobsmith status`` and all pipeline commands resolve
+    the repo root without requiring ``JOBSMITH_REPO_ROOT`` to be set in
+    the environment.
+    """
+    from .settings import write_repo_root
+
+    resolved = path.resolve()
+    write_repo_root(resolved)
+    console.print(f"[green]set repo_root:[/green] {resolved}")
+    console.print("  (stored in ~/.config/jobsmith/settings.toml)")
+
+
+@config_app.command("show")
+def config_show() -> None:
+    """Print current user-level settings."""
+    from .settings import read_settings, settings_config_path
+
+    path = settings_config_path()
+    console.print(f"[bold]Settings file:[/bold] {path}")
+    if not path.exists():
+        console.print("  (file does not exist — no settings stored yet)")
+        return
+
+    data = read_settings()
+    if not data:
+        console.print("  (empty — no settings stored yet)")
+        return
+
+    for key, value in sorted(data.items()):
+        console.print(f"  {key} = {value!r}")
+
+
+@config_app.command("clear-repo-root")
+def config_clear_repo_root() -> None:
+    """Remove the stored repo_root from user settings.
+
+    After clearing, ``jobsmith`` will fall back to walking the directory
+    tree from the current working directory to find ``.apply-config.yaml``.
+    """
+    from .settings import clear_repo_root, read_repo_root
+
+    prior = read_repo_root()
+    clear_repo_root()
+    if prior is not None:
+        console.print(f"[green]cleared repo_root[/green] (was {prior})")
+    else:
+        console.print("[yellow]repo_root was not set[/yellow]")
 
 
 # ---------- site subcommand group ----------
