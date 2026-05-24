@@ -10,15 +10,15 @@
 <body>
     <article id="feat-1d1a32fb"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-05-24T01:13:52.5919"
-             data-updated="2026-05-24T01:13:55.100351" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-7[1m]" data-created-by-cli-version="0.60.17">
+             data-updated="2026-05-24T01:21:15.385148" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-7[1m]" data-created-by-cli-version="0.60.17">
 
         <header>
             <h1>Fix roborev branch-review findings (job 980)</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
@@ -40,7 +40,8 @@
 
         <section data-content>
             <h3>Description</h3>
-            <p>Address 5 cross-slice integration findings from roborev job 980: (1 HIGH) onboard web SSE 404 on synthetic 'onboard' slug; (2) SSE URL omits static token; (3) master.py _db_load_section reads via global resolver while writes use request root; (4) onboard --force ignored; (5) multi-source candidate-*.json overwrite data loss.</p>
+            <p>Address 5 cross-slice integration findings from roborev job 980: (1 HIGH) onboard web SSE 404 on synthetic 'onboard' slug; (2) SSE URL omits static token; (3) master.py _db_load_section reads via global resolver while writes use request root; (4) onboard --force ignored; (5) multi-source candidate-*.json overwrite data loss.
+[2026-05-24 01:21 claude-code] accepted-advisory (provenance override): Implementation committed as 0a5e3b1 on trk-ac5661e4. Fixes all 5 roborev job-980 findings: HIGH onboard SSE 404 (synthetic-slug allowlist in events.py), web SSE static-token (buildEventsUrl delegation), master read/write repo consistency (repo_root threaded through _db_load_section + bullet reads), onboard --force (clobber param plumbed through both pipeline entries), multi-source candidate merge (no data loss). 9 new tests in test_roborev_980_fixes.py; full suite 1185 passed, 9 pre-existing failures, 0 new. Auto-link skipped: same collector limitation seen across this track's features.</p>
         </section>
     </article>
 </body>
