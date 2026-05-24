@@ -10,26 +10,20 @@
 <body>
     <article id="feat-e3dd986e"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-05-23T06:32:19.732797"
-             data-updated="2026-05-23T23:49:11.568123" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
+             data-updated="2026-05-24T00:03:59.966506" data-agent-assigned="claude-code" data-track-id="trk-ac5661e4">
 
         <header>
             <h1>Route API &#43; master reads through the shared resolver</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
 
         <nav data-graph-edges>
-            <section data-edge-type="implemented_in">
-                <h3>Implemented In:</h3>
-                <ul>
-                    <li><a href="e5e22c3d-7fa8-42e8-88bc-4f100d837fa2.html" data-relationship="implemented_in" data-since="2026-05-23T23:49:11.568025">session e5e22c3d-7fa8-42e8-88bc-4f100d837fa2</a></li>
-                </ul>
-            </section>
             <section data-edge-type="part_of">
                 <h3>Part Of:</h3>
                 <ul>
@@ -48,6 +42,12 @@
                     <li><a href="plan-95ec8de7.html" data-relationship="planned_in" data-since="2026-05-23T06:32:19.738863">plan-95ec8de7</a></li>
                 </ul>
             </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="e5e22c3d-7fa8-42e8-88bc-4f100d837fa2.html" data-relationship="implemented_in" data-since="2026-05-23T23:49:11.568025">session e5e22c3d-7fa8-42e8-88bc-4f100d837fa2</a></li>
+                </ul>
+            </section>
         </nav>
 
         <section data-content>
@@ -60,7 +60,8 @@ _require_config_path (master.py:77) AND _get_db_path_for_master (master.py:89) â
 to use the cached app.state.repo_root. Since master.py helpers are module-level
 and lack a Request, inject the root via a FastAPI Depends() (or pass it as a
 param) rather than reaching for a global. After this slice the env var is just
-tier-2 of the shared chain and app.state.repo_root is the single cached truth.</p>
+tier-2 of the shared chain and app.state.repo_root is the single cached truth.
+[2026-05-24 00:03 claude-code] accepted-advisory (provenance override): Implementation committed as 6777908 on trk-ac5661e4 (merge 1cdc937). Original agent commit bc3a013 captured only the test file; the applications/artifacts/main/master.py source was lost to a botched stash-pop during review and reconstructed from stash@{1}, then re-committed referencing feat-e3dd986e. Full suite green: 1083 passed, 9 pre-existing failures, 0 new; test_api_resolver.py 9/9 pass.</p>
         </section>
     </article>
 </body>
