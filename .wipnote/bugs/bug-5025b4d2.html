@@ -10,15 +10,15 @@
 <body>
     <article id="bug-5025b4d2"
              data-type="bug"
-             data-status="in-progress"
+             data-status="done"
              data-priority="high"
              data-created="2026-05-24T05:55:07.879766"
-             data-updated="2026-05-24T05:55:27.093543" data-agent-assigned="claude-code" data-track-id="trk-6f3666ea" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-7[1m]" data-created-by-cli-version="0.60.16">
+             data-updated="2026-05-25T20:29:27.13119" data-agent-assigned="claude-code" data-track-id="trk-6f3666ea" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-7[1m]" data-created-by-cli-version="0.60.16">
 
         <header>
             <h1>Declare missing runtime deps in pyproject</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-high">High Priority</span>
             </div>
         </header>
@@ -40,7 +40,8 @@
 
         <section data-content>
             <h3>Description</h3>
-            <p>Reconcile pyproject.toml deps vs actual imports in src/jobsmith post trk-ac5661e4 merge: fastapi, uvicorn, sse-starlette; verify whether pdfplumber/python-docx are actually imported before adding</p>
+            <p>Reconcile pyproject.toml deps vs actual imports in src/jobsmith post trk-ac5661e4 merge: fastapi, uvicorn, sse-starlette; verify whether pdfplumber/python-docx are actually imported before adding
+[2026-05-25 20:29 claude-code] accepted-advisory (provenance override): deps declared + lockfile updated in commit 4e8d498; 0 new test failures</p>
         </section>
     </article>
 </body>
