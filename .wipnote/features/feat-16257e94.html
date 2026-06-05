@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Localhost auto-auth: runtime token shim feeding header AND SSE paths</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-16257e94"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-05T06:55:13.175446"
+             data-updated="2026-06-05T10:14:37.166891" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f">
+
+        <header>
+            <h1>Localhost auto-auth: runtime token shim feeding header AND SSE paths</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="043df949-a113-4904-8786-2f306f9b5742.html" data-relationship="implemented_in" data-since="2026-06-05T10:14:37.166745">session 043df949-a113-4904-8786-2f306f9b5742</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-72ad5ccc.html" data-relationship="planned_in" data-since="2026-06-05T06:55:13.183014">plan-72ad5ccc</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-5d3b688f.html" data-relationship="part_of" data-since="2026-06-05T06:55:13.190845">trk-5d3b688f</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-9c980bef.html" data-relationship="blocked_by">feat-9c980bef</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Remove the need to type/configure a token on localhost while keeping bearer/JWT
+intact. When the API serves index.html (slice-1) on a LOCALHOST bind, inject the
+resolved static bearer token — sourced from the EXISTING resolver
+_get_expected_token() (lru_cache) at auth.py:86, which reads JOBSMITH_API_TOKEN
+(auth.py:46) then the CWD-relative private/jobsmith.token (auth.py:52) — into the
+page as a JSON-encoded/HTML-escaped runtime shim window.__JOBSMITH__={token,apiBase}.
+CRITICAL client refactor (per A2): today client.ts:17 STATIC_TOKEN is an immutable
+build-time const and buildEventsUrl (client.ts:265-271) reads
+getAccessToken()||STATIC_TOKEN — a window shim alone would NOT authenticate SSE.
+Refactor client.ts so a single MUTABLE runtime token (read from window.__JOBSMITH__,
+VITE var as fallback) feeds BOTH the Authorization header path AND buildEventsUrl's
+query-param. Inject ONLY on a localhost bind (detect 127.0.0.1/::1 from the bind/
+request); on --bind-public, do NOT inject and require explicit auth. Add a
+restrictive CSP on the served index and ensure the token is excluded from the SSE
+event-log redaction view.</p>
+        </section>
+    </article>
+</body>
+</html>
