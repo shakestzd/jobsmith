@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Bundle web/dist into the wheel via a hatch build hook</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-d58d5881"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-05T06:55:13.142535"
+             data-updated="2026-06-05T10:04:18.897215" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f">
+
+        <header>
+            <h1>Bundle web/dist into the wheel via a hatch build hook</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-5d3b688f.html" data-relationship="part_of" data-since="2026-06-05T06:55:13.161458">trk-5d3b688f</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-9c980bef.html" data-relationship="blocked_by">feat-9c980bef</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="043df949-a113-4904-8786-2f306f9b5742.html" data-relationship="implemented_in" data-since="2026-06-05T10:04:18.897106">session 043df949-a113-4904-8786-2f306f9b5742</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-72ad5ccc.html" data-relationship="planned_in" data-since="2026-06-05T06:55:13.155557">plan-72ad5ccc</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Make `pip install` / `uv tool install` ship the UI so the end user never runs npm.
+Add a custom hatchling build hook (new hatch_build.py + a NEW
+[tool.hatch.build.hooks.custom] section in pyproject.toml — this is separate from,
+not an extension of, the existing [tool.hatch.build.targets.wheel.force-include] at
+pyproject.toml:100-101 which already maps templates→jobsmith/templates). At
+wheel-build time the hook runs `vite build` in web/ FRESH (never trusting a stale
+on-disk web/dist) and copies the output into the package tree at
+src/jobsmith/web_dist/, then force-includes it in the wheel (add a second
+force-include entry alongside templates). The slice-1 locator prefers this bundled
+path. Gitignore BOTH web/dist and src/jobsmith/web_dist (build artifacts, currently
+neither is ignored). Make the hook a no-op with a clear message if npm/node is
+unavailable. Add a visibility check so a UI-less wheel is detectable: `jobsmith
+doctor` (and/or `jobsmith --version`) reports "UI bundled: yes/no".</p>
+        </section>
+    </article>
+</body>
+</html>
