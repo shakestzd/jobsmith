@@ -10,15 +10,15 @@
 <body>
     <article id="bug-b8bb48dc"
              data-type="bug"
-             data-status="in-progress"
+             data-status="done"
              data-priority="high"
              data-created="2026-06-05T16:48:04.955786"
-             data-updated="2026-06-05T16:48:32.682549" data-agent-assigned="claude-code" data-track-id="trk-211c4980" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.19">
+             data-updated="2026-06-05T16:56:12.02687" data-agent-assigned="claude-code" data-track-id="trk-211c4980" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.19">
 
         <header>
             <h1>Wheel omits web_dist UI — gitignored dir dropped by hatchling packages glob</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-high">High Priority</span>
             </div>
         </header>
@@ -40,7 +40,8 @@
 
         <section data-content>
             <h3>Description</h3>
-            <p>Build hook copies web/dist to src/jobsmith/web_dist but it is gitignored, so hatchling packages=[src/jobsmith] excludes it from the wheel. jobsmith doctor reports ui_bundled: no. Fix: add artifacts=[src/jobsmith/web_dist/**] to [tool.hatch.build.targets.wheel]; correct the misleading note at pyproject.toml lines 104-108.</p>
+            <p>Build hook copies web/dist to src/jobsmith/web_dist but it is gitignored, so hatchling packages=[src/jobsmith] excludes it from the wheel. jobsmith doctor reports ui_bundled: no. Fix: add artifacts=[src/jobsmith/web_dist/**] to [tool.hatch.build.targets.wheel]; correct the misleading note at pyproject.toml lines 104-108.
+[2026-06-05 16:56 claude-code] accepted-advisory (provenance override): Fixed in commit 7cad2b4; wheel now contains web_dist (3 entries verified), jobsmith doctor reports ui_bundled: yes</p>
         </section>
     </article>
 </body>
