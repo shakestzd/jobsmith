@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>`jobsmith up` — boot the server, open the browser after listen (non-blocking), --dev toggle</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-2423bbec"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-05T06:55:13.206919"
+             data-updated="2026-06-05T10:22:11.218667" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f">
+
+        <header>
+            <h1>`jobsmith up` — boot the server, open the browser after listen (non-blocking), --dev toggle</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-9c980bef.html" data-relationship="blocked_by">feat-9c980bef</a></li>
+                    <li><a href="feat-16257e94.html" data-relationship="blocked_by">feat-16257e94</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-72ad5ccc.html" data-relationship="planned_in" data-since="2026-06-05T06:55:13.215311">plan-72ad5ccc</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-5d3b688f.html" data-relationship="part_of" data-since="2026-06-05T06:55:13.22167">trk-5d3b688f</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="043df949-a113-4904-8786-2f306f9b5742.html" data-relationship="implemented_in" data-since="2026-06-05T10:22:11.218231">session 043df949-a113-4904-8786-2f306f9b5742</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Add a top-level `jobsmith up` Typer command (@app.command on the app at cli.py:42;
+`api serve` is registered under the api sub-Typer at cli.py:1157-1160 and stays). It
+reuses the serve path (api/server.py:24 serve → uvicorn.run on the create_app factory)
+but FIXES the browser-open (per A1): uvicorn.run() at server.py:28 BLOCKS and never
+returns, so the browser cannot be opened "after" it inline. Instead, start a daemon
+thread that waits for host:port to accept a connection, then webbrowser.open, and
+start that thread BEFORE calling uvicorn.run (or use uvicorn Config+Server with a
+startup callback). Handle PORT_IN_USE: catch the bind error and print a friendly
+message suggesting --port (exit non-zero), rather than a stacktrace. Flags:
+--host/--port (default 127.0.0.1:8000), --no-open (skip browser), --bind-public
+(passthrough; disables auto-auth per slice-3), --dev. --dev EXPLICITLY toggles
+serving: prod (default) serves bundled static single-port; --dev skips the static
+mount and targets the developer's separate vite origin (default http://localhost:5173),
+preserving the two-process hot-reload workflow. Pass the dev flag to create_app via an
+env var (create_app() currently takes no args — avoid a signature change). If
+webbrowser.open fails (e.g. headless/Windows quirk), log the URL and continue.</p>
+        </section>
+    </article>
+</body>
+</html>
