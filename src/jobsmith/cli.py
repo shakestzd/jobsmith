@@ -29,6 +29,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
+from .api.server import resolve_host, up_serve
 from .assemble import PACKAGE_ROOT, assemble_all, assemble_application
 from .config import CONFIG_FILENAME, find_config, load_config
 from .db import open_pipeline_db
@@ -1144,6 +1145,50 @@ def snapshot(
     )
     for f in result.files:
         console.print(f"  WROTE [{f.kind}] {f.path}")
+
+
+# ---------- up — convenience boot command (feat-2423bbec) ----------
+
+
+@app.command("up")
+def up_command(
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="Host to bind (default: 127.0.0.1).",
+    ),
+    port: int = typer.Option(8000, "--port", help="Bind port (default: 8000)."),
+    no_open: bool = typer.Option(
+        False,
+        "--no-open",
+        help="Skip opening the browser automatically.",
+    ),
+    bind_public: bool = typer.Option(
+        False,
+        "--bind-public",
+        help="Bind to 0.0.0.0 instead of 127.0.0.1.  Disables localhost auto-auth.",
+    ),
+    dev: bool = typer.Option(
+        False,
+        "--dev",
+        help="Dev mode: skip static UI mount (use Vite dev server at localhost:5173).",
+    ),
+) -> None:
+    """Boot the jobsmith server and open the browser when ready.
+
+    Opens http://<host>:<port> in your default browser once the server is
+    accepting connections.  Use --no-open to suppress the browser.
+
+    Use --dev to run in two-process mode (API only; point your browser at the
+    Vite dev server on port 5173 for hot-reload during front-end development).
+    """
+    effective_host = resolve_host(bind_public=bind_public) if bind_public else host
+    up_serve(
+        effective_host,
+        port,
+        open_browser=not no_open,
+        dev=dev,
+    )
 
 
 # ---------- api subcommand group ----------

@@ -45,7 +45,6 @@ from jobsmith.api.auth import current_user, current_user_or_query
 from jobsmith.api.auth_routes import router as auth_router
 from jobsmith.api.cache_routes import router as cache_router
 from jobsmith.api.chat import router as chat_router
-from jobsmith.api.onboard_routes import router as onboard_router
 from jobsmith.api.config import router as config_router
 from jobsmith.api.deps import upsert_or_load_user
 from jobsmith.api.doctor import router as doctor_router
@@ -53,7 +52,9 @@ from jobsmith.api.events import router as events_router
 from jobsmith.api.feedback import router as feedback_router
 from jobsmith.api.jd_routes import router as jd_router
 from jobsmith.api.master import router as master_router
+from jobsmith.api.onboard_routes import router as onboard_router
 from jobsmith.api.snapshots import router as snapshots_router
+from jobsmith.api.staticui import mount_static_ui
 from jobsmith.paths import repo_root_for
 
 _log = logging.getLogger(__name__)
@@ -214,6 +215,8 @@ def create_app() -> FastAPI:
     )
 
     # CORS — allow local Vite dev server origins used by humans and browser automation.
+    # Redundant when serving same-origin (feat-9c980bef) but kept for --dev split mode
+    # where the Vite dev server and the API run on separate ports.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -304,6 +307,13 @@ def create_app() -> FastAPI:
 
     # OpenAPI: surface the HTTPBearer scheme so /docs has an Authorize button.
     _install_openapi_security(app)
+
+    # Static UI + SPA catch-all — registered LAST so all API routes take
+    # precedence.  Skipped silently (API-only mode) when no web-dist is found.
+    # Also skipped in --dev mode (JOBSMITH_DEV=1) where the Vite dev server
+    # serves the front-end on a separate port (feat-2423bbec slice-4).
+    if os.environ.get("JOBSMITH_DEV") != "1":
+        mount_static_ui(app)
 
     return app
 

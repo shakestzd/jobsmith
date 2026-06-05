@@ -27,6 +27,10 @@ package-lock.json
 _freeze/
 .quarto/
 
+# Vite / wheel UI bundle artifacts — generated at build time, never committed.
+web/dist/
+src/jobsmith/web_dist/
+
 # Per-user state (should NEVER be committed to the framework)
 .apply-state/
 applications/

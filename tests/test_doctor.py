@@ -265,8 +265,9 @@ def test_check_plugin_dir_resolves_fail_no_plugin_json(monkeypatch: pytest.Monke
 # ---------------------------------------------------------------------------
 
 def test_run_all_checks_returns_eight_results() -> None:
+    # NOTE: count is now 9 — ui_bundled was added in feat-d58d5881 (slice-2).
     results = run_all_checks()
-    assert len(results) == 8
+    assert len(results) == 9
     assert all(isinstance(r, CheckResult) for r in results)
 
 
@@ -279,6 +280,7 @@ def test_run_all_checks_stable_order() -> None:
         "claude_binary",
         "claude_auth",
         "plugin_dir",
+        "ui_bundled",
         "apply_config",
         "master_yaml",
         "benchmarks",

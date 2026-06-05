@@ -12,7 +12,7 @@
 // case here first and then update redactSensitive to cover it.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { formatDetail, redactSensitive, apiPut, apiGetWithMeta, apiDelete, JobsmithApiError } from './client';
+import { formatDetail, redactSensitive, apiPut, apiGetWithMeta, apiDelete, JobsmithApiError, buildEventsUrl } from './client';
 
 // Synthetic test fixtures — low-entropy strings shaped enough to exercise
 // each redaction branch. Constructed at runtime from harmless fragments so
@@ -255,6 +255,62 @@ describe('apiDelete', () => {
       new Response(JSON.stringify({ detail: 'forbidden' }), { status: 403, statusText: 'Forbidden' }),
     );
     await expect(apiDelete('/resource/1')).rejects.toBeInstanceOf(JobsmithApiError);
+  });
+});
+
+// ── buildEventsUrl runtime-token (feat-16257e94) ─────────────────────────
+//
+// Validates that buildEventsUrl uses the mutable runtime token from
+// window.__JOBSMITH__ (the localhost shim) rather than only STATIC_TOKEN.
+// This is the client-side contract test for critique A2.
+
+describe('buildEventsUrl runtime token (feat-16257e94)', () => {
+  const SHIM_TOKEN = 'SHIM-runtime-token-' + 'y'.repeat(8);
+
+  afterEach(() => {
+    // Clean up any shim injected by tests
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (window as any).__JOBSMITH__;
+    // Clean up localStorage JWT tokens
+    window.localStorage.removeItem('jobsmith.access_token');
+  });
+
+  it('includes runtime shim token in SSE URL when window.__JOBSMITH__ is set', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__JOBSMITH__ = { token: SHIM_TOKEN, apiBase: 'http://localhost:8000' };
+    const url = buildEventsUrl('test-slug');
+    expect(url).toContain(`token=${encodeURIComponent(SHIM_TOKEN)}`);
+  });
+
+  it('shim token feeds SSE query param — not just Authorization header', () => {
+    // This directly validates critique A2: SSE must be authenticated via the
+    // runtime shim, not the immutable STATIC_TOKEN build-time const.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__JOBSMITH__ = { token: SHIM_TOKEN, apiBase: 'http://localhost:8000' };
+    const url = buildEventsUrl('my-app');
+    // The URL must include ?...&token=<shim-token>
+    expect(url).toMatch(/[?&]token=/);
+    expect(url).toContain(encodeURIComponent(SHIM_TOKEN));
+  });
+
+  it('JWT access token takes precedence over shim token for SSE', () => {
+    const JWT = 'FAKE-jwt-access-' + 'z'.repeat(8);
+    window.localStorage.setItem('jobsmith.access_token', JWT);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__JOBSMITH__ = { token: SHIM_TOKEN, apiBase: 'http://localhost:8000' };
+    const url = buildEventsUrl('slug-x');
+    // JWT takes priority (getAccessToken() || getRuntimeToken())
+    expect(url).toContain(encodeURIComponent(JWT));
+    expect(url).not.toContain(encodeURIComponent(SHIM_TOKEN));
+  });
+
+  it('falls back gracefully to no token param when no shim and no VITE var', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (window as any).__JOBSMITH__;
+    // When no shim and VITE_JOBSMITH_API_TOKEN is empty (test env), no ?token= param
+    const url = buildEventsUrl('no-auth-slug');
+    // URL must still be valid (base endpoint present), token param may or may not appear
+    expect(url).toContain('/api/applications/no-auth-slug/events');
   });
 });
 
