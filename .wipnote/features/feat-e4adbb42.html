@@ -10,20 +10,32 @@
 <body>
     <article id="feat-e4adbb42"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-05T06:55:13.277784"
-             data-updated="2026-06-05T11:01:18.387166" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f">
+             data-updated="2026-06-05T11:27:05.554816" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f">
 
         <header>
             <h1>End-to-end acceptance: fresh wheel install → jobsmith up → apply/onboard in browser</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
 
         <nav data-graph-edges>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-72ad5ccc.html" data-relationship="planned_in" data-since="2026-06-05T06:55:13.285105">plan-72ad5ccc</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="043df949-a113-4904-8786-2f306f9b5742.html" data-relationship="implemented_in" data-since="2026-06-05T11:01:18.386878">session 043df949-a113-4904-8786-2f306f9b5742</a></li>
+                </ul>
+            </section>
             <section data-edge-type="part_of">
                 <h3>Part Of:</h3>
                 <ul>
@@ -35,18 +47,6 @@
                 <ul>
                     <li><a href="feat-d58d5881.html" data-relationship="blocked_by">feat-d58d5881</a></li>
                     <li><a href="feat-2423bbec.html" data-relationship="blocked_by">feat-2423bbec</a></li>
-                </ul>
-            </section>
-            <section data-edge-type="planned_in">
-                <h3>Planned In:</h3>
-                <ul>
-                    <li><a href="plan-72ad5ccc.html" data-relationship="planned_in" data-since="2026-06-05T06:55:13.285105">plan-72ad5ccc</a></li>
-                </ul>
-            </section>
-            <section data-edge-type="implemented_in">
-                <h3>Implemented In:</h3>
-                <ul>
-                    <li><a href="043df949-a113-4904-8786-2f306f9b5742.html" data-relationship="implemented_in" data-since="2026-06-05T11:01:18.386878">session 043df949-a113-4904-8786-2f306f9b5742</a></li>
                 </ul>
             </section>
         </nav>
@@ -63,7 +63,8 @@ auto-auth. The E2E fixture sets up a scratch repo (settings repo_root) with seed
 master YAMLs + DB; assert onboard SEEDS MASTERS concretely (master YAML files written
 under the scratch repo's assets/content AND/OR rows in the DB). Document the launch
 story (README/AGENTS): `uv tool install` → `jobsmith up`, plus the editable-install
-dev note (`npm run build` or `jobsmith up --dev`). Verification + docs, not new product.</p>
+dev note (`npm run build` or `jobsmith up --dev`). Verification + docs, not new product.
+[2026-06-05 11:27 claude-code] accepted-advisory (provenance override): Implemented + committed by the /wipnote:execute orchestrator as commit a9732c2. E2E verified: 4 passed (wheel built via uv build, installed into a clean npm-free venv, served bundled UI, window.__JOBSMITH__ shim + authed REST + SSE all work on localhost), 2 skipped (async apply/onboard pipeline-completion — onboard's 409 in-progress guard + apply_runs timing — written but gated offline, per sanctioned skip design). Default suite green (only 9 known pre-existing failures), ruff no-new (132<=base 133). Also fixed a real packaging gap the E2E caught: added python-multipart runtime dep for onboard Form/UploadFile routes. Provenance auto-link absent due to the orchestrator-vs-subagent commit-attribution quirk (wipnote lineage/ingest commits don't resolve worktree-branch commits authored by the parent session).</p>
         </section>
     </article>
 </body>
