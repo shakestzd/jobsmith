@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>End-to-end acceptance: fresh wheel install → jobsmith up → apply/onboard in browser</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-e4adbb42"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-05T06:55:13.277784"
+             data-updated="2026-06-05T11:01:18.387166" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f">
+
+        <header>
+            <h1>End-to-end acceptance: fresh wheel install → jobsmith up → apply/onboard in browser</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-5d3b688f.html" data-relationship="part_of" data-since="2026-06-05T06:55:13.291233">trk-5d3b688f</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-d58d5881.html" data-relationship="blocked_by">feat-d58d5881</a></li>
+                    <li><a href="feat-2423bbec.html" data-relationship="blocked_by">feat-2423bbec</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-72ad5ccc.html" data-relationship="planned_in" data-since="2026-06-05T06:55:13.285105">plan-72ad5ccc</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="043df949-a113-4904-8786-2f306f9b5742.html" data-relationship="implemented_in" data-since="2026-06-05T11:01:18.386878">session 043df949-a113-4904-8786-2f306f9b5742</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Prove the full Dagster/Prefect-style loop at the strict acceptance bar the user chose.
+Build the wheel (slice-2) in a node-enabled CI/build env, install it into a clean,
+npm-free virtualenv, run `jobsmith up --no-open` (server only, for automation), and
+drive a COMPLETE apply (and onboard) run through the browser-facing HTTP surface
+end-to-end against the served origin: submit a JD, watch SSE phase progress, reach
+materials-ready — all via the same-origin API the served UI uses, with localhost
+auto-auth. The E2E fixture sets up a scratch repo (settings repo_root) with seeded
+master YAMLs + DB; assert onboard SEEDS MASTERS concretely (master YAML files written
+under the scratch repo's assets/content AND/OR rows in the DB). Document the launch
+story (README/AGENTS): `uv tool install` → `jobsmith up`, plus the editable-install
+dev note (`npm run build` or `jobsmith up --dev`). Verification + docs, not new product.</p>
+        </section>
+    </article>
+</body>
+</html>
