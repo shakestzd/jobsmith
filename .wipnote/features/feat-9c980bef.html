@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Serve the built UI same-origin from create_app (StaticFiles &#43; SPA fallback)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-9c980bef"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-05T06:55:13.117921"
+             data-updated="2026-06-05T09:57:18.649637" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f">
+
+        <header>
+            <h1>Serve the built UI same-origin from create_app (StaticFiles &#43; SPA fallback)</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-72ad5ccc.html" data-relationship="planned_in" data-since="2026-06-05T06:55:13.125702">plan-72ad5ccc</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-5d3b688f.html" data-relationship="part_of" data-since="2026-06-05T06:55:13.130943">trk-5d3b688f</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="043df949-a113-4904-8786-2f306f9b5742.html" data-relationship="implemented_in" data-since="2026-06-05T09:57:18.648999">session 043df949-a113-4904-8786-2f306f9b5742</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>In create_app (api/main.py:207), after all API routers are registered
+(main.py:237-303, all under prefix='/api'), mount the built frontend so one origin
+serves both. Add a web-dist locator (new api/staticui.py) that resolves the assets
+directory with a documented precedence: bundled package path (jobsmith/web_dist/,
+populated by slice-2) first, then the repo-root web/dist for source installs; if
+neither exists, skip the mount and log a one-line hint (API-only mode). Mount
+StaticFiles(html=True) for /assets and add a catch-all GET that returns index.html
+for non-API, non-asset paths so client-side deep links work — the exclusion list
+MUST cover every non-SPA route: /api/*, the BARE /health (main.py:231), /docs,
+/openapi.json, /redoc, and the asset mount (return 404 for unknown /api/* rather
+than index.html). The existing CORSMiddleware (main.py:217-228, localhost:5173/5174)
+stays for --dev split mode but is redundant for the served UI — document that.
+Make the web client same-origin: BASE_URL (client.ts:15-16) must default to
+window.location.origin when served from the API instead of hardcoded
+http://localhost:8000 (VITE_JOBSMITH_API_URL still overrides for split dev).</p>
+        </section>
+    </article>
+</body>
+</html>
