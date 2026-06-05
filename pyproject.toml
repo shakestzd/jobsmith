@@ -61,6 +61,8 @@ dependencies = [
     "fastapi>=0.111",
     "sse-starlette>=2.1",
     "uvicorn>=0.30",
+    # Required by FastAPI Form/File upload (onboard multipart routes).
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -123,3 +125,6 @@ ignore = ["E501"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v --strict-markers"
+markers = [
+    "e2e: end-to-end tests requiring JOBSMITH_E2E=1 and a real server subprocess (opt-in)",
+]
