@@ -410,7 +410,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-1" class="slice-nav-item" data-slice-nav="1">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="1"></span>
-        <span>#1 Reuse store: SQLite schema + hash/TTL helpers</span>
+        <span>#1 Reuse store: migration 009 + hash/TTL + config surface</span>
         
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
@@ -419,7 +419,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-2" class="slice-nav-item" data-slice-nav="2">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="2"></span>
-        <span>#2 Requirement canonicalization + tiered match</span>
+        <span>#2 Requirement canonicalization + tiered match + taxonomy seed</span>
         
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
@@ -428,7 +428,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-3" class="slice-nav-item" data-slice-nav="3">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="3"></span>
-        <span>#3 Company-research cache + specialist integration</span>
+        <span>#3 Company-research cross-role reuse (extend existing file cache)</span>
         
         
       </a>
@@ -464,7 +464,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-7" class="slice-nav-item" data-slice-nav="7">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="7"></span>
-        <span>#7 Whole-resume warm-start (diff-and-tweak) with anchor preservation</span>
+        <span>#7 Whole-resume warm-start (diff-and-tweak), owns anchor carry-forward</span>
         
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
@@ -473,7 +473,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-8" class="slice-nav-item" data-slice-nav="8">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="8"></span>
-        <span>#8 Correctness backstop: always re-gate assembled output</span>
+        <span>#8 Correctness backstop: always re-gate via guard.py + factcheck.py</span>
         
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
@@ -525,14 +525,14 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <section class="dep-graph" data-zone="dependency-graph">
   <h2>Dependency Graph</h2>
   <div id="graph-data" style="display:none">
-    <div data-node="1" data-name="Reuse store: SQLite schema + hash/TTL helpers" data-status="pending" data-deps="" data-files="4"></div>
-    <div data-node="2" data-name="Requirement canonicalization + tiered match" data-status="pending" data-deps="1" data-files="4"></div>
-    <div data-node="3" data-name="Company-research cache + specialist integration" data-status="pending" data-deps="1" data-files="2"></div>
-    <div data-node="4" data-name="Requirement->evidence/bullet map + reuse" data-status="pending" data-deps="1,2" data-files="2"></div>
-    <div data-node="5" data-name="JD-parse + fit-score dedup for near-duplicate JDs" data-status="pending" data-deps="1,2" data-files="3"></div>
+    <div data-node="1" data-name="Reuse store: migration 009 + hash/TTL + config surface" data-status="pending" data-deps="" data-files="4"></div>
+    <div data-node="2" data-name="Requirement canonicalization + tiered match + taxonomy seed" data-status="pending" data-deps="1" data-files="5"></div>
+    <div data-node="3" data-name="Company-research cross-role reuse (extend existing file cache)" data-status="pending" data-deps="1" data-files="3"></div>
+    <div data-node="4" data-name="Requirement->evidence/bullet map + reuse" data-status="pending" data-deps="1,2" data-files="3"></div>
+    <div data-node="5" data-name="JD-parse + fit-score dedup for near-duplicate JDs" data-status="pending" data-deps="1,2" data-files="4"></div>
     <div data-node="6" data-name="Reuse-planner pre-phase + --no-reuse flag" data-status="pending" data-deps="2,3,4,5" data-files="3"></div>
-    <div data-node="7" data-name="Whole-resume warm-start (diff-and-tweak) with anchor preservation" data-status="pending" data-deps="6,4" data-files="3"></div>
-    <div data-node="8" data-name="Correctness backstop: always re-gate assembled output" data-status="pending" data-deps="6,7" data-files="3"></div>
+    <div data-node="7" data-name="Whole-resume warm-start (diff-and-tweak), owns anchor carry-forward" data-status="pending" data-deps="6,4" data-files="3"></div>
+    <div data-node="8" data-name="Correctness backstop: always re-gate via guard.py + factcheck.py" data-status="pending" data-deps="6,7" data-files="4"></div>
     <div data-node="9" data-name="Reuse metrics, report, and A/B acceptance harness" data-status="pending" data-deps="6,8" data-files="3"></div>
     
     <!--PLAN_GRAPH_NODES-->
@@ -552,21 +552,25 @@ render) from zero, dispatching all apply-* specialists on every job even though
 JDs overlap heavily: the same requirements recur, the same companies recur, and
 a recently-tailored resume often already fits ~80% of a new JD. This wastes
 ~30-60 min wall-clock and many LLM calls per run by re-deriving information
-already generated in prior applications.
+already generated in prior applications. An exact-input phase cache (llm_cache,
+migration 008, keyed specialist+jd_hash+master_etag) already exists but only
+memoizes IDENTICAL inputs -- a near-duplicate JD with different wording is a
+cache miss, and there is no cross-application requirement/company/resume reuse.
 </div>
 <h4>Goals</h4>
 <ol>
-<li data-markdown>Introduce a layered reuse layer (artifact + requirement + whole-resume warm-start) that reuses prior outputs instead of regenerating them.</li>
+<li data-markdown>Introduce a layered reuse layer (artifact + requirement + whole-resume warm-start) that SITS ABOVE the existing exact-input llm_cache and reuses prior outputs across applications, not just on identical inputs.</li>
 <li data-markdown>Canonicalize JD requirements (hybrid tags + LLM normalize, no vector store) so equivalent phrasings map to one requirement.</li>
 <li data-markdown>Provide a fast path that cuts model calls AND wall-clock ~50% on warm runs, with the full pipeline as fallback for novel JDs.</li>
-<li data-markdown>Make reuse correctness-first: the final assembled output always passes anchor, no-fabrication, and fact-check gates.</li>
-<li data-markdown>Make savings measurable via per-run metrics + an A/B harness vs a baseline full run.</li>
+<li data-markdown>Make reuse correctness-first: the final assembled output always passes anchor (guard.py), no-fabrication, and fact-check (factcheck.py) gates regardless of how much was reused.</li>
+<li data-markdown>Make savings measurable via per-run metrics + an A/B harness that controls for the existing llm_cache so it measures the reuse layer&#39;s INCREMENTAL benefit.</li>
 </ol>
 <h4>Constraints</h4>
 <ul>
 <li data-markdown>Local-first, single-tenant: no heavy new runtime deps (no vector store) -- canonical tags + sqlite + content-hashing only.</li>
 <li data-markdown>Anchor preservation is non-negotiable; no fabrication; reuse must never carry a stale or wrong claim into a different JD.</li>
-<li data-markdown>Build on existing architecture: 3-phase pipeline, apply-* specialists, .apply-state/* artifacts, master YAMLs, anchors, job_search.db.</li>
+<li data-markdown>Build on existing architecture: 3-phase pipeline (src/jobsmith/core/pipeline.py + _cli_apply.py), prompt-based apply-* specialists (src/jobsmith/plugin/agents/apply-*.md), &lt;app-dir&gt;/.apply-state/* artifacts, master YAMLs + anchors, and the pipeline DB private/jobsmith.db (migrations in src/jobsmith/migrations/).</li>
+<li data-markdown>Do NOT duplicate or fork existing caches: coexist with llm_cache (migration 008) and the file-based company cache (research.py + private/companies/); reconcile, do not reinvent.</li>
 <li data-markdown>Reuse is an optimization layer; the full pipeline remains the correctness backstop and the fallback (--no-reuse).</li>
 </ul>
 
@@ -586,11 +590,11 @@ already generated in prior applications.
   <summary><span>Slices</span><span class="badge badge-pending" data-badge-for="slices">Pending</span></summary>
   <div class="section-body">
     <details class="slice-card" id="slice-1" data-slice="1" data-slice-name="slice-1" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 1: Reuse store: SQLite schema &#43; hash/TTL helpers">
+  <summary class="slice-summary" aria-label="Slice 1: Reuse store: migration 009 &#43; hash/TTL &#43; config surface">
     <span class="slice-num">#1</span>
     <span class="slice-title-col">
-      <span class="slice-name">Reuse store: SQLite schema &#43; hash/TTL helpers</span>
-      <span class="slice-preview">Add reuse tables to jobsearch.db: canonicalrequirements,</span>
+      <span class="slice-name">Reuse store: migration 009 &#43; hash/TTL &#43; config surface</span>
+      <span class="slice-preview">Add reuse tables to the pipeline DB (private/jobsmith.db) via a new migration</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-revision badge-sm">M</span>
@@ -630,13 +634,18 @@ already generated in prior applications.
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-1-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>Add reuse tables to job_search.db: canonical_requirements,
-requirement_evidence_map, company_research_cache, application_fingerprints,
-and run_metrics. Add a migration that creates them idempotently on apply
-startup. Implement a small reuse-store module exposing typed read/write
-helpers plus two freshness primitives: content_hash(inputs) (stable SHA over
-normalized input bytes) and is_fresh(row, ttl) (hash-match AND within TTL).
-No reuse logic yet -- this is the foundation every later slice keys off.</p>
+          <div class="markdown-block reveal-content serif-prose"><p>Add reuse tables to the pipeline DB (private/jobsmith.db) via a new migration
+src/jobsmith/migrations/009_reuse_store.sql registered in _PIPELINE_MIGRATIONS
+(src/jobsmith/db.py:50-58): canonical_requirements, requirement_evidence_map,
+application_fingerprints, and run_metrics. (Company research reuses the
+existing file cache -- see slice-3 -- so NO company table here.) Add a
+reuse-store module (src/jobsmith/reuse/store.py) with typed read/write helpers
+and two freshness primitives: content_hash(inputs) (stable SHA over normalized
+input bytes) and is_fresh(row, ttl). Add a config surface
+(src/jobsmith/config.py or existing settings module) that owns ALL reuse
+knobs with documented defaults: fuzzy cutoff, JD-overlap warm-start threshold,
+dedup threshold, company TTL, and the regen retry bound. This is the
+foundation every later slice keys off and the home for all tunables.</p>
 </div>
           <label for="slice-1-what-reveal" class="reveal-label">Show full description</label>
           
@@ -648,11 +657,12 @@ No reuse logic yet -- this is the foundation every later slice keys off.</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Stage-2 decision: cache state lives in job_search.db (queryable,
-transactional, co-located with job/application records, survives across
-runs). Stage-4 decision: invalidation = content-hash of inputs + TTL for
-time-sensitive data. Every downstream slice depends on this schema and the
-hash/TTL primitives, so it must land first and be stable.</p>
+          <div class="markdown-block serif-prose"><p>Stage-2: cache state lives in the pipeline DB (private/jobsmith.db), queryable
+and transactional. Stage-4: invalidation = content-hash + TTL. Critics: the DB
+is private/jobsmith.db (not job_search.db), migrations are registered in
+_PIPELINE_MIGRATIONS (no standalone migrate.py), and a single config surface
+with defaults is required so the human reviewer can see every threshold in one
+place.</p>
 </div>
           
         </div>
@@ -661,13 +671,13 @@ hash/TTL primitives, so it must land first and be stable.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/reuse/store.py, src/jobsmith/reuse/schema.sql, src/jobsmith/reuse/migrate.py, src/jobsmith/db.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/reuse/store.py, src/jobsmith/migrations/009_reuse_store.sql, src/jobsmith/db.py, src/jobsmith/config.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Running apply on a fresh job_search.db creates all five reuse tables idempotently (re-run is a no-op)</li><li>content_hash is stable across runs for identical normalized input and changes when any input byte changes</li><li>is_fresh returns false when either the stored hash differs OR the row is older than its TTL</li><li>Existing apply pipeline still runs end-to-end with the new tables present (no behavior change yet)</li></ul>
+        <ul class="slice-done-list slice-done-list--grid"><li>Running apply creates all reuse tables in private/jobsmith.db via the registered migration 009 idempotently (re-run is a no-op)</li><li>content_hash is stable across runs for identical normalized input and changes when any input byte changes</li><li>is_fresh returns false when either the stored hash differs OR the row is older than its TTL</li><li>All reuse knobs (fuzzy cutoff, warm-start &#43; dedup thresholds, company TTL, retry bound) are read from config with documented defaults</li><li>Cache rows survive deletion of a source application without error (orphaned rows are unreachable, not crashing) and writes use INSERT OR REPLACE under WAL</li><li>Existing apply pipeline and llm_cache still run end-to-end with the new tables present (no behavior change yet)</li></ul>
       </div>
       
     
@@ -678,17 +688,18 @@ hash/TTL primitives, so it must land first and be stable.</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-1-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>State:</strong> five new tables in job_search.db (not .apply-state files) per
-Stage-2 -- relational queries needed for nearest-app + requirement match.
-<strong>Payload split:</strong> index rows hold keys/hashes/timestamps/TTL; large blobs
-(company-research text, resume bases) stored inline as TEXT for v1 (single
-user, small volume) -- revisit file-offload only if rows get large.
-<strong>Freshness:</strong> content_hash over NORMALIZED inputs so cosmetic master-YAML
-reformatting does not bust the cache; TTL only on company_research_cache.
-<strong>Rejected:</strong> .apply-state/_cache JSON blobs (no relational nearest-app
-query); mtime/version invalidation (a no-op save would bust the whole cache).
-Exact module paths under src/jobsmith/ to be confirmed against the real tree
-at implementation; db wiring goes where job_search.db is already opened.</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>State:</strong> new tables in private/jobsmith.db (NOT job_search.db) via migration
+009 registered in _PIPELINE_MIGRATIONS (db.py:50-58); standalone schema.sql +
+migrate.py REJECTED (incompatible with the existing migration runner, A3).
+<strong>Coexistence:</strong> this layer does NOT replace llm_cache (008) -- llm_cache
+memoizes exact inputs; the reuse layer adds the fuzzy/cross-application tier
+above it (A4). Company research stays in the existing file cache (slice-3), so
+no company table here. <strong>Config:</strong> one surface owns every threshold/TTL so
+reviewers and operators see all knobs together (design-critic danger).
+<strong>Deletion/concurrency:</strong> rows keyed by content hash tolerate orphaned source
+apps; single-user + WAL + INSERT OR REPLACE covers the rare concurrent apply.
+<strong>Freshness:</strong> hash over NORMALIZED inputs so cosmetic master-YAML edits do
+not bust the cache; TTL applies to company research (slice-3).</p>
 </div>
         <label for="slice-1-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -706,12 +717,17 @@ at implementation; db wiring goes where job_search.db is already opened.</p>
           
           <div class="test-group" data-kind="unit">
             <span class="test-chip">UNIT &middot; 1</span>
-            <ul><li>test_content_hash_stable_and_sensitive; test_is_fresh_hash_and_ttl</li></ul>
+            <ul><li>test_content_hash_stable_and_sensitive; test_is_fresh_hash_and_ttl;</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 1</span>
+            <ul><li>test_config_defaults_present</li></ul>
           </div>
           
           <div class="test-group" data-kind="integration">
             <span class="test-chip">INTEGRATION &middot; 1</span>
-            <ul><li>test_migration_idempotent (run migrate twice, assert one schema)</li></ul>
+            <ul><li>test_migration_009_idempotent (run migrate twice via _PIPELINE_MIGRATIONS, assert one schema)</li></ul>
           </div>
           
         </div>
@@ -728,13 +744,13 @@ at implementation; db wiring goes where job_search.db is already opened.</p>
       <div class="slice-field-value">
         
         <div class="question-block slice-question-block">
-          <p>Store large cached blobs inline as TEXT or offload to files referenced by the index?</p>
+          <p>Store large cached payloads inline as TEXT or offload to files referenced by the index?</p>
           
           
           <textarea
             data-section="slice-1-question-q-blob"
             data-comment-for="slice-1-question-q-blob"
-            placeholder="Answer question q-blob...">Inline TEXT for v1 -- single-user, low volume, keeps invalidation atomic with the row. Revisit file-offload only if profiling shows DB bloat.</textarea>
+            placeholder="Answer question q-blob...">Inline TEXT for v1 -- single-user, low volume, keeps invalidation atomic with the row; company research keeps its existing file form (slice-3). Revisit offload only if profiling shows DB bloat.</textarea>
           
         </div>
         
@@ -753,11 +769,11 @@ at implementation; db wiring goes where job_search.db is already opened.</p>
   </div>
 </details>
 <details class="slice-card" id="slice-2" data-slice="2" data-slice-name="slice-2" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 2: Requirement canonicalization &#43; tiered match">
+  <summary class="slice-summary" aria-label="Slice 2: Requirement canonicalization &#43; tiered match &#43; taxonomy seed">
     <span class="slice-num">#2</span>
     <span class="slice-title-col">
-      <span class="slice-name">Requirement canonicalization &#43; tiered match</span>
-      <span class="slice-preview">Add a canonical skill/requirement taxonomy (seed list with synonym aliases,</span>
+      <span class="slice-name">Requirement canonicalization &#43; tiered match &#43; taxonomy seed</span>
+      <span class="slice-preview">Add a canonical skill/requirement taxonomy as a versioned seed file</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-blocked badge-sm">L</span>
@@ -797,14 +813,17 @@ at implementation; db wiring goes where job_search.db is already opened.</p>
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-2-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>Add a canonical skill/requirement taxonomy (seed list with synonym aliases,
-e.g. {advanced sql, strong sql skills, sql proficiency} -&gt; tag:sql) plus a
-normalizer that, during the existing apply-jd-parser LLM call, emits for each
-requirement: a canonical tag (when known) and a normalized phrase. Persist
-canonical requirements to canonical_requirements. Implement match(req) with
-tiered resolution: exact tag -&gt; normalized-phrase equality -&gt; fuzzy
-(token/FTS score) below a cutoff = &#34;no match&#34;. Return a match verdict
-(reuse | regenerate) with the matched prior requirement id.</p>
+          <div class="markdown-block reveal-content serif-prose"><p>Add a canonical skill/requirement taxonomy as a versioned seed file
+(src/jobsmith/reuse/taxonomy.py + a data seed, e.g. reuse/taxonomy_seed.yaml)
+with synonym aliases (advanced sql / strong sql skills / sql proficiency -&gt;
+tag:sql) and a documented path for adding new tags. Add a normalizer
+(canonicalize.py): extend the apply-jd-parser prompt
+(src/jobsmith/plugin/agents/apply-jd-parser.md) to emit, per requirement, a
+canonical tag (when known) + a normalized phrase, and capture those in the
+post-phase ingest (src/jobsmith/db_ingest.py) into canonical_requirements.
+Implement match(req) (match.py) with tiered resolution: exact tag -&gt;
+normalized-phrase equality -&gt; fuzzy (token-set ratio) below the configured
+cutoff = no match; return reuse|regenerate + matched prior requirement id.</p>
 </div>
           <label for="slice-2-what-reveal" class="reveal-label">Show full description</label>
           
@@ -816,10 +835,10 @@ tiered resolution: exact tag -&gt; normalized-phrase equality -&gt; fuzzy
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Stage-2 decision: hybrid canonical-tag taxonomy + LLM-assisted normalize,
-NO vector store (local-first). Stage-3 decision: tiered exact-&gt;normalized
--&gt;fuzzy gating. This is the classification substrate that requirement reuse,
-JD/fit dedup, and the planner all consume.</p>
+          <div class="markdown-block serif-prose"><p>Stage-2: hybrid canonical-tags + LLM normalize, NO vector store. Stage-3:
+tiered exact-&gt;normalized-&gt;fuzzy. Critics: jd-parser is a prompt .md (A2), so
+canonical fields are injected via the prompt + db_ingest.py, not a Python
+module; and the taxonomy needs an explicit seed + maintenance path.</p>
 </div>
           
         </div>
@@ -828,13 +847,13 @@ JD/fit dedup, and the planner all consume.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/reuse/taxonomy.py, src/jobsmith/reuse/canonicalize.py, src/jobsmith/reuse/match.py, src/jobsmith/agents/apply_jd_parser.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/reuse/taxonomy.py, src/jobsmith/reuse/canonicalize.py, src/jobsmith/reuse/match.py, src/jobsmith/plugin/agents/apply-jd-parser.md, src/jobsmith/db_ingest.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Three phrasings of the same skill (e.g. &#39;advanced SQL&#39; / &#39;strong SQL skills&#39; / &#39;SQL proficiency&#39;) resolve to the same canonical tag</li><li>An unknown phrasing with no tag still gets a normalized phrase and is matchable by normalized-equality / fuzzy</li><li>match returns reuse for exact&#43;normalized hits and regenerate for fuzzy scores below the configured cutoff</li><li>Canonicalized requirements persist to canonical_requirements and round-trip on the next run</li></ul>
+        <ul class="slice-done-list"><li>Three phrasings of the same skill resolve to the same canonical tag</li><li>An unknown phrasing with no tag still gets a normalized phrase and is matchable by normalized-equality / fuzzy</li><li>match returns reuse for exact&#43;normalized hits and regenerate for fuzzy scores below the configured cutoff</li><li>Canonicalized requirements persist to canonical_requirements (via db_ingest) and round-trip on the next run</li><li>Adding a new synonym to the taxonomy seed is picked up without code changes and is covered by a test</li></ul>
       </div>
       
     
@@ -845,16 +864,15 @@ JD/fit dedup, and the planner all consume.</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-2-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> canonicalization rides the existing apply-jd-parser LLM call --
-no extra model round-trip; the parser prompt is extended to emit tag +
-normalized phrase alongside its current output.
-<strong>Match tiers:</strong> exact tag (cheap, high precision) -&gt; normalized-phrase
-equality -&gt; fuzzy via sqlite FTS / token-set ratio with a config cutoff.
-Fuzzy below cutoff = regenerate (correctness-first bias).
-<strong>Rejected:</strong> embeddings + vector store (Stage-2: violates local-first, adds
-infra + embedding calls); pure deterministic synonym table (brittle on unseen
-phrasing -- LLM-normalize covers the long tail without a vector DB).
-Taxonomy seed is hand-curated and grows; not trying to be exhaustive at v1.</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> canonicalization rides the existing apply-jd-parser prompt (no
+extra model round-trip); fields land via db_ingest.py post-phase (A2 -- the
+parser is a .md prompt, there is no apply_jd_parser.py to edit).
+<strong>Match tiers:</strong> exact tag -&gt; normalized-phrase equality -&gt; token-set-ratio
+fuzzy with a config cutoff; below cutoff = regenerate (correctness-first).
+<strong>Taxonomy:</strong> versioned seed file with a documented add-a-tag path
+(design-critic danger on maintenance). <strong>Rejected:</strong> embeddings + vector store
+(violates local-first); pure deterministic synonym table (brittle -- LLM
+normalize covers the long tail without a vector DB).</p>
 </div>
         <label for="slice-2-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -877,12 +895,12 @@ Taxonomy seed is hand-curated and grows; not trying to be exhaustive at v1.</p>
           
           <div class="test-group" data-kind="other">
             <span class="test-chip">OTHER &middot; 1</span>
-            <ul><li>test_tiered_match_thresholds (exact/normalized/fuzzy boundaries)</li></ul>
+            <ul><li>test_tiered_match_thresholds; test_taxonomy_seed_extensible</li></ul>
           </div>
           
           <div class="test-group" data-kind="integration">
             <span class="test-chip">INTEGRATION &middot; 1</span>
-            <ul><li>test_jd_parser_emits_canonical_fields</li></ul>
+            <ul><li>test_jd_parser_emits_canonical_fields_via_ingest</li></ul>
           </div>
           
         </div>
@@ -899,13 +917,13 @@ Taxonomy seed is hand-curated and grows; not trying to be exhaustive at v1.</p>
       <div class="slice-field-value">
         
         <div class="question-block slice-question-block">
-          <p>What fuzzy backend -- sqlite FTS5 or an in-process token-set ratio?</p>
+          <p>Fuzzy backend -- sqlite FTS5 or in-process token-set ratio?</p>
           
           
           <textarea
             data-section="slice-2-question-q-fuzzy"
             data-comment-for="slice-2-question-q-fuzzy"
-            placeholder="Answer question q-fuzzy...">Start with token-set ratio over normalized phrases (no schema dependency, fully local); add FTS5 only if recall is insufficient. Cutoff lives in config so it is tunable without code changes.</textarea>
+            placeholder="Answer question q-fuzzy...">Token-set ratio over normalized phrases (no schema dependency, fully local); add FTS5 only if recall is insufficient. Cutoff lives in the slice-1 config surface, tunable without code changes.</textarea>
           
         </div>
         
@@ -924,11 +942,11 @@ Taxonomy seed is hand-curated and grows; not trying to be exhaustive at v1.</p>
   </div>
 </details>
 <details class="slice-card" id="slice-3" data-slice="3" data-slice-name="slice-3" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 3: Company-research cache &#43; specialist integration">
+  <summary class="slice-summary" aria-label="Slice 3: Company-research cross-role reuse (extend existing file cache)">
     <span class="slice-num">#3</span>
     <span class="slice-title-col">
-      <span class="slice-name">Company-research cache &#43; specialist integration</span>
-      <span class="slice-preview">Key companyresearchcache by normalized company identity &#43; a content hash of</span>
+      <span class="slice-name">Company-research cross-role reuse (extend existing file cache)</span>
+      <span class="slice-preview">EXTEND the existing file-based company cache (src/jobsmith/research.py:</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-revision badge-sm">M</span>
@@ -967,13 +985,17 @@ Taxonomy seed is hand-curated and grows; not trying to be exhaustive at v1.</p>
         <div class="slice-field-label">What</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Key company_research_cache by normalized company identity + a content hash of
-the inputs that shaped the research, with a TTL (default 90d). Wire
-apply-company-research to consult the cache first: on a fresh hit it returns
-the cached blob and skips the LLM call; on miss/stale it regenerates and
-writes back. Record whether the result was reused or generated for the
-reuse report.</p>
+          <input type="checkbox" id="slice-3-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>EXTEND the existing file-based company cache (src/jobsmith/research.py:
+slugify / is_fresh / cache_path_for, backed by private/companies/.md)
+so it reuses research across DIFFERENT roles at the same/normalized company,
+not just on the exact prior path. Add company-key normalization, surface the
+TTL through the slice-1 config (keep current 30d default), and record a
+reused-vs-generated signal for the reuse report. Update the
+apply-company-research prompt (src/jobsmith/plugin/agents/apply-company-research.md)
+/ its dispatch so a fresh cache hit short-circuits the LLM call.</p>
 </div>
+          <label for="slice-3-what-reveal" class="reveal-label">Show full description</label>
           
         </div>
       </div>
@@ -983,9 +1005,11 @@ reuse report.</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Stage-2 in-scope candidate; lowest-risk reuse because company facts do not
-depend on the specific JD. Directly attacks the cost/wall-clock target on the
-common case of multiple roles at the same/similar company.</p>
+          <div class="markdown-block serif-prose"><p>Stage-2 in-scope, lowest-risk reuse (company facts are JD-independent).
+Critic: a file-based company cache ALREADY exists (research.py +
+private/companies/, tests/test_company_research_cache.py) -- extend it for
+cross-role reuse rather than adding a parallel company_research_cache table
+that would fork the source of truth.</p>
 </div>
           
         </div>
@@ -994,13 +1018,13 @@ common case of multiple roles at the same/similar company.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/reuse/company_cache.py, src/jobsmith/agents/apply_company_research.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/research.py, src/jobsmith/reuse/company_cache.py, src/jobsmith/plugin/agents/apply-company-research.md</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Second application to the same company within TTL reuses cached research and makes zero company-research LLM calls</li><li>A cache entry past its TTL triggers regeneration and a write-back with a fresh timestamp</li><li>Each run records company-research as reused or generated for the reuse report</li></ul>
+        <ul class="slice-done-list"><li>A second application to the same (normalized) company within TTL reuses cached research and makes zero company-research LLM calls</li><li>A cache entry past its (config) TTL triggers regeneration and a fresh write-back</li><li>Existing tests/test_company_research_cache.py still pass (no regression to the file cache contract)</li><li>Each run records company-research as reused or generated for the reuse report</li></ul>
       </div>
       
     
@@ -1011,12 +1035,13 @@ common case of multiple roles at the same/similar company.</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-3-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>State:</strong> company_research_cache keyed on normalized company name + input
-hash; TTL default 90d (config) since company facts go stale. <strong>Skip rule:</strong>
-fresh hit (hash match AND within TTL) returns cached blob, bypasses the LLM
-call entirely. <strong>Rejected:</strong> keying on raw job_id (defeats cross-role reuse);
-no-TTL (company research would never refresh). Similar-company fuzzy reuse is
-deferred -- v1 reuses on same-company exact/normalized identity only.</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Reconcile:</strong> EXTEND research.py&#39;s existing file cache (slugify/is_fresh/
+cache_path_for + private/companies/) -- do NOT add a parallel DB table (critic:
+avoids two sources of truth). <strong>Skip rule:</strong> fresh hit (within TTL) returns
+the cached .md and bypasses the LLM call. <strong>TTL:</strong> surfaced through slice-1
+config, default kept at existing 30d. <strong>Rejected:</strong> keying on raw job_id
+(defeats cross-role reuse); a new DB company table (forks the live file cache).
+Similar-company fuzzy reuse deferred -- v1 is same-company normalized identity.</p>
 </div>
         <label for="slice-3-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1039,7 +1064,7 @@ deferred -- v1 reuses on same-company exact/normalized identity only.</p>
           
           <div class="test-group" data-kind="integration">
             <span class="test-chip">INTEGRATION &middot; 1</span>
-            <ul><li>test_second_run_same_company_skips_llm (assert call count 0)</li></ul>
+            <ul><li>test_second_role_same_company_skips_llm (assert call count 0)</li></ul>
           </div>
           
         </div>
@@ -1108,12 +1133,15 @@ deferred -- v1 reuses on same-company exact/normalized identity only.</p>
           
           <input type="checkbox" id="slice-4-what-reveal" class="reveal-toggle">
           <div class="markdown-block reveal-content serif-prose"><p>Populate requirement_evidence_map from each completed application&#39;s
-bullet-selection.json: (canonical requirement) -&gt; (master bullet id +
-content hash of that bullet). On a new JD, for each requirement that resolves
-to a prior canonical requirement (slice-2), reuse the previously selected
-master bullet INSTEAD of re-running selection for it -- but only if the
+bullet-selection.json (read via src/jobsmith/_state_readers.py:52, at
+/.apply-state/bullet-selection.json): (canonical requirement) -&gt;
+(master bullet id + content hash of that bullet). On a new JD, for each
+requirement resolving to a prior canonical requirement (slice-2), reuse the
+previously selected master bullet INSTEAD of re-selecting -- but only when the
 bullet&#39;s current content hash still matches the stored hash. A master-YAML
-edit changes the bullet hash and auto-invalidates the mapping.</p>
+edit changes the bullet hash and auto-invalidates the mapping. The
+apply-bullet-selector prompt (src/jobsmith/plugin/agents/apply-bullet-selector.md)
+consults the map before doing work.</p>
 </div>
           <label for="slice-4-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1125,9 +1153,11 @@ edit changes the bullet hash and auto-invalidates the mapping.</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Stage-2 in-scope candidate; the core of fine-grained reuse. Lets a master
-bullet that satisfied &#34;build data pipelines&#34; be reused whenever that
-requirement recurs, shrinking the work apply-bullet-selector must do.</p>
+          <div class="markdown-block serif-prose"><p>Stage-2 in-scope; core of fine-grained reuse. Critics: bullet-selector is a
+prompt .md (A2); the artifact path is confirmed at
+/.apply-state/bullet-selection.json (A6); and this high-risk slice
+needs an explicit correctness done_when plus a clear statement that the
+assembled-output gate is slice-8.</p>
 </div>
           
         </div>
@@ -1136,13 +1166,13 @@ requirement recurs, shrinking the work apply-bullet-selector must do.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/reuse/evidence_map.py, src/jobsmith/agents/apply_bullet_selector.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/reuse/evidence_map.py, src/jobsmith/plugin/agents/apply-bullet-selector.md, src/jobsmith/_state_readers.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>A requirement seen in a prior application reuses the same master bullet without re-running selection for that requirement</li><li>Editing the master bullet&#39;s content changes its hash and invalidates the reused mapping (forces re-selection)</li><li>Anchor bullets remain present in the selection regardless of reuse decisions</li><li>New requirements with no prior mapping fall through to normal apply-bullet-selector</li></ul>
+        <ul class="slice-done-list"><li>A requirement seen in a prior application reuses the same master bullet without re-selecting for that requirement</li><li>Editing the master bullet&#39;s content changes its hash and invalidates the reused mapping (forces re-selection) -- verified by a dedicated unit test</li><li>A reused mapping never returns a bullet whose stored hash != current master hash (map-correctness test in isolation)</li><li>Anchor bullets remain present in the selection regardless of reuse decisions</li><li>New requirements with no prior mapping fall through to normal bullet selection</li></ul>
       </div>
       
     
@@ -1154,15 +1184,15 @@ requirement recurs, shrinking the work apply-bullet-selector must do.</p>
         
         <input type="checkbox" id="slice-4-decisions-reveal" class="reveal-toggle">
         <div class="markdown-block reveal-content serif-prose"><p><strong>State:</strong> requirement_evidence_map rows store canonical-requirement id,
-master bullet id, and the bullet&#39;s content hash at mapping time.
-<strong>Invalidation:</strong> reuse only when stored hash == current master bullet hash
--- this is how master edits propagate (Stage-4 content-hash invalidation).
-<strong>Guardrail:</strong> anchor preservation is independent of and overrides reuse --
-anchors are always selected; reuse only affects non-anchor requirement-&gt;bullet
-picks. <strong>Rejected:</strong> reusing the whole bullet-selection.json blob here (that
-is slice-7 warm-start, coarser); trusting the map without re-hashing (would
-carry stale bullet text). High risk flagged: this is where a stale claim
-could leak, so slice-8 re-gates the assembled output.</p>
+master bullet id, and the bullet content hash at mapping time.
+<strong>Invalidation:</strong> reuse ONLY when stored hash == current master bullet hash
+(Stage-4 content-hash invalidation) -- this slice tests that in isolation so
+its correctness does not silently depend on slice-8. <strong>Gate boundary:</strong> the
+map is an optimization HINT, not a correctness authority; the assembled output
+is re-gated in slice-8. <strong>Guardrail:</strong> anchor preservation overrides reuse;
+anchors always selected. <strong>Rejected:</strong> reusing the whole bullet-selection.json
+blob here (that is slice-7 warm-start); trusting the map without re-hashing
+(carries stale bullet text).</p>
 </div>
         <label for="slice-4-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1184,8 +1214,8 @@ could leak, so slice-8 re-gates the assembled output.</p>
           </div>
           
           <div class="test-group" data-kind="other">
-            <span class="test-chip">OTHER &middot; 1</span>
-            <ul><li>test_master_edit_busts_bullet_hash; test_anchors_always_selected</li></ul>
+            <span class="test-chip">OTHER &middot; 2</span>
+            <ul><li>test_master_edit_busts_bullet_hash; test_no_reuse_on_hash_mismatch;</li><li>test_anchors_always_selected</li></ul>
           </div>
           
           <div class="test-group" data-kind="integration">
@@ -1207,13 +1237,13 @@ could leak, so slice-8 re-gates the assembled output.</p>
       <div class="slice-field-value">
         
         <div class="question-block slice-question-block">
-          <p>Can a bullet that satisfied a requirement in JD-A be wrong for JD-B even if the requirement tag matches?</p>
+          <p>Can a bullet that satisfied a requirement in JD-A be wrong for JD-B even if the tag matches?</p>
           
           
           <textarea
             data-section="slice-4-question-q-context"
             data-comment-for="slice-4-question-q-context"
-            placeholder="Answer question q-context...">Possibly (tone/context drift), so requirement-level reuse picks the bullet but does NOT bypass the final fact-check/no-fabrication gate (slice-8). The map is an optimization hint, not a correctness authority.</textarea>
+            placeholder="Answer question q-context...">Possibly (tone/context drift), so requirement-level reuse picks the bullet but never bypasses the final fact-check/no-fabrication gate (slice-8, guard.py &#43; factcheck.py). The map is a hint, not authority.</textarea>
           
         </div>
         
@@ -1275,14 +1305,19 @@ could leak, so slice-8 re-gates the assembled output.</p>
         <div class="slice-field-label">What</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Compute an application_fingerprint per JD from its normalized requirement set</p>
+          <input type="checkbox" id="slice-5-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Compute an application_fingerprint per JD from its normalized requirement set</p>
 <ul>
-<li>normalized text. On a new JD, look up application_fingerprints; if a prior
-JD is a near-duplicate above the dedup threshold, reuse its jd-parsed.json and
-fit-score.json instead of re-running apply-jd-parser / apply-fit-scorer.
-Below threshold, run normally and store the new fingerprint.</li>
+<li>normalized text (slice-2). On a new JD, look up application_fingerprints; if
+a prior JD is a near-duplicate above the (config) dedup threshold, reuse its
+jd-parsed.json and fit-score.json (read via src/jobsmith/_state_readers.py:36
+and :44) instead of re-running apply-jd-parser / apply-fit-scorer. Below
+threshold, run normally and store the new fingerprint. This is the FUZZY tier
+above llm_cache&#39;s exact jd_hash keying -- it catches reposts/edited JDs that
+llm_cache misses.</li>
 </ul>
 </div>
+          <label for="slice-5-what-reveal" class="reveal-label">Show full description</label>
           
         </div>
       </div>
@@ -1292,9 +1327,10 @@ Below threshold, run normally and store the new fingerprint.</li>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Stage-2 in-scope candidate. Near-duplicate JDs (reposts, same role across
-boards) are common; skipping parse+score on them is a cheap, safe win toward
-the cost/wall-clock target.</p>
+          <div class="markdown-block serif-prose"><p>Stage-2 in-scope. Near-duplicate JDs are common; skipping parse+score on them
+is cheap and safe. Critic: this complements llm_cache (exact jd_hash) by
+catching near-duplicates, and the specialists are prompts (A2) so the skip is
+enforced at dispatch, not in a Python specialist module.</p>
 </div>
           
         </div>
@@ -1303,13 +1339,13 @@ the cost/wall-clock target.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/reuse/fingerprint.py, src/jobsmith/agents/apply_jd_parser.py, src/jobsmith/agents/apply_fit_scorer.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/reuse/fingerprint.py, src/jobsmith/plugin/agents/apply-jd-parser.md, src/jobsmith/plugin/agents/apply-fit-scorer.md, src/jobsmith/_state_readers.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>A re-submitted near-identical JD reuses prior jd-parsed.json and fit-score.json and skips both specialists</li><li>A JD below the dedup threshold runs both specialists normally and stores its own fingerprint</li><li>The dedup threshold is read from config (tunable without code changes)</li></ul>
+        <ul class="slice-done-list"><li>A re-submitted near-identical JD reuses prior jd-parsed.json and fit-score.json and skips both specialists</li><li>A JD below the dedup threshold runs both specialists normally and stores its own fingerprint</li><li>The dedup threshold is read from the slice-1 config (tunable without code changes)</li><li>Fingerprint reuse triggers on a near-duplicate that llm_cache (exact jd_hash) would miss</li></ul>
       </div>
       
     
@@ -1320,12 +1356,13 @@ the cost/wall-clock target.</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-5-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Key:</strong> fingerprint = hash/feature-set over normalized requirements + JD
-text (reuses slice-2 normalization). <strong>Skip rule:</strong> near-duplicate above
-threshold reuses BOTH jd-parsed and fit-score together (they are tightly
-coupled to the same JD). <strong>Rejected:</strong> exact-text-only dedup (misses reposts
-with trivial edits); deduping parse but re-scoring (fit-score is a function of
-the same parsed JD, so reuse both or neither). Threshold in config per Stage-3.</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Key:</strong> fingerprint = feature-set over normalized requirements + JD text
+(slice-2). <strong>Relationship to llm_cache:</strong> llm_cache keys on EXACT jd_hash; this
+fingerprint is the fuzzy layer that catches near-duplicates llm_cache misses
+(critic). <strong>Skip rule:</strong> above threshold reuses BOTH jd-parsed and fit-score
+(tightly coupled to the same JD). <strong>Rejected:</strong> exact-text dedup (misses
+reposts); deduping parse but re-scoring (fit-score is a function of the same
+parsed JD). Threshold in slice-1 config.</p>
 </div>
         <label for="slice-5-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1348,7 +1385,12 @@ the same parsed JD, so reuse both or neither). Threshold in config per Stage-3.<
           
           <div class="test-group" data-kind="integration">
             <span class="test-chip">INTEGRATION &middot; 1</span>
-            <ul><li>test_duplicate_jd_skips_parser_and_scorer</li></ul>
+            <ul><li>test_duplicate_jd_skips_parser_and_scorer;</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 1</span>
+            <ul><li>test_near_dup_reused_where_llmcache_misses</li></ul>
           </div>
           
         </div>
@@ -1376,7 +1418,7 @@ the same parsed JD, so reuse both or neither). Threshold in config per Stage-3.<
     <span class="slice-num">#6</span>
     <span class="slice-title-col">
       <span class="slice-name">Reuse-planner pre-phase &#43; --no-reuse flag</span>
-      <span class="slice-preview">Add a planner that runs BEFORE the gather phase.</span>
+      <span class="slice-preview">Add a planner (src/jobsmith/reuse/planner.py) that runs BEFORE the gather</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-blocked badge-sm">L</span>
@@ -1416,13 +1458,14 @@ the same parsed JD, so reuse both or neither). Threshold in config per Stage-3.<
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-6-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>Add a planner that runs BEFORE the gather phase. It: (1) normalizes the JD via
-slice-2; (2) queries fingerprints/caches/evidence-map to find the nearest
-prior application and a per-candidate reuse verdict; (3) decides warm-start
-vs full-draft using a configurable JD-overlap threshold; (4) emits a
-reuse-plan artifact (what to skip / reuse / warm-start / regenerate) that the
-specialists consult. Add a --no-reuse CLI flag that forces a full from-scratch
-run (planner emits an all-regenerate plan).</p>
+          <div class="markdown-block reveal-content serif-prose"><p>Add a planner (src/jobsmith/reuse/planner.py) that runs BEFORE the gather
+phase in the orchestrator (src/jobsmith/core/pipeline.py, integrated via
+src/jobsmith/_cli_apply.py run_apply). It: (1) normalizes the JD (slice-2);
+(2) queries fingerprints/evidence-map/company cache to find the nearest prior
+application and a per-candidate reuse verdict; (3) decides warm-start vs
+full-draft using the config JD-overlap threshold; (4) emits a reuse-plan
+artifact into /.apply-state/ that specialists consult. Add a
+--no-reuse CLI flag (in _cli_apply.py) forcing an all-regenerate plan.</p>
 </div>
           <label for="slice-6-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1434,10 +1477,9 @@ run (planner emits an all-regenerate plan).</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Stage-3 decision: reuse-planner pre-phase + per-specialist cache checks, with
-a tunable warm-start threshold and automatic-by-default + --no-reuse. This is
-the brain that turns the per-candidate caches into a single coherent run plan
-and the fallback switch to the full pipeline.</p>
+          <div class="markdown-block serif-prose"><p>Stage-3: reuse-planner pre-phase + per-specialist checks, tunable warm-start
+threshold, automatic-by-default + --no-reuse. Critic: the orchestrator is
+src/jobsmith/core/pipeline.py + _cli_apply.py (NOT src/jobsmith/pipeline.py).</p>
 </div>
           
         </div>
@@ -1446,13 +1488,13 @@ and the fallback switch to the full pipeline.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/reuse/planner.py, src/jobsmith/pipeline.py, src/jobsmith/_cli_apply.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/reuse/planner.py, src/jobsmith/core/pipeline.py, src/jobsmith/_cli_apply.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Planner emits a reuse-plan listing per-candidate verdicts (reuse/warm-start/regenerate) before gather runs</li><li>JD overlap above the warm-start threshold selects warm-start; below selects full draft</li><li>--no-reuse forces an all-regenerate plan identical in effect to the legacy full pipeline</li><li>When no prior application exists, the planner falls back cleanly to a full run</li></ul>
+        <ul class="slice-done-list"><li>Planner emits a reuse-plan listing per-candidate verdicts (reuse/warm-start/regenerate) before gather runs</li><li>JD overlap above the (config) warm-start threshold selects warm-start; below selects full draft</li><li>--no-reuse forces an all-regenerate plan identical in effect to the legacy full pipeline</li><li>When no prior application exists, the planner falls back cleanly to a full run</li></ul>
       </div>
       
     
@@ -1463,14 +1505,15 @@ and the fallback switch to the full pipeline.</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-6-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> new pre-gather phase in the apply orchestrator; reuse is
-automatic by default (safe -- gates still run), --no-reuse is the escape.
-<strong>Payload:</strong> a reuse-plan artifact in .apply-state// that specialists
-read to decide skip vs work. <strong>Threshold:</strong> warm-start fires only above a
-configurable JD-overlap score (default ~80%); thresholds in config per
-Stage-3. <strong>Rejected:</strong> pure pre-phase pre-population (no central warm-start
-decision); per-specialist-only (no cross-specialist coordination, no
-nearest-app). Full pipeline remains the correctness backstop + fallback.</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> new pre-gather step wired into src/jobsmith/core/pipeline.py via
+_cli_apply.run_apply (critic A-path: not src/jobsmith/pipeline.py). Reuse is
+automatic by default (safe -- gates still run); --no-reuse is the escape.
+<strong>Payload:</strong> a reuse-plan artifact in /.apply-state/ that specialists
+read. <strong>Threshold:</strong> warm-start fires only above the config JD-overlap score
+(default ~80%). <strong>Bottleneck (critic warn):</strong> planner depends on 2-5 by design
+(it is the integration join); slices 2/3 and 4/5 parallelize after slice-1.
+<strong>Rejected:</strong> pre-population only (no central warm-start decision);
+per-specialist-only (no cross-specialist coordination / nearest-app).</p>
 </div>
         <label for="slice-6-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1521,7 +1564,7 @@ nearest-app). Full pipeline remains the correctness backstop + fallback.</p>
           <textarea
             data-section="slice-6-question-q-overlap"
             data-comment-for="slice-6-question-q-overlap"
-            placeholder="Answer question q-overlap...">Jaccard/coverage over canonical requirement sets of the new JD vs the nearest prior application (reuses slice-2 tags). Single tunable score in config; warm-start only above it, else full draft.</textarea>
+            placeholder="Answer question q-overlap...">Jaccard/coverage over canonical requirement sets of the new JD vs the nearest prior application (slice-2 tags). Single tunable score in the slice-1 config; warm-start only above it, else full draft.</textarea>
           
         </div>
         
@@ -1540,10 +1583,10 @@ nearest-app). Full pipeline remains the correctness backstop + fallback.</p>
   </div>
 </details>
 <details class="slice-card" id="slice-7" data-slice="7" data-slice-name="slice-7" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 7: Whole-resume warm-start (diff-and-tweak) with anchor preservation">
+  <summary class="slice-summary" aria-label="Slice 7: Whole-resume warm-start (diff-and-tweak), owns anchor carry-forward">
     <span class="slice-num">#7</span>
     <span class="slice-title-col">
-      <span class="slice-name">Whole-resume warm-start (diff-and-tweak) with anchor preservation</span>
+      <span class="slice-name">Whole-resume warm-start (diff-and-tweak), owns anchor carry-forward</span>
       <span class="slice-preview">When the planner selects warm-start, load the nearest prior resume &#43; its</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
@@ -1587,9 +1630,12 @@ nearest-app). Full pipeline remains the correctness backstop + fallback.</p>
           <div class="markdown-block reveal-content serif-prose"><p>When the planner selects warm-start, load the nearest prior resume + its
 bullet-selection as a base, compute the requirement delta (what the new JD
 needs that the base does not already satisfy), and short-circuit the draft
-phase to modifying only the delta bullets via prose-writer instead of a
-from-scratch draft. Anchor bullets from the base are carried forward
-unconditionally and never dropped or rewritten away.</p>
+phase to modifying ONLY the delta bullets via the apply-prose-writer agent
+(src/jobsmith/plugin/agents/apply-prose-writer.md, dispatched through the
+existing agent path in src/jobsmith/core/pipeline.py run_phase_iter), instead
+of a from-scratch draft. This slice OWNS anchor carry-forward: anchor bullets
+from the base are copied verbatim and excluded from the diff/regenerate set;
+slice-8 VERIFIES them.</p>
 </div>
           <label for="slice-7-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1601,10 +1647,10 @@ unconditionally and never dropped or rewritten away.</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Stage-2 in-scope candidate and the biggest wall-clock win: turns a
-from-scratch draft into &#34;modify a few bullets&#34; when fit is close. Trickiest
-correctness surface, so anchor handling is explicit here and the assembled
-output is re-gated in slice-8.</p>
+          <div class="markdown-block serif-prose"><p>Stage-2 in-scope and the biggest wall-clock win. Critic: prose-writer is a
+prompt .md (A2) dispatched via the agent path, not a Python module; and anchor
+responsibility must be unambiguous -- slice-7 carries them forward, slice-8
+verifies.</p>
 </div>
           
         </div>
@@ -1613,13 +1659,13 @@ output is re-gated in slice-8.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/reuse/warmstart.py, src/jobsmith/agents/prose_writer.py, src/jobsmith/pipeline.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/reuse/warmstart.py, src/jobsmith/plugin/agents/apply-prose-writer.md, src/jobsmith/core/pipeline.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>A near-duplicate JD warm-starts from the nearest prior resume and only delta bullets are regenerated</li><li>All anchor bullets from the base resume are present and unmodified in the warm-started output</li><li>The requirement delta correctly identifies new-JD requirements not covered by the base</li><li>If warm-start cannot satisfy a required-but-uncovered requirement, it escalates that piece to full generation rather than fabricating</li></ul>
+        <ul class="slice-done-list"><li>A near-duplicate JD warm-starts from the nearest prior resume and only delta bullets are regenerated</li><li>All anchor bullets from the base resume are present and unmodified in the warm-started output (carry-forward owned here)</li><li>The requirement delta correctly identifies new-JD requirements not covered by the base</li><li>If warm-start cannot satisfy a required-but-uncovered requirement, it escalates that piece to full generation rather than fabricating</li></ul>
       </div>
       
     
@@ -1630,15 +1676,15 @@ output is re-gated in slice-8.</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-7-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> only when planner verdict == warm-start (above overlap
-threshold). <strong>Mechanism:</strong> base resume + bullet-selection diffed against new
-canonical requirements; prose-writer edits only delta bullets.
-<strong>Guardrail:</strong> anchors are copied from the base verbatim and excluded from the
-diff/regenerate set -- anchor preservation is non-negotiable. Uncovered
-required requirements escalate to full generation (never fabricate).
-<strong>Rejected:</strong> blind copy of the whole prior resume (carries stale, JD-specific
-claims); regenerating everything (defeats the warm-start win). This slice
-produces candidate output; slice-8 is the correctness gate before acceptance.</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> only when planner verdict == warm-start. <strong>Mechanism:</strong> base
+resume + bullet-selection diffed against new canonical requirements;
+apply-prose-writer (prompt, dispatched via core/pipeline run_phase_iter)
+edits only delta bullets (critic A2). <strong>Anchor ownership:</strong> this slice copies
+anchors verbatim and excludes them from regeneration; slice-8 verifies them
+(resolves the design-critic split). Uncovered required requirements escalate
+to full generation (never fabricate). <strong>Rejected:</strong> blind copy of the whole
+prior resume (carries stale JD-specific claims); regenerating everything
+(defeats the win). Output is candidate; slice-8 gates before acceptance.</p>
 </div>
         <label for="slice-7-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1689,7 +1735,7 @@ produces candidate output; slice-8 is the correctness gate before acceptance.</p
           <textarea
             data-section="slice-7-question-q-anchor"
             data-comment-for="slice-7-question-q-anchor"
-            placeholder="Answer question q-anchor...">Anchors are preserved regardless -- they are non-negotiable per project constraints. A conflict surfaces in the reuse report for human review; it never causes an anchor to be dropped or silently rewritten.</textarea>
+            placeholder="Answer question q-anchor...">Anchors are preserved regardless (non-negotiable). A conflict surfaces in the reuse report for human review; it never causes an anchor to be dropped or silently rewritten.</textarea>
           
         </div>
         
@@ -1708,10 +1754,10 @@ produces candidate output; slice-8 is the correctness gate before acceptance.</p
   </div>
 </details>
 <details class="slice-card" id="slice-8" data-slice="8" data-slice-name="slice-8" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 8: Correctness backstop: always re-gate assembled output">
+  <summary class="slice-summary" aria-label="Slice 8: Correctness backstop: always re-gate via guard.py &#43; factcheck.py">
     <span class="slice-num">#8</span>
     <span class="slice-title-col">
-      <span class="slice-name">Correctness backstop: always re-gate assembled output</span>
+      <span class="slice-name">Correctness backstop: always re-gate via guard.py &#43; factcheck.py</span>
       <span class="slice-preview">Ensure that no matter how much was reused or warm-started, the FINAL assembled</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
@@ -1751,12 +1797,18 @@ produces candidate output; slice-8 is the correctness gate before acceptance.</p
         <div class="slice-field-label">What</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Ensure that no matter how much was reused or warm-started, the FINAL assembled
-resume + cover letter pass the full gate suite before acceptance: anchor
-preservation, no-fabrication, and fact-check (every claim traceable to master
-content / research). On any gate failure, regenerate the offending piece via
-the full specialist and re-gate -- reuse must never ship an unvalidated claim.</p>
+          <input type="checkbox" id="slice-8-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Ensure that no matter how much was reused or warm-started, the FINAL assembled
+resume + cover letter pass the full gate suite before acceptance, by reusing
+the EXISTING gate implementations: anchor preservation (src/jobsmith/guard.py
+check_anchors) and no-fabrication / fact-check (src/jobsmith/factcheck.py).
+Wire the backstop (src/jobsmith/reuse/backstop.py) into the assembly step in
+src/jobsmith/core/pipeline.py so it runs on the reused path too. On any gate
+failure, regenerate the offending piece via the full specialist and re-gate,
+with a bounded retry count (from slice-1 config); after the bound, fall back
+to full from-scratch generation, then error rather than ship an ungated claim.</p>
 </div>
+          <label for="slice-8-what-reveal" class="reveal-label">Show full description</label>
           
         </div>
       </div>
@@ -1766,9 +1818,10 @@ the full specialist and re-gate -- reuse must never ship an unvalidated claim.</
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Stage-1 constraint (correctness-first) + Stage-4 decision: always re-run the
-gates on final output. This is the safety net that makes aggressive reuse
-acceptable -- the full pipeline remains the correctness authority.</p>
+          <div class="markdown-block serif-prose"><p>Stage-1 constraint (correctness-first) + Stage-4 (always re-gate final
+output). Critic: the gates are guard.py + factcheck.py (NOT a nonexistent
+apply_reviewer.py, A5); reuse them, do not reinvent. Design critic: the retry
+bound must be a done_when, not buried in a question answer.</p>
 </div>
           
         </div>
@@ -1777,13 +1830,13 @@ acceptable -- the full pipeline remains the correctness authority.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/reuse/backstop.py, src/jobsmith/agents/apply_reviewer.py, src/jobsmith/pipeline.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/reuse/backstop.py, src/jobsmith/guard.py, src/jobsmith/factcheck.py, src/jobsmith/core/pipeline.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Final assembled output runs anchor &#43; no-fabrication &#43; fact-check gates on EVERY run, reuse or not</li><li>A reused/warm-started piece that fails a gate is regenerated from scratch and re-gated, not shipped</li><li>A run that passes via reuse produces output that also passes when re-run with --no-reuse (gate parity)</li><li>Gate outcomes (pass / regenerated-on-fail) are recorded for the reuse report</li></ul>
+        <ul class="slice-done-list"><li>Final assembled output runs guard.py anchor &#43; factcheck.py no-fabrication/fact-check gates on EVERY run, reuse or not</li><li>A reused/warm-started piece that fails a gate is regenerated and re-gated, not shipped</li><li>Regeneration is bounded by the config retry count; on exhaustion it falls back to full from-scratch generation, and failing that, raises an error (never ships an ungated claim)</li><li>A run that passes via reuse produces output that also passes when re-run with --no-reuse (gate parity)</li><li>Gate outcomes (pass / regenerated-on-fail / fallback) are recorded for the reuse report</li></ul>
       </div>
       
     
@@ -1795,13 +1848,15 @@ acceptable -- the full pipeline remains the correctness authority.</p>
         
         <input type="checkbox" id="slice-8-decisions-reveal" class="reveal-toggle">
         <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> post-assembly, pre-acceptance, unconditional. <strong>Mechanism:</strong>
-reuse the EXISTING gate implementations (anchor / no-fabrication / fact-check)
--- do not fork them; the backstop just guarantees they run on the reused path
-too. <strong>Failure policy:</strong> regenerate the offending piece via the full
-specialist, then re-gate (bounded retry). <strong>Rejected:</strong> re-gating only
-modified pieces (a cached-valid piece can be wrong in a new JD context);
-gating the plan up front then trusting it (Stage-4 rejected -- weakest
-backstop). This slice is why requirement/warm-start reuse is safe.</p>
+reuse EXISTING guard.py (check_anchors) + factcheck.py -- do not fork them
+(critic A5); the backstop guarantees they run on the reused path. <strong>Failure
+policy:</strong> bounded regenerate-and-re-gate (config), then full from-scratch,
+then error -- promoted to done_when (design-critic danger). <strong>Gate parity
+caveat:</strong> if a gate has nondeterminism, the parity test asserts gate VERDICT
+equality (pass/fail), not byte-identical artifacts, to avoid flakiness
+(design-critic warn). <strong>Rejected:</strong> re-gating only modified pieces (a
+cached-valid piece can be wrong in a new JD context); gating the plan up front
+then trusting it (weakest backstop). This slice is why slices 4/7 are safe.</p>
 </div>
         <label for="slice-8-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1819,7 +1874,12 @@ backstop). This slice is why requirement/warm-start reuse is safe.</p>
           
           <div class="test-group" data-kind="unit">
             <span class="test-chip">UNIT &middot; 1</span>
-            <ul><li>test_failed_gate_triggers_regen; test_gates_run_on_reused_output</li></ul>
+            <ul><li>test_failed_gate_triggers_regen; test_gates_run_on_reused_output;</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 1</span>
+            <ul><li>test_retry_bound_then_fallback_then_error</li></ul>
           </div>
           
           <div class="test-group" data-kind="integration">
@@ -1847,7 +1907,7 @@ backstop). This slice is why requirement/warm-start reuse is safe.</p>
           <textarea
             data-section="slice-8-question-q-retry"
             data-comment-for="slice-8-question-q-retry"
-            placeholder="Answer question q-retry...">Bounded (e.g. 1-2) per piece; if it still fails, fall back to full from-scratch generation for that artifact and, failing that, surface an error rather than ship an ungated claim.</textarea>
+            placeholder="Answer question q-retry...">Bounded by the slice-1 config (default 1-2) per piece; on exhaustion fall back to full from-scratch generation for that artifact, and failing that, raise an error rather than ship an ungated claim.</textarea>
           
         </div>
         
@@ -1913,10 +1973,12 @@ backstop). This slice is why requirement/warm-start reuse is safe.</p>
           <div class="markdown-block reveal-content serif-prose"><p>Persist per-run metrics to run_metrics: model-call count, wall-clock, and
 reused-vs-generated tallies per candidate. Emit a human-readable reuse report
 at end of run (&#34;reused company-research from app Y; warm-started from resume
-Z; regenerated 3 bullets; 2 gates re-run&#34;). Add an A/B bench harness that runs
-the same JD with --no-reuse and with reuse, asserting a &gt;=50% reduction in
-model calls AND wall-clock on a warm candidate while gate outcomes are
-identical.</p>
+Z; regenerated 3 bullets; 2 gates re-run&#34;). Add an A/B bench harness
+(tests/test_reuse_ab.py) that runs the same JD with --no-reuse and with reuse
+-- clearing/controlling the existing llm_cache so it measures the reuse
+layer&#39;s INCREMENTAL benefit -- and asserts a &gt;=50% reduction in model calls
+AND a &gt;=50% reduction in wall-clock on a warm candidate, FAILING if either
+metric misses, while gate verdicts are identical.</p>
 </div>
           <label for="slice-9-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1928,9 +1990,10 @@ identical.</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Stage-4 decision: per-run metrics + A/B harness vs baseline, and Stage-3 UX:
-surface &#34;reused X from prior application Y&#34; for transparency. This both proves
-the ~50% target and makes reuse auditable per run.</p>
+          <div class="markdown-block serif-prose"><p>Stage-4: per-run metrics + A/B harness vs baseline; Stage-3 UX: surface
+&#34;reused X from prior application Y&#34;. Critics: tests are flat under tests/ (not
+tests/bench/); the baseline must control for the existing llm_cache; and the
+50%-calls-AND-50%-wall-clock acceptance must explicitly fail if either misses.</p>
 </div>
           
         </div>
@@ -1939,13 +2002,13 @@ the ~50% target and makes reuse auditable per run.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/reuse/metrics.py, src/jobsmith/reuse/report.py, tests/bench/test_reuse_ab.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/reuse/metrics.py, src/jobsmith/reuse/report.py, tests/test_reuse_ab.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Every run records model-call count, wall-clock, and per-candidate reused/generated counts to run_metrics</li><li>End-of-run reuse report names each reused source application/artifact for transparency</li><li>A/B harness asserts &gt;=50% fewer model calls AND &gt;=50% less wall-clock on a warm JD vs --no-reuse</li><li>A/B harness asserts gate outcomes are identical between reuse and --no-reuse runs</li></ul>
+        <ul class="slice-done-list"><li>Every run records model-call count, wall-clock, and per-candidate reused/generated counts to run_metrics</li><li>End-of-run reuse report names each reused source application/artifact for transparency</li><li>A/B harness controls for llm_cache and asserts &gt;=50% fewer model calls AND &gt;=50% less wall-clock on a warm JD vs --no-reuse, FAILING if either metric misses</li><li>A/B harness asserts gate verdicts are identical between reuse and --no-reuse runs</li></ul>
       </div>
       
     
@@ -1957,11 +2020,14 @@ the ~50% target and makes reuse auditable per run.</p>
         
         <input type="checkbox" id="slice-9-decisions-reveal" class="reveal-toggle">
         <div class="markdown-block reveal-content serif-prose"><p><strong>State:</strong> run_metrics table (slice-1) holds per-run counts; report renders
-from it. <strong>Acceptance:</strong> the A/B harness is the hard gate on the ~50% target
-AND on correctness parity -- savings without identical gate outcomes is a
-failure. <strong>Rejected:</strong> logging-only (no enforced savings bar); manual
-spot-check (no regression guard). The report doubles as the transparency UX
-from Stage-3 (&#34;reused X from prior application Y&#34;).</p>
+from it. <strong>Acceptance:</strong> the A/B harness is the hard gate -- it FAILS if
+either the call-reduction or the wall-clock-reduction misses 50%, or if gate
+verdicts diverge (design-critic danger: explicit AND-gate). <strong>Baseline:</strong> the
+harness controls for the existing llm_cache so it measures the reuse layer&#39;s
+incremental benefit, not pre-existing memoization (critic). <strong>Path:</strong>
+tests/test_reuse_ab.py (flat tests/ dir, not tests/bench/). <strong>Rejected:</strong>
+logging-only (no enforced savings bar); manual spot-check (no regression
+guard). The report doubles as the Stage-3 transparency UX.</p>
 </div>
         <label for="slice-9-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1984,7 +2050,7 @@ from Stage-3 (&#34;reused X from prior application Y&#34;).</p>
           
           <div class="test-group" data-kind="bench">
             <span class="test-chip">BENCH &middot; 1</span>
-            <ul><li>test_reuse_ab_savings_and_gate_parity</li></ul>
+            <ul><li>test_reuse_ab_savings_and_gate_parity (tests/test_reuse_ab.py)</li></ul>
           </div>
           
         </div>
