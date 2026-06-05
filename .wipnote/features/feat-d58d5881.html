@@ -10,15 +10,15 @@
 <body>
     <article id="feat-d58d5881"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-05T06:55:13.142535"
-             data-updated="2026-06-05T10:04:18.897215" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f">
+             data-updated="2026-06-05T10:13:28.013792" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f">
 
         <header>
             <h1>Bundle web/dist into the wheel via a hatch build hook</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
@@ -64,7 +64,8 @@ force-include entry alongside templates). The slice-1 locator prefers this bundl
 path. Gitignore BOTH web/dist and src/jobsmith/web_dist (build artifacts, currently
 neither is ignored). Make the hook a no-op with a clear message if npm/node is
 unavailable. Add a visibility check so a UI-less wheel is detectable: `jobsmith
-doctor` (and/or `jobsmith --version`) reports "UI bundled: yes/no".</p>
+doctor` (and/or `jobsmith --version`) reports "UI bundled: yes/no".
+[2026-06-05 10:13 claude-code] accepted-advisory (provenance override): implementation committed at 552450d on branch trk-5d3b688f</p>
         </section>
     </article>
 </body>
