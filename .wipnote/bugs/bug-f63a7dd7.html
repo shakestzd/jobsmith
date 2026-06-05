@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Served-UI apply: detail view pinned to pre-rekey slug shows &#39;no documents&#39; after render</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="bug-f63a7dd7"
+             data-type="bug"
+             data-status="todo"
+             data-priority="high"
+             data-created="2026-06-05T17:44:49.603641"
+             data-updated="2026-06-05T17:44:49.633394" data-agent-assigned="claude-code" data-track-id="trk-211c4980" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.19">
+
+        <header>
+            <h1>Served-UI apply: detail view pinned to pre-rekey slug shows &#39;no documents&#39; after render</h1>
+            <div class="metadata">
+                <span class="badge status-todo">Todo</span>
+                <span class="badge priority-high">High Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-211c4980.html" data-relationship="part_of" data-since="2026-06-05T17:44:49.633192">trk-211c4980</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>UI-initiated apply starts under URL-derived slug (e.g. becu-Sr-Data-Analyst_R-13411-2026-06); jd-parser rekeys to canonical (becu-sr-data-analyst) and writes resume.pdf + cover-letter there. Render completes (status done) but the served UI detail page stays on the original slug, so documents/review tabs query the stale slug and show 'no documents yet'. CLI path reconciles the rekey; UI path does not redirect/reconcile. Repro: new application via UI with a Workday URL + paste-text JD. Fix: after rekey, redirect the detail route to the canonical slug (or have the documents/review endpoints resolve via the run-id/rekey log, not the stale slug).</p>
+        </section>
+    </article>
+</body>
+</html>
