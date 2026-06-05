@@ -10,15 +10,15 @@
 <body>
     <article id="feat-9c980bef"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-05T06:55:13.117921"
-             data-updated="2026-06-05T09:57:18.649637" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f">
+             data-updated="2026-06-05T10:02:28.573713" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f">
 
         <header>
             <h1>Serve the built UI same-origin from create_app (StaticFiles &#43; SPA fallback)</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
@@ -60,7 +60,8 @@ than index.html). The existing CORSMiddleware (main.py:217-228, localhost:5173/5
 stays for --dev split mode but is redundant for the served UI — document that.
 Make the web client same-origin: BASE_URL (client.ts:15-16) must default to
 window.location.origin when served from the API instead of hardcoded
-http://localhost:8000 (VITE_JOBSMITH_API_URL still overrides for split dev).</p>
+http://localhost:8000 (VITE_JOBSMITH_API_URL still overrides for split dev).
+[2026-06-05 10:02 claude-code] accepted-advisory (provenance override): implementation committed at 20d193b on branch trk-5d3b688f</p>
         </section>
     </article>
 </body>
