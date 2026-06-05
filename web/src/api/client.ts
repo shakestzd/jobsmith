@@ -10,10 +10,11 @@
 //   postApplication   — POST /api/applications → { slug, run_id }
 //   buildEventsUrl    — construct the SSE URL for a slug
 
-const DEFAULT_BASE_URL = window.location.hostname === 'host.docker.internal'
-  ? 'http://host.docker.internal:8000'
-  : 'http://localhost:8000';
-export const BASE_URL = import.meta.env.VITE_JOBSMITH_API_URL ?? DEFAULT_BASE_URL;
+// When served same-origin from the API (feat-9c980bef), resolve to the current
+// origin so API calls work without hardcoded ports.  VITE_JOBSMITH_API_URL
+// overrides this for split dev (Vite dev-server + separate uvicorn).
+export const BASE_URL: string =
+  import.meta.env.VITE_JOBSMITH_API_URL ?? window.location.origin;
 const STATIC_TOKEN = import.meta.env.VITE_JOBSMITH_API_TOKEN ?? '';
 const ACCESS_TOKEN_KEY = 'jobsmith.access_token';
 const REFRESH_TOKEN_KEY = 'jobsmith.refresh_token';
