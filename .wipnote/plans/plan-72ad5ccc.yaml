@@ -1,18 +1,294 @@
 meta:
     id: plan-72ad5ccc
-    track_id: trk-211c4980
     title: 'Single-server local app: static-serve UI + wheel bundle + jobsmith up'
-    description: 'Dagster/Prefect-style local web app: serve built frontend same-origin from FastAPI, bundle web/dist into the wheel, add jobsmith up (boot+open browser, --dev toggle), with localhost auto-auth. No native shell.'
-    created_at: "2026-06-05"
+    description: |
+        Close the last-mile gap between "a CLI with a web frontend in the dev tree" and
+        a Dagster/Prefect-style local app: one server serves both the API and the built
+        React UI on a single origin, the UI ships inside the Python wheel (end user never
+        runs npm), and a single `jobsmith up` command boots the server and opens the
+        browser. Localhost auto-authenticates so no token typing. NO native desktop shell
+        (Tauri/Electron) — local web server + browser only, exactly like Dagster/Prefect.
+    created_at: ""
     status: draft
-    priority: medium
     schema_version: v3
-    version: 2
+    version: 1
 design:
-    problem: ""
-    goals: []
-    constraints: []
+    problem: |
+        jobsmith already has the bones of the target architecture — a FastAPI ASGI app
+        (`jobsmith api serve` → uvicorn via api/server.py:24 → create_app at api/main.py:207),
+        a Vite/React frontend (web/ → web/dist), and SSE live updates. But the API does NOT
+        serve the built UI (only FileResponse downloads in applications.py); the web client
+        hardcodes a cross-origin base URL (client.ts:15 `http://localhost:8000`) and a
+        build-time token (client.ts:17 VITE_JOBSMITH_API_TOKEN); web/dist is not bundled in
+        the wheel; and there is no one-command launch. So today's UX is "run the API, run a
+        separate vite dev server, open a browser, wire a token" — a dev workflow, not an app.
+    goals:
+        - One uvicorn process serves the API and the built UI on a single origin (same-port).
+        - The built UI ships inside the Python wheel — `uv tool install`/`pip install` includes it, no npm for the end user.
+        - '`jobsmith up` boots the server and opens the browser to a working UI in one command.'
+        - Localhost auto-authenticates (existing bearer/JWT preserved); the user never types a token.
+        - A fresh-wheel install can run a full apply/onboard end-to-end through the browser UI.
+    constraints:
+        - NO native desktop shell (Tauri/Electron) — local web server + browser only.
+        - 'Preserve existing auth: static bearer token (JOBSMITH_API_TOKEN / private/jobsmith.token, auth.py:46) and JWT stay intact; localhost convenience is additive.'
+        - 'Backward compatible: `jobsmith api serve` keeps working as the lower-level/headless entry; existing cross-origin dev workflow stays available behind a flag.'
+        - Single-tenant, local-first — no multi-user/hosted concerns in this plan.
     approved: false
     comment: ""
-slices: []
+slices:
+    - id: slice-1
+      num: 1
+      title: Serve the built UI same-origin from create_app (StaticFiles + SPA fallback)
+      what: |
+        In create_app (api/main.py:207), after all API routers are registered, mount the
+        built frontend so one origin serves both. Add a web-dist locator (new
+        api/staticui.py) that resolves the assets directory with a documented precedence:
+        bundled package path (jobsmith/web_dist/, populated by slice-2) first, then the
+        repo-root web/dist for source installs; if neither exists, skip the mount and log
+        a hint (API-only mode). Mount StaticFiles(html=True) and add a catch-all GET that
+        returns index.html for non-API, non-asset paths so client-side deep links work —
+        WITHOUT shadowing existing API routes (register the SPA fallback last and exclude
+        the API path prefixes + docs). Make the web client same-origin: when the app is
+        served from the API, BASE_URL (client.ts:15-16) must default to a relative origin
+        ("" / window.location.origin) instead of hardcoded http://localhost:8000.
+      why: |
+        This is the core of the Dagster/Prefect model — a single server serving API + SPA
+        on one port. Without it the UI lives only in a separate vite process and the app
+        can never feel like one thing. Same-origin also removes the CORS/base-URL friction.
+      files:
+        - src/jobsmith/api/main.py
+        - src/jobsmith/api/staticui.py
+        - web/src/api/client.ts
+        - tests/test_api_staticui.py
+      deps: []
+      done_when:
+        - With assets present, GET / returns the SPA index.html and GET /assets/* returns hashed bundles, both from the same server/port as the API
+        - A client-side deep link (e.g. GET /applications/some-slug) falls back to index.html (200), while GET /api/* and existing API routes are unaffected (no shadowing)
+        - When no web-dist is found, the server starts in API-only mode (no crash) and logs a one-line hint
+        - The web client resolves BASE_URL to the serving origin when not overridden by VITE_JOBSMITH_API_URL
+      effort: M
+      risk: Med
+      tests: |
+        Integration: TestServeSpaIndex — GET / → index.html; GET /assets/<hash>.js → 200
+        Integration: TestSpaFallbackDeepLink — GET /applications/x → index.html 200
+        Integration: TestApiRoutesNotShadowed — GET /api/* + a known route still resolve
+        Integration: TestApiOnlyModeWhenNoDist — no dist dir → app boots, mount skipped
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-fallback-scope
+          text: How to keep the SPA catch-all from swallowing API/doc routes?
+          answer: Register API routers + StaticFiles first; add the index.html catch-all LAST with an explicit exclusion of /api, /docs, /openapi.json, /redoc and the /assets mount, returning 404 for unknown /api/* rather than index.html.
+      decisions_notes: |
+        **Trigger:** static mount added inside create_app AFTER API routers, fallback last.
+        **State:** assets located via api/staticui.py resolver — bundled path
+          (jobsmith/web_dist) preferred, repo web/dist fallback, else API-only.
+        **Payload:** StaticFiles(html=True) at /, catch-all → index.html for SPA routes,
+          excluding /api, /docs, /openapi.json and the asset mount.
+        **Same-origin:** client.ts BASE_URL defaults to window.location.origin when served
+          from the API; VITE_JOBSMITH_API_URL still overrides for split dev.
+        **Rejected:** a second static server / reverse proxy (defeats single-process goal);
+          serving from repo web/dist only (breaks published wheels — see slice-2);
+          hash-router to avoid fallback (changes URLs, worse UX than SPA fallback).
+    - id: slice-2
+      num: 2
+      title: Bundle web/dist into the wheel via a hatch build hook
+      what: |
+        Make `pip install` / `uv tool install` ship the UI so the end user never runs npm.
+        Add a custom hatchling build hook (hatch_build.py + [tool.hatch.build.targets.wheel.hooks]
+        wiring in pyproject.toml) that, at wheel-build time, runs `vite build` in web/ and
+        copies web/dist into the package tree at src/jobsmith/web_dist/, then force-includes
+        it in the wheel (extend the existing [tool.hatch.build.targets.wheel.force-include]
+        at pyproject.toml:100). The slice-1 locator already prefers this bundled path. Add
+        web_dist/ to .gitignore (build artifact, not committed) and make the hook a no-op
+        with a clear message if npm/node is unavailable (so source-only installs degrade to
+        API-only rather than failing the build).
+      why: |
+        The whole "feels like an app" property in Dagster/Prefect comes from shipping the
+        pre-built SPA inside the Python package. Without wheel bundling, `pip install
+        jobsmith` would have no UI and `jobsmith up` could only work from a source checkout.
+      files:
+        - pyproject.toml
+        - hatch_build.py
+        - .gitignore
+        - tests/test_wheel_bundles_ui.py
+      deps:
+        - 1
+      done_when:
+        - Building the wheel runs vite build and produces src/jobsmith/web_dist/index.html + hashed assets inside the wheel (verified by unzipping the built wheel)
+        - Installing the built wheel into a clean venv (no node/npm) exposes the bundled web_dist that slice-1's locator finds
+        - If node/npm is absent at build time, the hook logs a skip and the wheel still builds (API-only), rather than erroring
+      effort: M
+      risk: High
+      tests: |
+        Integration: TestWheelContainsUI — build wheel, unzip, assert jobsmith/web_dist/index.html present
+        Integration: TestLocatorFindsBundled — point locator at an installed layout → resolves bundled dist
+        Unit: TestBuildHookSkipsWithoutNode — simulate missing npm → hook no-ops, build succeeds
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-no-node-build
+          text: What if node/npm isn't present when the wheel is built?
+          answer: The hook logs a skip and the wheel builds without the UI (API-only). CI/release builds run on an image with node so published wheels always include the UI; only ad-hoc source builds may omit it.
+      decisions_notes: |
+        **Trigger:** hatchling custom build hook on the wheel target, runs at build time.
+        **State:** built assets copied to src/jobsmith/web_dist/ (gitignored) and
+          force-included in the wheel; bundled path is slice-1's preferred location.
+        **Payload:** `vite build` output (index.html + /assets/*) shipped verbatim.
+        **Rejected:** committing prebuilt web/dist to git (repo bloat + stale-bundle risk);
+          a separate companion package like dagster-webserver (overkill for single-tenant);
+          runtime `npm install` on first launch (slow, requires node on the user machine).
+    - id: slice-3
+      num: 3
+      title: 'Localhost auto-auth: inject the served UI''s token at runtime'
+      what: |
+        Remove the need to type/configure a token when using the served UI on localhost,
+        while keeping bearer/JWT auth fully intact. When the API serves index.html (slice-1),
+        inject the resolved static bearer token (the same one from JOBSMITH_API_TOKEN /
+        private/jobsmith.token, auth.py:46) into the page at request time — e.g. a small
+        runtime-config shim (window.__JOBSMITH__ = { token, apiBase }) written into index.html
+        or exposed via a tiny GET /api/bootstrap the SPA calls on load. Change the web client
+        (client.ts:17) to read the token from this runtime shim instead of the build-time
+        VITE_JOBSMITH_API_TOKEN, falling back to the VITE var for split dev. Only inject when
+        bound to localhost; on --bind-public, do NOT inject (require explicit auth).
+      why: |
+        Same-origin serving is pointless if the user still has to paste a bearer token. The
+        user chose "keep existing bearer/JWT, UI auto-authenticates locally" — matching
+        Dagster/Prefect, which require no login on localhost. The build-time VITE token can't
+        carry a runtime-generated localhost token, so injection must happen at serve time.
+      files:
+        - src/jobsmith/api/staticui.py
+        - src/jobsmith/api/auth.py
+        - web/src/api/client.ts
+        - tests/test_api_autoauth.py
+      deps:
+        - 1
+      done_when:
+        - Served on localhost, the SPA loads with a valid token (via injected window shim or /api/bootstrap) and authenticated calls succeed WITHOUT the user setting VITE_JOBSMITH_API_TOKEN
+        - On --bind-public, no token is injected; unauthenticated API calls are rejected as before
+        - The injected token equals the resolved static bearer token (env var or private/jobsmith.token), and the SSE/EventSource query-param path still authenticates
+        - The rendered token is excluded from the SSE event-log redaction view (no accidental echo)
+      effort: M
+      risk: High
+      tests: |
+        Integration: TestLocalhostInjectsToken — GET / on 127.0.0.1 → index has token shim; authed call OK
+        Integration: TestPublicBindNoInjection — --bind-public → no token in page; 401 without header
+        Unit: TestClientReadsRuntimeToken — client prefers window shim over VITE var
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-inject-mechanism
+          text: Inject the token into index.html, or expose it via an endpoint?
+          answer: Inject a window.__JOBSMITH__ shim into the served index.html on localhost — zero extra round-trip, no unauthenticated bootstrap endpoint to guard; the SPA reads it synchronously before first API call.
+      decisions_notes: |
+        **Trigger:** token injected only when serving index.html on a localhost bind.
+        **State:** token sourced from the existing resolver (JOBSMITH_API_TOKEN env →
+          private/jobsmith.token file); no new secret store.
+        **Payload:** runtime shim window.__JOBSMITH__={token,apiBase} in index.html, OR a
+          GET /api/bootstrap the SPA fetches on load; client.ts reads it, VITE var as fallback.
+        **Rejected:** baking the token into the bundle at build time (can't carry a runtime
+          token, and leaks into static assets); cookie/session auth (larger change, the API
+          is bearer/JWT today); auto-injecting on public binds (security hole).
+    - id: slice-4
+      num: 4
+      title: '`jobsmith up` — boot the server, serve the UI, open the browser (--dev toggle)'
+      what: |
+        Add a top-level `jobsmith up` Typer command as the friendly one-command entry. It
+        reuses the existing serve path (api/server.py:24 serve → uvicorn.run on create_app),
+        then opens the default browser to the served URL (webbrowser.open after the server is
+        listening). Flags: --host/--port (default 127.0.0.1:8000), --no-open (skip browser),
+        --bind-public (passthrough; disables auto-auth per slice-3), and --dev. Per the chosen
+        design, --dev EXPLICITLY toggles serving behavior: prod (default) serves the bundled
+        static UI single-port; --dev expects the developer's separate vite dev server (skips
+        the static mount, points the opened URL / client at the vite origin, leaves the
+        existing two-process workflow intact). `jobsmith api serve` stays as the lower-level
+        headless entry.
+      why: |
+        One memorable command (`dagster dev` / `prefect server start`) is what makes it feel
+        like an app. The user chose a new `jobsmith up` wrapping serve + static + open, with
+        an explicit --dev flag to preserve the hot-reload developer workflow.
+      files:
+        - src/jobsmith/cli.py
+        - src/jobsmith/api/server.py
+        - tests/test_cli_up.py
+      deps:
+        - 1
+        - 3
+      done_when:
+        - '`jobsmith up` starts uvicorn on 127.0.0.1:8000, and once listening opens the browser to the served UI (auto-authenticated via slice-3)'
+        - '`jobsmith up --no-open` starts the server without launching a browser; `--port N` is honored'
+        - '`jobsmith up --dev` skips the static mount and targets the vite dev origin, preserving the two-process hot-reload workflow'
+        - '`jobsmith api serve` continues to work unchanged as the headless entry'
+      effort: M
+      risk: Med
+      tests: |
+        Integration: TestUpServesAndOpens — spawn `up --no-open`, assert server up + UI served; browser-open mocked
+        Unit: TestUpDevSkipsStatic — --dev → static mount not applied, points at vite origin
+        Unit: TestUpHonorsPort — --port → uvicorn binds the given port
+      complexity: standard
+      approved: false
+      comment: ""
+      questions:
+        - id: q-open-timing
+          text: How to avoid opening the browser before the server is ready?
+          answer: Start uvicorn, poll the bound host:port (or use a startup callback) until it accepts a connection, THEN webbrowser.open; cap the wait and proceed/log if it doesn't come up.
+      decisions_notes: |
+        **Trigger:** explicit `jobsmith up` CLI invocation; opens browser after listen.
+        **State:** none new — wraps the existing serve()/create_app; browser via stdlib webbrowser.
+        **Payload:** flags --host/--port/--no-open/--bind-public/--dev; default 127.0.0.1:8000 prod.
+        **Rejected:** folding into `api serve` flags only (less discoverable than a top-level
+          `up`); replacing/retiring `api serve` (breaks headless scripts); auto-running vite
+          from `up` in dev (fragile; devs already run their own vite).
+    - id: slice-5
+      num: 5
+      title: 'End-to-end acceptance: fresh wheel install → jobsmith up → apply/onboard in browser'
+      what: |
+        Prove the full Dagster/Prefect-style loop at the strict acceptance bar the user chose.
+        Build the wheel (slice-2), install it into a clean, npm-free virtualenv, run
+        `jobsmith up --no-open` (server only, for automation), and drive a COMPLETE apply (and
+        onboard) run through the browser-facing HTTP surface end-to-end against the served
+        origin: submit a JD, watch SSE phase progress, reach materials-ready — all via the
+        same-origin API the served UI uses, with localhost auto-auth. Document the launch
+        story (README/AGENTS): `uv tool install` → `jobsmith up`. This slice is verification +
+        docs, not new product surface.
+      why: |
+        The acceptance bar is "fresh install → up → working UI + a full apply/onboard through
+        the browser." A green E2E here is what certifies the architecture actually delivers the
+        one-command local-app experience, not just that the pieces exist.
+      files:
+        - tests/e2e/test_fresh_install_up.py
+        - README.md
+        - AGENTS.md
+      deps:
+        - 2
+        - 4
+      done_when:
+        - A built wheel installs into a clean venv with NO node/npm and serves the bundled UI via `jobsmith up`
+        - A full apply run completes end-to-end through the served same-origin API (JD → SSE phases → materials-ready) with localhost auto-auth and no manual token
+        - An onboard run seeds master content through the same served surface
+        - README/AGENTS document the `uv tool install` → `jobsmith up` launch story
+      effort: L
+      risk: Med
+      tests: |
+        E2E: TestFreshInstallUpApply — clean venv + wheel → up → drive apply to materials-ready over same-origin API
+        E2E: TestFreshInstallUpOnboard — same env → onboard seeds masters
+        Smoke: assert bundled web_dist served and auto-auth works on localhost
+      complexity: standard
+      approved: false
+      comment: ""
+      questions:
+        - id: q-e2e-surface
+          text: Drive the E2E through a headless browser or the same-origin HTTP API?
+          answer: Through the same-origin HTTP API the served UI calls (plus a smoke check that the UI + auto-auth load). It proves the single-server + packaging + auth loop without Playwright flakiness; a DOM-level browser test can be a later add-on.
+      decisions_notes: |
+        **Trigger:** CI/e2e job that builds the wheel and exercises the served app.
+        **State:** ephemeral clean venv + a scratch jobsmith repo (settings repo_root) for the run.
+        **Payload:** exercises the real HTTP surface the served UI uses (same-origin), not the CLI pipeline directly.
+        **Rejected:** asserting only that index.html loads (the user explicitly wanted a full
+          apply/onboard through the UI); a full headless-browser (Playwright) DOM drive (heavier;
+          same-origin API-level E2E proves the architecture with far less flakiness — can add
+          browser DOM coverage later).
 questions: []

@@ -405,6 +405,55 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <a href="#design" class="nav-link active" data-spy="design" data-initial="D">Design</a>
   <a href="#slices" class="nav-link" data-spy="slices" data-initial="S">Slices</a>
   
+  <ul class="slice-nav-list" id="slice-nav-list">
+    
+    <li>
+      <a href="#slice-1" class="slice-nav-item" data-slice-nav="1">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="1"></span>
+        <span>#1 Serve the built UI same-origin from create_app (StaticFiles + SPA fallback)</span>
+        
+        <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-2" class="slice-nav-item" data-slice-nav="2">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="2"></span>
+        <span>#2 Bundle web/dist into the wheel via a hatch build hook</span>
+        
+        <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-3" class="slice-nav-item" data-slice-nav="3">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="3"></span>
+        <span>#3 Localhost auto-auth: inject the served UI's token at runtime</span>
+        
+        <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-4" class="slice-nav-item" data-slice-nav="4">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="4"></span>
+        <span>#4 `jobsmith up` — boot the server, serve the UI, open the browser (--dev toggle)</span>
+        
+        <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-5" class="slice-nav-item" data-slice-nav="5">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="5"></span>
+        <span>#5 End-to-end acceptance: fresh wheel install → jobsmith up → apply/onboard in browser</span>
+        
+        <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
+      </a>
+    </li>
+    
+  </ul>
+  
   <a href="#questions" class="nav-link" data-spy="questions" data-initial="Q">Decisions</a>
   <a href="#critique" class="nav-link" data-spy="critique" data-initial="C">Critique</a>
   <a href="#feedback-summary" class="nav-link" data-spy="feedback-summary" data-initial="P">Progress</a>
@@ -412,15 +461,21 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 </nav>
 <div class="plan-layout">
 <div class="plan-content">
-<article id="plan-72ad5ccc" data-type="plan" data-plan-id="plan-72ad5ccc" data-feature-id="trk-211c4980" data-status="draft" data-priority="medium">
+<article id="plan-72ad5ccc" data-type="plan" data-plan-id="plan-72ad5ccc" data-feature-id="" data-status="draft" data-priority="medium">
 
 <!-- Plan Header -->
 <header class="plan-header">
   <h1>Plan: Single-server local app: static-serve UI + wheel bundle + jobsmith up</h1>
-  <p style="color:var(--text-dim)">Dagster/Prefect-style local web app: serve built frontend same-origin from FastAPI, bundle web/dist into the wheel, add jobsmith up (boot+open browser, --dev toggle), with localhost auto-auth. No native shell.</p>
+  <p style="color:var(--text-dim)">Close the last-mile gap between "a CLI with a web frontend in the dev tree" and
+a Dagster/Prefect-style local app: one server serves both the API and the built
+React UI on a single origin, the UI ships inside the Python wheel (end user never
+runs npm), and a single `jobsmith up` command boots the server and opens the
+browser. Localhost auto-authenticates so no token typing. NO native desktop shell
+(Tauri/Electron) — local web server + browser only, exactly like Dagster/Prefect.
+</p>
   <div class="meta">
     <span class="badge badge-pending">Draft</span>
-    <span style="font-size:.75rem;color:var(--text-muted)">v2 · 0 slices · Created 2026-06-05</span>
+    <span style="font-size:.75rem;color:var(--text-muted)">v1 · 5 slices · Created 2026-06-05</span>
   </div>
 </header>
 <button id="themeToggle" style="position:fixed;top:16px;right:16px;z-index:100;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;color:var(--text);font-family:var(--mono);font-size:0.75rem;cursor:pointer;">
@@ -440,6 +495,11 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <section class="dep-graph" data-zone="dependency-graph">
   <h2>Dependency Graph</h2>
   <div id="graph-data" style="display:none">
+    <div data-node="1" data-name="Serve the built UI same-origin from create_app (StaticFiles + SPA fallback)" data-status="pending" data-deps="" data-files="4"></div>
+    <div data-node="2" data-name="Bundle web/dist into the wheel via a hatch build hook" data-status="pending" data-deps="1" data-files="4"></div>
+    <div data-node="3" data-name="Localhost auto-auth: inject the served UI's token at runtime" data-status="pending" data-deps="1" data-files="4"></div>
+    <div data-node="4" data-name="`jobsmith up` — boot the server, serve the UI, open the browser (--dev toggle)" data-status="pending" data-deps="1,3" data-files="3"></div>
+    <div data-node="5" data-name="End-to-end acceptance: fresh wheel install → jobsmith up → apply/onboard in browser" data-status="pending" data-deps="2,4" data-files="3"></div>
     
     <!--PLAN_GRAPH_NODES-->
   </div>
@@ -452,17 +512,39 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <details id="design" class="section-card" open data-phase="design" data-status="pending">
   <summary><span>Design</span><span class="badge badge-pending" data-badge-for="design">Pending</span></summary>
   <div class="section-body">
-    <!--PLAN_DESIGN_CONTENT-->
-    <div class="sub-section">
-      <h4>Open Questions</h4>
-      <!--PLAN_QUESTIONS-->
-    </div>
+    <h4>Problem</h4>
+<div data-markdown>jobsmith already has the bones of the target architecture — a FastAPI ASGI app
+(`jobsmith api serve` → uvicorn via api/server.py:24 → create_app at api/main.py:207),
+a Vite/React frontend (web/ → web/dist), and SSE live updates. But the API does NOT
+serve the built UI (only FileResponse downloads in applications.py); the web client
+hardcodes a cross-origin base URL (client.ts:15 `http://localhost:8000`) and a
+build-time token (client.ts:17 VITE_JOBSMITH_API_TOKEN); web/dist is not bundled in
+the wheel; and there is no one-command launch. So today&#39;s UX is &#34;run the API, run a
+separate vite dev server, open a browser, wire a token&#34; — a dev workflow, not an app.
+</div>
+<h4>Goals</h4>
+<ol>
+<li data-markdown>One uvicorn process serves the API and the built UI on a single origin (same-port).</li>
+<li data-markdown>The built UI ships inside the Python wheel — `uv tool install`/`pip install` includes it, no npm for the end user.</li>
+<li data-markdown>`jobsmith up` boots the server and opens the browser to a working UI in one command.</li>
+<li data-markdown>Localhost auto-authenticates (existing bearer/JWT preserved); the user never types a token.</li>
+<li data-markdown>A fresh-wheel install can run a full apply/onboard end-to-end through the browser UI.</li>
+</ol>
+<h4>Constraints</h4>
+<ul>
+<li data-markdown>NO native desktop shell (Tauri/Electron) — local web server + browser only.</li>
+<li data-markdown>Preserve existing auth: static bearer token (JOBSMITH_API_TOKEN / private/jobsmith.token, auth.py:46) and JWT stay intact; localhost convenience is additive.</li>
+<li data-markdown>Backward compatible: `jobsmith api serve` keeps working as the lower-level/headless entry; existing cross-origin dev workflow stays available behind a flag.</li>
+<li data-markdown>Single-tenant, local-first — no multi-user/hosted concerns in this plan.</li>
+</ul>
+
     <div class="approval-row">
       <label><input type="checkbox" data-section="design" data-action="approve"> Approve design</label>
       <textarea data-section="design" data-comment-for="design" placeholder="Comments on design decisions..."></textarea>
     </div>
   </div>
 </details>
+
 
 <!-- Structure Outline (hidden when empty) -->
 
@@ -471,23 +553,828 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <details id="slices" class="section-card" open data-phase="slices" data-status="pending">
   <summary><span>Slices</span><span class="badge badge-pending" data-badge-for="slices">Pending</span></summary>
   <div class="section-body">
+    <details class="slice-card" id="slice-1" data-slice="1" data-slice-name="slice-1" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 1: Serve the built UI same-origin from create_app (StaticFiles &#43; SPA fallback)">
+    <span class="slice-num">#1</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Serve the built UI same-origin from create_app (StaticFiles &#43; SPA fallback)</span>
+      <span class="slice-preview">In createapp (api/main.py:207), after all API routers are registered, mount the</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-1">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-1-approval" value="approved" data-section="slice-1" data-action="approve" aria-label="Approve slice 1">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-1-approval" value="changes_requested" data-section="slice-1" data-action="approve" aria-label="Request changes for slice 1">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-1-approval" value="rejected" data-section="slice-1" data-action="approve" aria-label="Reject slice 1">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
     
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-1-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>In create_app (api/main.py:207), after all API routers are registered, mount the
+built frontend so one origin serves both. Add a web-dist locator (new
+api/staticui.py) that resolves the assets directory with a documented precedence:
+bundled package path (jobsmith/web_dist/, populated by slice-2) first, then the
+repo-root web/dist for source installs; if neither exists, skip the mount and log
+a hint (API-only mode). Mount StaticFiles(html=True) and add a catch-all GET that
+returns index.html for non-API, non-asset paths so client-side deep links work —
+WITHOUT shadowing existing API routes (register the SPA fallback last and exclude
+the API path prefixes + docs). Make the web client same-origin: when the app is
+served from the API, BASE_URL (client.ts:15-16) must default to a relative origin
+(&#34;&#34; / window.location.origin) instead of hardcoded http://localhost:8000.</p>
+</div>
+          <label for="slice-1-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>This is the core of the Dagster/Prefect model — a single server serving API + SPA
+on one port. Without it the UI lives only in a separate vite process and the app
+can never feel like one thing. Same-origin also removes the CORS/base-URL friction.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/api/main.py, src/jobsmith/api/staticui.py, web/src/api/client.ts, tests/test_api_staticui.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>With assets present, GET / returns the SPA index.html and GET /assets/* returns hashed bundles, both from the same server/port as the API</li><li>A client-side deep link (e.g. GET /applications/some-slug) falls back to index.html (200), while GET /api/* and existing API routes are unaffected (no shadowing)</li><li>When no web-dist is found, the server starts in API-only mode (no crash) and logs a one-line hint</li><li>The web client resolves BASE_URL to the serving origin when not overridden by VITE_JOBSMITH_API_URL</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-1-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> static mount added inside create_app AFTER API routers, fallback last.
+<strong>State:</strong> assets located via api/staticui.py resolver — bundled path
+(jobsmith/web_dist) preferred, repo web/dist fallback, else API-only.
+<strong>Payload:</strong> StaticFiles(html=True) at /, catch-all → index.html for SPA routes,
+excluding /api, /docs, /openapi.json and the asset mount.
+<strong>Same-origin:</strong> client.ts BASE_URL defaults to window.location.origin when served
+from the API; VITE_JOBSMITH_API_URL still overrides for split dev.
+<strong>Rejected:</strong> a second static server / reverse proxy (defeats single-process goal);
+serving from repo web/dist only (breaks published wheels — see slice-2);
+hash-router to avoid fallback (changes URLs, worse UX than SPA fallback).</p>
+</div>
+        <label for="slice-1-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 4</span>
+            <ul><li>TestServeSpaIndex — GET / → index.html; GET /assets/&lt;hash&gt;.js → 200</li><li>TestSpaFallbackDeepLink — GET /applications/x → index.html 200</li><li>TestApiRoutesNotShadowed — GET /api/* &#43; a known route still resolve</li><li>TestApiOnlyModeWhenNoDist — no dist dir → app boots, mount skipped</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>How to keep the SPA catch-all from swallowing API/doc routes?</p>
+          
+          
+          <textarea
+            data-section="slice-1-question-q-fallback-scope"
+            data-comment-for="slice-1-question-q-fallback-scope"
+            placeholder="Answer question q-fallback-scope...">Register API routers &#43; StaticFiles first; add the index.html catch-all LAST with an explicit exclusion of /api, /docs, /openapi.json, /redoc and the /assets mount, returning 404 for unknown /api/* rather than index.html.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: none</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-1" data-comment-for="slice-1" placeholder="Comments on slice 1..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-2" data-slice="2" data-slice-name="slice-2" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 2: Bundle web/dist into the wheel via a hatch build hook">
+    <span class="slice-num">#2</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Bundle web/dist into the wheel via a hatch build hook</span>
+      <span class="slice-preview">Make pip install / uv tool install ship the UI so the end user never runs npm.</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-blocked badge-sm">High</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-2">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-2-approval" value="approved" data-section="slice-2" data-action="approve" aria-label="Approve slice 2">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-2-approval" value="changes_requested" data-section="slice-2" data-action="approve" aria-label="Request changes for slice 2">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-2-approval" value="rejected" data-section="slice-2" data-action="approve" aria-label="Reject slice 2">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-2-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Make <code>pip install</code> / <code>uv tool install</code> ship the UI so the end user never runs npm.
+Add a custom hatchling build hook (hatch_build.py + [tool.hatch.build.targets.wheel.hooks]
+wiring in pyproject.toml) that, at wheel-build time, runs <code>vite build</code> in web/ and
+copies web/dist into the package tree at src/jobsmith/web_dist/, then force-includes
+it in the wheel (extend the existing [tool.hatch.build.targets.wheel.force-include]
+at pyproject.toml:100). The slice-1 locator already prefers this bundled path. Add
+web_dist/ to .gitignore (build artifact, not committed) and make the hook a no-op
+with a clear message if npm/node is unavailable (so source-only installs degrade to
+API-only rather than failing the build).</p>
+</div>
+          <label for="slice-2-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>The whole &#34;feels like an app&#34; property in Dagster/Prefect comes from shipping the
+pre-built SPA inside the Python package. Without wheel bundling, <code>pip install jobsmith</code> would have no UI and <code>jobsmith up</code> could only work from a source checkout.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>pyproject.toml, hatch_build.py, .gitignore, tests/test_wheel_bundles_ui.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Building the wheel runs vite build and produces src/jobsmith/web_dist/index.html &#43; hashed assets inside the wheel (verified by unzipping the built wheel)</li><li>Installing the built wheel into a clean venv (no node/npm) exposes the bundled web_dist that slice-1&#39;s locator finds</li><li>If node/npm is absent at build time, the hook logs a skip and the wheel still builds (API-only), rather than erroring</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-2-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> hatchling custom build hook on the wheel target, runs at build time.
+<strong>State:</strong> built assets copied to src/jobsmith/web_dist/ (gitignored) and
+force-included in the wheel; bundled path is slice-1&#39;s preferred location.
+<strong>Payload:</strong> <code>vite build</code> output (index.html + /assets/*) shipped verbatim.
+<strong>Rejected:</strong> committing prebuilt web/dist to git (repo bloat + stale-bundle risk);
+a separate companion package like dagster-webserver (overkill for single-tenant);
+runtime <code>npm install</code> on first launch (slow, requires node on the user machine).</p>
+</div>
+        <label for="slice-2-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 2</span>
+            <ul><li>TestWheelContainsUI — build wheel, unzip, assert jobsmith/web_dist/index.html present</li><li>TestLocatorFindsBundled — point locator at an installed layout → resolves bundled dist</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>TestBuildHookSkipsWithoutNode — simulate missing npm → hook no-ops, build succeeds</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>What if node/npm isn&#39;t present when the wheel is built?</p>
+          
+          
+          <textarea
+            data-section="slice-2-question-q-no-node-build"
+            data-comment-for="slice-2-question-q-no-node-build"
+            placeholder="Answer question q-no-node-build...">The hook logs a skip and the wheel builds without the UI (API-only). CI/release builds run on an image with node so published wheels always include the UI; only ad-hoc source builds may omit it.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: slices 1</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-2" data-comment-for="slice-2" placeholder="Comments on slice 2..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-3" data-slice="3" data-slice-name="slice-3" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 3: Localhost auto-auth: inject the served UI&#39;s token at runtime">
+    <span class="slice-num">#3</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Localhost auto-auth: inject the served UI&#39;s token at runtime</span>
+      <span class="slice-preview">Remove the need to type/configure a token when using the served UI on localhost,</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-blocked badge-sm">High</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-3">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-3-approval" value="approved" data-section="slice-3" data-action="approve" aria-label="Approve slice 3">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-3-approval" value="changes_requested" data-section="slice-3" data-action="approve" aria-label="Request changes for slice 3">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-3-approval" value="rejected" data-section="slice-3" data-action="approve" aria-label="Reject slice 3">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-3-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Remove the need to type/configure a token when using the served UI on localhost,
+while keeping bearer/JWT auth fully intact. When the API serves index.html (slice-1),
+inject the resolved static bearer token (the same one from JOBSMITH_API_TOKEN /
+private/jobsmith.token, auth.py:46) into the page at request time — e.g. a small
+runtime-config shim (window.<strong>JOBSMITH</strong> = { token, apiBase }) written into index.html
+or exposed via a tiny GET /api/bootstrap the SPA calls on load. Change the web client
+(client.ts:17) to read the token from this runtime shim instead of the build-time
+VITE_JOBSMITH_API_TOKEN, falling back to the VITE var for split dev. Only inject when
+bound to localhost; on --bind-public, do NOT inject (require explicit auth).</p>
+</div>
+          <label for="slice-3-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Same-origin serving is pointless if the user still has to paste a bearer token. The
+user chose &#34;keep existing bearer/JWT, UI auto-authenticates locally&#34; — matching
+Dagster/Prefect, which require no login on localhost. The build-time VITE token can&#39;t
+carry a runtime-generated localhost token, so injection must happen at serve time.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/api/staticui.py, src/jobsmith/api/auth.py, web/src/api/client.ts, tests/test_api_autoauth.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Served on localhost, the SPA loads with a valid token (via injected window shim or /api/bootstrap) and authenticated calls succeed WITHOUT the user setting VITE_JOBSMITH_API_TOKEN</li><li>On --bind-public, no token is injected; unauthenticated API calls are rejected as before</li><li>The injected token equals the resolved static bearer token (env var or private/jobsmith.token), and the SSE/EventSource query-param path still authenticates</li><li>The rendered token is excluded from the SSE event-log redaction view (no accidental echo)</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-3-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> token injected only when serving index.html on a localhost bind.
+<strong>State:</strong> token sourced from the existing resolver (JOBSMITH_API_TOKEN env →
+private/jobsmith.token file); no new secret store.
+<strong>Payload:</strong> runtime shim window.<strong>JOBSMITH</strong>={token,apiBase} in index.html, OR a
+GET /api/bootstrap the SPA fetches on load; client.ts reads it, VITE var as fallback.
+<strong>Rejected:</strong> baking the token into the bundle at build time (can&#39;t carry a runtime
+token, and leaks into static assets); cookie/session auth (larger change, the API
+is bearer/JWT today); auto-injecting on public binds (security hole).</p>
+</div>
+        <label for="slice-3-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 2</span>
+            <ul><li>TestLocalhostInjectsToken — GET / on 127.0.0.1 → index has token shim; authed call OK</li><li>TestPublicBindNoInjection — --bind-public → no token in page; 401 without header</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>TestClientReadsRuntimeToken — client prefers window shim over VITE var</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>Inject the token into index.html, or expose it via an endpoint?</p>
+          
+          
+          <textarea
+            data-section="slice-3-question-q-inject-mechanism"
+            data-comment-for="slice-3-question-q-inject-mechanism"
+            placeholder="Answer question q-inject-mechanism...">Inject a window.__JOBSMITH__ shim into the served index.html on localhost — zero extra round-trip, no unauthenticated bootstrap endpoint to guard; the SPA reads it synchronously before first API call.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: slices 1</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-3" data-comment-for="slice-3" placeholder="Comments on slice 3..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-4" data-slice="4" data-slice-name="slice-4" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 4: `jobsmith up` — boot the server, serve the UI, open the browser (--dev toggle)">
+    <span class="slice-num">#4</span>
+    <span class="slice-title-col">
+      <span class="slice-name">`jobsmith up` — boot the server, serve the UI, open the browser (--dev toggle)</span>
+      <span class="slice-preview">Add a top-level jobsmith up Typer command as the friendly one-command entry.</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-4">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-4-approval" value="approved" data-section="slice-4" data-action="approve" aria-label="Approve slice 4">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-4-approval" value="changes_requested" data-section="slice-4" data-action="approve" aria-label="Request changes for slice 4">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-4-approval" value="rejected" data-section="slice-4" data-action="approve" aria-label="Reject slice 4">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-4-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Add a top-level <code>jobsmith up</code> Typer command as the friendly one-command entry. It
+reuses the existing serve path (api/server.py:24 serve → uvicorn.run on create_app),
+then opens the default browser to the served URL (webbrowser.open after the server is
+listening). Flags: --host/--port (default 127.0.0.1:8000), --no-open (skip browser),
+--bind-public (passthrough; disables auto-auth per slice-3), and --dev. Per the chosen
+design, --dev EXPLICITLY toggles serving behavior: prod (default) serves the bundled
+static UI single-port; --dev expects the developer&#39;s separate vite dev server (skips
+the static mount, points the opened URL / client at the vite origin, leaves the
+existing two-process workflow intact). <code>jobsmith api serve</code> stays as the lower-level
+headless entry.</p>
+</div>
+          <label for="slice-4-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>One memorable command (<code>dagster dev</code> / <code>prefect server start</code>) is what makes it feel
+like an app. The user chose a new <code>jobsmith up</code> wrapping serve + static + open, with
+an explicit --dev flag to preserve the hot-reload developer workflow.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/cli.py, src/jobsmith/api/server.py, tests/test_cli_up.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>`jobsmith up` starts uvicorn on 127.0.0.1:8000, and once listening opens the browser to the served UI (auto-authenticated via slice-3)</li><li>`jobsmith up --no-open` starts the server without launching a browser; `--port N` is honored</li><li>`jobsmith up --dev` skips the static mount and targets the vite dev origin, preserving the two-process hot-reload workflow</li><li>`jobsmith api serve` continues to work unchanged as the headless entry</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-4-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> explicit <code>jobsmith up</code> CLI invocation; opens browser after listen.
+<strong>State:</strong> none new — wraps the existing serve()/create_app; browser via stdlib webbrowser.
+<strong>Payload:</strong> flags --host/--port/--no-open/--bind-public/--dev; default 127.0.0.1:8000 prod.
+<strong>Rejected:</strong> folding into <code>api serve</code> flags only (less discoverable than a top-level
+<code>up</code>); replacing/retiring <code>api serve</code> (breaks headless scripts); auto-running vite
+from <code>up</code> in dev (fragile; devs already run their own vite).</p>
+</div>
+        <label for="slice-4-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 1</span>
+            <ul><li>TestUpServesAndOpens — spawn `up --no-open`, assert server up &#43; UI served; browser-open mocked</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 2</span>
+            <ul><li>TestUpDevSkipsStatic — --dev → static mount not applied, points at vite origin</li><li>TestUpHonorsPort — --port → uvicorn binds the given port</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>How to avoid opening the browser before the server is ready?</p>
+          
+          
+          <textarea
+            data-section="slice-4-question-q-open-timing"
+            data-comment-for="slice-4-question-q-open-timing"
+            placeholder="Answer question q-open-timing...">Start uvicorn, poll the bound host:port (or use a startup callback) until it accepts a connection, THEN webbrowser.open; cap the wait and proceed/log if it doesn&#39;t come up.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: slices 1,3</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-4" data-comment-for="slice-4" placeholder="Comments on slice 4..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-5" data-slice="5" data-slice-name="slice-5" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 5: End-to-end acceptance: fresh wheel install → jobsmith up → apply/onboard in browser">
+    <span class="slice-num">#5</span>
+    <span class="slice-title-col">
+      <span class="slice-name">End-to-end acceptance: fresh wheel install → jobsmith up → apply/onboard in browser</span>
+      <span class="slice-preview">Prove the full Dagster/Prefect-style loop at the strict acceptance bar the user chose.</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-blocked badge-sm">L</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-5">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-5-approval" value="approved" data-section="slice-5" data-action="approve" aria-label="Approve slice 5">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-5-approval" value="changes_requested" data-section="slice-5" data-action="approve" aria-label="Request changes for slice 5">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-5-approval" value="rejected" data-section="slice-5" data-action="approve" aria-label="Reject slice 5">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-5-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Prove the full Dagster/Prefect-style loop at the strict acceptance bar the user chose.
+Build the wheel (slice-2), install it into a clean, npm-free virtualenv, run
+<code>jobsmith up --no-open</code> (server only, for automation), and drive a COMPLETE apply (and
+onboard) run through the browser-facing HTTP surface end-to-end against the served
+origin: submit a JD, watch SSE phase progress, reach materials-ready — all via the
+same-origin API the served UI uses, with localhost auto-auth. Document the launch
+story (README/AGENTS): <code>uv tool install</code> → <code>jobsmith up</code>. This slice is verification +
+docs, not new product surface.</p>
+</div>
+          <label for="slice-5-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>The acceptance bar is &#34;fresh install → up → working UI + a full apply/onboard through
+the browser.&#34; A green E2E here is what certifies the architecture actually delivers the
+one-command local-app experience, not just that the pieces exist.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>tests/e2e/test_fresh_install_up.py, README.md, AGENTS.md</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>A built wheel installs into a clean venv with NO node/npm and serves the bundled UI via `jobsmith up`</li><li>A full apply run completes end-to-end through the served same-origin API (JD → SSE phases → materials-ready) with localhost auto-auth and no manual token</li><li>An onboard run seeds master content through the same served surface</li><li>README/AGENTS document the `uv tool install` → `jobsmith up` launch story</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-5-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> CI/e2e job that builds the wheel and exercises the served app.
+<strong>State:</strong> ephemeral clean venv + a scratch jobsmith repo (settings repo_root) for the run.
+<strong>Payload:</strong> exercises the real HTTP surface the served UI uses (same-origin), not the CLI pipeline directly.
+<strong>Rejected:</strong> asserting only that index.html loads (the user explicitly wanted a full
+apply/onboard through the UI); a full headless-browser (Playwright) DOM drive (heavier;
+same-origin API-level E2E proves the architecture with far less flakiness — can add
+browser DOM coverage later).</p>
+</div>
+        <label for="slice-5-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="e2e">
+            <span class="test-chip">E2E &middot; 2</span>
+            <ul><li>TestFreshInstallUpApply — clean venv &#43; wheel → up → drive apply to materials-ready over same-origin API</li><li>TestFreshInstallUpOnboard — same env → onboard seeds masters</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="smoke">
+            <span class="test-chip">SMOKE &middot; 1</span>
+            <ul><li>assert bundled web_dist served and auto-auth works on localhost</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>Drive the E2E through a headless browser or the same-origin HTTP API?</p>
+          
+          
+          <textarea
+            data-section="slice-5-question-q-e2e-surface"
+            data-comment-for="slice-5-question-q-e2e-surface"
+            placeholder="Answer question q-e2e-surface...">Through the same-origin HTTP API the served UI calls (plus a smoke check that the UI &#43; auto-auth load). It proves the single-server &#43; packaging &#43; auth loop without Playwright flakiness; a DOM-level browser test can be a later add-on.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: slices 2,4</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-5" data-comment-for="slice-5" placeholder="Comments on slice 5..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+
     <!--PLAN_SLICE_CARDS-->
   </div>
 </details>
 
 <!-- Design Decisions (hidden for v2 plans — slice cards carry their own questions) -->
-<details id="questions" class="section-card" data-phase="questions" data-status="pending">
-  <summary><span>Design Decisions</span><span class="badge badge-pending" data-badge-for="questions">Pending</span></summary>
-  <div class="section-body">
-    <table class="q-table">
-      <thead><tr><th>Question</th><th>Selected</th><th>Status</th></tr></thead>
-      <tbody id="questionsRecap">
-        <!--PLAN_QUESTIONS_RECAP-->
-      </tbody>
-    </table>
-  </div>
-</details>
+
 
 
 
@@ -498,8 +1385,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <h2>Feedback Summary</h2>
   <div class="progress-stats">
     <div class="progress-stat"><strong id="approvedCount">0</strong> approved</div>
-    <div class="progress-stat"><strong id="totalSections">1</strong> sections</div>
-    <div class="progress-stat"><strong id="pendingCount">1</strong> pending</div>
+    <div class="progress-stat"><strong id="totalSections">6</strong> sections</div>
+    <div class="progress-stat"><strong id="pendingCount">6</strong> pending</div>
   </div>
   <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill" style="width:0%"></div></div>
   <div class="comments-summary">
@@ -579,7 +1466,7 @@ var planId=(function(){var a=document.querySelector('article[id]');return a?a.id
 
 (function(){
   'use strict';
-  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design"]/*END_PLAN_SECTIONS_JSON*/;
+  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design","slice-1","slice-2","slice-3","slice-4","slice-5"]/*END_PLAN_SECTIONS_JSON*/;
 
   function setBadge(el,ok){
     el.className='badge badge-'+(ok?'approved':'pending');
