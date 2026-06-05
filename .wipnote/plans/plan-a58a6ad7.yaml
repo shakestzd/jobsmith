@@ -1,0 +1,18 @@
+meta:
+    id: plan-a58a6ad7
+    track_id: trk-45e7fcd5
+    title: Apply-pipeline incremental-reuse / caching layer
+    description: Layered reuse (artifact + requirement + whole-resume warm-start) with hybrid canonical-tag classification, reuse-planner pre-phase, content-hash+TTL invalidation, correctness-first gate re-run, and an A/B acceptance harness targeting ~50% cost+wall-clock on warm runs.
+    created_at: "2026-06-05"
+    status: draft
+    priority: medium
+    schema_version: v3
+    version: 2
+design:
+    problem: ""
+    goals: []
+    constraints: []
+    approved: false
+    comment: ""
+slices: []
+questions: []
