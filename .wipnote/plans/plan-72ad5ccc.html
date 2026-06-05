@@ -411,7 +411,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-1" class="slice-nav-item" data-slice-nav="1">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="1"></span>
         <span>#1 Serve the built UI same-origin from create_app (StaticFiles + SPA fallback)</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="5 issue(s)">&#9888;5</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -420,7 +420,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-2" class="slice-nav-item" data-slice-nav="2">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="2"></span>
         <span>#2 Bundle web/dist into the wheel via a hatch build hook</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="5 issue(s)">&#9888;5</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -428,8 +428,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-3" class="slice-nav-item" data-slice-nav="3">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="3"></span>
-        <span>#3 Localhost auto-auth: inject the served UI's token at runtime</span>
-        
+        <span>#3 Localhost auto-auth: runtime token shim feeding header AND SSE paths</span>
+        <span class="nav-triage-badge nav-triage-issue" title="5 issue(s)">&#9888;5</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -437,8 +437,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-4" class="slice-nav-item" data-slice-nav="4">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="4"></span>
-        <span>#4 `jobsmith up` — boot the server, serve the UI, open the browser (--dev toggle)</span>
-        
+        <span>#4 `jobsmith up` — boot the server, open the browser after listen (non-blocking), --dev toggle</span>
+        <span class="nav-triage-badge nav-triage-issue" title="5 issue(s)">&#9888;5</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -447,7 +447,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-5" class="slice-nav-item" data-slice-nav="5">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="5"></span>
         <span>#5 End-to-end acceptance: fresh wheel install → jobsmith up → apply/onboard in browser</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="4 issue(s)">&#9888;4</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -496,10 +496,10 @@ browser. Localhost auto-authenticates so no token typing. NO native desktop shel
   <h2>Dependency Graph</h2>
   <div id="graph-data" style="display:none">
     <div data-node="1" data-name="Serve the built UI same-origin from create_app (StaticFiles + SPA fallback)" data-status="pending" data-deps="" data-files="4"></div>
-    <div data-node="2" data-name="Bundle web/dist into the wheel via a hatch build hook" data-status="pending" data-deps="1" data-files="4"></div>
-    <div data-node="3" data-name="Localhost auto-auth: inject the served UI's token at runtime" data-status="pending" data-deps="1" data-files="4"></div>
-    <div data-node="4" data-name="`jobsmith up` — boot the server, serve the UI, open the browser (--dev toggle)" data-status="pending" data-deps="1,3" data-files="3"></div>
-    <div data-node="5" data-name="End-to-end acceptance: fresh wheel install → jobsmith up → apply/onboard in browser" data-status="pending" data-deps="2,4" data-files="3"></div>
+    <div data-node="2" data-name="Bundle web/dist into the wheel via a hatch build hook" data-status="pending" data-deps="1" data-files="5"></div>
+    <div data-node="3" data-name="Localhost auto-auth: runtime token shim feeding header AND SSE paths" data-status="pending" data-deps="1" data-files="4"></div>
+    <div data-node="4" data-name="`jobsmith up` — boot the server, open the browser after listen (non-blocking), --dev toggle" data-status="pending" data-deps="1,3" data-files="3"></div>
+    <div data-node="5" data-name="End-to-end acceptance: fresh wheel install → jobsmith up → apply/onboard in browser" data-status="pending" data-deps="2,4" data-files="4"></div>
     
     <!--PLAN_GRAPH_NODES-->
   </div>
@@ -533,8 +533,8 @@ separate vite dev server, open a browser, wire a token&#34; — a dev workflow, 
 <h4>Constraints</h4>
 <ul>
 <li data-markdown>NO native desktop shell (Tauri/Electron) — local web server + browser only.</li>
-<li data-markdown>Preserve existing auth: static bearer token (JOBSMITH_API_TOKEN / private/jobsmith.token, auth.py:46) and JWT stay intact; localhost convenience is additive.</li>
-<li data-markdown>Backward compatible: `jobsmith api serve` keeps working as the lower-level/headless entry; existing cross-origin dev workflow stays available behind a flag.</li>
+<li data-markdown>Preserve existing auth: static bearer token (JOBSMITH_API_TOKEN / private/jobsmith.token, resolved by _get_expected_token() at auth.py:86) and JWT stay intact; localhost convenience is additive.</li>
+<li data-markdown>Backward compatible: `jobsmith api serve` keeps working as the lower-level/headless entry; existing cross-origin dev workflow stays available behind --dev.</li>
 <li data-markdown>Single-tenant, local-first — no multi-user/hosted concerns in this plan.</li>
 </ul>
 
@@ -558,7 +558,7 @@ separate vite dev server, open a browser, wire a token&#34; — a dev workflow, 
     <span class="slice-num">#1</span>
     <span class="slice-title-col">
       <span class="slice-name">Serve the built UI same-origin from create_app (StaticFiles &#43; SPA fallback)</span>
-      <span class="slice-preview">In createapp (api/main.py:207), after all API routers are registered, mount the</span>
+      <span class="slice-preview">In createapp (api/main.py:207), after all API routers are registered</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-revision badge-sm">M</span>
@@ -566,7 +566,7 @@ separate vite dev server, open a browser, wire a token&#34; — a dev workflow, 
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-1">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="5 critic issue(s)">5 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -598,17 +598,21 @@ separate vite dev server, open a browser, wire a token&#34; — a dev workflow, 
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-1-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>In create_app (api/main.py:207), after all API routers are registered, mount the
-built frontend so one origin serves both. Add a web-dist locator (new
-api/staticui.py) that resolves the assets directory with a documented precedence:
-bundled package path (jobsmith/web_dist/, populated by slice-2) first, then the
-repo-root web/dist for source installs; if neither exists, skip the mount and log
-a hint (API-only mode). Mount StaticFiles(html=True) and add a catch-all GET that
-returns index.html for non-API, non-asset paths so client-side deep links work —
-WITHOUT shadowing existing API routes (register the SPA fallback last and exclude
-the API path prefixes + docs). Make the web client same-origin: when the app is
-served from the API, BASE_URL (client.ts:15-16) must default to a relative origin
-(&#34;&#34; / window.location.origin) instead of hardcoded http://localhost:8000.</p>
+          <div class="markdown-block reveal-content serif-prose"><p>In create_app (api/main.py:207), after all API routers are registered
+(main.py:237-303, all under prefix=&#39;/api&#39;), mount the built frontend so one origin
+serves both. Add a web-dist locator (new api/staticui.py) that resolves the assets
+directory with a documented precedence: bundled package path (jobsmith/web_dist/,
+populated by slice-2) first, then the repo-root web/dist for source installs; if
+neither exists, skip the mount and log a one-line hint (API-only mode). Mount
+StaticFiles(html=True) for /assets and add a catch-all GET that returns index.html
+for non-API, non-asset paths so client-side deep links work — the exclusion list
+MUST cover every non-SPA route: /api/<em>, the BARE /health (main.py:231), /docs,
+/openapi.json, /redoc, and the asset mount (return 404 for unknown /api/</em> rather
+than index.html). The existing CORSMiddleware (main.py:217-228, localhost:5173/5174)
+stays for --dev split mode but is redundant for the served UI — document that.
+Make the web client same-origin: BASE_URL (client.ts:15-16) must default to
+window.location.origin when served from the API instead of hardcoded
+http://localhost:8000 (VITE_JOBSMITH_API_URL still overrides for split dev).</p>
 </div>
           <label for="slice-1-what-reveal" class="reveal-label">Show full description</label>
           
@@ -637,7 +641,7 @@ can never feel like one thing. Same-origin also removes the CORS/base-URL fricti
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>With assets present, GET / returns the SPA index.html and GET /assets/* returns hashed bundles, both from the same server/port as the API</li><li>A client-side deep link (e.g. GET /applications/some-slug) falls back to index.html (200), while GET /api/* and existing API routes are unaffected (no shadowing)</li><li>When no web-dist is found, the server starts in API-only mode (no crash) and logs a one-line hint</li><li>The web client resolves BASE_URL to the serving origin when not overridden by VITE_JOBSMITH_API_URL</li></ul>
+        <ul class="slice-done-list"><li>With assets present, GET / returns the SPA index.html and GET /assets/* returns hashed bundles, both from the same server/port as the API</li><li>A client-side deep link (e.g. GET /applications/some-slug) falls back to index.html (200); GET /api/*, the bare GET /health, and /docs are unaffected (no shadowing; unknown /api/* → 404 not index.html)</li><li>When no web-dist is found, the server starts in API-only mode (no crash) and logs a one-line hint</li><li>The web client resolves BASE_URL to window.location.origin when not overridden by VITE_JOBSMITH_API_URL</li></ul>
       </div>
       
     
@@ -648,13 +652,16 @@ can never feel like one thing. Same-origin also removes the CORS/base-URL fricti
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-1-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> static mount added inside create_app AFTER API routers, fallback last.
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> static mount added inside create_app AFTER API routers; SPA catch-all LAST.
 <strong>State:</strong> assets located via api/staticui.py resolver — bundled path
 (jobsmith/web_dist) preferred, repo web/dist fallback, else API-only.
-<strong>Payload:</strong> StaticFiles(html=True) at /, catch-all → index.html for SPA routes,
-excluding /api, /docs, /openapi.json and the asset mount.
+<strong>Payload:</strong> StaticFiles(html=True) for /assets, catch-all → index.html, excluding
+/api, the bare /health (main.py:231), /docs, /openapi.json, /redoc, /assets.
 <strong>Same-origin:</strong> client.ts BASE_URL defaults to window.location.origin when served
-from the API; VITE_JOBSMITH_API_URL still overrides for split dev.
+from the API; VITE_JOBSMITH_API_URL still overrides for split dev. CORS
+(main.py:217-228) retained for --dev only.
+<strong>Cache-control:</strong> hashed /assets served immutable/long-lived; index.html served
+no-cache so SPA updates aren&#39;t pinned to a stale shell.
 <strong>Rejected:</strong> a second static server / reverse proxy (defeats single-process goal);
 serving from repo web/dist only (breaks published wheels — see slice-2);
 hash-router to avoid fallback (changes URLs, worse UX than SPA fallback).</p>
@@ -675,7 +682,7 @@ hash-router to avoid fallback (changes URLs, worse UX than SPA fallback).</p>
           
           <div class="test-group" data-kind="integration">
             <span class="test-chip">INTEGRATION &middot; 4</span>
-            <ul><li>TestServeSpaIndex — GET / → index.html; GET /assets/&lt;hash&gt;.js → 200</li><li>TestSpaFallbackDeepLink — GET /applications/x → index.html 200</li><li>TestApiRoutesNotShadowed — GET /api/* &#43; a known route still resolve</li><li>TestApiOnlyModeWhenNoDist — no dist dir → app boots, mount skipped</li></ul>
+            <ul><li>TestServeSpaIndex — GET / → index.html; GET /assets/&lt;hash&gt;.js → 200</li><li>TestSpaFallbackDeepLink — GET /applications/x → index.html 200</li><li>TestApiAndHealthNotShadowed — GET /api/*, GET /health, GET /docs still resolve; unknown /api/* → 404</li><li>TestApiOnlyModeWhenNoDist — no dist dir → app boots, mount skipped</li></ul>
           </div>
           
         </div>
@@ -685,6 +692,43 @@ hash-router to avoid fallback (changes URLs, worse UX than SPA fallback).</p>
     
 
     
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">Catch-all exclusion omitted the BARE /health (main.py:231); API routers ARE /api-prefixed (237-303) but /health is bare — RESOLVED: exclusion &#43; test now cover /health and /docs.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">SUCCESS</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">create_app confirmed at main.py:207; no existing static mount; /api prefix discipline (237-303) makes SPA fallback sound.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">CORSMiddleware already exists (main.py:217-228, vite origins) — redundant same-origin but keep for --dev; noted in decisions.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Asset cache-control unspecified — RESOLVED: hashed assets immutable, index.html no-cache, added to decisions.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">SSE EventSource auth under same-origin not explicit here — handled in slice-3 (client token refactor); cross-referenced.</span>
+        </div>
+        
+      </div>
+    </div>
+    
 
     
     <div class="slice-field slice-questions">
@@ -692,13 +736,13 @@ hash-router to avoid fallback (changes URLs, worse UX than SPA fallback).</p>
       <div class="slice-field-value">
         
         <div class="question-block slice-question-block">
-          <p>How to keep the SPA catch-all from swallowing API/doc routes?</p>
+          <p>How to keep the SPA catch-all from swallowing API/doc/health routes?</p>
           
           
           <textarea
             data-section="slice-1-question-q-fallback-scope"
             data-comment-for="slice-1-question-q-fallback-scope"
-            placeholder="Answer question q-fallback-scope...">Register API routers &#43; StaticFiles first; add the index.html catch-all LAST with an explicit exclusion of /api, /docs, /openapi.json, /redoc and the /assets mount, returning 404 for unknown /api/* rather than index.html.</textarea>
+            placeholder="Answer question q-fallback-scope...">Register API routers &#43; StaticFiles first; add the index.html catch-all LAST with an explicit exclusion of /api, the bare /health (main.py:231), /docs, /openapi.json, /redoc and /assets, returning 404 for unknown /api/* rather than index.html.</textarea>
           
         </div>
         
@@ -729,7 +773,7 @@ hash-router to avoid fallback (changes URLs, worse UX than SPA fallback).</p>
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-2">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="5 critic issue(s)">5 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -762,14 +806,17 @@ hash-router to avoid fallback (changes URLs, worse UX than SPA fallback).</p>
           
           <input type="checkbox" id="slice-2-what-reveal" class="reveal-toggle">
           <div class="markdown-block reveal-content serif-prose"><p>Make <code>pip install</code> / <code>uv tool install</code> ship the UI so the end user never runs npm.
-Add a custom hatchling build hook (hatch_build.py + [tool.hatch.build.targets.wheel.hooks]
-wiring in pyproject.toml) that, at wheel-build time, runs <code>vite build</code> in web/ and
-copies web/dist into the package tree at src/jobsmith/web_dist/, then force-includes
-it in the wheel (extend the existing [tool.hatch.build.targets.wheel.force-include]
-at pyproject.toml:100). The slice-1 locator already prefers this bundled path. Add
-web_dist/ to .gitignore (build artifact, not committed) and make the hook a no-op
-with a clear message if npm/node is unavailable (so source-only installs degrade to
-API-only rather than failing the build).</p>
+Add a custom hatchling build hook (new hatch_build.py + a NEW
+[tool.hatch.build.hooks.custom] section in pyproject.toml — this is separate from,
+not an extension of, the existing [tool.hatch.build.targets.wheel.force-include] at
+pyproject.toml:100-101 which already maps templates→jobsmith/templates). At
+wheel-build time the hook runs <code>vite build</code> in web/ FRESH (never trusting a stale
+on-disk web/dist) and copies the output into the package tree at
+src/jobsmith/web_dist/, then force-includes it in the wheel (add a second
+force-include entry alongside templates). The slice-1 locator prefers this bundled
+path. Gitignore BOTH web/dist and src/jobsmith/web_dist (build artifacts, currently
+neither is ignored). Make the hook a no-op with a clear message if npm/node is
+unavailable. Add a visibility check so a UI-less wheel is detectable: <code>jobsmith doctor</code> (and/or <code>jobsmith --version</code>) reports &#34;UI bundled: yes/no&#34;.</p>
 </div>
           <label for="slice-2-what-reveal" class="reveal-label">Show full description</label>
           
@@ -781,8 +828,10 @@ API-only rather than failing the build).</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>The whole &#34;feels like an app&#34; property in Dagster/Prefect comes from shipping the
-pre-built SPA inside the Python package. Without wheel bundling, <code>pip install jobsmith</code> would have no UI and <code>jobsmith up</code> could only work from a source checkout.</p>
+          <div class="markdown-block serif-prose"><p>The &#34;feels like an app&#34; property in Dagster/Prefect comes from shipping the pre-built
+SPA inside the Python package. Without wheel bundling, <code>pip install jobsmith</code> has no
+UI and <code>jobsmith up</code> only works from a source checkout. The visibility check stops a
+silently-degraded API-only wheel from shipping unnoticed.</p>
 </div>
           
         </div>
@@ -791,13 +840,13 @@ pre-built SPA inside the Python package. Without wheel bundling, <code>pip insta
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>pyproject.toml, hatch_build.py, .gitignore, tests/test_wheel_bundles_ui.py</code></div>
+        <div class="slice-field-value"><code>pyproject.toml, hatch_build.py, .gitignore, src/jobsmith/api/doctor.py, tests/test_wheel_bundles_ui.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Building the wheel runs vite build and produces src/jobsmith/web_dist/index.html &#43; hashed assets inside the wheel (verified by unzipping the built wheel)</li><li>Installing the built wheel into a clean venv (no node/npm) exposes the bundled web_dist that slice-1&#39;s locator finds</li><li>If node/npm is absent at build time, the hook logs a skip and the wheel still builds (API-only), rather than erroring</li></ul>
+        <ul class="slice-done-list"><li>Building the wheel runs vite build FRESH and produces src/jobsmith/web_dist/index.html &#43; hashed assets inside the wheel (verified by unzipping the built wheel)</li><li>Installing the built wheel into a clean venv (no node/npm) exposes the bundled web_dist that slice-1&#39;s locator finds</li><li>If node/npm is absent at build time, the hook logs a skip and the wheel still builds (API-only), rather than erroring</li><li>`jobsmith doctor` (or --version) reports whether the UI is bundled, so a UI-less wheel is detectable</li><li>Both web/dist and src/jobsmith/web_dist are gitignored</li></ul>
       </div>
       
     
@@ -808,13 +857,18 @@ pre-built SPA inside the Python package. Without wheel bundling, <code>pip insta
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-2-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> hatchling custom build hook on the wheel target, runs at build time.
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> hatchling custom build hook ([tool.hatch.build.hooks.custom], a NEW
+section — NOT the force-include at :100) on the wheel target, runs at build time.
 <strong>State:</strong> built assets copied to src/jobsmith/web_dist/ (gitignored) and
-force-included in the wheel; bundled path is slice-1&#39;s preferred location.
-<strong>Payload:</strong> <code>vite build</code> output (index.html + /assets/*) shipped verbatim.
+force-included; bundled path is slice-1&#39;s preferred location.
+<strong>Payload:</strong> <code>vite build</code> output (index.html + /assets/*), built FRESH each wheel
+build to avoid stale-dist capture; shipped verbatim.
+<strong>Visibility:</strong> doctor/--version reports &#34;UI bundled&#34; so silent API-only wheels are caught.
+<strong>Editable installs:</strong> <code>pip install -e .</code> does NOT run the hook — developers run
+<code>npm run build</code> (or <code>jobsmith up --dev</code>); documented in slice-5 docs.
 <strong>Rejected:</strong> committing prebuilt web/dist to git (repo bloat + stale-bundle risk);
-a separate companion package like dagster-webserver (overkill for single-tenant);
-runtime <code>npm install</code> on first launch (slow, requires node on the user machine).</p>
+a separate companion package (overkill for single-tenant); runtime npm install on
+first launch (slow, needs node on the user machine).</p>
 </div>
         <label for="slice-2-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -832,12 +886,12 @@ runtime <code>npm install</code> on first launch (slow, requires node on the use
           
           <div class="test-group" data-kind="integration">
             <span class="test-chip">INTEGRATION &middot; 2</span>
-            <ul><li>TestWheelContainsUI — build wheel, unzip, assert jobsmith/web_dist/index.html present</li><li>TestLocatorFindsBundled — point locator at an installed layout → resolves bundled dist</li></ul>
+            <ul><li>TestWheelContainsUI — build wheel, unzip, assert jobsmith/web_dist/index.html present</li><li>TestLocatorFindsBundled — installed layout → locator resolves bundled dist</li></ul>
           </div>
           
           <div class="test-group" data-kind="unit">
-            <span class="test-chip">UNIT &middot; 1</span>
-            <ul><li>TestBuildHookSkipsWithoutNode — simulate missing npm → hook no-ops, build succeeds</li></ul>
+            <span class="test-chip">UNIT &middot; 2</span>
+            <ul><li>TestBuildHookSkipsWithoutNode — simulate missing npm → hook no-ops, build succeeds</li><li>TestDoctorReportsUiBundled — doctor output reflects presence/absence of web_dist</li></ul>
           </div>
           
         </div>
@@ -846,6 +900,43 @@ runtime <code>npm install</code> on first launch (slow, requires node on the use
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">web/dist exists on disk but is NOT gitignored — hook could copy a STALE dist — RESOLVED: hook builds fresh; gitignore web/dist &#43; src/jobsmith/web_dist.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">Hook wiring is a NEW [tool.hatch.build.hooks.custom] section, not an extension of force-include at :100 — RESOLVED: clarified in what/decisions.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">SUCCESS</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">hatchling&gt;=1.20 (pyproject.toml:1) supports custom build hooks; force-include pattern already in use (:100-101, templates).</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Silent API-only degradation could ship a UI-less wheel unnoticed — RESOLVED: doctor/--version &#39;UI bundled&#39; visibility check &#43; test.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Editable-install (`pip install -e .`) won&#39;t trigger the hook — RESOLVED: documented dev workflow (npm run build / --dev) in decisions &#43; slice-5 docs.</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -860,7 +951,7 @@ runtime <code>npm install</code> on first launch (slow, requires node on the use
           <textarea
             data-section="slice-2-question-q-no-node-build"
             data-comment-for="slice-2-question-q-no-node-build"
-            placeholder="Answer question q-no-node-build...">The hook logs a skip and the wheel builds without the UI (API-only). CI/release builds run on an image with node so published wheels always include the UI; only ad-hoc source builds may omit it.</textarea>
+            placeholder="Answer question q-no-node-build...">The hook logs a skip and the wheel builds without the UI (API-only); `jobsmith doctor` then reports &#39;UI bundled: no&#39;. CI/release builds run on a node image so published wheels always include the UI; only ad-hoc source builds may omit it.</textarea>
           
         </div>
         
@@ -879,11 +970,11 @@ runtime <code>npm install</code> on first launch (slow, requires node on the use
   </div>
 </details>
 <details class="slice-card" id="slice-3" data-slice="3" data-slice-name="slice-3" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 3: Localhost auto-auth: inject the served UI&#39;s token at runtime">
+  <summary class="slice-summary" aria-label="Slice 3: Localhost auto-auth: runtime token shim feeding header AND SSE paths">
     <span class="slice-num">#3</span>
     <span class="slice-title-col">
-      <span class="slice-name">Localhost auto-auth: inject the served UI&#39;s token at runtime</span>
-      <span class="slice-preview">Remove the need to type/configure a token when using the served UI on localhost,</span>
+      <span class="slice-name">Localhost auto-auth: runtime token shim feeding header AND SSE paths</span>
+      <span class="slice-preview">Remove the need to type/configure a token on localhost while keeping bearer/JWT</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-revision badge-sm">M</span>
@@ -891,7 +982,7 @@ runtime <code>npm install</code> on first launch (slow, requires node on the use
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-3">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="5 critic issue(s)">5 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -923,15 +1014,21 @@ runtime <code>npm install</code> on first launch (slow, requires node on the use
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-3-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>Remove the need to type/configure a token when using the served UI on localhost,
-while keeping bearer/JWT auth fully intact. When the API serves index.html (slice-1),
-inject the resolved static bearer token (the same one from JOBSMITH_API_TOKEN /
-private/jobsmith.token, auth.py:46) into the page at request time — e.g. a small
-runtime-config shim (window.<strong>JOBSMITH</strong> = { token, apiBase }) written into index.html
-or exposed via a tiny GET /api/bootstrap the SPA calls on load. Change the web client
-(client.ts:17) to read the token from this runtime shim instead of the build-time
-VITE_JOBSMITH_API_TOKEN, falling back to the VITE var for split dev. Only inject when
-bound to localhost; on --bind-public, do NOT inject (require explicit auth).</p>
+          <div class="markdown-block reveal-content serif-prose"><p>Remove the need to type/configure a token on localhost while keeping bearer/JWT
+intact. When the API serves index.html (slice-1) on a LOCALHOST bind, inject the
+resolved static bearer token — sourced from the EXISTING resolver
+_get_expected_token() (lru_cache) at auth.py:86, which reads JOBSMITH_API_TOKEN
+(auth.py:46) then the CWD-relative private/jobsmith.token (auth.py:52) — into the
+page as a JSON-encoded/HTML-escaped runtime shim window.<strong>JOBSMITH</strong>={token,apiBase}.
+CRITICAL client refactor (per A2): today client.ts:17 STATIC_TOKEN is an immutable
+build-time const and buildEventsUrl (client.ts:265-271) reads
+getAccessToken()||STATIC_TOKEN — a window shim alone would NOT authenticate SSE.
+Refactor client.ts so a single MUTABLE runtime token (read from window.<strong>JOBSMITH</strong>,
+VITE var as fallback) feeds BOTH the Authorization header path AND buildEventsUrl&#39;s
+query-param. Inject ONLY on a localhost bind (detect 127.0.0.1/::1 from the bind/
+request); on --bind-public, do NOT inject and require explicit auth. Add a
+restrictive CSP on the served index and ensure the token is excluded from the SSE
+event-log redaction view.</p>
 </div>
           <label for="slice-3-what-reveal" class="reveal-label">Show full description</label>
           
@@ -943,11 +1040,14 @@ bound to localhost; on --bind-public, do NOT inject (require explicit auth).</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Same-origin serving is pointless if the user still has to paste a bearer token. The
-user chose &#34;keep existing bearer/JWT, UI auto-authenticates locally&#34; — matching
-Dagster/Prefect, which require no login on localhost. The build-time VITE token can&#39;t
-carry a runtime-generated localhost token, so injection must happen at serve time.</p>
+          <input type="checkbox" id="slice-3-why-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Same-origin serving is pointless if the user still pastes a bearer token. The user
+chose &#34;keep bearer/JWT, UI auto-authenticates locally&#34; — matching Dagster/Prefect
+(no localhost login). The build-time VITE token can&#39;t carry a runtime localhost
+token, and the immutable STATIC_TOKEN const means SSE would silently fail without the
+client refactor — so injection + a mutable runtime token are both required.</p>
 </div>
+          <label for="slice-3-why-reveal" class="reveal-label">Show full description</label>
           
         </div>
       </div>
@@ -961,7 +1061,7 @@ carry a runtime-generated localhost token, so injection must happen at serve tim
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Served on localhost, the SPA loads with a valid token (via injected window shim or /api/bootstrap) and authenticated calls succeed WITHOUT the user setting VITE_JOBSMITH_API_TOKEN</li><li>On --bind-public, no token is injected; unauthenticated API calls are rejected as before</li><li>The injected token equals the resolved static bearer token (env var or private/jobsmith.token), and the SSE/EventSource query-param path still authenticates</li><li>The rendered token is excluded from the SSE event-log redaction view (no accidental echo)</li></ul>
+        <ul class="slice-done-list"><li>Served on localhost, the SPA loads with a valid token via the injected window.__JOBSMITH__ shim and BOTH authed REST calls AND SSE/EventSource succeed WITHOUT VITE_JOBSMITH_API_TOKEN set</li><li>client.ts reads a single mutable runtime token consumed by both the Authorization header and buildEventsUrl (client.ts:265-271); the VITE var is fallback only</li><li>On --bind-public, no token is injected; unauthenticated REST and SSE calls are rejected as before</li><li>The injected token equals _get_expected_token() (auth.py:86), is JSON/HTML-escaped in the page, and is excluded from the SSE event-log redaction view</li></ul>
       </div>
       
     
@@ -972,14 +1072,17 @@ carry a runtime-generated localhost token, so injection must happen at serve tim
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-3-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> token injected only when serving index.html on a localhost bind.
-<strong>State:</strong> token sourced from the existing resolver (JOBSMITH_API_TOKEN env →
-private/jobsmith.token file); no new secret store.
-<strong>Payload:</strong> runtime shim window.<strong>JOBSMITH</strong>={token,apiBase} in index.html, OR a
-GET /api/bootstrap the SPA fetches on load; client.ts reads it, VITE var as fallback.
-<strong>Rejected:</strong> baking the token into the bundle at build time (can&#39;t carry a runtime
-token, and leaks into static assets); cookie/session auth (larger change, the API
-is bearer/JWT today); auto-injecting on public binds (security hole).</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> token injected only when serving index.html on a localhost bind (127.0.0.1/::1).
+<strong>State:</strong> token from the EXISTING resolver _get_expected_token() at auth.py:86
+(env JOBSMITH_API_TOKEN → CWD-relative private/jobsmith.token); no new secret store.
+<strong>Payload:</strong> JSON-encoded/HTML-escaped window.<strong>JOBSMITH</strong>={token,apiBase} in index.html;
+client.ts refactored to a MUTABLE runtime token feeding BOTH header and buildEventsUrl
+(client.ts:265-271). VITE var fallback only.
+<strong>Security:</strong> restrictive CSP on served index; token redacted in the SSE event-log view;
+inject never on public binds.
+<strong>Rejected:</strong> baking the token into the bundle at build time (can&#39;t carry a runtime token,
+leaks into static assets); leaving STATIC_TOKEN const as-is (A2 — SSE would silently
+fail); cookie/session auth (larger change vs today&#39;s bearer/JWT).</p>
 </div>
         <label for="slice-3-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -997,12 +1100,12 @@ is bearer/JWT today); auto-injecting on public binds (security hole).</p>
           
           <div class="test-group" data-kind="integration">
             <span class="test-chip">INTEGRATION &middot; 2</span>
-            <ul><li>TestLocalhostInjectsToken — GET / on 127.0.0.1 → index has token shim; authed call OK</li><li>TestPublicBindNoInjection — --bind-public → no token in page; 401 without header</li></ul>
+            <ul><li>TestLocalhostInjectsToken — GET / on 127.0.0.1 → shim present; authed REST &#43; SSE OK</li><li>TestPublicBindNoInjection — --bind-public → no token in page; 401 without header</li></ul>
           </div>
           
           <div class="test-group" data-kind="unit">
-            <span class="test-chip">UNIT &middot; 1</span>
-            <ul><li>TestClientReadsRuntimeToken — client prefers window shim over VITE var</li></ul>
+            <span class="test-chip">UNIT &middot; 2</span>
+            <ul><li>TestClientRuntimeTokenFeedsSSE — buildEventsUrl uses the runtime token, not immutable STATIC_TOKEN</li><li>TestTokenEscapedAndRedacted — injected token is JSON/HTML-escaped and redacted in event log</li></ul>
           </div>
           
         </div>
@@ -1012,6 +1115,43 @@ is bearer/JWT today); auto-injecting on public binds (security hole).</p>
     
 
     
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">A2: STATIC_TOKEN (client.ts:17) is an immutable build-time const and buildEventsUrl (client.ts:265-271) ignores window shims — SSE would be unauthenticated — RESOLVED: client refactor to a mutable runtime token feeding both paths.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">A3: token resolver mis-cited as auth.py:46 (that&#39;s the TOKEN_ENV_VAR const); real fn is _get_expected_token() lru_cache at auth.py:86 — RESOLVED: corrected throughout.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">PRIVATE_TOKEN_PATH (auth.py:52) is CWD-relative; `jobsmith up` from a different dir may miss/regenerate the token — noted; up resolves repo_root first (slice-4).</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Inlining a secret token into HTML is XSS-exposed — RESOLVED: JSON/HTML-escape, localhost-only injection, restrictive CSP; localhost-guarded /api/bootstrap noted as alt.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">JWT/token refresh over a long-running session unaddressed — flagged for implementation (re-read shim or re-issue on 401).</span>
+        </div>
+        
+      </div>
+    </div>
+    
 
     
     <div class="slice-field slice-questions">
@@ -1019,13 +1159,13 @@ is bearer/JWT today); auto-injecting on public binds (security hole).</p>
       <div class="slice-field-value">
         
         <div class="question-block slice-question-block">
-          <p>Inject the token into index.html, or expose it via an endpoint?</p>
+          <p>Inject into index.html, or expose via an endpoint — and how does SSE get the token?</p>
           
           
           <textarea
             data-section="slice-3-question-q-inject-mechanism"
             data-comment-for="slice-3-question-q-inject-mechanism"
-            placeholder="Answer question q-inject-mechanism...">Inject a window.__JOBSMITH__ shim into the served index.html on localhost — zero extra round-trip, no unauthenticated bootstrap endpoint to guard; the SPA reads it synchronously before first API call.</textarea>
+            placeholder="Answer question q-inject-mechanism...">Inject a JSON/HTML-escaped window.__JOBSMITH__ shim into the served index.html on localhost, AND refactor client.ts so one mutable runtime token feeds both the header and buildEventsUrl (client.ts:265-271) — otherwise SSE keeps reading the immutable build-time STATIC_TOKEN and fails. A localhost-guarded /api/bootstrap is an acceptable alternative but adds a round-trip.</textarea>
           
         </div>
         
@@ -1044,19 +1184,19 @@ is bearer/JWT today); auto-injecting on public binds (security hole).</p>
   </div>
 </details>
 <details class="slice-card" id="slice-4" data-slice="4" data-slice-name="slice-4" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 4: `jobsmith up` — boot the server, serve the UI, open the browser (--dev toggle)">
+  <summary class="slice-summary" aria-label="Slice 4: `jobsmith up` — boot the server, open the browser after listen (non-blocking), --dev toggle">
     <span class="slice-num">#4</span>
     <span class="slice-title-col">
-      <span class="slice-name">`jobsmith up` — boot the server, serve the UI, open the browser (--dev toggle)</span>
-      <span class="slice-preview">Add a top-level jobsmith up Typer command as the friendly one-command entry.</span>
+      <span class="slice-name">`jobsmith up` — boot the server, open the browser after listen (non-blocking), --dev toggle</span>
+      <span class="slice-preview">Add a top-level jobsmith up Typer command (@app.command on the app at cli.py:42;</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-revision badge-sm">M</span>
-          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-blocked badge-sm">High</span>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-4">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="5 critic issue(s)">5 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1088,16 +1228,22 @@ is bearer/JWT today); auto-injecting on public binds (security hole).</p>
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-4-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>Add a top-level <code>jobsmith up</code> Typer command as the friendly one-command entry. It
-reuses the existing serve path (api/server.py:24 serve → uvicorn.run on create_app),
-then opens the default browser to the served URL (webbrowser.open after the server is
-listening). Flags: --host/--port (default 127.0.0.1:8000), --no-open (skip browser),
---bind-public (passthrough; disables auto-auth per slice-3), and --dev. Per the chosen
-design, --dev EXPLICITLY toggles serving behavior: prod (default) serves the bundled
-static UI single-port; --dev expects the developer&#39;s separate vite dev server (skips
-the static mount, points the opened URL / client at the vite origin, leaves the
-existing two-process workflow intact). <code>jobsmith api serve</code> stays as the lower-level
-headless entry.</p>
+          <div class="markdown-block reveal-content serif-prose"><p>Add a top-level <code>jobsmith up</code> Typer command (@app.command on the app at cli.py:42;
+<code>api serve</code> is registered under the api sub-Typer at cli.py:1157-1160 and stays). It
+reuses the serve path (api/server.py:24 serve → uvicorn.run on the create_app factory)
+but FIXES the browser-open (per A1): uvicorn.run() at server.py:28 BLOCKS and never
+returns, so the browser cannot be opened &#34;after&#34; it inline. Instead, start a daemon
+thread that waits for host:port to accept a connection, then webbrowser.open, and
+start that thread BEFORE calling uvicorn.run (or use uvicorn Config+Server with a
+startup callback). Handle PORT_IN_USE: catch the bind error and print a friendly
+message suggesting --port (exit non-zero), rather than a stacktrace. Flags:
+--host/--port (default 127.0.0.1:8000), --no-open (skip browser), --bind-public
+(passthrough; disables auto-auth per slice-3), --dev. --dev EXPLICITLY toggles
+serving: prod (default) serves bundled static single-port; --dev skips the static
+mount and targets the developer&#39;s separate vite origin (default http://localhost:5173),
+preserving the two-process hot-reload workflow. Pass the dev flag to create_app via an
+env var (create_app() currently takes no args — avoid a signature change). If
+webbrowser.open fails (e.g. headless/Windows quirk), log the URL and continue.</p>
 </div>
           <label for="slice-4-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1110,8 +1256,9 @@ headless entry.</p>
         <div class="slice-field-value">
           
           <div class="markdown-block serif-prose"><p>One memorable command (<code>dagster dev</code> / <code>prefect server start</code>) is what makes it feel
-like an app. The user chose a new <code>jobsmith up</code> wrapping serve + static + open, with
-an explicit --dev flag to preserve the hot-reload developer workflow.</p>
+like an app. The user chose a new <code>jobsmith up</code> wrapping serve + static + open, with an
+explicit --dev flag. The blocking-call and port-collision realities must be handled or
+the command is unusable in practice.</p>
 </div>
           
         </div>
@@ -1126,7 +1273,7 @@ an explicit --dev flag to preserve the hot-reload developer workflow.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>`jobsmith up` starts uvicorn on 127.0.0.1:8000, and once listening opens the browser to the served UI (auto-authenticated via slice-3)</li><li>`jobsmith up --no-open` starts the server without launching a browser; `--port N` is honored</li><li>`jobsmith up --dev` skips the static mount and targets the vite dev origin, preserving the two-process hot-reload workflow</li><li>`jobsmith api serve` continues to work unchanged as the headless entry</li></ul>
+        <ul class="slice-done-list"><li>`jobsmith up` starts uvicorn on 127.0.0.1:8000 and, once the port accepts a connection, opens the browser (from a pre-started daemon thread / startup callback — NOT an inline post-run call) to the auto-authenticated UI</li><li>`jobsmith up --no-open` starts the server without a browser; `--port N` is honored</li><li>Port already in use → a friendly message suggesting --port and a non-zero exit, not a raw stacktrace</li><li>`jobsmith up --dev` skips the static mount and targets the vite origin; `jobsmith api serve` continues unchanged as the headless entry</li><li>If webbrowser.open fails, the server keeps running and the URL is logged</li></ul>
       </div>
       
     
@@ -1137,12 +1284,17 @@ an explicit --dev flag to preserve the hot-reload developer workflow.</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-4-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> explicit <code>jobsmith up</code> CLI invocation; opens browser after listen.
-<strong>State:</strong> none new — wraps the existing serve()/create_app; browser via stdlib webbrowser.
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> explicit <code>jobsmith up</code>; browser opened after listen via a pre-started
+daemon thread (or uvicorn Config+Server startup callback) — NOT inline after the
+blocking uvicorn.run (A1).
+<strong>State:</strong> none new — wraps serve()/create_app; --dev passed to create_app via env var
+(create_app takes no args today; avoid signature churn).
 <strong>Payload:</strong> flags --host/--port/--no-open/--bind-public/--dev; default 127.0.0.1:8000 prod.
-<strong>Rejected:</strong> folding into <code>api serve</code> flags only (less discoverable than a top-level
-<code>up</code>); replacing/retiring <code>api serve</code> (breaks headless scripts); auto-running vite
-from <code>up</code> in dev (fragile; devs already run their own vite).</p>
+<strong>Failure UX:</strong> PORT_IN_USE → friendly message + --port hint + non-zero exit;
+webbrowser.open failure → log URL, keep serving.
+<strong>Rejected:</strong> &#34;poll then open&#34; inline after uvicorn.run (A1 — never returns); folding
+into <code>api serve</code> flags only (less discoverable); replacing/retiring <code>api serve</code>
+(breaks headless scripts); auto-running vite from <code>up --dev</code> (fragile).</p>
 </div>
         <label for="slice-4-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1164,8 +1316,8 @@ from <code>up</code> in dev (fragile; devs already run their own vite).</p>
           </div>
           
           <div class="test-group" data-kind="unit">
-            <span class="test-chip">UNIT &middot; 2</span>
-            <ul><li>TestUpDevSkipsStatic — --dev → static mount not applied, points at vite origin</li><li>TestUpHonorsPort — --port → uvicorn binds the given port</li></ul>
+            <span class="test-chip">UNIT &middot; 3</span>
+            <ul><li>TestUpOpensAfterListen — open is invoked only after the port accepts (thread/callback), never before bind</li><li>TestUpPortInUse — bind conflict → friendly message &#43; non-zero exit, no stacktrace</li><li>TestUpDevSkipsStatic — --dev → static mount not applied, points at vite origin</li></ul>
           </div>
           
         </div>
@@ -1175,6 +1327,43 @@ from <code>up</code> in dev (fragile; devs already run their own vite).</p>
     
 
     
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">A1: uvicorn.run() (server.py:28) blocks and never returns; &#39;poll then open&#39; inline is impossible — RESOLVED: open from a pre-started daemon thread / startup callback; risk bumped Med→High.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">create_app() takes no args; --dev needs threading through — RESOLVED: pass via env var, no signature change.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">SUCCESS</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">Top-level command wiring confirmed: app at cli.py:42, api sub-Typer at cli.py:1157-1160; `up` as @app.command is straightforward.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">PORT_IN_USE unhandled (jobsmith often already binds ports) — RESOLVED: friendly message &#43; --port hint &#43; non-zero exit &#43; test.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Cross-platform webbrowser.open may fail/behave oddly — RESOLVED: on failure, log URL and keep serving; done_when added.</span>
+        </div>
+        
+      </div>
+    </div>
+    
 
     
     <div class="slice-field slice-questions">
@@ -1182,13 +1371,13 @@ from <code>up</code> in dev (fragile; devs already run their own vite).</p>
       <div class="slice-field-value">
         
         <div class="question-block slice-question-block">
-          <p>How to avoid opening the browser before the server is ready?</p>
+          <p>How to open the browser only after the server is ready, given uvicorn.run blocks?</p>
           
           
           <textarea
             data-section="slice-4-question-q-open-timing"
             data-comment-for="slice-4-question-q-open-timing"
-            placeholder="Answer question q-open-timing...">Start uvicorn, poll the bound host:port (or use a startup callback) until it accepts a connection, THEN webbrowser.open; cap the wait and proceed/log if it doesn&#39;t come up.</textarea>
+            placeholder="Answer question q-open-timing...">Start a daemon thread BEFORE uvicorn.run that polls host:port until it accepts (cap the wait), then webbrowser.open; or use uvicorn Config&#43;Server with a startup callback. Do NOT attempt to open after uvicorn.run — it never returns.</textarea>
           
         </div>
         
@@ -1219,7 +1408,7 @@ from <code>up</code> in dev (fragile; devs already run their own vite).</p>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-5">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="4 critic issue(s)">4 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1252,13 +1441,16 @@ from <code>up</code> in dev (fragile; devs already run their own vite).</p>
           
           <input type="checkbox" id="slice-5-what-reveal" class="reveal-toggle">
           <div class="markdown-block reveal-content serif-prose"><p>Prove the full Dagster/Prefect-style loop at the strict acceptance bar the user chose.
-Build the wheel (slice-2), install it into a clean, npm-free virtualenv, run
-<code>jobsmith up --no-open</code> (server only, for automation), and drive a COMPLETE apply (and
-onboard) run through the browser-facing HTTP surface end-to-end against the served
-origin: submit a JD, watch SSE phase progress, reach materials-ready — all via the
-same-origin API the served UI uses, with localhost auto-auth. Document the launch
-story (README/AGENTS): <code>uv tool install</code> → <code>jobsmith up</code>. This slice is verification +
-docs, not new product surface.</p>
+Build the wheel (slice-2) in a node-enabled CI/build env, install it into a clean,
+npm-free virtualenv, run <code>jobsmith up --no-open</code> (server only, for automation), and
+drive a COMPLETE apply (and onboard) run through the browser-facing HTTP surface
+end-to-end against the served origin: submit a JD, watch SSE phase progress, reach
+materials-ready — all via the same-origin API the served UI uses, with localhost
+auto-auth. The E2E fixture sets up a scratch repo (settings repo_root) with seeded
+master YAMLs + DB; assert onboard SEEDS MASTERS concretely (master YAML files written
+under the scratch repo&#39;s assets/content AND/OR rows in the DB). Document the launch
+story (README/AGENTS): <code>uv tool install</code> → <code>jobsmith up</code>, plus the editable-install
+dev note (<code>npm run build</code> or <code>jobsmith up --dev</code>). Verification + docs, not new product.</p>
 </div>
           <label for="slice-5-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1271,8 +1463,8 @@ docs, not new product surface.</p>
         <div class="slice-field-value">
           
           <div class="markdown-block serif-prose"><p>The acceptance bar is &#34;fresh install → up → working UI + a full apply/onboard through
-the browser.&#34; A green E2E here is what certifies the architecture actually delivers the
-one-command local-app experience, not just that the pieces exist.</p>
+the browser.&#34; A green E2E here certifies the architecture delivers the one-command
+local-app experience, not just that the pieces exist.</p>
 </div>
           
         </div>
@@ -1281,13 +1473,13 @@ one-command local-app experience, not just that the pieces exist.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>tests/e2e/test_fresh_install_up.py, README.md, AGENTS.md</code></div>
+        <div class="slice-field-value"><code>tests/e2e/test_fresh_install_up.py, tests/e2e/conftest.py, README.md, AGENTS.md</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>A built wheel installs into a clean venv with NO node/npm and serves the bundled UI via `jobsmith up`</li><li>A full apply run completes end-to-end through the served same-origin API (JD → SSE phases → materials-ready) with localhost auto-auth and no manual token</li><li>An onboard run seeds master content through the same served surface</li><li>README/AGENTS document the `uv tool install` → `jobsmith up` launch story</li></ul>
+        <ul class="slice-done-list"><li>A built wheel (built where node is present) installs into a clean venv with NO node/npm and serves the bundled UI via `jobsmith up`</li><li>A full apply run completes end-to-end through the served same-origin API (JD → SSE phases → materials-ready) with localhost auto-auth and no manual token</li><li>An onboard run seeds master content verifiably — master YAMLs written under the scratch repo&#39;s assets/content (and/or DB rows), asserted explicitly</li><li>README/AGENTS document `uv tool install` → `jobsmith up`, plus the editable-install dev note</li></ul>
       </div>
       
     
@@ -1298,13 +1490,16 @@ one-command local-app experience, not just that the pieces exist.</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-5-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> CI/e2e job that builds the wheel and exercises the served app.
-<strong>State:</strong> ephemeral clean venv + a scratch jobsmith repo (settings repo_root) for the run.
-<strong>Payload:</strong> exercises the real HTTP surface the served UI uses (same-origin), not the CLI pipeline directly.
-<strong>Rejected:</strong> asserting only that index.html loads (the user explicitly wanted a full
-apply/onboard through the UI); a full headless-browser (Playwright) DOM drive (heavier;
-same-origin API-level E2E proves the architecture with far less flakiness — can add
-browser DOM coverage later).</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> CI/e2e job that builds the wheel (node present) and exercises the served app.
+<strong>State:</strong> ephemeral clean venv + a scratch jobsmith repo (settings repo_root) with seeded
+masters/DB, set up in tests/e2e/conftest.py.
+<strong>Payload:</strong> exercises the real same-origin HTTP surface the served UI uses (not the CLI
+pipeline directly); onboard assertion checks concrete master YAML/DB writes.
+<strong>Build env:</strong> node required at BUILD time (the install venv stays npm-free) — an
+infra requirement, called out so CI provisions it.
+<strong>Rejected:</strong> asserting only that index.html loads (user wanted a full apply/onboard
+through the UI); a full Playwright DOM drive (heavier/flakier — same-origin API-level
+E2E proves the architecture; DOM coverage can be a later add-on).</p>
 </div>
         <label for="slice-5-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1322,12 +1517,12 @@ browser DOM coverage later).</p>
           
           <div class="test-group" data-kind="e2e">
             <span class="test-chip">E2E &middot; 2</span>
-            <ul><li>TestFreshInstallUpApply — clean venv &#43; wheel → up → drive apply to materials-ready over same-origin API</li><li>TestFreshInstallUpOnboard — same env → onboard seeds masters</li></ul>
+            <ul><li>TestFreshInstallUpApply — clean venv &#43; wheel → up → drive apply to materials-ready over same-origin API</li><li>TestFreshInstallUpOnboard — same env → onboard writes master YAMLs/DB rows (asserted)</li></ul>
           </div>
           
           <div class="test-group" data-kind="smoke">
             <span class="test-chip">SMOKE &middot; 1</span>
-            <ul><li>assert bundled web_dist served and auto-auth works on localhost</li></ul>
+            <ul><li>assert bundled web_dist served and localhost auto-auth works (REST &#43; SSE)</li></ul>
           </div>
           
         </div>
@@ -1336,6 +1531,37 @@ browser DOM coverage later).</p>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">CI needs node at BUILD time (install venv is npm-free) — RESOLVED: called out in decisions/done_when as an infra requirement.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">E2E fixture needs a scratch repo_root &#43; seeded masters/DB, not surfaced in files — RESOLVED: added tests/e2e/conftest.py.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">&#39;onboard seeds masters&#39; was a vague assertion — RESOLVED: assert concrete master YAML writes under assets/content and/or DB rows.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">SUCCESS</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Same-origin API-level E2E (vs headless browser) is a pragmatic, low-flake acceptance choice.</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1350,7 +1576,7 @@ browser DOM coverage later).</p>
           <textarea
             data-section="slice-5-question-q-e2e-surface"
             data-comment-for="slice-5-question-q-e2e-surface"
-            placeholder="Answer question q-e2e-surface...">Through the same-origin HTTP API the served UI calls (plus a smoke check that the UI &#43; auto-auth load). It proves the single-server &#43; packaging &#43; auth loop without Playwright flakiness; a DOM-level browser test can be a later add-on.</textarea>
+            placeholder="Answer question q-e2e-surface...">Through the same-origin HTTP API the served UI calls (plus a smoke check that the UI &#43; auto-auth load, REST and SSE). Proves the single-server &#43; packaging &#43; auth loop without Playwright flakiness; a DOM-level browser test can be a later add-on.</textarea>
           
         </div>
         
