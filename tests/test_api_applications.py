@@ -456,6 +456,12 @@ class TestRekeySlugResolution:
     def _make_rekeyed_db(tmp_path: Path) -> tuple[Path, str, str, str]:
         """Create a DB + filesystem layout that mirrors a post-rekey apply run.
 
+        Uses the REAL pipeline evidence shape: the agentic orchestrator stores
+        a manifest record in ``apply_state`` under the *canonical* slug whose
+        JSON body has a ``"slug"`` field preserving the original pre-rekey slug.
+        No ``--from ... --to ...`` string is written to ``apply_state_log``
+        in normal agentic runs (only present in synthetic/legacy fixtures).
+
         Returns (db_path, starting_slug, canonical_slug, run_id).
         """
         starting_slug = "becu-Sr-Data-Analyst_R-13411-2026-06"
@@ -496,21 +502,26 @@ class TestRekeySlugResolution:
                 "2026-06-01T10:02:00Z",
             ),
         )
-        # apply_state_log contains the rekey command (as recorded by the orchestrator).
+        # apply_state manifest under canonical slug, body preserves starting_slug.
+        # This is the REAL signal the pipeline writes: reconcile_canonical_slug
+        # renames the directory and the orchestrator writes the manifest under
+        # the canonical slug with the original "slug" field intact.
         conn.execute(
-            "INSERT INTO apply_state_log (run_id, slug, ts, payload) VALUES (?, ?, ?, ?)",
+            "INSERT INTO apply_state (slug, kind, content_blob, updated_at) "
+            "VALUES (?, ?, ?, ?)",
             (
-                run_id,
                 canonical_slug,
-                "2026-06-01T10:01:30Z",
+                "manifest",
                 json.dumps({
-                    "type": "tool_result",
-                    "content": (
-                        "jobsmith db rekey-slug "
-                        f"--from {starting_slug} "
-                        f"--to {canonical_slug}"
-                    ),
+                    "run_id": run_id,
+                    "slug": starting_slug,  # original pre-rekey slug preserved here
+                    "started_at": "2026-06-01T10:00:00Z",
+                    "slug_derived_from": "slug_override",
+                    "role_type": "data-analyst",
+                    "tier": "deep",
+                    "fit_score": 0.85,
                 }),
+                "2026-06-01T10:01:00Z",
             ),
         )
         conn.commit()
@@ -619,3 +630,68 @@ class TestRekeySlugResolution:
         resp = client.get(f"/api/applications/{canonical_slug}/documents")
         assert resp.status_code == 200, resp.text
         assert "resume.pdf" in resp.json()
+
+    def test_detail_resolves_rekeyed_slug_via_log_command_string(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Legacy: apply_state_log payload with '--from X --to Y' still resolves.
+
+        This covers synthetic fixtures and any older pipeline runs that wrote
+        the rekey command as a literal string in apply_state_log.
+        """
+        starting_slug = "widget-corp-engineer-2025"
+        canonical_slug = "widget-corp-senior-engineer"
+        run_id = "run-legacy-rekey"
+
+        db_path = tmp_path / "jobsmith.db"
+        conn = open_pipeline_db(db_path)
+        conn.execute(
+            "INSERT INTO apply_runs (run_id, slug, phase, started_at, finished_at, status) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (run_id, canonical_slug, "render", "2025-09-01T10:00:00Z", "2025-09-01T10:15:00Z", "done"),
+        )
+        conn.execute(
+            "INSERT INTO specialist_outputs "
+            "(run_id, specialist, kind, output_json, transcript_ref, finished_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                run_id,
+                "apply-jd-parser",
+                "jd-parsed",
+                json.dumps({"company": "Widget Corp", "position": "Senior Engineer"}),
+                None,
+                "2025-09-01T10:02:00Z",
+            ),
+        )
+        # Legacy shape: literal "--from X --to Y" in apply_state_log payload.
+        conn.execute(
+            "INSERT INTO apply_state_log (run_id, slug, ts, payload) VALUES (?, ?, ?, ?)",
+            (
+                run_id,
+                canonical_slug,
+                "2025-09-01T10:01:30Z",
+                json.dumps({
+                    "type": "tool_result",
+                    "content": (
+                        f"jobsmith db rekey-slug --from {starting_slug} --to {canonical_slug}"
+                    ),
+                }),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        monkeypatch.setattr("jobsmith.api.applications._get_db_path", lambda: db_path)
+        monkeypatch.setattr(
+            "jobsmith.api.applications._get_app_dir",
+            lambda s: tmp_path / "applications" / s,
+        )
+        app = FastAPI()
+        app.include_router(applications_router, prefix="/api")
+        client = TestClient(app, raise_server_exceptions=True)
+
+        resp = client.get(f"/api/applications/{starting_slug}")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["slug"] == canonical_slug
+        assert data["company"] == "Widget Corp"
