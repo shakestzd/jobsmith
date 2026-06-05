@@ -324,6 +324,66 @@ class TestUpBindPublicNoAutoAuth:
 
 
 # ---------------------------------------------------------------------------
+# TestBindModeEnvGate — auto-auth gated on real bind mode, not Host header
+# ---------------------------------------------------------------------------
+
+
+class TestBindModeEnvGate:
+    """_apply_bind_mode_env publishes JOBSMITH_PUBLIC_BIND for non-loopback binds."""
+
+    def test_loopback_host_clears_flag(self):
+        from jobsmith.api.server import _apply_bind_mode_env
+        from jobsmith.api.staticui import PUBLIC_BIND_ENV_VAR
+
+        with patch.dict(os.environ):
+            os.environ[PUBLIC_BIND_ENV_VAR] = "1"  # stale value must be cleared
+            _apply_bind_mode_env("127.0.0.1")
+            assert PUBLIC_BIND_ENV_VAR not in os.environ
+
+    def test_public_host_sets_flag(self):
+        from jobsmith.api.server import _apply_bind_mode_env
+        from jobsmith.api.staticui import PUBLIC_BIND_ENV_VAR
+
+        with patch.dict(os.environ):
+            os.environ.pop(PUBLIC_BIND_ENV_VAR, None)
+            _apply_bind_mode_env("0.0.0.0")
+            assert os.environ.get(PUBLIC_BIND_ENV_VAR) == "1"
+
+    def test_specific_lan_ip_is_public(self):
+        """A bind to a concrete LAN IP (not 0.0.0.0) is still treated as public."""
+        from jobsmith.api.server import _apply_bind_mode_env
+        from jobsmith.api.staticui import PUBLIC_BIND_ENV_VAR
+
+        with patch.dict(os.environ):
+            os.environ.pop(PUBLIC_BIND_ENV_VAR, None)
+            _apply_bind_mode_env("192.168.1.10")
+            assert os.environ.get(PUBLIC_BIND_ENV_VAR) == "1"
+
+    def test_up_bind_public_sets_flag_before_uvicorn(self):
+        """`up --bind-public` sets JOBSMITH_PUBLIC_BIND=1 before uvicorn.run."""
+        from jobsmith.api.staticui import PUBLIC_BIND_ENV_VAR
+
+        captured: dict[str, str | None] = {}
+
+        def capture_env_run(*a, **kw):
+            captured["flag"] = os.environ.get(PUBLIC_BIND_ENV_VAR)
+
+        with (
+            patch.dict(os.environ),
+            patch("jobsmith.api.server.uvicorn") as mock_uv_mod,
+            patch("jobsmith.api.server._wait_for_port", MagicMock()),
+        ):
+            os.environ.pop(PUBLIC_BIND_ENV_VAR, None)
+            mock_uv_mod.run = capture_env_run
+            result = runner.invoke(app, ["up", "--bind-public", "--no-open"])
+            assert result.exit_code == 0, result.output
+
+        assert captured.get("flag") == "1", (
+            f"Expected JOBSMITH_PUBLIC_BIND=1 at uvicorn.run time, got: {captured.get('flag')!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # TestUpWebbrowserFailureContinues
 # ---------------------------------------------------------------------------
 

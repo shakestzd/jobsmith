@@ -219,6 +219,28 @@ class TestBuildHookSkipsWithoutNode:
             "web_dist should not be created when npm is absent"
         )
 
+    def test_hook_removes_stale_web_dist_when_npm_absent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A pre-existing (stale) web_dist is purged even when the build is skipped.
+
+        Otherwise an API-only skip would silently ship a stale UI bundle from a
+        previous build (roborev-991 MEDIUM).
+        """
+        monkeypatch.setattr(shutil, "which", lambda cmd: None)
+
+        stale = tmp_path / "src" / "jobsmith" / "web_dist"
+        stale.mkdir(parents=True)
+        (stale / "index.html").write_text("<stale/>", encoding="utf-8")
+
+        from hatch_build import build_hook_copy_web_dist
+
+        build_hook_copy_web_dist(root=tmp_path)
+
+        assert not stale.exists(), (
+            "stale web_dist must be removed before skipping the build"
+        )
+
 
 # ---------------------------------------------------------------------------
 # TestDoctorReportsUiBundled

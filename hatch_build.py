@@ -42,10 +42,20 @@ def build_hook_copy_web_dist(root: Path) -> None:
 
     Behaviour
     ---------
+    - Removes any stale ``src/jobsmith/web_dist/`` FIRST so an early skip can
+      never let a previous build's bundle ride along in the wheel.
     - Returns immediately (logs WARNING) when npm or node are not on PATH.
     - Raises ``subprocess.CalledProcessError`` on npm build failure so the wheel
       build fails loudly rather than silently shipping an empty UI.
     """
+    dest = root / "src" / "jobsmith" / "web_dist"
+
+    # Always start from a clean slate — drop any generated bundle from a prior
+    # build BEFORE deciding whether to skip.  Otherwise an API-only skip (npm
+    # missing, or no web/ dir) would silently ship a stale UI.
+    if dest.exists():
+        shutil.rmtree(dest)
+
     if shutil.which("npm") is None or shutil.which("node") is None:
         _log.warning(
             "jobsmith build hook: npm/node not found — skipping vite build. "
@@ -77,12 +87,8 @@ def build_hook_copy_web_dist(root: Path) -> None:
             f"jobsmith build hook: vite build succeeded but {src_dist} does not exist."
         )
 
-    dest = root / "src" / "jobsmith" / "web_dist"
-
-    # Always start fresh — remove any stale copy from a previous build.
-    if dest.exists():
-        shutil.rmtree(dest)
-
+    # ``dest`` was already cleared at the top of the function, so copytree onto
+    # the (now absent) destination is safe.
     shutil.copytree(src_dist, dest)
     _log.info("jobsmith build hook: copied %s → %s", src_dist, dest)
 

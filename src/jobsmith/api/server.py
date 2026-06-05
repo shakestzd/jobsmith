@@ -21,7 +21,33 @@ DEFAULT_PORT = 8000
 _WAIT_TIMEOUT = 30.0  # seconds to wait for port to accept connections
 _POLL_INTERVAL = 0.1  # seconds between socket-connect attempts
 
+# Host literals that mean "loopback only".  A bind to anything else (0.0.0.0,
+# an empty string, "::", or a specific LAN IP) is reachable by other machines
+# and is treated as a public bind for auto-auth purposes.
+_LOOPBACK_HOSTS = frozenset(["127.0.0.1", "::1", "localhost"])
+
 _log = logging.getLogger(__name__)
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Return True if *host* binds the server to the loopback interface only."""
+    return host.lower() in _LOOPBACK_HOSTS
+
+
+def _apply_bind_mode_env(host: str) -> None:
+    """Publish the effective bind mode via env so the SPA handler can read it.
+
+    Sets ``JOBSMITH_PUBLIC_BIND=1`` for any non-loopback bind and clears it
+    otherwise.  ``api/staticui.py`` consults this flag to decide whether
+    localhost auto-auth may inject a bearer token — the bind mode, not the
+    spoofable request Host header, is the source of truth.
+    """
+    from jobsmith.api.staticui import PUBLIC_BIND_ENV_VAR
+
+    if _is_loopback_host(host):
+        os.environ.pop(PUBLIC_BIND_ENV_VAR, None)
+    else:
+        os.environ[PUBLIC_BIND_ENV_VAR] = "1"
 
 
 def resolve_host(*, bind_public: bool) -> str:
@@ -86,6 +112,9 @@ def up_serve(host: str, port: int, *, open_browser: bool, dev: bool) -> None:
     else:
         os.environ.pop("JOBSMITH_DEV", None)
 
+    # Gate localhost auto-auth on the real bind mode (not the request header).
+    _apply_bind_mode_env(host)
+
     # The URL we will open (always loopback-friendly for display, even on 0.0.0.0).
     display_host = "127.0.0.1" if host in ("0.0.0.0", "") else host  # noqa: S104
     url = f"http://{display_host}:{port}"
@@ -127,6 +156,9 @@ def serve(host: str, port: int, reload: bool) -> None:
     Lower-level entry used by ``jobsmith api serve``.  Does not open a browser
     and does not handle port-in-use specially.
     """
+    # Gate localhost auto-auth on the real bind mode (not the request header).
+    _apply_bind_mode_env(host)
+
     uvicorn.run(
         "jobsmith.api.main:create_app",
         factory=True,

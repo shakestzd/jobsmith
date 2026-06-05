@@ -20,9 +20,9 @@ injected; explicit auth is required as before.
 
 from __future__ import annotations
 
-import html
 import json
 import logging
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -46,6 +46,14 @@ _CSP = (
 
 # Hostnames / IP literals that qualify as localhost.
 _LOCALHOST_NAMES = frozenset(["localhost", "127.0.0.1", "::1", "[::1]"])
+
+# Env flag set by the server entry-point (api/server.py) when the process is
+# bound to a NON-loopback interface (e.g. ``--bind-public`` → 0.0.0.0, or any
+# specific LAN IP).  When set, localhost auto-auth is disabled unconditionally:
+# the Host header is client-controlled, so a remote caller could otherwise
+# spoof ``Host: 127.0.0.1`` to harvest the injected bearer token.  The actual
+# bind mode — not the request header — is the source of truth.
+PUBLIC_BIND_ENV_VAR = "JOBSMITH_PUBLIC_BIND"
 
 
 def find_web_dist() -> Path | None:
@@ -91,6 +99,17 @@ def _is_api_or_system_path(path: str) -> bool:
     return False
 
 
+def _is_public_bind() -> bool:
+    """Return True if the server is bound to a non-loopback interface.
+
+    Driven by the ``JOBSMITH_PUBLIC_BIND`` env flag set by the server
+    entry-point (api/server.py).  This is the authoritative gate for localhost
+    auto-auth: when the bind is public the (client-controlled, spoofable) Host
+    header must NOT be trusted to decide whether to inject the bearer token.
+    """
+    return os.environ.get(PUBLIC_BIND_ENV_VAR) == "1"
+
+
 def _is_localhost_request(request: Request) -> bool:
     """Return True if *request* originates from a localhost bind.
 
@@ -113,12 +132,24 @@ def _is_localhost_request(request: Request) -> bool:
 def _build_shim_script(token: str, api_base: str) -> str:
     """Return an HTML ``<script>`` tag that assigns window.__JOBSMITH__.
 
-    The token and apiBase are JSON-encoded and HTML-escaped so that any
-    HTML-special characters in the token cannot break out of the script
-    context (defense-in-depth on top of localhost-only injection).
+    The payload is a JSON literal embedded directly in the script body, so it
+    must be valid JavaScript — NOT HTML-escaped.  HTML entities such as
+    ``&quot;`` are not decoded inside a ``<script>`` element, so escaping the
+    JSON as HTML would yield syntactically invalid JS and the assignment would
+    silently fail.  Instead we escape the characters that could terminate the
+    script element or be misread by an HTML parser inside raw text
+    (``<``, ``>``, ``&``) plus the JS line separators U+2028/U+2029, using
+    ``\\uXXXX`` forms that JSON parsers decode back to the original characters.
     """
-    payload = html.escape(json.dumps({"token": token, "apiBase": api_base}))
-    return f"<script>window.__JOBSMITH__ = {payload};</script>"
+    literal = json.dumps({"token": token, "apiBase": api_base})
+    safe = (
+        literal.replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
+    return f"<script>window.__JOBSMITH__ = {safe};</script>"
 
 
 def mount_static_ui(app: FastAPI) -> None:
@@ -164,9 +195,13 @@ def mount_static_ui(app: FastAPI) -> None:
         content = index_html.read_text(encoding="utf-8")
 
         # Localhost auto-auth (feat-16257e94): inject the runtime token shim
-        # ONLY when the request comes from a localhost bind.  On a public bind
-        # no shim is emitted; callers must supply explicit auth.
-        if _is_localhost_request(request):
+        # ONLY when (a) the server is actually bound to a loopback interface
+        # AND (b) the request's Host header looks like localhost.  The bind-mode
+        # check is the real security boundary — the Host header is
+        # client-controlled, so a remote caller on a public bind could spoof
+        # "Host: 127.0.0.1" to harvest the token.  On a public bind no shim is
+        # emitted; callers must supply explicit auth.
+        if not _is_public_bind() and _is_localhost_request(request):
             from jobsmith.api.auth import _get_expected_token  # noqa: PLC0415
 
             token = _get_expected_token()

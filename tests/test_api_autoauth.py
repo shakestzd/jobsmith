@@ -159,6 +159,23 @@ class TestPublicBindNoInjection:
         assert resp.status_code == 200
         assert "__JOBSMITH__" not in resp.text
 
+    def test_public_bind_flag_blocks_spoofed_localhost_host(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """On a public bind, a spoofed ``Host: 127.0.0.1`` must NOT leak the token.
+
+        The bind mode (env flag set by the server entry-point) is authoritative;
+        the client-controlled Host header cannot re-enable auto-auth.
+        """
+        from jobsmith.api.staticui import PUBLIC_BIND_ENV_VAR
+
+        dist = _make_dist(tmp_path)
+        client = _make_client(dist, monkeypatch)
+        monkeypatch.setenv(PUBLIC_BIND_ENV_VAR, "1")
+        resp = client.get("/", headers={"host": "127.0.0.1:8000"})
+        assert resp.status_code == 200
+        assert "__JOBSMITH__" not in resp.text
+
 
 # ---------------------------------------------------------------------------
 # TestTokenEscapedAndRedacted
@@ -168,20 +185,32 @@ class TestPublicBindNoInjection:
 class TestTokenEscapedAndRedacted:
     """Injected token is JSON/HTML-escaped and redacted in the event log."""
 
-    def test_token_is_html_escaped(
+    def test_token_is_script_safe_and_valid_js(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A token with HTML-special chars is escaped before injection."""
-        dangerous_token = 'tok<en>"&test'
+        """A token with script-breaking chars is \\uXXXX-escaped, not HTML-escaped.
+
+        The payload lives inside a <script> body, so it must be valid JS: HTML
+        entities like &quot; would NOT decode there and would break the
+        assignment.  We escape <, >, & as \\uXXXX (which JSON decodes back) so
+        the literal both parses as JS and cannot terminate the <script> tag.
+        """
+        dangerous_token = 'tok<en>"&test</script>'
         dist = _make_dist(tmp_path)
         client = _make_client(dist, monkeypatch, token=dangerous_token)
         resp = client.get("/", headers={"host": "127.0.0.1:8000"})
         assert resp.status_code == 200
-        # Raw dangerous chars must not appear unescaped in the HTML
+        # The raw token (with its <, >, & and a </script> breakout) must never
+        # appear verbatim — every dangerous char is \\uXXXX-escaped instead.
+        assert dangerous_token not in resp.text
         assert "<en>" not in resp.text
-        # The JSON-encoded+HTML-escaped form must be present
-        escaped = html.escape(json.dumps(dangerous_token))
-        assert escaped in resp.text
+        assert "&test</script>" not in resp.text
+        # HTML-escaped form must NOT be used (it would be invalid JS).
+        assert html.escape(json.dumps(dangerous_token)) not in resp.text
+        # The shim must still round-trip to the original token via a JSON parse.
+        shim = _extract_shim(resp.text)
+        assert shim is not None, "shim must be valid, parseable JS/JSON"
+        assert shim["token"] == dangerous_token
 
     def test_token_is_json_encoded(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
