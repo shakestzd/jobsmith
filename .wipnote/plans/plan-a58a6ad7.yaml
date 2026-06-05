@@ -1,18 +1,453 @@
 meta:
     id: plan-a58a6ad7
-    track_id: trk-45e7fcd5
     title: Apply-pipeline incremental-reuse / caching layer
-    description: Layered reuse (artifact + requirement + whole-resume warm-start) with hybrid canonical-tag classification, reuse-planner pre-phase, content-hash+TTL invalidation, correctness-first gate re-run, and an A/B acceptance harness targeting ~50% cost+wall-clock on warm runs.
-    created_at: "2026-06-05"
+    description: ""
+    created_at: ""
     status: draft
-    priority: medium
     schema_version: v3
-    version: 2
+    version: 1
 design:
-    problem: ""
-    goals: []
-    constraints: []
+    problem: |
+        Every `jobsmith apply` re-runs the full 3-phase pipeline (gather -> draft ->
+        render) from zero, dispatching all apply-* specialists on every job even though
+        JDs overlap heavily: the same requirements recur, the same companies recur, and
+        a recently-tailored resume often already fits ~80% of a new JD. This wastes
+        ~30-60 min wall-clock and many LLM calls per run by re-deriving information
+        already generated in prior applications.
+    goals:
+        - Introduce a layered reuse layer (artifact + requirement + whole-resume warm-start) that reuses prior outputs instead of regenerating them.
+        - Canonicalize JD requirements (hybrid tags + LLM normalize, no vector store) so equivalent phrasings map to one requirement.
+        - Provide a fast path that cuts model calls AND wall-clock ~50% on warm runs, with the full pipeline as fallback for novel JDs.
+        - 'Make reuse correctness-first: the final assembled output always passes anchor, no-fabrication, and fact-check gates.'
+        - Make savings measurable via per-run metrics + an A/B harness vs a baseline full run.
+    constraints:
+        - 'Local-first, single-tenant: no heavy new runtime deps (no vector store) -- canonical tags + sqlite + content-hashing only.'
+        - Anchor preservation is non-negotiable; no fabrication; reuse must never carry a stale or wrong claim into a different JD.
+        - 'Build on existing architecture: 3-phase pipeline, apply-* specialists, .apply-state/* artifacts, master YAMLs, anchors, job_search.db.'
+        - Reuse is an optimization layer; the full pipeline remains the correctness backstop and the fallback (--no-reuse).
     approved: false
     comment: ""
-slices: []
+slices:
+    - id: slice-1
+      num: 1
+      title: 'Reuse store: SQLite schema + hash/TTL helpers'
+      what: |
+        Add reuse tables to job_search.db: canonical_requirements,
+        requirement_evidence_map, company_research_cache, application_fingerprints,
+        and run_metrics. Add a migration that creates them idempotently on apply
+        startup. Implement a small reuse-store module exposing typed read/write
+        helpers plus two freshness primitives: content_hash(inputs) (stable SHA over
+        normalized input bytes) and is_fresh(row, ttl) (hash-match AND within TTL).
+        No reuse logic yet -- this is the foundation every later slice keys off.
+      why: |
+        Stage-2 decision: cache state lives in job_search.db (queryable,
+        transactional, co-located with job/application records, survives across
+        runs). Stage-4 decision: invalidation = content-hash of inputs + TTL for
+        time-sensitive data. Every downstream slice depends on this schema and the
+        hash/TTL primitives, so it must land first and be stable.
+      files:
+        - src/jobsmith/reuse/store.py
+        - src/jobsmith/reuse/schema.sql
+        - src/jobsmith/reuse/migrate.py
+        - src/jobsmith/db.py
+      deps: []
+      done_when:
+        - Running apply on a fresh job_search.db creates all five reuse tables idempotently (re-run is a no-op)
+        - content_hash is stable across runs for identical normalized input and changes when any input byte changes
+        - is_fresh returns false when either the stored hash differs OR the row is older than its TTL
+        - Existing apply pipeline still runs end-to-end with the new tables present (no behavior change yet)
+      effort: M
+      risk: Med
+      tests: |
+        Unit: test_content_hash_stable_and_sensitive; test_is_fresh_hash_and_ttl
+        Integration: test_migration_idempotent (run migrate twice, assert one schema)
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-blob
+          text: Store large cached blobs inline as TEXT or offload to files referenced by the index?
+          answer: Inline TEXT for v1 -- single-user, low volume, keeps invalidation atomic with the row. Revisit file-offload only if profiling shows DB bloat.
+      decisions_notes: |
+        **State:** five new tables in job_search.db (not .apply-state files) per
+        Stage-2 -- relational queries needed for nearest-app + requirement match.
+        **Payload split:** index rows hold keys/hashes/timestamps/TTL; large blobs
+        (company-research text, resume bases) stored inline as TEXT for v1 (single
+        user, small volume) -- revisit file-offload only if rows get large.
+        **Freshness:** content_hash over NORMALIZED inputs so cosmetic master-YAML
+        reformatting does not bust the cache; TTL only on company_research_cache.
+        **Rejected:** .apply-state/_cache JSON blobs (no relational nearest-app
+        query); mtime/version invalidation (a no-op save would bust the whole cache).
+        Exact module paths under src/jobsmith/ to be confirmed against the real tree
+        at implementation; db wiring goes where job_search.db is already opened.
+    - id: slice-2
+      num: 2
+      title: Requirement canonicalization + tiered match
+      what: |
+        Add a canonical skill/requirement taxonomy (seed list with synonym aliases,
+        e.g. {advanced sql, strong sql skills, sql proficiency} -> tag:sql) plus a
+        normalizer that, during the existing apply-jd-parser LLM call, emits for each
+        requirement: a canonical tag (when known) and a normalized phrase. Persist
+        canonical requirements to canonical_requirements. Implement match(req) with
+        tiered resolution: exact tag -> normalized-phrase equality -> fuzzy
+        (token/FTS score) below a cutoff = "no match". Return a match verdict
+        (reuse | regenerate) with the matched prior requirement id.
+      why: |
+        Stage-2 decision: hybrid canonical-tag taxonomy + LLM-assisted normalize,
+        NO vector store (local-first). Stage-3 decision: tiered exact->normalized
+        ->fuzzy gating. This is the classification substrate that requirement reuse,
+        JD/fit dedup, and the planner all consume.
+      files:
+        - src/jobsmith/reuse/taxonomy.py
+        - src/jobsmith/reuse/canonicalize.py
+        - src/jobsmith/reuse/match.py
+        - src/jobsmith/agents/apply_jd_parser.py
+      deps:
+        - 1
+      done_when:
+        - Three phrasings of the same skill (e.g. 'advanced SQL' / 'strong SQL skills' / 'SQL proficiency') resolve to the same canonical tag
+        - An unknown phrasing with no tag still gets a normalized phrase and is matchable by normalized-equality / fuzzy
+        - match returns reuse for exact+normalized hits and regenerate for fuzzy scores below the configured cutoff
+        - Canonicalized requirements persist to canonical_requirements and round-trip on the next run
+      effort: L
+      risk: Med
+      tests: |
+        Unit: test_synonyms_map_to_tag; test_normalize_unknown_phrase;
+              test_tiered_match_thresholds (exact/normalized/fuzzy boundaries)
+        Integration: test_jd_parser_emits_canonical_fields
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-fuzzy
+          text: What fuzzy backend -- sqlite FTS5 or an in-process token-set ratio?
+          answer: Start with token-set ratio over normalized phrases (no schema dependency, fully local); add FTS5 only if recall is insufficient. Cutoff lives in config so it is tunable without code changes.
+      decisions_notes: |
+        **Trigger:** canonicalization rides the existing apply-jd-parser LLM call --
+        no extra model round-trip; the parser prompt is extended to emit tag +
+        normalized phrase alongside its current output.
+        **Match tiers:** exact tag (cheap, high precision) -> normalized-phrase
+        equality -> fuzzy via sqlite FTS / token-set ratio with a config cutoff.
+        Fuzzy below cutoff = regenerate (correctness-first bias).
+        **Rejected:** embeddings + vector store (Stage-2: violates local-first, adds
+        infra + embedding calls); pure deterministic synonym table (brittle on unseen
+        phrasing -- LLM-normalize covers the long tail without a vector DB).
+        Taxonomy seed is hand-curated and grows; not trying to be exhaustive at v1.
+    - id: slice-3
+      num: 3
+      title: Company-research cache + specialist integration
+      what: |
+        Key company_research_cache by normalized company identity + a content hash of
+        the inputs that shaped the research, with a TTL (default 90d). Wire
+        apply-company-research to consult the cache first: on a fresh hit it returns
+        the cached blob and skips the LLM call; on miss/stale it regenerates and
+        writes back. Record whether the result was reused or generated for the
+        reuse report.
+      why: |
+        Stage-2 in-scope candidate; lowest-risk reuse because company facts do not
+        depend on the specific JD. Directly attacks the cost/wall-clock target on the
+        common case of multiple roles at the same/similar company.
+      files:
+        - src/jobsmith/reuse/company_cache.py
+        - src/jobsmith/agents/apply_company_research.py
+      deps:
+        - 1
+      done_when:
+        - Second application to the same company within TTL reuses cached research and makes zero company-research LLM calls
+        - A cache entry past its TTL triggers regeneration and a write-back with a fresh timestamp
+        - Each run records company-research as reused or generated for the reuse report
+      effort: M
+      risk: Low
+      tests: |
+        Unit: test_company_key_normalization; test_ttl_expiry_forces_regen
+        Integration: test_second_run_same_company_skips_llm (assert call count 0)
+      complexity: standard
+      approved: false
+      comment: ""
+      decisions_notes: |
+        **State:** company_research_cache keyed on normalized company name + input
+        hash; TTL default 90d (config) since company facts go stale. **Skip rule:**
+        fresh hit (hash match AND within TTL) returns cached blob, bypasses the LLM
+        call entirely. **Rejected:** keying on raw job_id (defeats cross-role reuse);
+        no-TTL (company research would never refresh). Similar-company fuzzy reuse is
+        deferred -- v1 reuses on same-company exact/normalized identity only.
+    - id: slice-4
+      num: 4
+      title: Requirement->evidence/bullet map + reuse
+      what: |
+        Populate requirement_evidence_map from each completed application's
+        bullet-selection.json: (canonical requirement) -> (master bullet id +
+        content hash of that bullet). On a new JD, for each requirement that resolves
+        to a prior canonical requirement (slice-2), reuse the previously selected
+        master bullet INSTEAD of re-running selection for it -- but only if the
+        bullet's current content hash still matches the stored hash. A master-YAML
+        edit changes the bullet hash and auto-invalidates the mapping.
+      why: |
+        Stage-2 in-scope candidate; the core of fine-grained reuse. Lets a master
+        bullet that satisfied "build data pipelines" be reused whenever that
+        requirement recurs, shrinking the work apply-bullet-selector must do.
+      files:
+        - src/jobsmith/reuse/evidence_map.py
+        - src/jobsmith/agents/apply_bullet_selector.py
+      deps:
+        - 1
+        - 2
+      done_when:
+        - A requirement seen in a prior application reuses the same master bullet without re-running selection for that requirement
+        - Editing the master bullet's content changes its hash and invalidates the reused mapping (forces re-selection)
+        - Anchor bullets remain present in the selection regardless of reuse decisions
+        - New requirements with no prior mapping fall through to normal apply-bullet-selector
+      effort: L
+      risk: High
+      tests: |
+        Unit: test_map_population_from_bullet_selection;
+              test_master_edit_busts_bullet_hash; test_anchors_always_selected
+        Integration: test_recurring_requirement_reuses_bullet
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-context
+          text: Can a bullet that satisfied a requirement in JD-A be wrong for JD-B even if the requirement tag matches?
+          answer: Possibly (tone/context drift), so requirement-level reuse picks the bullet but does NOT bypass the final fact-check/no-fabrication gate (slice-8). The map is an optimization hint, not a correctness authority.
+      decisions_notes: |
+        **State:** requirement_evidence_map rows store canonical-requirement id,
+        master bullet id, and the bullet's content hash at mapping time.
+        **Invalidation:** reuse only when stored hash == current master bullet hash
+        -- this is how master edits propagate (Stage-4 content-hash invalidation).
+        **Guardrail:** anchor preservation is independent of and overrides reuse --
+        anchors are always selected; reuse only affects non-anchor requirement->bullet
+        picks. **Rejected:** reusing the whole bullet-selection.json blob here (that
+        is slice-7 warm-start, coarser); trusting the map without re-hashing (would
+        carry stale bullet text). High risk flagged: this is where a stale claim
+        could leak, so slice-8 re-gates the assembled output.
+    - id: slice-5
+      num: 5
+      title: JD-parse + fit-score dedup for near-duplicate JDs
+      what: |
+        Compute an application_fingerprint per JD from its normalized requirement set
+        + normalized text. On a new JD, look up application_fingerprints; if a prior
+        JD is a near-duplicate above the dedup threshold, reuse its jd-parsed.json and
+        fit-score.json instead of re-running apply-jd-parser / apply-fit-scorer.
+        Below threshold, run normally and store the new fingerprint.
+      why: |
+        Stage-2 in-scope candidate. Near-duplicate JDs (reposts, same role across
+        boards) are common; skipping parse+score on them is a cheap, safe win toward
+        the cost/wall-clock target.
+      files:
+        - src/jobsmith/reuse/fingerprint.py
+        - src/jobsmith/agents/apply_jd_parser.py
+        - src/jobsmith/agents/apply_fit_scorer.py
+      deps:
+        - 1
+        - 2
+      done_when:
+        - A re-submitted near-identical JD reuses prior jd-parsed.json and fit-score.json and skips both specialists
+        - A JD below the dedup threshold runs both specialists normally and stores its own fingerprint
+        - The dedup threshold is read from config (tunable without code changes)
+      effort: M
+      risk: Med
+      tests: |
+        Unit: test_fingerprint_stable_for_near_duplicate; test_threshold_gate
+        Integration: test_duplicate_jd_skips_parser_and_scorer
+      complexity: standard
+      approved: false
+      comment: ""
+      decisions_notes: |
+        **Key:** fingerprint = hash/feature-set over normalized requirements + JD
+        text (reuses slice-2 normalization). **Skip rule:** near-duplicate above
+        threshold reuses BOTH jd-parsed and fit-score together (they are tightly
+        coupled to the same JD). **Rejected:** exact-text-only dedup (misses reposts
+        with trivial edits); deduping parse but re-scoring (fit-score is a function of
+        the same parsed JD, so reuse both or neither). Threshold in config per Stage-3.
+    - id: slice-6
+      num: 6
+      title: Reuse-planner pre-phase + --no-reuse flag
+      what: |
+        Add a planner that runs BEFORE the gather phase. It: (1) normalizes the JD via
+        slice-2; (2) queries fingerprints/caches/evidence-map to find the nearest
+        prior application and a per-candidate reuse verdict; (3) decides warm-start
+        vs full-draft using a configurable JD-overlap threshold; (4) emits a
+        reuse-plan artifact (what to skip / reuse / warm-start / regenerate) that the
+        specialists consult. Add a --no-reuse CLI flag that forces a full from-scratch
+        run (planner emits an all-regenerate plan).
+      why: |
+        Stage-3 decision: reuse-planner pre-phase + per-specialist cache checks, with
+        a tunable warm-start threshold and automatic-by-default + --no-reuse. This is
+        the brain that turns the per-candidate caches into a single coherent run plan
+        and the fallback switch to the full pipeline.
+      files:
+        - src/jobsmith/reuse/planner.py
+        - src/jobsmith/pipeline.py
+        - src/jobsmith/_cli_apply.py
+      deps:
+        - 2
+        - 3
+        - 4
+        - 5
+      done_when:
+        - Planner emits a reuse-plan listing per-candidate verdicts (reuse/warm-start/regenerate) before gather runs
+        - JD overlap above the warm-start threshold selects warm-start; below selects full draft
+        - --no-reuse forces an all-regenerate plan identical in effect to the legacy full pipeline
+        - When no prior application exists, the planner falls back cleanly to a full run
+      effort: L
+      risk: High
+      tests: |
+        Unit: test_planner_verdicts_per_candidate; test_warmstart_threshold;
+              test_no_reuse_forces_full; test_no_candidate_falls_back_full
+        Integration: test_planner_runs_before_gather
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-overlap
+          text: How is JD-overlap for the warm-start decision computed?
+          answer: Jaccard/coverage over canonical requirement sets of the new JD vs the nearest prior application (reuses slice-2 tags). Single tunable score in config; warm-start only above it, else full draft.
+      decisions_notes: |
+        **Trigger:** new pre-gather phase in the apply orchestrator; reuse is
+        automatic by default (safe -- gates still run), --no-reuse is the escape.
+        **Payload:** a reuse-plan artifact in .apply-state/<job>/ that specialists
+        read to decide skip vs work. **Threshold:** warm-start fires only above a
+        configurable JD-overlap score (default ~80%); thresholds in config per
+        Stage-3. **Rejected:** pure pre-phase pre-population (no central warm-start
+        decision); per-specialist-only (no cross-specialist coordination, no
+        nearest-app). Full pipeline remains the correctness backstop + fallback.
+    - id: slice-7
+      num: 7
+      title: Whole-resume warm-start (diff-and-tweak) with anchor preservation
+      what: |
+        When the planner selects warm-start, load the nearest prior resume + its
+        bullet-selection as a base, compute the requirement delta (what the new JD
+        needs that the base does not already satisfy), and short-circuit the draft
+        phase to modifying only the delta bullets via prose-writer instead of a
+        from-scratch draft. Anchor bullets from the base are carried forward
+        unconditionally and never dropped or rewritten away.
+      why: |
+        Stage-2 in-scope candidate and the biggest wall-clock win: turns a
+        from-scratch draft into "modify a few bullets" when fit is close. Trickiest
+        correctness surface, so anchor handling is explicit here and the assembled
+        output is re-gated in slice-8.
+      files:
+        - src/jobsmith/reuse/warmstart.py
+        - src/jobsmith/agents/prose_writer.py
+        - src/jobsmith/pipeline.py
+      deps:
+        - 6
+        - 4
+      done_when:
+        - A near-duplicate JD warm-starts from the nearest prior resume and only delta bullets are regenerated
+        - All anchor bullets from the base resume are present and unmodified in the warm-started output
+        - The requirement delta correctly identifies new-JD requirements not covered by the base
+        - If warm-start cannot satisfy a required-but-uncovered requirement, it escalates that piece to full generation rather than fabricating
+      effort: L
+      risk: High
+      tests: |
+        Unit: test_requirement_delta_computation; test_anchors_carried_forward
+        Integration: test_warmstart_regenerates_only_delta;
+                     test_uncovered_requirement_escalates
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-anchor
+          text: What if an anchor bullet conflicts with the new JD?
+          answer: Anchors are preserved regardless -- they are non-negotiable per project constraints. A conflict surfaces in the reuse report for human review; it never causes an anchor to be dropped or silently rewritten.
+      decisions_notes: |
+        **Trigger:** only when planner verdict == warm-start (above overlap
+        threshold). **Mechanism:** base resume + bullet-selection diffed against new
+        canonical requirements; prose-writer edits only delta bullets.
+        **Guardrail:** anchors are copied from the base verbatim and excluded from the
+        diff/regenerate set -- anchor preservation is non-negotiable. Uncovered
+        required requirements escalate to full generation (never fabricate).
+        **Rejected:** blind copy of the whole prior resume (carries stale, JD-specific
+        claims); regenerating everything (defeats the warm-start win). This slice
+        produces candidate output; slice-8 is the correctness gate before acceptance.
+    - id: slice-8
+      num: 8
+      title: 'Correctness backstop: always re-gate assembled output'
+      what: |
+        Ensure that no matter how much was reused or warm-started, the FINAL assembled
+        resume + cover letter pass the full gate suite before acceptance: anchor
+        preservation, no-fabrication, and fact-check (every claim traceable to master
+        content / research). On any gate failure, regenerate the offending piece via
+        the full specialist and re-gate -- reuse must never ship an unvalidated claim.
+      why: |
+        Stage-1 constraint (correctness-first) + Stage-4 decision: always re-run the
+        gates on final output. This is the safety net that makes aggressive reuse
+        acceptable -- the full pipeline remains the correctness authority.
+      files:
+        - src/jobsmith/reuse/backstop.py
+        - src/jobsmith/agents/apply_reviewer.py
+        - src/jobsmith/pipeline.py
+      deps:
+        - 6
+        - 7
+      done_when:
+        - Final assembled output runs anchor + no-fabrication + fact-check gates on EVERY run, reuse or not
+        - A reused/warm-started piece that fails a gate is regenerated from scratch and re-gated, not shipped
+        - A run that passes via reuse produces output that also passes when re-run with --no-reuse (gate parity)
+        - Gate outcomes (pass / regenerated-on-fail) are recorded for the reuse report
+      effort: M
+      risk: High
+      tests: |
+        Unit: test_failed_gate_triggers_regen; test_gates_run_on_reused_output
+        Integration: test_reuse_vs_no_reuse_gate_parity
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-retry
+          text: How many regenerate-and-re-gate retries before failing the run?
+          answer: Bounded (e.g. 1-2) per piece; if it still fails, fall back to full from-scratch generation for that artifact and, failing that, surface an error rather than ship an ungated claim.
+      decisions_notes: |
+        **Trigger:** post-assembly, pre-acceptance, unconditional. **Mechanism:**
+        reuse the EXISTING gate implementations (anchor / no-fabrication / fact-check)
+        -- do not fork them; the backstop just guarantees they run on the reused path
+        too. **Failure policy:** regenerate the offending piece via the full
+        specialist, then re-gate (bounded retry). **Rejected:** re-gating only
+        modified pieces (a cached-valid piece can be wrong in a new JD context);
+        gating the plan up front then trusting it (Stage-4 rejected -- weakest
+        backstop). This slice is why requirement/warm-start reuse is safe.
+    - id: slice-9
+      num: 9
+      title: Reuse metrics, report, and A/B acceptance harness
+      what: |
+        Persist per-run metrics to run_metrics: model-call count, wall-clock, and
+        reused-vs-generated tallies per candidate. Emit a human-readable reuse report
+        at end of run ("reused company-research from app Y; warm-started from resume
+        Z; regenerated 3 bullets; 2 gates re-run"). Add an A/B bench harness that runs
+        the same JD with --no-reuse and with reuse, asserting a >=50% reduction in
+        model calls AND wall-clock on a warm candidate while gate outcomes are
+        identical.
+      why: |
+        Stage-4 decision: per-run metrics + A/B harness vs baseline, and Stage-3 UX:
+        surface "reused X from prior application Y" for transparency. This both proves
+        the ~50% target and makes reuse auditable per run.
+      files:
+        - src/jobsmith/reuse/metrics.py
+        - src/jobsmith/reuse/report.py
+        - tests/bench/test_reuse_ab.py
+      deps:
+        - 6
+        - 8
+      done_when:
+        - Every run records model-call count, wall-clock, and per-candidate reused/generated counts to run_metrics
+        - End-of-run reuse report names each reused source application/artifact for transparency
+        - A/B harness asserts >=50% fewer model calls AND >=50% less wall-clock on a warm JD vs --no-reuse
+        - A/B harness asserts gate outcomes are identical between reuse and --no-reuse runs
+      effort: M
+      risk: Med
+      tests: |
+        Unit: test_metrics_persisted; test_report_names_sources
+        Bench: test_reuse_ab_savings_and_gate_parity
+      complexity: standard
+      approved: false
+      comment: ""
+      decisions_notes: |
+        **State:** run_metrics table (slice-1) holds per-run counts; report renders
+        from it. **Acceptance:** the A/B harness is the hard gate on the ~50% target
+        AND on correctness parity -- savings without identical gate outcomes is a
+        failure. **Rejected:** logging-only (no enforced savings bar); manual
+        spot-check (no regression guard). The report doubles as the transparency UX
+        from Stage-3 ("reused X from prior application Y").
 questions: []
