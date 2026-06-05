@@ -1,5 +1,6 @@
 meta:
     id: plan-72ad5ccc
+    track_id: trk-5d3b688f
     title: 'Single-server local app: static-serve UI + wheel bundle + jobsmith up'
     description: |
         Close the last-mile gap between "a CLI with a web frontend in the dev tree" and
@@ -9,9 +10,9 @@ meta:
         browser. Localhost auto-authenticates so no token typing. NO native desktop shell
         (Tauri/Electron) — local web server + browser only, exactly like Dagster/Prefect.
     created_at: ""
-    status: draft
+    status: finalized
     schema_version: v3
-    version: 1
+    version: 2
 design:
     problem: |
         jobsmith already has the bones of the target architecture — a FastAPI ASGI app
@@ -37,6 +38,7 @@ design:
     comment: ""
 slices:
     - id: slice-1
+      feature_id: feat-9c980bef
       num: 1
       title: Serve the built UI same-origin from create_app (StaticFiles + SPA fallback)
       what: |
@@ -78,8 +80,9 @@ slices:
         Integration: TestApiAndHealthNotShadowed — GET /api/*, GET /health, GET /docs still resolve; unknown /api/* → 404
         Integration: TestApiOnlyModeWhenNoDist — no dist dir → app boots, mount skipped
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       questions:
         - id: q-fallback-scope
           text: How to keep the SPA catch-all from swallowing API/doc/health routes?
@@ -115,6 +118,7 @@ slices:
           serving from repo web/dist only (breaks published wheels — see slice-2);
           hash-router to avoid fallback (changes URLs, worse UX than SPA fallback).
     - id: slice-2
+      feature_id: feat-d58d5881
       num: 2
       title: Bundle web/dist into the wheel via a hatch build hook
       what: |
@@ -158,8 +162,9 @@ slices:
         Unit: TestBuildHookSkipsWithoutNode — simulate missing npm → hook no-ops, build succeeds
         Unit: TestDoctorReportsUiBundled — doctor output reflects presence/absence of web_dist
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       questions:
         - id: q-no-node-build
           text: What if node/npm isn't present when the wheel is built?
@@ -194,6 +199,7 @@ slices:
           a separate companion package (overkill for single-tenant); runtime npm install on
           first launch (slow, needs node on the user machine).
     - id: slice-3
+      feature_id: feat-16257e94
       num: 3
       title: 'Localhost auto-auth: runtime token shim feeding header AND SSE paths'
       what: |
@@ -238,8 +244,9 @@ slices:
         Integration: TestPublicBindNoInjection — --bind-public → no token in page; 401 without header
         Unit: TestTokenEscapedAndRedacted — injected token is JSON/HTML-escaped and redacted in event log
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       questions:
         - id: q-inject-mechanism
           text: Inject into index.html, or expose via an endpoint — and how does SSE get the token?
@@ -273,6 +280,7 @@ slices:
           leaks into static assets); leaving STATIC_TOKEN const as-is (A2 — SSE would silently
           fail); cookie/session auth (larger change vs today's bearer/JWT).
     - id: slice-4
+      feature_id: feat-2423bbec
       num: 4
       title: '`jobsmith up` — boot the server, open the browser after listen (non-blocking), --dev toggle'
       what: |
@@ -318,8 +326,9 @@ slices:
         Unit: TestUpPortInUse — bind conflict → friendly message + non-zero exit, no stacktrace
         Unit: TestUpDevSkipsStatic — --dev → static mount not applied, points at vite origin
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       questions:
         - id: q-open-timing
           text: How to open the browser only after the server is ready, given uvicorn.run blocks?
@@ -353,6 +362,7 @@ slices:
           into `api serve` flags only (less discoverable); replacing/retiring `api serve`
           (breaks headless scripts); auto-running vite from `up --dev` (fragile).
     - id: slice-5
+      feature_id: feat-e4adbb42
       num: 5
       title: 'End-to-end acceptance: fresh wheel install → jobsmith up → apply/onboard in browser'
       what: |
@@ -391,8 +401,9 @@ slices:
         E2E: TestFreshInstallUpOnboard — same env → onboard writes master YAMLs/DB rows (asserted)
         Smoke: assert bundled web_dist served and localhost auto-auth works (REST + SSE)
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       questions:
         - id: q-e2e-surface
           text: Drive the E2E through a headless browser or the same-origin HTTP API?
