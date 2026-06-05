@@ -499,15 +499,15 @@ def list_applications() -> list[Application]:
 def get_application(slug: str) -> ApplicationDetail:
     """Return the latest run + all artifacts for *slug*.
 
-    Raises 404 when *slug* has no apply_runs row.
+    Raises 404 when *slug* has no apply_runs row (even after rekey resolution).
+    Uses :func:`_find_run_row_for_slug` so a stale URL-derived slug (pinned in
+    the browser after POST /applications) continues to resolve after
+    ``apply_runs.slug`` was rekeyed to the canonical slug mid-run.
     """
     db_path = _get_db_path()
     conn = _open_conn(db_path)
     try:
-        run_row = conn.execute(
-            "SELECT * FROM apply_runs WHERE slug = ? ORDER BY started_at DESC LIMIT 1",
-            (slug,),
-        ).fetchone()
+        run_row = _find_run_row_for_slug(conn, slug)
         if run_row is None:
             raise HTTPException(
                 status_code=404, detail=f"No application found for slug {slug!r}"
@@ -612,6 +612,47 @@ def _get_app_dir(slug: str) -> Path | None:
     return apps_dir / slug
 
 
+def _find_run_row_for_slug(conn, slug: str):
+    """Return the latest apply_runs row for *slug*, resolving through slug rekeys.
+
+    Direct lookup first (works when slug is already canonical or was never
+    rekeyed).  Falls back to the ``apply_state_log`` rekey trail: the
+    jd-parser records a log line whose ``payload`` contains
+    ``--from <starting-slug> --to <canonical>``; scanning that table lets us
+    map a stale URL-derived slug → run_id → current apply_runs row even after
+    ``apply_runs.slug`` was updated to the canonical slug mid-run.
+
+    Returns the ``apply_runs`` row (sqlite3.Row) or None.
+    """
+    row = conn.execute(
+        "SELECT * FROM apply_runs WHERE slug = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
+        (slug,),
+    ).fetchone()
+    if row is not None:
+        return row
+
+    # Rekey fallback: search apply_state_log for rekey commands that name
+    # *slug* as the --from side.  We anchor the pattern with a trailing space
+    # (or end-of-string) to avoid partial matches such as
+    # "acme-foo" matching against "--from acme-foo-bar".
+    for pattern in (f"%--from {slug} %", f"%--from {slug}"):
+        log_row = conn.execute(
+            "SELECT run_id FROM apply_state_log "
+            "WHERE payload LIKE ? ORDER BY id DESC LIMIT 1",
+            (pattern,),
+        ).fetchone()
+        if log_row is not None:
+            row = conn.execute(
+                "SELECT * FROM apply_runs WHERE run_id = ? "
+                "ORDER BY started_at DESC LIMIT 1",
+                (log_row["run_id"],),
+            ).fetchone()
+            if row is not None:
+                return row
+
+    return None
+
+
 _ALLOWED_DOC_SUFFIXES = {".pdf", ".md", ".txt", ".typ"}
 
 
@@ -641,10 +682,10 @@ def _cover_letter_candidates(app_dir: Path) -> list[Path]:
 def _resolve_cover_letter(slug: str, conn) -> Path | None:
     """Return the path to cover-letter-draft.md for *slug*, or None if not found.
 
-    Tries the original-slug directory first, then the canonical slug (same
-    fallback used by _resolve_docs_dir).  This ensures the cover letter is
-    found even when the gather phase rekeyed artifacts under a canonical slug
-    while the original slug directory also exists on disk.
+    Tries the original-slug directory first, then all candidate slugs derived
+    from the run row (jd-parsed company+position, rekey log).  Uses
+    :func:`_find_run_row_for_slug` so a stale URL-derived slug is resolved even
+    after ``apply_runs.slug`` was updated to the canonical slug mid-run.
     """
     app_dir = _get_app_dir(slug)
     if app_dir is not None:
@@ -652,25 +693,23 @@ def _resolve_cover_letter(slug: str, conn) -> Path | None:
             if cl.is_file():
                 return cl
 
-    # Canonical slug fallback.
-    run_row = conn.execute(
-        "SELECT run_id FROM apply_runs WHERE slug = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
-        (slug,),
-    ).fetchone()
+    # Rekey-aware fallback: find the run row (works even if apply_runs.slug
+    # was updated to canonical) then check every candidate slug directory.
+    run_row = _find_run_row_for_slug(conn, slug)
     if run_row is None:
         return None
-    role, company, _ = _extract_jd_fields(conn, run_row["run_id"])
-    if not company or not role:
-        return None
-    canonical = f"{_to_slug(company)}-{_to_slug(role)}"
-    if canonical == slug:
-        return None
-    canonical_dir = _get_app_dir(canonical)
-    if canonical_dir is None:
-        return None
-    for cl in _cover_letter_candidates(canonical_dir):
-        if cl.is_file():
-            return cl
+    run_id = run_row["run_id"]
+    current_slug = run_row["slug"]
+
+    for candidate in _slug_candidates_for_run(conn, run_id, current_slug):
+        if candidate == slug:
+            continue  # already tried above
+        candidate_dir = _get_app_dir(candidate)
+        if candidate_dir is None:
+            continue
+        for cl in _cover_letter_candidates(candidate_dir):
+            if cl.is_file():
+                return cl
     return None
 
 
@@ -679,6 +718,10 @@ def _resolve_docs_dir(slug: str, conn) -> Path | None:
 
     The gather phase creates documents/ early (for YAML stubs) so we must
     check for actual render outputs, not just directory existence.
+
+    Uses :func:`_find_run_row_for_slug` so a stale URL-derived slug (e.g.
+    ``becu-Sr-Data-Analyst_R-13411-2026-06``) is resolved to the run row even
+    after ``apply_runs.slug`` was rekeyed to the canonical form mid-run.
     """
     app_dir = _get_app_dir(slug)
     if app_dir is not None:
@@ -686,27 +729,27 @@ def _resolve_docs_dir(slug: str, conn) -> Path | None:
         if docs.exists() and _has_render_outputs(docs):
             return docs
 
-    # The gather phase rekeyes DB rows to a canonical slug (e.g.
-    # "performance-analytics-manager" → "catalyze-performance-analytics-manager")
-    # but apply_runs.slug stays as the starting slug.  Derive the canonical
-    # slug from jd-parsed company + position and retry.
-    run_row = conn.execute(
-        "SELECT run_id FROM apply_runs WHERE slug = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
-        (slug,),
-    ).fetchone()
+    # The gather phase rekeyed apply_runs.slug to a canonical slug — resolve
+    # via the rekey-aware run-row lookup, then derive canonical from jd-parsed
+    # company + position.  Also consult the rekey log itself as a further
+    # fallback (_slug_candidates_for_run covers all three paths).
+    run_row = _find_run_row_for_slug(conn, slug)
     if run_row is None:
         return None
-    role, company, _ = _extract_jd_fields(conn, run_row["run_id"])
-    if not company or not role:
-        return None
-    canonical = f"{_to_slug(company)}-{_to_slug(role)}"
-    if canonical == slug:
-        return None
-    canonical_dir = _get_app_dir(canonical)
-    if canonical_dir is None:
-        return None
-    docs = canonical_dir / "documents"
-    return docs if docs.exists() else None
+    run_id = run_row["run_id"]
+    current_slug = run_row["slug"]
+
+    for candidate in _slug_candidates_for_run(conn, run_id, current_slug):
+        if candidate == slug:
+            continue  # already tried above
+        candidate_dir = _get_app_dir(candidate)
+        if candidate_dir is None:
+            continue
+        docs = candidate_dir / "documents"
+        if docs.exists() and _has_render_outputs(docs):
+            return docs
+
+    return None
 
 
 @router.get("/applications/{slug}/documents")
@@ -784,18 +827,10 @@ def get_transcript(slug: str) -> list[dict]:
     db_path = _get_db_path()
     conn = _open_conn(db_path)
     try:
-        run_row = conn.execute(
-            "SELECT run_id FROM apply_runs WHERE slug = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
-            (slug,),
-        ).fetchone()
+        run_row = _find_run_row_for_slug(conn, slug)
         if run_row is None:
-            # Try canonical slug (company-position derived from jd-parsed artifact).
-            canonical_run = _find_canonical_run(conn, slug)
-            if canonical_run is None:
-                return []
-            run_id = canonical_run
-        else:
-            run_id = run_row["run_id"]
+            return []
+        run_id = run_row["run_id"]
         rows = conn.execute(
             "SELECT id, payload FROM apply_state_log WHERE run_id = ? ORDER BY id ASC",
             (run_id,),
@@ -859,14 +894,15 @@ def _resolve_canonical_slug(conn, starting_slug: str, run_id: str) -> str:
 
 @router.get("/applications/{slug}/review")
 def get_review(slug: str) -> dict:
-    """Return review state: cover letter text, fit score, review status."""
+    """Return review state: cover letter text, fit score, review status.
+
+    Uses :func:`_find_run_row_for_slug` so a stale URL-derived slug is resolved
+    to the canonical slug's data even after ``apply_runs.slug`` was rekeyed.
+    """
     db_path = _get_db_path()
     conn = _open_conn(db_path)
     try:
-        run_row = conn.execute(
-            "SELECT run_id, slug FROM apply_runs WHERE slug = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
-            (slug,),
-        ).fetchone()
+        run_row = _find_run_row_for_slug(conn, slug)
         if run_row is None:
             raise HTTPException(status_code=404, detail=f"No application found for slug {slug!r}")
         run_id = run_row["run_id"]
@@ -966,10 +1002,7 @@ def set_review_status(slug: str, body: dict) -> dict:
     db_path = _get_db_path()
     conn = _open_conn(db_path)
     try:
-        run_row = conn.execute(
-            "SELECT run_id, slug FROM apply_runs WHERE slug = ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
-            (slug,),
-        ).fetchone()
+        run_row = _find_run_row_for_slug(conn, slug)
         if run_row is None:
             raise HTTPException(status_code=404, detail=f"No application found for slug {slug!r}")
         run_id = run_row["run_id"]

@@ -431,3 +431,191 @@ class TestUiPhaseMapping:
         assert resp.status_code == 200, resp.text
         row = resp.json()[0]
         assert row["ui_phase"] == "rendered"
+
+
+# ---------------------------------------------------------------------------
+# Rekey-aware slug resolution (bug-f63a7dd7)
+# ---------------------------------------------------------------------------
+
+
+class TestRekeySlugResolution:
+    """Tests for slug rekey: stale URL-derived slug → canonical slug resolution.
+
+    Simulates the scenario where:
+      1.  POST /applications returns starting_slug = "becu-Sr-Data-Analyst_R-13411-2026-06"
+      2.  The jd-parser rekeys the apply_runs.slug to canonical = "becu-sr-data-analyst"
+      3.  apply_state_log contains the rekey command payload
+      4.  Artifacts (resume.pdf, cover-letter-draft.md) live under canonical dir
+
+    Asserts that GET /applications/{starting_slug},
+    GET /applications/{starting_slug}/documents, and
+    GET /applications/{starting_slug}/review all resolve correctly — not 404.
+    """
+
+    @staticmethod
+    def _make_rekeyed_db(tmp_path: Path) -> tuple[Path, str, str, str]:
+        """Create a DB + filesystem layout that mirrors a post-rekey apply run.
+
+        Returns (db_path, starting_slug, canonical_slug, run_id).
+        """
+        starting_slug = "becu-Sr-Data-Analyst_R-13411-2026-06"
+        canonical_slug = "becu-sr-data-analyst"
+        run_id = "run-becu-rekey"
+
+        db_path = tmp_path / "jobsmith.db"
+        conn = open_pipeline_db(db_path)
+
+        # apply_runs.slug is the canonical slug (updated mid-run by the pipeline).
+        conn.execute(
+            "INSERT INTO apply_runs (run_id, slug, phase, started_at, finished_at, status) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                run_id,
+                canonical_slug,
+                "render",
+                "2026-06-01T10:00:00Z",
+                "2026-06-01T10:15:00Z",
+                "done",
+            ),
+        )
+        # jd-parsed artifact in specialist_outputs (used by _extract_jd_fields).
+        conn.execute(
+            "INSERT INTO specialist_outputs "
+            "(run_id, specialist, kind, output_json, transcript_ref, finished_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                run_id,
+                "apply-jd-parser",
+                "jd-parsed",
+                json.dumps({
+                    "company": "BECU",
+                    "position": "Sr Data Analyst",
+                    "apply_url": "https://careers.becu.org/jobs/R-13411",
+                }),
+                None,
+                "2026-06-01T10:02:00Z",
+            ),
+        )
+        # apply_state_log contains the rekey command (as recorded by the orchestrator).
+        conn.execute(
+            "INSERT INTO apply_state_log (run_id, slug, ts, payload) VALUES (?, ?, ?, ?)",
+            (
+                run_id,
+                canonical_slug,
+                "2026-06-01T10:01:30Z",
+                json.dumps({
+                    "type": "tool_result",
+                    "content": (
+                        "jobsmith db rekey-slug "
+                        f"--from {starting_slug} "
+                        f"--to {canonical_slug}"
+                    ),
+                }),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        return db_path, starting_slug, canonical_slug, run_id
+
+    def test_detail_resolves_rekeyed_slug(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GET /applications/{stale_slug} returns 200 (not 404) after rekey."""
+        db_path, starting_slug, canonical_slug, _ = self._make_rekeyed_db(tmp_path)
+        apps_root = tmp_path / "applications"
+        monkeypatch.setattr("jobsmith.api.applications._get_db_path", lambda: db_path)
+        monkeypatch.setattr(
+            "jobsmith.api.applications._get_app_dir",
+            lambda s: apps_root / s,
+        )
+        app = FastAPI()
+        app.include_router(applications_router, prefix="/api")
+        client = TestClient(app, raise_server_exceptions=True)
+
+        resp = client.get(f"/api/applications/{starting_slug}")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        # The response slug should be the canonical one (from the DB row).
+        assert data["slug"] == canonical_slug
+        assert data["status"] == "done"
+        assert data["company"] == "BECU"
+
+    def test_list_documents_resolves_rekeyed_slug(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GET /applications/{stale_slug}/documents returns resume.pdf after rekey."""
+        db_path, starting_slug, canonical_slug, _ = self._make_rekeyed_db(tmp_path)
+        apps_root = tmp_path / "applications"
+
+        # Create the resume.pdf in the canonical slug's documents/ dir.
+        docs_dir = apps_root / canonical_slug / "documents"
+        docs_dir.mkdir(parents=True)
+        (docs_dir / "resume.pdf").write_bytes(b"%PDF-1.4 stub")
+
+        monkeypatch.setattr("jobsmith.api.applications._get_db_path", lambda: db_path)
+        monkeypatch.setattr(
+            "jobsmith.api.applications._get_app_dir",
+            lambda s: apps_root / s,
+        )
+        app = FastAPI()
+        app.include_router(applications_router, prefix="/api")
+        client = TestClient(app, raise_server_exceptions=True)
+
+        resp = client.get(f"/api/applications/{starting_slug}/documents")
+        assert resp.status_code == 200, resp.text
+        assert "resume.pdf" in resp.json()
+
+    def test_review_resolves_rekeyed_slug(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GET /applications/{stale_slug}/review returns cover letter after rekey."""
+        db_path, starting_slug, canonical_slug, _ = self._make_rekeyed_db(tmp_path)
+        apps_root = tmp_path / "applications"
+
+        # Create cover-letter-draft.md under the canonical slug directory.
+        canonical_dir = apps_root / canonical_slug
+        canonical_dir.mkdir(parents=True)
+        (canonical_dir / "cover-letter-draft.md").write_text(
+            "Dear BECU hiring team,\n", encoding="utf-8"
+        )
+
+        monkeypatch.setattr("jobsmith.api.applications._get_db_path", lambda: db_path)
+        monkeypatch.setattr(
+            "jobsmith.api.applications._get_app_dir",
+            lambda s: apps_root / s,
+        )
+        app = FastAPI()
+        app.include_router(applications_router, prefix="/api")
+        client = TestClient(app, raise_server_exceptions=True)
+
+        resp = client.get(f"/api/applications/{starting_slug}/review")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["cover_letter"] == "Dear BECU hiring team,\n"
+        # canonical_slug is returned in the response
+        assert data["canonical_slug"] == canonical_slug
+
+    def test_canonical_slug_still_works(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GET /applications/{canonical_slug}/documents is unaffected by the fix."""
+        db_path, _, canonical_slug, _ = self._make_rekeyed_db(tmp_path)
+        apps_root = tmp_path / "applications"
+
+        docs_dir = apps_root / canonical_slug / "documents"
+        docs_dir.mkdir(parents=True)
+        (docs_dir / "resume.pdf").write_bytes(b"%PDF-1.4 stub")
+
+        monkeypatch.setattr("jobsmith.api.applications._get_db_path", lambda: db_path)
+        monkeypatch.setattr(
+            "jobsmith.api.applications._get_app_dir",
+            lambda s: apps_root / s,
+        )
+        app = FastAPI()
+        app.include_router(applications_router, prefix="/api")
+        client = TestClient(app, raise_server_exceptions=True)
+
+        resp = client.get(f"/api/applications/{canonical_slug}/documents")
+        assert resp.status_code == 200, resp.text
+        assert "resume.pdf" in resp.json()
