@@ -10,15 +10,15 @@
 <body>
     <article id="feat-30736316"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-05T16:11:52.098462"
-             data-updated="2026-06-05T16:11:55.761668" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.20">
+             data-updated="2026-06-05T16:21:55.810666" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.20">
 
         <header>
             <h1>roborev-991 fixes: shim bind-mode gate, JS-safe escaping, stale web_dist cleanup</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
@@ -40,7 +40,8 @@
 
         <section data-content>
             <h3>Description</h3>
-            <p>Fix 3 roborev findings (job 991): (1) HIGH auto-auth shim gated only by client Host header — gate on actual bind mode; (2) HIGH _build_shim_script HTML-escapes JSON inside  producing invalid JS; (3) MEDIUM hatch build hook ships stale web_dist when npm/node missing.</p>
+            <p>Fix 3 roborev findings (job 991): (1) HIGH auto-auth shim gated only by client Host header — gate on actual bind mode; (2) HIGH _build_shim_script HTML-escapes JSON inside  producing invalid JS; (3) MEDIUM hatch build hook ships stale web_dist when npm/node missing.
+[2026-06-05 16:21 claude-code] accepted-advisory (provenance override): Implementation committed as 1fb90b9 'fix(feat-30736316): roborev-991 …' on branch trk-5d3b688f with parenthetical (feat-30736316) provenance; source-commit auto-link hook did not fire for the Bash-driven commit inside the .claude worktree (ingest commits reads the .wipnote artifact repo, not the source repo). Provenance is durable in the source git history.</p>
         </section>
     </article>
 </body>
