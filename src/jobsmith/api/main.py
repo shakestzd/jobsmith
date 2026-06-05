@@ -310,7 +310,10 @@ def create_app() -> FastAPI:
 
     # Static UI + SPA catch-all — registered LAST so all API routes take
     # precedence.  Skipped silently (API-only mode) when no web-dist is found.
-    mount_static_ui(app)
+    # Also skipped in --dev mode (JOBSMITH_DEV=1) where the Vite dev server
+    # serves the front-end on a separate port (feat-2423bbec slice-4).
+    if os.environ.get("JOBSMITH_DEV") != "1":
+        mount_static_ui(app)
 
     return app
 
