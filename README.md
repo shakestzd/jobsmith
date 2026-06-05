@@ -63,6 +63,55 @@ jobsmith/
 └── docs/                    # Getting started, configuration, contributing
 ```
 
+## Quickstart — `uv tool install` → `jobsmith up`
+
+Install jobsmith as a standalone CLI tool (wheel includes the bundled UI):
+
+```bash
+# Install from PyPI (or a local wheel)
+uv tool install jobsmith
+
+# Or install from a local build (e.g. a development wheel):
+uv tool install dist/jobsmith-*.whl
+```
+
+Initialize a repo and start the server:
+
+```bash
+mkdir my-job-search && cd my-job-search
+jobsmith init          # scaffold assets/content/*.yml + .apply-config.yaml
+jobsmith up            # starts http://127.0.0.1:8000 and opens your browser
+```
+
+The browser opens automatically once the server is ready.  The UI auto-authenticates
+on localhost — no token management required.
+
+**Flags:**
+
+| Flag | Effect |
+|------|--------|
+| `--no-open` | Don't open the browser automatically |
+| `--port PORT` | Bind to a different port (default: 8000) |
+| `--bind-public` | Bind to 0.0.0.0 instead of 127.0.0.1 (disables auto-auth) |
+| `--dev` | API-only mode — use with `npm run dev` in `web/` for hot-reload |
+
+**Editable-install dev note (for contributors):**
+
+```bash
+git clone <repo> && cd jobsmith
+uv pip install -e ".[dev]"   # editable install, no bundled UI
+cd web && npm install && npm run build  # build UI into src/jobsmith/web_dist/
+jobsmith up                  # now serves the built UI
+
+# Or for front-end hot-reload:
+jobsmith up --dev            # API only on :8000
+cd web && npm run dev        # Vite dev server on :5173
+```
+
+CI requirement: **node is required at wheel-build time** (`uv build --wheel` runs
+`vite build` via the hatch_build.py hook).  The installed wheel and its runtime
+venv are npm-free.
+
 ## Quickstart (planned, not yet functional)
 
 ```bash

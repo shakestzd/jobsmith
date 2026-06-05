@@ -10,11 +10,45 @@
 //   postApplication   — POST /api/applications → { slug, run_id }
 //   buildEventsUrl    — construct the SSE URL for a slug
 
-const DEFAULT_BASE_URL = window.location.hostname === 'host.docker.internal'
-  ? 'http://host.docker.internal:8000'
-  : 'http://localhost:8000';
-export const BASE_URL = import.meta.env.VITE_JOBSMITH_API_URL ?? DEFAULT_BASE_URL;
-const STATIC_TOKEN = import.meta.env.VITE_JOBSMITH_API_TOKEN ?? '';
+// When served same-origin from the API (feat-9c980bef), resolve to the current
+// origin so API calls work without hardcoded ports.  VITE_JOBSMITH_API_URL
+// overrides this for split dev (Vite dev-server + separate uvicorn).
+export const BASE_URL: string =
+  import.meta.env.VITE_JOBSMITH_API_URL ?? window.location.origin;
+
+// ---------------------------------------------------------------------------
+// Runtime token (feat-16257e94 — localhost auto-auth)
+// ---------------------------------------------------------------------------
+//
+// Resolution order (mutable, read at call-time so a 401 retry can update it):
+//   1. window.__JOBSMITH__.token  — injected by the server on localhost binds.
+//   2. VITE_JOBSMITH_API_TOKEN    — build-time env var (split-dev fallback).
+//
+// IMPORTANT: keep STATIC_TOKEN as a NAMED EXPORT so external callers that
+// previously imported it continue to compile.  It is still used as the
+// build-time fallback when the runtime shim is absent.
+export const STATIC_TOKEN = import.meta.env.VITE_JOBSMITH_API_TOKEN ?? '';
+
+/**
+ * Return the best available static/shim bearer token at call-time.
+ *
+ * Reads window.__JOBSMITH__.token first (injected on localhost by staticui.py)
+ * then falls back to the VITE build-time token.  Reading at call-time means a
+ * hot-reload or future shim update takes effect without a full page reload.
+ */
+function getRuntimeToken(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const shim = (window as any).__JOBSMITH__;
+    if (shim && typeof shim.token === 'string' && shim.token) {
+      return shim.token;
+    }
+  } catch {
+    // window not available (SSR / test environments without jsdom)
+  }
+  return STATIC_TOKEN;
+}
+
 const ACCESS_TOKEN_KEY = 'jobsmith.access_token';
 const REFRESH_TOKEN_KEY = 'jobsmith.refresh_token';
 export const JOBSMITH_DATA_CHANGED = 'jobsmith:data-changed';
@@ -37,7 +71,7 @@ export function getAccessToken(): string {
 }
 
 export function hasStaticToken(): boolean {
-  return Boolean(STATIC_TOKEN);
+  return Boolean(getRuntimeToken());
 }
 
 export function getRefreshToken(): string {
@@ -60,7 +94,7 @@ export function notifyDataChanged(path: string): void {
 
 export function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const token = getAccessToken() || STATIC_TOKEN;
+  const token = getAccessToken() || getRuntimeToken();
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
@@ -68,7 +102,7 @@ export function authHeaders(): Record<string, string> {
 }
 
 function authOnlyHeaders(): Record<string, string> {
-  const token = getAccessToken() || STATIC_TOKEN;
+  const token = getAccessToken() || getRuntimeToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
@@ -264,7 +298,9 @@ export function postApplication(
  */
 export function buildEventsUrl(slug: string): string {
   const base = `${BASE_URL}/api/applications/${encodeURIComponent(slug)}/events?verbosity=verbose`;
-  const token = getAccessToken() || STATIC_TOKEN;
+  // Use the mutable runtime token (from window.__JOBSMITH__ shim or VITE var)
+  // so that SSE is authenticated on localhost even without VITE_JOBSMITH_API_TOKEN.
+  const token = getAccessToken() || getRuntimeToken();
   if (token) {
     return `${base}&token=${encodeURIComponent(token)}`;
   }
@@ -308,7 +344,7 @@ export function redactSensitive(text: string): string {
   // bracket — not a narrow alphanumeric class — so we never leave a trailing
   // suffix in the rendered string. Case-insensitive to also catch `bearer …`.
   out = out.replace(/(Bearer\s+)[^\s"'<>]+/gi, '$1[redacted]');
-  const token = getAccessToken() || STATIC_TOKEN;
+  const token = getAccessToken() || getRuntimeToken();
   if (token && token.length >= 8) {
     // Escape regex metacharacters in the token before matching it as a literal.
     const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

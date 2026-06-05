@@ -18,6 +18,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+# Imported at module level so tests can monkeypatch jobsmith.doctor.find_web_dist.
+from .api.staticui import find_web_dist
+
 
 @dataclass
 class CheckResult:
@@ -322,6 +325,45 @@ def check_contracts_frozen() -> CheckResult:
     )
 
 
+def check_ui_bundled() -> CheckResult:
+    """Verify that the bundled web_dist (slice-2) is present in the installed package.
+
+    Uses slice-1's find_web_dist() locator which prefers the bundled package path
+    (``<pkg_root>/web_dist/``) over the repo-root ``web/dist/`` fallback.
+
+    - Bundled path resolves to a real ``index.html``: PASS with path info.
+    - Falls back to repo web/dist: PASS with a note (dev mode).
+    - Neither exists: FAIL with remediation.
+    """
+    dist = find_web_dist()
+    if dist is None:
+        return CheckResult(
+            name="ui_bundled",
+            ok=False,
+            message="UI bundled: no — web_dist not found (API-only mode)",
+            remediation=(
+                "Install the full wheel (built with node/npm) or run "
+                "`npm run build` in the web/ directory for dev installs."
+            ),
+        )
+
+    # Distinguish between bundled (in package) and dev fallback (repo web/dist)
+    package_root = Path(__file__).parent
+    bundled_path = package_root / "web_dist"
+    if dist == bundled_path:
+        return CheckResult(
+            name="ui_bundled",
+            ok=True,
+            message=f"UI bundled: yes — {dist}",
+        )
+    # Repo fallback (dev editable install)
+    return CheckResult(
+        name="ui_bundled",
+        ok=True,
+        message=f"UI bundled: yes (dev/repo web/dist) — {dist}",
+    )
+
+
 def check_python_version(min_major: int = 3, min_minor: int = 10) -> CheckResult:
     """Verify the running Python interpreter meets the minimum version requirement."""
     vi = sys.version_info
@@ -393,6 +435,7 @@ def run_all_checks(cwd: Optional[Path] = None) -> list[CheckResult]:
         check_claude_binary(),
         check_claude_auth(),
         check_plugin_dir_resolves(),
+        check_ui_bundled(),
         check_apply_config(cwd),
         check_master_yaml(cwd),
         check_benchmarks(config_path=config_path, cwd=cwd),
@@ -431,6 +474,7 @@ __all__ = [
     "check_master_yaml",
     "check_plugin_dir_resolves",
     "check_python_version",
+    "check_ui_bundled",
     "preflight",
     "run_all_checks",
 ]
