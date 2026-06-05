@@ -10,15 +10,15 @@
 <body>
     <article id="bug-36f05a7a"
              data-type="bug"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-05T18:54:04.618103"
-             data-updated="2026-06-05T18:54:39.976482" data-agent-assigned="claude-code" data-track-id="trk-211c4980" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.19">
+             data-updated="2026-06-05T20:31:04.680803" data-agent-assigned="claude-code" data-track-id="trk-211c4980" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.19">
 
         <header>
             <h1>Stale pre-rekey slug still 404s: backward-compat resolver does not match real rekey-log</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
@@ -40,7 +40,8 @@
 
         <section data-content>
             <h3>Description</h3>
-            <p>After bug-f63a7dd7 fix (d49b6b1), the canonical slug resolves correctly in the UI, but a request using the ORIGINAL pre-rekey slug still 404s. Repro (live, shakestzd repo, server on :8000): GET /api/applications/becu-Sr-Data-Analyst_R-13411-2026-06 -> 404; GET /api/applications/becu-Sr-Data-Analyst_R-13411-2026-06/documents/resume.pdf -> 404; while the canonical becu-sr-data-analyst -> 200. The fix's backward-compat path (_find_run_row_for_slug fallback via _slug_from_rekey_log scanning apply_state_log.payload for '--from {slug}') does not resolve this real case. Investigate: (1) which DB actually holds apply_runs/apply_state_log (a manual query of shakestzd/private/job_search.db returned 'no such table: apply_state_log' — the pipeline tables may live in a different DB file, e.g. private/jobsmith.db); (2) what the rekey-log payload actually looks like for the BECU run, and why the LIKE '--from {slug}' scan misses it. Non-blocking (UI uses canonical slug now) but old links/bookmarks should resolve.</p>
+            <p>After bug-f63a7dd7 fix (d49b6b1), the canonical slug resolves correctly in the UI, but a request using the ORIGINAL pre-rekey slug still 404s. Repro (live, shakestzd repo, server on :8000): GET /api/applications/becu-Sr-Data-Analyst_R-13411-2026-06 -> 404; GET /api/applications/becu-Sr-Data-Analyst_R-13411-2026-06/documents/resume.pdf -> 404; while the canonical becu-sr-data-analyst -> 200. The fix's backward-compat path (_find_run_row_for_slug fallback via _slug_from_rekey_log scanning apply_state_log.payload for '--from {slug}') does not resolve this real case. Investigate: (1) which DB actually holds apply_runs/apply_state_log (a manual query of shakestzd/private/job_search.db returned 'no such table: apply_state_log' — the pipeline tables may live in a different DB file, e.g. private/jobsmith.db); (2) what the rekey-log payload actually looks like for the BECU run, and why the LIKE '--from {slug}' scan misses it. Non-blocking (UI uses canonical slug now) but old links/bookmarks should resolve.
+[2026-06-05 20:31 claude-code] accepted-advisory (provenance override): implemented in commit 0a6de2f on main</p>
         </section>
     </article>
 </body>
