@@ -10,15 +10,15 @@
 <body>
     <article id="feat-16257e94"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-05T06:55:13.175446"
-             data-updated="2026-06-05T10:14:37.166891" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f">
+             data-updated="2026-06-05T10:20:57.447155" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f">
 
         <header>
             <h1>Localhost auto-auth: runtime token shim feeding header AND SSE paths</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
@@ -66,7 +66,8 @@ VITE var as fallback) feeds BOTH the Authorization header path AND buildEventsUr
 query-param. Inject ONLY on a localhost bind (detect 127.0.0.1/::1 from the bind/
 request); on --bind-public, do NOT inject and require explicit auth. Add a
 restrictive CSP on the served index and ensure the token is excluded from the SSE
-event-log redaction view.</p>
+event-log redaction view.
+[2026-06-05 10:20 claude-code] accepted-advisory (provenance override): commit ee5dec2 on branch trk-5d3b688f contains the full implementation</p>
         </section>
     </article>
 </body>
