@@ -10,15 +10,15 @@
 <body>
     <article id="bug-f63a7dd7"
              data-type="bug"
-             data-status="in-progress"
+             data-status="done"
              data-priority="high"
              data-created="2026-06-05T17:44:49.603641"
-             data-updated="2026-06-05T17:46:07.814788" data-agent-assigned="claude-code" data-track-id="trk-211c4980" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.19">
+             data-updated="2026-06-05T17:54:14.425343" data-agent-assigned="claude-code" data-track-id="trk-211c4980" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.19">
 
         <header>
             <h1>Served-UI apply: detail view pinned to pre-rekey slug shows &#39;no documents&#39; after render</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-high">High Priority</span>
             </div>
         </header>
@@ -40,7 +40,8 @@
 
         <section data-content>
             <h3>Description</h3>
-            <p>UI-initiated apply starts under URL-derived slug (e.g. becu-Sr-Data-Analyst_R-13411-2026-06); jd-parser rekeys to canonical (becu-sr-data-analyst) and writes resume.pdf + cover-letter there. Render completes (status done) but the served UI detail page stays on the original slug, so documents/review tabs query the stale slug and show 'no documents yet'. CLI path reconciles the rekey; UI path does not redirect/reconcile. Repro: new application via UI with a Workday URL + paste-text JD. Fix: after rekey, redirect the detail route to the canonical slug (or have the documents/review endpoints resolve via the run-id/rekey log, not the stale slug).</p>
+            <p>UI-initiated apply starts under URL-derived slug (e.g. becu-Sr-Data-Analyst_R-13411-2026-06); jd-parser rekeys to canonical (becu-sr-data-analyst) and writes resume.pdf + cover-letter there. Render completes (status done) but the served UI detail page stays on the original slug, so documents/review tabs query the stale slug and show 'no documents yet'. CLI path reconciles the rekey; UI path does not redirect/reconcile. Repro: new application via UI with a Workday URL + paste-text JD. Fix: after rekey, redirect the detail route to the canonical slug (or have the documents/review endpoints resolve via the run-id/rekey log, not the stale slug).
+[2026-06-05 17:54 claude-code] accepted-advisory (provenance override): implementation committed in d49b6b1</p>
         </section>
     </article>
 </body>
