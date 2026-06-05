@@ -1,0 +1,18 @@
+meta:
+    id: plan-72ad5ccc
+    track_id: trk-211c4980
+    title: 'Single-server local app: static-serve UI + wheel bundle + jobsmith up'
+    description: 'Dagster/Prefect-style local web app: serve built frontend same-origin from FastAPI, bundle web/dist into the wheel, add jobsmith up (boot+open browser, --dev toggle), with localhost auto-auth. No native shell.'
+    created_at: "2026-06-05"
+    status: draft
+    priority: medium
+    schema_version: v3
+    version: 2
+design:
+    problem: ""
+    goals: []
+    constraints: []
+    approved: false
+    comment: ""
+slices: []
+questions: []
