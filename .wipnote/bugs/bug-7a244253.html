@@ -13,7 +13,7 @@
              data-status="done"
              data-priority="high"
              data-created="2026-06-05T18:46:57.448462"
-             data-updated="2026-06-05T18:48:00.581925" data-agent-assigned="claude-code" data-track-id="trk-211c4980" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.19">
+             data-updated="2026-06-05T18:49:51.005103" data-agent-assigned="claude-code" data-track-id="trk-211c4980" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.19">
 
         <header>
             <h1>Served-UI: CSP blocks blob: PDF iframe — resume.pdf shows broken icon in documents tab</h1>
@@ -48,7 +48,8 @@
         <section data-content>
             <h3>Description</h3>
             <p>slice-3 added a restrictive CSP in api/staticui.py (_CSP) with no frame-src/object-src, so it falls back to default-src 'self'. The documents tab renders resume.pdf via apiGetBlob -> blob: URL in an  (application.tsx:693,861). blob: is not allowed by default-src 'self', so the iframe is CSP-blocked and shows a broken-doc icon; the cover letter (text) renders fine. Fix: add 'frame-src self blob:; object-src self blob:;' to the _CSP string in staticui.py. Server-side header only — no web rebuild needed.
-[2026-06-05 18:48 claude-code] accepted-advisory (provenance override): Commit 8184d93 fixes the CSP issue; added blob: to frame-src/object-src and test verification</p>
+[2026-06-05 18:48 claude-code] accepted-advisory (provenance override): Commit 8184d93 fixes the CSP issue; added blob: to frame-src/object-src and test verification
+[2026-06-05 18:49 claude-code] accepted-advisory (provenance override): Fixed in commit 8184d93; CSP now allows blob: in frame-src/object-src; verified live — resume.pdf renders in the documents tab</p>
         </section>
     </article>
 </body>
