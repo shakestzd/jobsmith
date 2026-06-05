@@ -34,6 +34,8 @@ _log = logging.getLogger(__name__)
 # Restrictive CSP for the served index.html.  Allows only same-origin scripts
 # (the hashed /assets/* bundle) and same-origin connections so the injected
 # inline shim is the only non-bundle JS surface.
+# frame-src and object-src permit 'self' and blob: to allow resume.pdf (framed
+# from a blob: URL) to render in the documents tab without CSP violation.
 _CSP = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline'; "
@@ -41,6 +43,8 @@ _CSP = (
     "img-src 'self' data:; "
     "connect-src 'self'; "
     "font-src 'self'; "
+    "frame-src 'self' blob:; "
+    "object-src 'self' blob:; "
     "frame-ancestors 'none'"
 )
 

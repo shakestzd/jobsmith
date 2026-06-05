@@ -74,6 +74,24 @@ class TestServeSpaIndex:
         assert resp.status_code == 200
         assert "console.log" in resp.text
 
+    def test_csp_allows_blob_frames(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GET / returns CSP with frame-src and object-src permitting blob: URLs.
+
+        This allows resume.pdf (framed via blob: URL in documents tab) to render
+        without CSP violation (bug-7a244253).
+        """
+        dist = _make_dist(tmp_path)
+        client = _make_client(dist, monkeypatch)
+        resp = client.get("/")
+        assert resp.status_code == 200
+        csp = resp.headers.get("Content-Security-Policy", "")
+        assert "frame-src 'self' blob:" in csp
+        assert "object-src 'self' blob:" in csp
+        # Ensure frame-ancestors 'none' is still present (no loosening).
+        assert "frame-ancestors 'none'" in csp
+
 
 # ---------------------------------------------------------------------------
 # TestSpaFallbackDeepLink
