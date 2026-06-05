@@ -89,6 +89,7 @@ Issues = "https://github.com/shakestzd/jobsmith/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/jobsmith"]
+artifacts = ["src/jobsmith/web_dist/**"]
 
 # Force-include the templates tree inside the installed package so wheel
 # installs ship the same templates/ layout that checkout installs see at
@@ -101,11 +102,9 @@ packages = ["src/jobsmith"]
 # `packages = ["src/jobsmith"]` rule — no explicit force-include needed.
 [tool.hatch.build.targets.wheel.force-include]
 "templates" = "jobsmith/templates"
-# NOTE: src/jobsmith/web_dist/ is intentionally NOT listed here because it lives
-# inside the package tree (src/jobsmith/) and is already picked up automatically
-# by the `packages = ["src/jobsmith"]` rule.  It is populated at build time by the
-# custom hook below.  Adding a force-include entry would cause a duplicate-file
-# conflict in hatchling.
+# NOTE: src/jobsmith/web_dist/ is gitignored (see .gitignore) so it is NOT
+# picked up by the `packages` glob. It is included via the `artifacts` setting
+# above. Do NOT force-include it here — that would duplicate the artifact entry.
 
 # Custom build hook: run `vite build` and copy output into src/jobsmith/web_dist/.
 # Requires hatchling>=1.20 (ships since hatch 1.9.0 / hatchling 1.21+).
