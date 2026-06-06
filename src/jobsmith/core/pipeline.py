@@ -181,6 +181,121 @@ def _auto_freeze_contracts(contracts_path: Path) -> None:
         )
 
 
+def _load_reuse_plan_from_state(state_dir: Path) -> object | None:
+    """Load reuse-plan.json from *state_dir*; return parsed dict or None.
+
+    Returns None when the file is missing, malformed, or the draft decision
+    is absent.  The pipeline uses this to detect a warm-start trigger.
+    Never raises — any error degrades to None (regenerate path).
+    """
+    plan_path = state_dir / "reuse-plan.json"
+    if not plan_path.exists():
+        return None
+    try:
+        import json as _json
+
+        return _json.loads(plan_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("pipeline: could not load reuse-plan.json: %s", exc)
+        return None
+
+
+def _build_warmstart_prompt_suffix(
+    slug: str,
+    resolved_cwd: Path,
+    reuse_plan_dict: dict,
+) -> str:
+    """Build a prompt suffix for the warm-start draft path.
+
+    Computes the warm-start delta and returns a text block to append to the
+    draft phase prompt.  The block tells the prose-writer agent exactly:
+    - which bullets are carried forward verbatim (anchors + reused)
+    - which requirement hashes must be freshly addressed
+
+    Returns an empty string on any error (falls back to full regeneration).
+    """
+    try:
+        bullet_map: dict[str, str] = reuse_plan_dict.get("bullet_map") or {}
+        matched_slug: str | None = reuse_plan_dict.get("matched_slug")
+        if not matched_slug:
+            return ""
+
+        apps_dir = applications_dir(resolved_cwd)
+        if apps_dir is None:
+            return ""
+
+        prior_state_dir = apps_dir / matched_slug / ".apply-state"
+        if not prior_state_dir.is_dir():
+            logger.debug(
+                "pipeline: warm-start prior state dir missing: %s", prior_state_dir
+            )
+            return ""
+
+        # Load current requirement hashes from the current app's state dir
+        current_state_dir = apply_state_dir(slug, resolved_cwd)
+        current_req_hashes: list[str] = []
+        if current_state_dir is not None:
+            jd_parsed_path = current_state_dir / "jd-parsed.json"
+            if jd_parsed_path.exists():
+                try:
+                    import json as _json2
+
+                    jd_parsed = _json2.loads(
+                        jd_parsed_path.read_text(encoding="utf-8")
+                    )
+                    must_haves = jd_parsed.get("must_haves") or []
+                    nice_to_haves = jd_parsed.get("nice_to_haves") or []
+                    from jobsmith.reuse.store import content_hash as _content_hash
+
+                    for req in must_haves + nice_to_haves:
+                        raw = req.get("raw", "") if isinstance(req, dict) else str(req)
+                        if raw:
+                            current_req_hashes.append(_content_hash(raw))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "pipeline: warm-start could not load jd-parsed.json: %s", exc
+                    )
+
+        from jobsmith.reuse.warmstart import compute_warm_start
+
+        ws = compute_warm_start(
+            prior_state_dir=prior_state_dir,
+            current_requirement_hashes=current_req_hashes,
+            bullet_map=bullet_map,
+        )
+
+        anchor_ids = [
+            b.get("master_bullet_id", "")
+            for b in ws.anchors_carried
+            if b.get("master_bullet_id")
+        ]
+        lines = [
+            "",
+            "## Warm-start mode (diff-and-tweak)",
+            "",
+            f"Prior application: {matched_slug}",
+            f"Reused bullet IDs (no rewrite needed): {ws.reused_bullet_ids or 'none'}",
+            f"Anchor bullets (carry VERBATIM, do NOT rewrite): {anchor_ids or 'none'}",
+            f"Delta requirement hashes (MUST address): {ws.delta_requirement_hashes or 'none'}",
+            f"Escalated requirements (full generation): {ws.escalated_requirement_hashes or 'none'}",
+            "",
+            "Instructions:",
+            "- Load the prior prose-draft.md from the matched application as your base.",
+            "- Anchor bullets are SACRED — copy them verbatim, never rewrite.",
+            "- Reused bullet IDs are already covered — keep them with minor JD-keyword tuning only.",
+            "- Delta requirements need fresh bullets — write new bullets from master YAML only.",
+            "- Escalated requirements need full generation — treat as normal draft for those bullets.",
+            "- Do NOT fabricate. Every metric must be in master YAML or gap-resolutions.",
+        ]
+        return "\n".join(lines)
+
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "pipeline: warm-start prompt suffix failed — falling back to full draft: %s", exc
+        )
+        return ""
+
+
 def _snapshot_phase_drafts(phase: str, slug: str, cwd: Path) -> None:
     """Persist immutable agent-draft snapshots after a phase completes.
 
@@ -505,6 +620,25 @@ def _run_phase_iter_body(
             paths=phase_paths,
             jd_text_file=jd_text_file if phase_name == "gather" else None,
         )
+
+        # Step 3c-warmstart: when the reuse plan says warm-start for draft,
+        # append the delta/anchor context to the prompt so the prose-writer
+        # only rewrites the delta bullets and carries anchors verbatim.
+        if phase_name == "draft":
+            _state_dir_for_plan = apply_state_dir(slug, resolved_cwd)
+            if _state_dir_for_plan is not None:
+                _reuse_plan_dict = _load_reuse_plan_from_state(_state_dir_for_plan)
+                if (
+                    _reuse_plan_dict is not None
+                    and isinstance(_reuse_plan_dict, dict)
+                    and (_reuse_plan_dict.get("draft") or {}).get("decision")
+                    == "warm-start"
+                ):
+                    _ws_suffix = _build_warmstart_prompt_suffix(
+                        slug, resolved_cwd, _reuse_plan_dict
+                    )
+                    if _ws_suffix:
+                        prompt_text = prompt_text + _ws_suffix
 
         # Step 3f: stream events from headless
         phase_succeeded = False
