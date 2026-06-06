@@ -10,15 +10,15 @@
 <body>
     <article id="bug-6204cdad"
              data-type="bug"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-06T16:22:53.912003"
-             data-updated="2026-06-06T16:36:06.680188" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.20">
+             data-updated="2026-06-06T17:00:59.454212" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.20">
 
         <header>
             <h1>Reuse layer inactive end-to-end &#43; backstop bypass (roborev findings)</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
@@ -40,7 +40,8 @@
 
         <section data-content>
             <h3>Description</h3>
-            <p>roborev branch review of trk-45e7fcd5 found 5 findings (3 High, 2 Medium): (1) pipeline.py:416 _run_backstop_gate swallows BackstopError so ungated output ships; (2) _cli_apply.py:387 planner called with empty inputs + decisions ignored; (3) _cli_apply.py:812 post-phase ingest never persists fingerprints/canonical_requirements/requirement_evidence_map; (4) _cli_reuse.py:99 wrong master-YAML shape; (5) apply-bullet-selector.md:145 inconsistent requirement-hash contract.</p>
+            <p>roborev branch review of trk-45e7fcd5 found 5 findings (3 High, 2 Medium): (1) pipeline.py:416 _run_backstop_gate swallows BackstopError so ungated output ships; (2) _cli_apply.py:387 planner called with empty inputs + decisions ignored; (3) _cli_apply.py:812 post-phase ingest never persists fingerprints/canonical_requirements/requirement_evidence_map; (4) _cli_reuse.py:99 wrong master-YAML shape; (5) apply-bullet-selector.md:145 inconsistent requirement-hash contract.
+[2026-06-06 17:00 claude-code] accepted-advisory (provenance override): All 5 roborev findings fixed and committed on trk-45e7fcd5: 57dd016 (#1 backstop propagation, #4 master parsing, #5 unified requirement-hash contract), f4753c7 (#3 reuse-table persistence after gather), ef78bfd (#2 feed real jd_text + enforce whole-artifact gather reuse + CLI backstop). Full suite 1389 passed, 9 pre-existing failures; ruff clean. No commit-linking hook installed in this repo so auto-provenance unavailable; commits reference bug-6204cdad in their messages.</p>
         </section>
     </article>
 </body>
