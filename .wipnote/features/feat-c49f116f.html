@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Reuse metrics, report, and A/B acceptance harness</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-c49f116f"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-06T07:06:55.09765"
+             data-updated="2026-06-06T09:01:22.841862" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
+
+        <header>
+            <h1>Reuse metrics, report, and A/B acceptance harness</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="2dc17467-59ed-416e-9cf4-53feb0ecd9eb.html" data-relationship="implemented_in" data-since="2026-06-06T09:01:22.841675">session 2dc17467-59ed-416e-9cf4-53feb0ecd9eb</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-45e7fcd5.html" data-relationship="part_of" data-since="2026-06-06T07:06:55.137006">trk-45e7fcd5</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-a58a6ad7.html" data-relationship="planned_in" data-since="2026-06-06T07:06:55.148856">plan-a58a6ad7</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-6623ee3b.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:55.160605">feat-6623ee3b</a></li>
+                    <li><a href="feat-bd0fc232.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:55.167649">feat-bd0fc232</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Persist per-run metrics to run_metrics: model-call count, wall-clock, and
+reused-vs-generated tallies per candidate. Emit a human-readable reuse report
+at end of run ("reused company-research from app Y; warm-started from resume
+Z; regenerated 3 bullets; 2 gates re-run"). Add an A/B bench harness
+(tests/test_reuse_ab.py) that runs the same JD with --no-reuse and with reuse
+-- clearing/controlling the existing llm_cache so it measures the reuse
+layer's INCREMENTAL benefit -- and asserts a >=50% reduction in model calls
+AND a >=50% reduction in wall-clock on a warm candidate, FAILING if either
+metric misses, while gate verdicts are identical.</p>
+        </section>
+    </article>
+</body>
+</html>
