@@ -18,11 +18,10 @@ import yaml
 from fastapi.testclient import TestClient
 
 from jobsmith.api.auth import (
-    PRIVATE_TOKEN_PATH,
     TOKEN_ENV_VAR,
+    _get_expected_token,
     create_access_token,
     decode_access_token,
-    _get_expected_token,
 )
 from jobsmith.api.main import create_app
 

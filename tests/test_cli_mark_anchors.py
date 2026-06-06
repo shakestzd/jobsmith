@@ -5,9 +5,6 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
-
 # Fixture YAML with a leading comment, mixed string + dict bullets, and
 # specific indentation we want round-tripped intact.
 SAMPLE_WORK_YML = """\

@@ -34,10 +34,10 @@ create the directory/file directly, so they do not rely on the live CLI.
 from __future__ import annotations
 
 import contextlib
-import threading  # noqa: F401 — used in run_phase's optional cancel_event annotation
 import json
 import re
 import subprocess
+import threading  # noqa: F401 — used in run_phase's optional cancel_event annotation
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -355,7 +355,7 @@ def run_phase(
     *,
     cwd: Path | None = None,
     max_turns: int = 30,
-    cancel_event: "threading.Event | None" = None,
+    cancel_event: threading.Event | None = None,
 ) -> Iterator[Event]:
     """Spawn ``claude -p`` and yield :class:`Event` objects as JSONL lines arrive.
 

@@ -15,7 +15,6 @@ from jobsmith.benchmarks import (
 from jobsmith.config import BenchmarkConfig, JobsmithConfig
 from jobsmith.doctor import check_benchmarks
 
-
 # ---------------------------------------------------------------------------
 # resolve_benchmark_or_fallback
 # ---------------------------------------------------------------------------

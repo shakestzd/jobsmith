@@ -524,13 +524,12 @@ def onboard(
         console.print(f"[bold]jobsmith onboard[/bold]: repo at {resolved_root}")
 
     # --- Clobber guard ---
-    if not force and not merge:
-        if _masters_have_content(resolved_root):
-            console.print(
-                "[red]ABORT:[/red] Master YAML files already contain content.\n"
-                "  Pass [bold]--force[/bold] to overwrite, or [bold]--merge[/bold] to merge."
-            )
-            raise typer.Exit(code=1)
+    if not force and not merge and _masters_have_content(resolved_root):
+        console.print(
+            "[red]ABORT:[/red] Master YAML files already contain content.\n"
+            "  Pass [bold]--force[/bold] to overwrite, or [bold]--merge[/bold] to merge."
+        )
+        raise typer.Exit(code=1)
 
     # --- Dispatch pipeline ---
     # --force overwrites existing master entries; --merge (or the default

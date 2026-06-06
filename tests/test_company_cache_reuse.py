@@ -13,17 +13,13 @@ import os
 import sqlite3
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from jobsmith.reuse.company_cache import (
-    normalize_company_key,
     check_cache,
-    write_cache,
+    normalize_company_key,
     record_company_research_metric,
+    write_cache,
 )
-
 
 # ---------------------------------------------------------------------------
 # test_company_key_normalization

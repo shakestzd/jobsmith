@@ -4,12 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 from jobsmith.assemble import load_projects
 from jobsmith.config import ResumeSettings
-
 
 # ---------- fixtures ----------
 
@@ -223,8 +221,9 @@ def test_resume_settings_bullet_type_ordering_overrideable_to_project_first() ->
 
 def test_specialist_contracts_declares_restoration_queue() -> None:
     """The bullet-selector outputs schema must declare restoration_queue (Slice C.1 BREAKING change)."""
-    import yaml as _yaml
     from pathlib import Path as _Path
+
+    import yaml as _yaml
 
     contracts = _yaml.safe_load(
         (_Path(__file__).parent.parent / "src/jobsmith/plugin/agents/apply/specialist-contracts.yaml").read_text()

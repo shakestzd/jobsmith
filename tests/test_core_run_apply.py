@@ -1,7 +1,8 @@
 """Tests for jobsmith.core.pipeline.core_run_apply — Slice 3c."""
 import inspect
-from jobsmith.core import pipeline as core_pipeline
+
 from jobsmith import apply as apply_mod
+from jobsmith.core import pipeline as core_pipeline
 
 
 def test_core_run_apply_importable():
@@ -78,14 +79,12 @@ def test_core_pipeline_no_rich_import():
     lines = src.splitlines()
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
-        if stripped.startswith("import rich") or stripped.startswith("from rich"):
-            # Only flag if it's at module level (not inside a function)
-            # Check indentation — module-level lines have no leading spaces
-            if not line.startswith(" ") and not line.startswith("\t"):
-                raise AssertionError(f"core.pipeline imports rich at module level (line {i}): {line!r}")
-        if stripped.startswith("import click") or stripped.startswith("from click"):
-            if not line.startswith(" ") and not line.startswith("\t"):
-                raise AssertionError(f"core.pipeline imports click at module level (line {i}): {line!r}")
-        if stripped.startswith("import typer") or stripped.startswith("from typer"):
-            if not line.startswith(" ") and not line.startswith("\t"):
-                raise AssertionError(f"core.pipeline imports typer at module level (line {i}): {line!r}")
+        # Only flag module-level imports (no leading whitespace); inline imports
+        # inside function bodies are tolerated.
+        module_level = not line.startswith((" ", "\t"))
+        if module_level and (stripped.startswith("import rich") or stripped.startswith("from rich")):
+            raise AssertionError(f"core.pipeline imports rich at module level (line {i}): {line!r}")
+        if module_level and (stripped.startswith("import click") or stripped.startswith("from click")):
+            raise AssertionError(f"core.pipeline imports click at module level (line {i}): {line!r}")
+        if module_level and (stripped.startswith("import typer") or stripped.startswith("from typer")):
+            raise AssertionError(f"core.pipeline imports typer at module level (line {i}): {line!r}")

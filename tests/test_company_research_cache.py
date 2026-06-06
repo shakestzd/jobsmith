@@ -5,10 +5,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import pytest
-
 from jobsmith.research import cache_path_for, is_fresh, slugify
-
 
 # ---------- slugify ----------
 

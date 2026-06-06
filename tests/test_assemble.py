@@ -803,10 +803,7 @@ def test_find_package_root_prefers_inside_package_when_both_exist(tmp_path: Path
     monkeypatch.setattr(assemble, "__file__", str(fake_pkg / "assemble.py"))
     # Recompute and assert wheel layout wins
     pkg_dir = Path(assemble.__file__).resolve().parent
-    if (pkg_dir / "templates").is_dir():
-        resolved = pkg_dir
-    else:
-        resolved = pkg_dir.parent.parent
+    resolved = pkg_dir if (pkg_dir / "templates").is_dir() else pkg_dir.parent.parent
     assert resolved == fake_pkg
 
 
@@ -944,7 +941,7 @@ def test_all_theme_scss_files_have_quarto_layer_markers() -> None:
 
     assert not missing, (
         "The following SCSS files are missing a Quarto layer boundary marker "
-        f"(/*-- scss:defaults --*/ etc.):\n" + "\n".join(f"  {p}" for p in missing)
+        "(/*-- scss:defaults --*/ etc.):\n" + "\n".join(f"  {p}" for p in missing)
     )
 
 

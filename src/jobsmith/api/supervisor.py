@@ -209,7 +209,7 @@ class _SupervisorEventSink:
 
     def __init__(
         self,
-        supervisor: "RunSupervisor",
+        supervisor: RunSupervisor,
         record: _RunRecord,
     ) -> None:
         self._supervisor = supervisor
@@ -420,10 +420,8 @@ class RunSupervisor:
         task = record.task
         if task is not None and not task.done():
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
                 await asyncio.wait_for(asyncio.shield(task), timeout=timeout_s)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
 
         # Finalise handle.
         if record.handle.status == "running":

@@ -1,5 +1,6 @@
 """Tests for Slice 5 — cli.py:apply is a shim."""
 import inspect
+
 import jobsmith.cli as cli_mod
 
 

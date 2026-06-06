@@ -1,5 +1,6 @@
 """Tests for Slice 4 — API drives apply pipeline in-process (no subprocess)."""
 import inspect
+
 from jobsmith.api.supervisor import RunSupervisor
 from jobsmith.core.protocols import EventSink
 
@@ -122,9 +123,11 @@ def test_render_write_transcript_no_disk_write():
     After Slice 4 the disk transcript.jsonl write is removed.
     Only _append_state_log (DB) remains.
     """
-    from jobsmith.render import ApplyRenderer
     import io
+
     from rich.console import Console
+
+    from jobsmith.render import ApplyRenderer
 
     # Construct renderer to confirm import works; then inspect the method source.
     ApplyRenderer(

@@ -22,10 +22,10 @@ Tests removed (covered by Slice 4 design)
 from __future__ import annotations
 
 import asyncio
+
 import pytest
 
 from jobsmith.api.supervisor import RunSupervisor, SynthPhaseEvent
-
 
 # ---------------------------------------------------------------------------
 # Backward-compat stub: SynthPhaseEvent dataclass still importable

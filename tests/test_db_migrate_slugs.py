@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import sqlite3
 
-import pytest
-
 from jobsmith.db import open_pipeline_db
 from jobsmith.db_migrate_slugs import find_malformed_slugs, normalize_existing_slugs
 

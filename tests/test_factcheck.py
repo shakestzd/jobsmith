@@ -4,15 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from jobsmith.factcheck import (
-    Claim,
     check_draft,
     extract_hard_claims,
     verify_claim,
 )
-
 
 # ---------- extract_hard_claims ----------
 

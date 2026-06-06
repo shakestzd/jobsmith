@@ -16,7 +16,6 @@ from jobsmith.anchors import (
 )
 from jobsmith.guard import Bullet
 
-
 # ---------- parse_money_to_usd ----------
 
 

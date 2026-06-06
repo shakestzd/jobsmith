@@ -19,11 +19,9 @@ from jobsmith.voice import (
     GENERIC_RESULT_VERBS,
     VoiceProfile,
     _content_hash,
-    _extract_bullets_from_qmd,
     is_result_first,
     load_voice_profile,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -435,6 +433,7 @@ def test_load_voice_profile_benchmark_path_override(tmp_path: Path) -> None:
 def test_voice_settings_overlap_validator_catches_overlap() -> None:
     """Pydantic must reject construction when a token is in both lists."""
     import pytest as _pytest
+
     from jobsmith.config import VoiceSettings
 
     with _pytest.raises(ValueError, match="both banned_adjectives and banned_buzzwords"):
