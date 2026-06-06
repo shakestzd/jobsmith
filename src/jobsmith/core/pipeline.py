@@ -323,6 +323,103 @@ def _snapshot_phase_drafts(phase: str, slug: str, cwd: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Correctness backstop helper (slice-8)
+# ---------------------------------------------------------------------------
+
+
+def _run_backstop_gate(slug: str, resolved_cwd: Path) -> None:
+    """Run the correctness backstop (guard + factcheck) after render phase.
+
+    This is UNCONDITIONAL — it runs whether or not reuse/warm-start was used.
+    Failures are logged as warnings but do NOT abort the pipeline here; the
+    backstop itself raises BackstopError only when all retries + fallback
+    are exhausted, and that propagates naturally to the phase_failed path.
+
+    Config (``config.reuse.regen_retry_bound``) drives the retry bound.
+    """
+    try:
+        from jobsmith.config import find_config, load_config
+        from jobsmith.core.paths import apply_state_dir, applications_dir
+
+        config_path = find_config(resolved_cwd)
+        regen_retry_bound = 3  # default
+        if config_path is not None:
+            try:
+                cfg = load_config(config_path)
+                regen_retry_bound = cfg.reuse.regen_retry_bound
+            except Exception:  # noqa: BLE001
+                pass
+
+        apps_dir = applications_dir(resolved_cwd)
+        if apps_dir is None:
+            logger.debug("backstop: no applications_dir — skipping")
+            return
+
+        app_dir = apps_dir / slug
+        state_dir = apply_state_dir(slug, resolved_cwd)
+        if state_dir is None or not state_dir.is_dir():
+            logger.debug("backstop: state_dir missing for %s — skipping", slug)
+            return
+
+        # Locate artifacts: resume prose-draft and cover-letter-draft
+        resume_path = state_dir / "prose-draft.md"
+        cl_candidates = [
+            app_dir / "cover-letter-draft.md",
+            state_dir / "cover-letter-draft.md",
+        ]
+        cl_path = next((p for p in cl_candidates if p.exists()), None)
+
+        resume_text = resume_path.read_text(encoding="utf-8") if resume_path.exists() else ""
+        cover_letter_text = cl_path.read_text(encoding="utf-8") if cl_path else ""
+
+        if not resume_text and not cover_letter_text:
+            logger.debug("backstop: no artifact text found for %s — skipping", slug)
+            return
+
+        # Locate gate inputs
+        master_path = state_dir.parent.parent / "assets" / "content" / "work.yml"
+        if config_path is not None and not master_path.exists():
+            try:
+                cfg = load_config(config_path)
+                master_path = (config_path.parent / cfg.master.work_yml).resolve()
+            except Exception:  # noqa: BLE001
+                pass
+
+        content_dir = master_path.parent if master_path.exists() else resolved_cwd
+        selection_path = state_dir / "bullet-selection.json"
+        decisions_path = state_dir / "bullet-decisions.json"
+
+        # Open DB connection for metric recording (best-effort)
+        db_conn = None
+        with contextlib.suppress(Exception):
+            db_conn = _open_pipeline_db_for_run(resolved_cwd)
+
+        try:
+            from jobsmith.reuse.backstop import run_backstop
+
+            run_backstop(
+                slug=slug,
+                resume_text=resume_text,
+                cover_letter_text=cover_letter_text,
+                master_path=master_path,
+                content_dir=content_dir,
+                selection_path=selection_path,
+                decisions_path=decisions_path if decisions_path.exists() else None,
+                regen_retry_bound=regen_retry_bound,
+                db_conn=db_conn,
+            )
+        finally:
+            if db_conn is not None:
+                with __import__("contextlib").suppress(Exception):
+                    db_conn.close()
+
+    except Exception as exc:  # noqa: BLE001
+        # Backstop errors are surfaced as warnings — the gate logic itself
+        # raises BackstopError which propagates from run_backstop above.
+        logger.warning("backstop: gate check failed for %s: %s", slug, exc)
+
+
+# ---------------------------------------------------------------------------
 # Public generator
 # ---------------------------------------------------------------------------
 
@@ -713,6 +810,11 @@ def _run_phase_iter_body(
                 _time.sleep(0)  # cooperative yield point
             if reconciled:
                 record_url_mapping(url, slug, resolved_cwd)
+
+        # Step 3h: correctness backstop after render (UNCONDITIONAL — runs on
+        # every completed render, whether reuse was active or not).
+        if phase_name == "render":
+            _run_backstop_gate(slug, resolved_cwd)
 
         yield PipelineEvent(kind="phase_complete", phase=phase_name)
 
