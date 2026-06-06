@@ -1,0 +1,11 @@
+guards:
+    completion:
+        - name: pytest
+          cmd: uv run pytest
+    quality:
+        - name: ruff
+          cmd: uv run ruff check .
+approved:
+    signature: sha256:75742e6be4b906c2af4f7f08e99fd828173aa263d3ceb90cd98d966db1d5c059
+    by: shakestzd
+    at: "2026-06-06T20:29:23Z"
