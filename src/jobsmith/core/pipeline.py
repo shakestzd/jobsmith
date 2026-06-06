@@ -245,12 +245,22 @@ def _build_warmstart_prompt_suffix(
                     )
                     must_haves = jd_parsed.get("must_haves") or []
                     nice_to_haves = jd_parsed.get("nice_to_haves") or []
-                    from jobsmith.reuse.store import content_hash as _content_hash
+                    # Use the SINGLE requirement-hash contract (canonical_tag +
+                    # normalized_phrase) so these hashes match the planner's
+                    # bullet_map keys and the evidence map.  Hashing raw text
+                    # here would never match, mis-flagging covered requirements
+                    # as delta/escalated work.
+                    from jobsmith.reuse.canonicalize import requirement_content_hash
 
                     for req in must_haves + nice_to_haves:
-                        raw = req.get("raw", "") if isinstance(req, dict) else str(req)
-                        if raw:
-                            current_req_hashes.append(_content_hash(raw))
+                        if not isinstance(req, dict):
+                            continue
+                        current_req_hashes.append(requirement_content_hash({
+                            "canonical_tag": req.get("canonical_tag"),
+                            "normalized_phrase": req.get(
+                                "normalized_phrase", req.get("raw", "")
+                            ),
+                        }))
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
                         "pipeline: warm-start could not load jd-parsed.json: %s", exc
@@ -815,9 +825,22 @@ def _run_phase_iter_body(
                 record_url_mapping(url, slug, resolved_cwd)
 
         # Step 3h: correctness backstop after render (UNCONDITIONAL — runs on
-        # every completed render, whether reuse was active or not).
+        # every completed render, whether reuse was active or not).  A failed
+        # gate raises BackstopError, which MUST surface as a structured
+        # ``phase_failed`` event (not escape the generator raw — consumers
+        # expect PipelineEvent failures, never a thrown exception).
         if phase_name == "render":
-            _run_backstop_gate(slug, resolved_cwd)
+            from jobsmith.reuse.backstop import BackstopError
+
+            try:
+                _run_backstop_gate(slug, resolved_cwd)
+            except BackstopError as exc:
+                yield PipelineEvent(
+                    kind="phase_failed",
+                    phase=phase_name,
+                    payload={"error": f"{type(exc).__name__}: {exc}"},
+                )
+                return
 
         yield PipelineEvent(kind="phase_complete", phase=phase_name)
 
