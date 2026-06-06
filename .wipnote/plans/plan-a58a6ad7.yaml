@@ -6,7 +6,7 @@ meta:
     created_at: ""
     status: draft
     schema_version: v3
-    version: 18
+    version: 19
 design:
     problem: |
         Every `jobsmith apply` re-runs the full 3-phase pipeline (gather -> draft ->
@@ -430,6 +430,7 @@ slices:
         prior resume (carries stale JD-specific claims); regenerating everything
         (defeats the win). Output is candidate; slice-8 gates before acceptance.
     - id: slice-8
+      feature_id: feat-bd0fc232
       num: 8
       title: 'Correctness backstop: always re-gate via guard.py + factcheck.py'
       what: |
@@ -471,6 +472,7 @@ slices:
       approved: false
       comment: ""
       approval_status: approved
+      execution_status: promoted
       questions:
         - id: q-retry
           text: How many regenerate-and-re-gate retries before failing the run?
