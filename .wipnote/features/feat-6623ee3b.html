@@ -10,29 +10,20 @@
 <body>
     <article id="feat-6623ee3b"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-06T07:06:54.517103"
-             data-updated="2026-06-06T08:39:50.166222" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
+             data-updated="2026-06-06T08:41:06.014909" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
 
         <header>
             <h1>Reuse-planner pre-phase &#43; --no-reuse flag</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
 
         <nav data-graph-edges>
-            <section data-edge-type="blocked_by">
-                <h3>Blocked By:</h3>
-                <ul>
-                    <li><a href="feat-5024375d.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:54.561005">feat-5024375d</a></li>
-                    <li><a href="feat-62ac0b17.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:54.575092">feat-62ac0b17</a></li>
-                    <li><a href="feat-08e32ed5.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:54.58509">feat-08e32ed5</a></li>
-                    <li><a href="feat-42d39d4a.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:54.591388">feat-42d39d4a</a></li>
-                </ul>
-            </section>
             <section data-edge-type="implemented_in">
                 <h3>Implemented In:</h3>
                 <ul>
@@ -51,6 +42,15 @@
                     <li><a href="plan-a58a6ad7.html" data-relationship="planned_in" data-since="2026-06-06T07:06:54.553671">plan-a58a6ad7</a></li>
                 </ul>
             </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-5024375d.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:54.561005">feat-5024375d</a></li>
+                    <li><a href="feat-62ac0b17.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:54.575092">feat-62ac0b17</a></li>
+                    <li><a href="feat-08e32ed5.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:54.58509">feat-08e32ed5</a></li>
+                    <li><a href="feat-42d39d4a.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:54.591388">feat-42d39d4a</a></li>
+                </ul>
+            </section>
         </nav>
 
         <section data-content>
@@ -62,7 +62,8 @@ src/jobsmith/_cli_apply.py run_apply). It: (1) normalizes the JD (slice-2);
 application and a per-candidate reuse verdict; (3) decides warm-start vs
 full-draft using the config JD-overlap threshold; (4) emits a reuse-plan
 artifact into /.apply-state/ that specialists consult. Add a
---no-reuse CLI flag (in _cli_apply.py) forcing an all-regenerate plan.</p>
+--no-reuse CLI flag (in _cli_apply.py) forcing an all-regenerate plan.
+[2026-06-06 08:41 claude-code] accepted-advisory (provenance override): Implementation committed at 4960dbc on branch trk-45e7fcd5 (message references feat-6623ee3b). Both sub-agents were cut off at the tool-budget ceiling before committing; orchestrator finished the staged work, verified quality gates (ruff clean except pre-existing B008 house pattern; full pytest 1355 passed, 9 pre-existing failures only), and committed. No git commit-linking hook is installed in this repo, so auto-provenance was unavailable.</p>
         </section>
     </article>
 </body>
