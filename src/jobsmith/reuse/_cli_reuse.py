@@ -264,6 +264,86 @@ def _do_lookup(
     return bullet_id, match_result.matched_hash
 
 
+# ---------------------------------------------------------------------------
+# reuse backfill subcommand (feat-60d8bef1)
+# ---------------------------------------------------------------------------
+
+
+@reuse_app.command("backfill")
+def reuse_backfill(
+    slug: str | None = typer.Option(
+        None,
+        "--slug",
+        help="Backfill a single application slug (directory name under applications_dir).",
+    ),
+    all_slugs: bool = typer.Option(
+        False,
+        "--all",
+        help="Backfill every eligible slug under applications_dir.",
+    ),
+) -> None:
+    """Backfill the reuse store from existing applications.
+
+    Populates application_fingerprints, run_metrics, canonical_requirements,
+    and requirement_evidence_map from the .apply-state/ artifacts that were
+    produced by previous ``jobsmith apply`` runs.  Safe to re-run — all writes
+    use INSERT OR IGNORE on their natural unique keys so the operation is
+    idempotent.
+
+    \\b
+      jobsmith reuse backfill               # backfill every eligible slug
+      jobsmith reuse backfill --all         # same as above (explicit)
+      jobsmith reuse backfill --slug X      # backfill a single slug
+    """
+    if slug and all_slugs:
+        typer.echo("ERROR: pass either --slug or --all, not both", err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        from jobsmith.config import find_config, load_config
+        from jobsmith.db import open_pipeline_db
+        from jobsmith.paths import repo_root_for, resolve
+        from jobsmith.reuse.backfill import backfill_all_reuse, backfill_slug_reuse
+    except ImportError as exc:
+        typer.echo(f"ERROR: could not import required module: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    cwd = Path.cwd()
+    config_path = find_config(cwd)
+    if config_path is None:
+        typer.echo("ERROR: No .apply-config.yaml found — run `jobsmith init` first.", err=True)
+        raise typer.Exit(code=2)
+
+    config = load_config(config_path)
+    repo_root = repo_root_for()
+    applications_dir = resolve(config.output.applications_dir, repo_root)
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+
+    if not db_path.exists():
+        typer.echo(f"ERROR: Pipeline DB not found at {db_path}.", err=True)
+        raise typer.Exit(code=2)
+
+    conn = open_pipeline_db(db_path)
+    try:
+        if slug:
+            inserted = backfill_slug_reuse(conn, slug, applications_dir)
+            typer.echo(f"backfilled {slug}: {inserted} row(s) inserted")
+        else:
+            # Both bare invocation and --all iterate all eligible slugs
+            results = backfill_all_reuse(conn, applications_dir)
+            if not results:
+                typer.echo("No eligible slugs found under applications_dir.")
+                return
+            total = sum(results.values())
+            typer.echo(
+                f"backfilled {len(results)} slug(s), {total} row(s) inserted"
+            )
+            for s, n in results.items():
+                typer.echo(f"  {s}: {n}")
+    finally:
+        conn.close()
+
+
 __all__ = [
     "reuse_app",
     "_resolve_db_conn",
