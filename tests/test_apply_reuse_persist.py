@@ -237,3 +237,146 @@ def test_no_reuse_skips_persistence(tmp_path: Path):
 
     assert fp == 0, f"--no-reuse wrote application_fingerprints (got {fp})"
     assert evmap == 0, f"--no-reuse wrote requirement_evidence_map (got {evmap})"
+
+
+# ---------------------------------------------------------------------------
+# Finding #2 (bug-6204cdad): whole-artifact gather reuse enforcement.
+# ---------------------------------------------------------------------------
+
+
+def test_reuse_gather_artifacts_copies_both_and_company(tmp_path: Path):
+    """Both required artifacts (+ company-research when requested) are copied."""
+    from jobsmith._cli_apply import _reuse_gather_artifacts
+
+    prior = tmp_path / "prior"
+    cur = tmp_path / "cur"
+    prior.mkdir()
+    (prior / "jd-parsed.json").write_text('{"a": 1}')
+    (prior / "fit-score.json").write_text('{"b": 2}')
+    (prior / "company-research.md").write_text("# Acme\n")
+    dirs = {"prior-slug": prior, "cur-slug": cur}
+
+    ok = _reuse_gather_artifacts(
+        matched_slug="prior-slug",
+        current_slug="cur-slug",
+        resolved_cwd=tmp_path,
+        apply_state_dir_fn=lambda slug, _cwd: dirs[slug],
+        reuse_company_research=True,
+    )
+
+    assert ok is True
+    assert (cur / "jd-parsed.json").read_text() == '{"a": 1}'
+    assert (cur / "fit-score.json").read_text() == '{"b": 2}'
+    assert (cur / "company-research.md").exists()
+
+
+def test_reuse_gather_artifacts_partial_regenerates(tmp_path: Path):
+    """Missing fit-score.json → returns False and copies nothing (regenerate)."""
+    from jobsmith._cli_apply import _reuse_gather_artifacts
+
+    prior = tmp_path / "prior"
+    cur = tmp_path / "cur"
+    prior.mkdir()
+    (prior / "jd-parsed.json").write_text("{}")  # fit-score.json absent
+    dirs = {"prior-slug": prior, "cur-slug": cur}
+
+    ok = _reuse_gather_artifacts(
+        matched_slug="prior-slug",
+        current_slug="cur-slug",
+        resolved_cwd=tmp_path,
+        apply_state_dir_fn=lambda slug, _cwd: dirs[slug],
+        reuse_company_research=False,
+    )
+
+    assert ok is False
+    assert not (cur / "jd-parsed.json").exists()
+
+
+def test_reuse_gather_artifacts_missing_src_returns_false(tmp_path: Path):
+    """Unresolvable source dir → returns False (regenerate), never raises."""
+    from jobsmith._cli_apply import _reuse_gather_artifacts
+
+    ok = _reuse_gather_artifacts(
+        matched_slug="prior-slug",
+        current_slug="cur-slug",
+        resolved_cwd=tmp_path,
+        apply_state_dir_fn=lambda _slug, _cwd: None,
+        reuse_company_research=False,
+    )
+
+    assert ok is False
+
+
+def test_near_duplicate_reuses_gather_phase(tmp_path: Path):
+    """A near-duplicate JD with a seeded prior app skips the gather specialist.
+
+    The prior app's jd-parsed.json + fit-score.json are copied into the new
+    app's .apply-state/, gather is marked done, and the gather phase's
+    ``run_phase`` is never invoked.
+    """
+    repo = _minimal_repo(tmp_path)
+    plugin_dir = _mock_plugin_dir(tmp_path)
+    jd = "We need a backend engineer with Python and AWS. Five years experience."
+
+    # Seed a prior application: gather artifacts + a JD fingerprint row.
+    prior_url = "https://example.com/jobs/prior-backend"
+    prior_slug = derive_slug(prior_url)
+    prior_state = repo / "private" / "applications" / prior_slug / ".apply-state"
+    _seed_gather_artifacts(prior_state, prior_url)
+    # _seed_gather_artifacts omits fit-score.json; whole-artifact reuse
+    # requires BOTH jd-parsed.json and fit-score.json in the prior app.
+    (prior_state / "fit-score.json").write_text(
+        json.dumps({"score": 8, "verdict": "strong", "rationale": "match"})
+    )
+
+    from jobsmith.db import open_pipeline_db
+    from jobsmith.reuse.dedup import write_jd_fingerprint
+
+    conn = open_pipeline_db(repo / "private" / "jobsmith.db")
+    try:
+        write_jd_fingerprint(conn, slug=prior_slug, jd_text=jd)
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Run a NEW application with the SAME JD body → exact dedup hit.
+    new_url = "https://example.com/jobs/new-backend"
+    new_slug = derive_slug(new_url)
+    new_state = repo / "private" / "applications" / new_slug / ".apply-state"
+
+    called_phases: list[str] = []
+
+    def recording_run_phase(*args, **kwargs):
+        phase = kwargs.get("phase") or args[0]
+        called_phases.append(phase)
+        yield Event(type="phase_complete", name=phase)
+
+    rdr = ApplyRenderer(
+        yes=True,
+        verbosity=0,
+        console=Console(file=io.StringIO(), force_terminal=False),
+    )
+
+    with (
+        patch("jobsmith.apply.headless.run_phase", recording_run_phase),
+        patch("jobsmith.apply.get_plugin_dir", return_value=plugin_dir),
+        patch("jobsmith.apply._build_paths", return_value={}),
+        patch("jobsmith.apply._reconcile_canonical_slug", return_value=(new_slug, False)),
+        patch("jobsmith.apply._run_step45_orchestration", return_value=0),
+        patch("jobsmith.apply.ensure_bootstrap"),
+    ):
+        rc = run_apply(
+            new_url,
+            cwd=repo,
+            skip_confirm=True,
+            force=True,
+            renderer=rdr,
+            jd_text=jd,
+        )
+
+    assert rc == 0, f"run_apply returned {rc}"
+    # gather specialist was NOT invoked — it was reused from the prior app.
+    assert "gather" not in called_phases, f"gather ran despite reuse: {called_phases}"
+    # prior artifacts were copied into the new app's state dir.
+    assert (new_state / "jd-parsed.json").exists()
+    assert (new_state / "fit-score.json").exists()
