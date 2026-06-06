@@ -10,15 +10,15 @@
 <body>
     <article id="feat-4dfd1a0b"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-06T07:06:42.018504"
-             data-updated="2026-06-06T07:13:30.379724" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
+             data-updated="2026-06-06T07:19:50.526574" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
 
         <header>
             <h1>Reuse store: migration 009 &#43; hash/TTL &#43; config surface</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
@@ -57,7 +57,8 @@ input bytes) and is_fresh(row, ttl). Add a config surface
 (src/jobsmith/config.py or existing settings module) that owns ALL reuse
 knobs with documented defaults: fuzzy cutoff, JD-overlap warm-start threshold,
 dedup threshold, company TTL, and the regen retry bound. This is the
-foundation every later slice keys off and the home for all tunables.</p>
+foundation every later slice keys off and the home for all tunables.
+[2026-06-06 07:19 claude-code] accepted-advisory (provenance override): Committed as b526f7c on trk-45e7fcd5: feat(reuse): add migration 009, reuse store, and config surface (feat-4dfd1a0b)</p>
         </section>
     </article>
 </body>
