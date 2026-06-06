@@ -12,6 +12,26 @@ Design decisions
   so repeated calls pay no I/O cost.
 - No external dependencies: only stdlib + PyYAML (already a project dep for
   config loading).
+
+Canonical requirement-hash contract (Finding #5)
+-------------------------------------------------
+``requirement_content_hash(req)`` is the SINGLE source of truth for the
+content hash stored in ``canonical_requirements.content_hash`` and keyed by
+``requirement_evidence_map.requirement_hash``.
+
+The hash is computed over the dict
+``{"canonical_tag": <tag_or_None>, "normalized_phrase": <normalized>}``.
+Fields ``raw`` and any extra prompt-level fields are intentionally EXCLUDED so
+that cosmetic JD wording changes (e.g. "Advanced SQL" vs "advanced SQL
+experience") do NOT bust the cache as long as the normalized identity is stable.
+
+All callers — ``db_ingest.ingest_canonical_requirements``, test helpers, and
+the selector prompt — MUST derive the hash via this function or from the
+``content_hash`` field that ``ingest_canonical_requirements`` stores.  The
+``apply-bullet-selector`` prompt resolves the hash at runtime via
+``jobsmith reuse lookup-bullet --requirement-raw "<text>"`` which internally
+calls ``match()`` → ``matched_hash``.  The ``content_hash`` field is NEVER
+emitted directly in the jd-parsed JSON; the Python layer always recomputes it.
 """
 from __future__ import annotations
 
@@ -59,4 +79,41 @@ def canonicalize(raw: str) -> tuple[str | None, str]:
     return tag, normalized
 
 
-__all__ = ["canonicalize"]
+def requirement_content_hash(req: dict) -> str:
+    """Return the canonical content hash for a requirement dict.
+
+    This is the SINGLE definition of the requirement-hash contract used by
+    ``canonical_requirements.content_hash`` and
+    ``requirement_evidence_map.requirement_hash``.
+
+    The hash is over the stable identity fields only::
+
+        {"canonical_tag": <str | None>, "normalized_phrase": <str>}
+
+    The ``raw`` field is excluded because two JDs can phrase the same
+    requirement differently (e.g. "Advanced SQL" vs "strong SQL skills"),
+    yet both should resolve to the same canonical entry when the tag or
+    normalized phrase matches.
+
+    Parameters
+    ----------
+    req:
+        A requirement item dict.  Must contain at least
+        ``canonical_tag`` (``str | None``) and ``normalized_phrase`` (``str``).
+        Extra keys (e.g. ``raw``) are ignored.
+
+    Returns
+    -------
+    str
+        SHA-256 hex digest (64 chars) over the normalized identity payload.
+    """
+    from jobsmith.reuse.store import content_hash
+
+    identity = {
+        "canonical_tag": req.get("canonical_tag"),
+        "normalized_phrase": req.get("normalized_phrase", ""),
+    }
+    return content_hash(identity)
+
+
+__all__ = ["canonicalize", "requirement_content_hash"]

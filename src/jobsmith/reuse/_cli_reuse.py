@@ -80,12 +80,16 @@ def _resolve_db_conn(slug: str, cwd: Path) -> sqlite3.Connection | None:
 def _load_current_bullet_texts(cwd: Path) -> dict[str, str]:
     """Return ``{master_bullet_id: text}`` for all bullets in master work YAML.
 
-    Falls back to an empty dict on any error (degrade to regenerate).
+    Delegates to ``guard.parse_master_bullets`` so the bullet_id computation
+    (SHA-1 hex first 12 chars of bullet text, via ``guard._bullet_id``) and
+    YAML parsing (list-of-positions with ``details`` entries) exactly match
+    what the anchor guard uses.  Falls back to an empty dict on any error
+    (degrade to regenerate — never error the lookup path).
     """
     try:
-        import yaml  # noqa: I001
         from jobsmith.config import find_config, load_config
-        from jobsmith.paths import resolve  # noqa: I001
+        from jobsmith.guard import parse_master_bullets
+        from jobsmith.paths import resolve
 
         config_path = find_config(cwd)
         if config_path is None:
@@ -96,18 +100,8 @@ def _load_current_bullet_texts(cwd: Path) -> dict[str, str]:
         if not work_path.exists():
             return {}
 
-        raw = yaml.safe_load(work_path.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            return {}
-
-        bullet_texts: dict[str, str] = {}
-        for position in raw.get("positions", []):
-            for bullet in position.get("bullets", []):
-                bid = bullet.get("id") or bullet.get("bullet_id")
-                text = bullet.get("text", "")
-                if bid and text:
-                    bullet_texts[bid] = text
-        return bullet_texts
+        bullets = parse_master_bullets(work_path)
+        return {b.bullet_id: b.text for b in bullets}
     except Exception as exc:  # noqa: BLE001
         logger.warning("_load_current_bullet_texts failed: %s", exc)
         return {}

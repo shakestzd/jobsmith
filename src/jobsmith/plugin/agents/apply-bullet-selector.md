@@ -142,7 +142,7 @@ When in doubt, KEEP the anchor. Re-rank it lower if the JD doesn't reward it, bu
 Write `.apply-state/bullet-selection.json` per the contract schema (positions, anchor lists, kept/dropped/rewritten per bullet, **restoration_queue**).
 
 Each bullet entry in `positions[].bullets[]` MUST carry two reuse fields (set regardless of whether reuse fired — this populates the map for FUTURE runs):
-- `"matched_requirement_hash"`: the `content_hash` of the canonical requirement this bullet covers (from `jd_parsed.must_haves[n].content_hash` or the equivalent from `jobsmith reuse lookup-bullet`). Set to `null` if no requirement maps to this bullet.
+- `"matched_requirement_hash"`: the canonical requirement hash for the requirement this bullet covers. **Do NOT read this from `jd_parsed` — the jd-parsed JSON does not carry a `content_hash` field.** Instead, obtain it from the `jobsmith reuse lookup-bullet` response (`matched_hash` in the internal result), or leave it `null` if no requirement maps to this bullet. The hash is computed by the Python layer over `{canonical_tag, normalized_phrase}` and stored in `canonical_requirements.content_hash`; you never compute it yourself.
 - `"reuse_source"`: `"evidence_map"` when reused from the map (step 0), `"selection"` when freshly selected.
 
 Write `.apply-state/bullet-diff.md` (anchor guard does this; you ensure it's complete).

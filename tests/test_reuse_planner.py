@@ -14,14 +14,12 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from jobsmith import db as jobsmith_db
 from jobsmith.config import ReuseSettings
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -68,7 +66,7 @@ FIT_SCORE_A = {"overall": 0.85, "tier": "strong"}
 
 class TestReusePlanStructure:
     def test_reuse_plan_has_expected_fields(self):
-        from jobsmith.reuse.planner import ReusePlan, PhaseDecision
+        from jobsmith.reuse.planner import PhaseDecision, ReusePlan
 
         plan = ReusePlan(
             jd_parse=PhaseDecision(decision="regenerate", source=None),
@@ -91,7 +89,7 @@ class TestReusePlanStructure:
         assert pd.source == "prior-slug-abc"
 
     def test_reuse_plan_reuse_fields(self):
-        from jobsmith.reuse.planner import ReusePlan, PhaseDecision
+        from jobsmith.reuse.planner import PhaseDecision, ReusePlan
 
         plan = ReusePlan(
             jd_parse=PhaseDecision(decision="reuse", source="slug-abc"),
@@ -236,9 +234,10 @@ class TestComputeReusePlanCompanyHit:
         assert plan.company_research.source is not None
 
     def test_stale_company_cache_sets_regenerate(self, tmp_path: Path):
+        import time
+
         from jobsmith.reuse.company_cache import normalize_company_key
         from jobsmith.reuse.planner import compute_reuse_plan
-        import time
 
         companies_dir = tmp_path / "companies"
         companies_dir.mkdir(parents=True, exist_ok=True)
@@ -273,11 +272,9 @@ class TestComputeReusePlanCompanyHit:
 
 class TestComputeReusePlanBulletHit:
     def test_bullet_map_hit_populates_bullet_map(self, tmp_path: Path):
-        from jobsmith.reuse.evidence_map import populate_from_bullet_selection
-        from jobsmith.reuse.match import match
-        from jobsmith.reuse.store import content_hash, upsert_canonical_requirement
-        from jobsmith.reuse.planner import compute_reuse_plan
         from jobsmith.reuse.canonicalize import canonicalize
+        from jobsmith.reuse.planner import compute_reuse_plan
+        from jobsmith.reuse.store import content_hash, upsert_canonical_requirement
 
         conn = _db(tmp_path)
 
@@ -318,9 +315,9 @@ class TestComputeReusePlanBulletHit:
         assert plan.bullet_map[req_hash] == bullet_id
 
     def test_bullet_map_miss_when_bullet_text_changed(self, tmp_path: Path):
-        from jobsmith.reuse.store import content_hash, upsert_canonical_requirement
         from jobsmith.reuse.canonicalize import canonicalize
         from jobsmith.reuse.planner import compute_reuse_plan
+        from jobsmith.reuse.store import content_hash, upsert_canonical_requirement
 
         conn = _db(tmp_path)
 
@@ -382,7 +379,7 @@ class TestNoReuseFlag:
         assert plan.matched_slug is None
 
     def test_no_reuse_plan_is_sentinel(self, tmp_path: Path):
-        from jobsmith.reuse.planner import no_reuse_plan, ReusePlan
+        from jobsmith.reuse.planner import ReusePlan, no_reuse_plan
 
         plan = no_reuse_plan()
         assert isinstance(plan, ReusePlan)
@@ -398,8 +395,7 @@ class TestPipelineShortCircuit:
 
     def test_pipeline_consults_reuse_plan_skip_phase(self, tmp_path: Path):
         """When plan says 'reuse' for a phase, it should not call the phase runner."""
-        from jobsmith.reuse.planner import ReusePlan, PhaseDecision
-        from jobsmith.reuse.planner import should_skip_phase
+        from jobsmith.reuse.planner import PhaseDecision, ReusePlan, should_skip_phase
 
         plan = ReusePlan(
             jd_parse=PhaseDecision(decision="reuse", source="prior-slug"),
@@ -413,7 +409,7 @@ class TestPipelineShortCircuit:
         assert should_skip_phase(plan, "company-research") is False
 
     def test_pipeline_no_reuse_skips_nothing(self, tmp_path: Path):
-        from jobsmith.reuse.planner import should_skip_phase, no_reuse_plan
+        from jobsmith.reuse.planner import no_reuse_plan, should_skip_phase
 
         plan = no_reuse_plan()
         assert should_skip_phase(plan, "jd-parse") is False
@@ -433,9 +429,10 @@ class TestReuseLookupBulletCLI:
     def test_lookup_bullet_reused_true(self, tmp_path: Path):
         """When a fresh bullet mapping exists, exit 0, JSON reused=true."""
         from typer.testing import CliRunner
+
         from jobsmith.cli import app
-        from jobsmith.reuse.store import content_hash, upsert_canonical_requirement
         from jobsmith.reuse.canonicalize import canonicalize
+        from jobsmith.reuse.store import content_hash, upsert_canonical_requirement
 
         conn = _db(tmp_path)
 
@@ -461,15 +458,6 @@ class TestReuseLookupBulletCLI:
         slug = "test-slug"
         state_dir = tmp_path / "applications" / slug / ".apply-state"
         state_dir.mkdir(parents=True, exist_ok=True)
-
-        # write master bullet with same text so hash matches
-        master_work = {
-            "positions": [{
-                "company": "Test Corp",
-                "title": "Engineer",
-                "bullets": [{"id": bullet_id, "text": bullet_text}],
-            }]
-        }
 
         runner = CliRunner()
         # Patch the DB path resolver and bullet text loader
@@ -505,6 +493,7 @@ class TestReuseLookupBulletCLI:
     def test_lookup_bullet_reused_false_no_prior_data(self, tmp_path: Path):
         """When no mapping exists, exit 0, JSON reused=false, master_bullet_id=null."""
         from typer.testing import CliRunner
+
         from jobsmith.cli import app
 
         runner = CliRunner()
@@ -717,3 +706,95 @@ class TestPlannerVerdicts:
         assert plan.draft.decision == "regenerate"
         assert plan.matched_slug is None
         assert plan.jd_overlap_score == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Finding #4 — _load_current_bullet_texts must use guard.parse_master_bullets
+# ---------------------------------------------------------------------------
+
+
+class TestLoadCurrentBulletTexts:
+    """_load_current_bullet_texts must produce the same bullet_id mapping as guard."""
+
+    def _write_master_yaml(self, tmp_path: Path, content: str) -> Path:
+        work_yml = tmp_path / "work.yml"
+        work_yml.write_text(content, encoding="utf-8")
+        return work_yml
+
+    def test_realistic_master_yaml_produces_nonempty_map(self, tmp_path: Path) -> None:
+        """Feed a realistic list-of-positions master YAML and assert non-empty result.
+
+        The old ad-hoc parser expected {"positions": [...]} (dict root) and would
+        return an empty map for the real list-of-positions format.  After the fix,
+        guard.parse_master_bullets handles the real format.
+        """
+        import hashlib
+
+        from jobsmith.reuse._cli_reuse import _load_current_bullet_texts
+
+        bullet_text_a = "Led migration of $250M solar asset portfolio to new data platform."
+        bullet_text_b = "Automated 200K+ solar asset monitoring pipelines using Python."
+
+        master_content = (
+            "- location: SolarCo\n"
+            "  title: Data Engineer\n"
+            "  details:\n"
+            f"    - bullet: \"{bullet_text_a}\"\n"
+            f"    - bullet: \"{bullet_text_b}\"\n"
+        )
+        work_yml = self._write_master_yaml(tmp_path, master_content)
+
+        # Build stable bullet_ids as guard._bullet_id would
+        def _bullet_id(text: str) -> str:
+            return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
+
+        bid_a = _bullet_id(bullet_text_a)
+        bid_b = _bullet_id(bullet_text_b)
+
+        mock_config = MagicMock()
+        mock_config.master.work_yml = str(work_yml)
+
+        with (
+            patch("jobsmith.config.find_config", return_value=tmp_path / ".apply-config.yaml"),
+            patch("jobsmith.config.load_config", return_value=mock_config),
+            patch("jobsmith.paths.resolve", return_value=work_yml),
+        ):
+            result = _load_current_bullet_texts(tmp_path)
+
+        assert result, "Expected a non-empty bullet map from realistic master YAML"
+        assert bid_a in result, f"bullet_id {bid_a!r} missing from result"
+        assert bid_b in result, f"bullet_id {bid_b!r} missing from result"
+        assert result[bid_a] == bullet_text_a
+        assert result[bid_b] == bullet_text_b
+
+    def test_string_details_entries_work(self, tmp_path: Path) -> None:
+        """guard.parse_master_bullets also handles plain-string entries in details."""
+        import hashlib
+
+        from jobsmith.reuse._cli_reuse import _load_current_bullet_texts
+
+        bullet_text = "Built ETL pipelines processing 1M+ records daily."
+        master_content = (
+            "- location: Acme Corp\n"
+            "  title: Engineer\n"
+            "  details:\n"
+            f"    - {bullet_text!r}\n"
+        )
+        work_yml = self._write_master_yaml(tmp_path, master_content)
+
+        def _bullet_id(text: str) -> str:
+            return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
+
+        bid = _bullet_id(bullet_text)
+        mock_config = MagicMock()
+        mock_config.master.work_yml = str(work_yml)
+
+        with (
+            patch("jobsmith.config.find_config", return_value=tmp_path / ".apply-config.yaml"),
+            patch("jobsmith.config.load_config", return_value=mock_config),
+            patch("jobsmith.paths.resolve", return_value=work_yml),
+        ):
+            result = _load_current_bullet_texts(tmp_path)
+
+        assert bid in result
+        assert result[bid] == bullet_text

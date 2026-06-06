@@ -547,7 +547,7 @@ def ingest_canonical_requirements(
     int
         Number of *new* rows inserted (0 if all already present).
     """
-    from jobsmith.reuse.store import content_hash as _content_hash
+    from jobsmith.reuse.canonicalize import requirement_content_hash
 
     reqs: list[dict] = []
     for key in ("must_haves", "nice_to_haves"):
@@ -565,13 +565,15 @@ def ingest_canonical_requirements(
             canonical_tag = req.get("canonical_tag")
             normalized_phrase = req.get("normalized_phrase", raw)
 
+            # Payload stored for human inspection; hash keyed on stable identity
+            # only (canonical_tag + normalized_phrase) via requirement_content_hash.
             payload_obj = {
                 "raw": raw,
                 "canonical_tag": canonical_tag,
                 "normalized_phrase": normalized_phrase,
             }
             payload_str = json.dumps(payload_obj)
-            h = _content_hash(payload_obj)
+            h = requirement_content_hash(payload_obj)
 
             cursor = conn.execute(
                 "INSERT OR IGNORE INTO canonical_requirements "

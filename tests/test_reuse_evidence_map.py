@@ -41,9 +41,15 @@ def _bullet_id(text: str) -> str:
 
 
 def _make_requirement_hash(raw: str) -> str:
-    """Hash a minimal requirement payload as ingest_canonical_requirements would."""
-    payload = {"raw": raw, "canonical_tag": None, "normalized_phrase": raw.strip().lower()}
-    return content_hash(payload)
+    """Hash a minimal requirement using the canonical contract (requirement_content_hash).
+
+    Uses the same stable-identity fields as ``ingest_canonical_requirements``:
+    only ``canonical_tag`` + ``normalized_phrase`` (``raw`` is excluded so
+    cosmetic phrasing differences do not bust the cache).
+    """
+    from jobsmith.reuse.canonicalize import requirement_content_hash
+
+    return requirement_content_hash({"canonical_tag": None, "normalized_phrase": raw.strip().lower()})
 
 
 def _open_db(tmp_path: Path) -> sqlite3.Connection:

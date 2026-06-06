@@ -253,3 +253,80 @@ def test_jd_parser_emits_canonical_fields_via_ingest(tmp_path: Path):
     assert len(rows2) == 3
 
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Finding #5 — single requirement-hash contract (requirement_content_hash)
+# ---------------------------------------------------------------------------
+
+
+def test_requirement_content_hash_stable_over_raw_changes():
+    """requirement_content_hash is stable when raw phrase changes but identity is same.
+
+    Two requirements with different raw phrasing but the same canonical_tag +
+    normalized_phrase MUST produce the same hash (same canonical identity).
+    """
+    from jobsmith.reuse.canonicalize import requirement_content_hash
+
+    req_a = {
+        "raw": "Advanced SQL",
+        "canonical_tag": "tag:sql",
+        "normalized_phrase": "advanced sql",
+    }
+    req_b = {
+        "raw": "SQL Proficiency (5+ years)",
+        "canonical_tag": "tag:sql",
+        "normalized_phrase": "advanced sql",
+    }
+    assert requirement_content_hash(req_a) == requirement_content_hash(req_b), (
+        "Same identity (canonical_tag + normalized_phrase) must yield same hash"
+    )
+
+
+def test_requirement_content_hash_differs_for_different_identity():
+    """Different canonical_tag or normalized_phrase yields a different hash."""
+    from jobsmith.reuse.canonicalize import requirement_content_hash
+
+    req_sql = {"canonical_tag": "tag:sql", "normalized_phrase": "advanced sql"}
+    req_python = {"canonical_tag": "tag:python", "normalized_phrase": "python development"}
+    assert requirement_content_hash(req_sql) != requirement_content_hash(req_python)
+
+
+def test_ingest_canonical_requirements_uses_identity_hash(tmp_path: Path):
+    """ingest_canonical_requirements stores the requirement_content_hash (not a raw hash).
+
+    Two items with the same canonical identity (same tag + normalized phrase)
+    but different raw phrasing must map to the SAME content_hash in the DB,
+    because the canonical-requirements table is keyed on stable identity.
+    """
+    from jobsmith.db_ingest import ingest_canonical_requirements
+    from jobsmith.reuse.canonicalize import requirement_content_hash
+
+    db_path = tmp_path / "jobsmith.db"
+    conn = jobsmith_db.open_pipeline_db(db_path)
+
+    jd_parsed = {
+        "must_haves": [
+            {
+                "raw": "Advanced SQL",
+                "canonical_tag": "tag:sql",
+                "normalized_phrase": "advanced sql",
+            },
+        ],
+        "nice_to_haves": [],
+    }
+    ingest_canonical_requirements(conn, jd_parsed=jd_parsed)
+
+    expected_hash = requirement_content_hash({
+        "canonical_tag": "tag:sql",
+        "normalized_phrase": "advanced sql",
+    })
+    rows = conn.execute(
+        "SELECT content_hash FROM canonical_requirements"
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["content_hash"] == expected_hash, (
+        "Stored hash must match requirement_content_hash (identity-only input)"
+    )
+
+    conn.close()
