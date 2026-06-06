@@ -6,7 +6,7 @@ meta:
     created_at: ""
     status: draft
     schema_version: v3
-    version: 11
+    version: 12
 design:
     problem: |
         Every `jobsmith apply` re-runs the full 3-phase pipeline (gather -> draft ->
@@ -34,6 +34,7 @@ design:
     comment: ""
 slices:
     - id: slice-1
+      feature_id: feat-4dfd1a0b
       num: 1
       title: 'Reuse store: migration 009 + hash/TTL + config surface'
       what: |
@@ -79,6 +80,7 @@ slices:
       approved: false
       comment: ""
       approval_status: approved
+      execution_status: promoted
       questions:
         - id: q-blob
           text: Store large cached payloads inline as TEXT or offload to files referenced by the index?
