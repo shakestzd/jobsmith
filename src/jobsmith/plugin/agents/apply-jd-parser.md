@@ -92,10 +92,63 @@ For any URL that does not match the patterns above, use a two-step fetch strateg
 5. Detect named HM only from explicit signals: LinkedIn post author, JD signature, hiring manager name in the body. Do not infer from "you'll work with X" — that's a teammate, not the HM. If unclear, set `named_hm: null`.
 6. Top keywords = 5-8 unique skill/tool/domain terms that appear ≥2 times in must-haves + nice-to-haves combined.
 
+## Canonical requirement fields (reuse layer — feat-5024375d)
+
+For **every entry** in `must_haves` and `nice_to_haves`, emit two additional fields alongside the existing requirement text:
+
+- `canonical_tag` — the canonical taxonomy tag if the phrase matches a known synonym (e.g. `"tag:sql"`, `"tag:python"`, `"tag:spark"`), otherwise `null`.
+- `normalized_phrase` — the requirement phrase lowercased, stripped, and with internal whitespace collapsed to a single space.
+
+### Known canonical tags (seed v1)
+Match the **full phrase** (after normalization) against these aliases:
+
+| Tag | Example aliases |
+|-----|----------------|
+| `tag:sql` | advanced sql, strong sql skills, sql proficiency, sql experience |
+| `tag:python` | python programming, python development, python scripting |
+| `tag:machine_learning` | machine learning, ml experience, ml skills |
+| `tag:data_engineering` | data engineering, etl pipelines, data pipelines |
+| `tag:spark` | apache spark, pyspark, experience with apache spark |
+| `tag:cloud_aws` | aws, amazon web services, aws experience |
+| `tag:cloud_gcp` | gcp, google cloud platform, google cloud |
+| `tag:cloud_azure` | azure, microsoft azure |
+| `tag:kubernetes` | kubernetes, k8s, container orchestration, knowledge of kubernetes |
+| `tag:docker` | docker, docker containers, containerization |
+| `tag:airflow` | apache airflow, airflow, airflow dags |
+| `tag:dbt` | dbt, data build tool, dbt models |
+| `tag:deep_learning` | deep learning, neural networks, tensorflow, pytorch |
+| `tag:llm` | llm, large language models, prompt engineering, rag |
+| `tag:data_visualization` | data visualization, tableau, power bi, looker, dashboards |
+| `tag:statistics` | statistics, statistical analysis, statistical modeling |
+| `tag:git` | git, version control, github, gitlab |
+| `tag:communication` | communication skills, stakeholder management, cross-functional collaboration |
+
+If the phrase does not match any alias above, set `canonical_tag: null`.
+
+### Shape of each requirement item (must_haves and nice_to_haves)
+```json
+{
+  "raw": "<original phrase as it appears in the JD>",
+  "canonical_tag": "tag:sql",
+  "normalized_phrase": "advanced sql"
+}
+```
+
+### Example
+Input JD has: "Must have: Advanced SQL, Python Development, experience building Kafka pipelines"
+
+```json
+"must_haves": [
+  {"raw": "Advanced SQL", "canonical_tag": "tag:sql", "normalized_phrase": "advanced sql"},
+  {"raw": "Python Development", "canonical_tag": "tag:python", "normalized_phrase": "python development"},
+  {"raw": "experience building Kafka pipelines", "canonical_tag": null, "normalized_phrase": "experience building kafka pipelines"}
+]
+```
+
 ## Output
 
 Persist `jd-parsed` to the DB:
-`Bash("jobsmith db put-state --slug {slug} --kind jd-parsed" <<< '<json>')` matching the contract schema exactly. Fields: `company, position, location, location_type, salary_range, req_id, apply_url, named_hm, role_type, must_haves, nice_to_haves, top_keywords, jd_text_clean, jd_url`. Also keep `.apply-state/jd-parsed.json` on disk during the trk-60217f9f migration window so unmigrated downstream readers continue to work; Pass 5 removes the disk write.
+`Bash("jobsmith db put-state --slug {slug} --kind jd-parsed" <<< '<json>')` matching the contract schema exactly. Fields: `company, position, location, location_type, salary_range, req_id, apply_url, named_hm, role_type, must_haves, nice_to_haves, top_keywords, jd_text_clean, jd_url`. Each `must_haves` and `nice_to_haves` entry must include the `raw`, `canonical_tag`, and `normalized_phrase` fields (see above). Also keep `.apply-state/jd-parsed.json` on disk during the trk-60217f9f migration window so unmigrated downstream readers continue to work; Pass 5 removes the disk write.
 
 `jd_url` is the original input URL (from `inputs.jd_url`). Preserve it verbatim — the Python wrapper uses it on subsequent runs to short-circuit slug derivation and resume from completed phases.
 

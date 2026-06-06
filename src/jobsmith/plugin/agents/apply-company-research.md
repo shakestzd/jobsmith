@@ -23,12 +23,40 @@ Read your spec from the DB (trk-60217f9f Pass 3):
 
 ## Cache check (FIRST thing you do)
 
-1. Slugify the company name using the rule documented in `src/jobsmith/research.py` (lowercase, spaces→hyphens, strip non-alphanumerics, collapse repeated hyphens). Example: "Schneider Electric" → `schneider-electric`.
-2. Check `private/companies/<slug>.md`.
-   - If it exists AND its mtime is **within the last 30 days**: copy verbatim into `.apply-state/company-research.md`. Skip WebFetch. Return `status=ok` with a `cached_from` note.
+Company research is shared across all roles at the same company. The cache key
+is a **normalized company key** — not a raw slug — so "Acme, Inc.", "Acme Inc",
+and "ACME" all resolve to the same cache file.
+
+1. Derive the normalized cache key using `jobsmith.reuse.company_cache.normalize_company_key(company_name)`.
+   This strips legal suffixes (Inc, LLC, Ltd, Corp, Co, PLC, LP), leading "The",
+   and normalizes case. Example: "Schneider Electric Inc." → `schneider-electric`.
+2. Check `private/companies/<key>.md`.
+   - If it exists AND its mtime is within the TTL configured in `.apply-config.yaml`
+     (`reuse.company_ttl_days`, default 30 days): copy verbatim into
+     `.apply-state/company-research.md`. Skip WebFetch entirely.
+     Return `status=ok` with a `cached_from` note.
+     Record the reuse signal: metric_key=`company_research_source`, value=`reused`.
    - Else: fall through to a fresh fetch.
 
-Use `jobsmith.research.is_fresh(path, window_days=30)` if you call into Python; otherwise check mtime via Bash.
+Use `jobsmith.reuse.company_cache.check_cache(company_name, companies_dir=..., ttl_days=...)` to
+perform both operations atomically in Python. The TTL value comes from
+`JobsmithConfig().reuse.company_ttl_days`.
+
+```python
+# Example Python cache-check pattern
+from jobsmith.config import JobsmithConfig
+from jobsmith.reuse.company_cache import check_cache, record_company_research_metric
+
+cfg = JobsmithConfig()
+cached = check_cache(
+    company_name,
+    companies_dir=repo_root / "private" / "companies",
+    ttl_days=cfg.reuse.company_ttl_days,
+)
+if cached:
+    # Write to .apply-state, record metric, return ok
+    record_company_research_metric(conn, slug=slug, outcome="reused")
+```
 
 ## Fresh fetch path
 
@@ -72,7 +100,13 @@ When no usable cache exists:
 
 ## Cache write
 
-Once you've synthesized the file, also copy it to `private/companies/<slug>.md` so the next application to this company within 30 days reuses the research.
+Once you've synthesized the file, also write it to `private/companies/<key>.md` (where
+`<key>` = `normalize_company_key(company_name)`) so the next application to this
+company within TTL days reuses the research across any role.
+
+Use `jobsmith.reuse.company_cache.write_cache(company_name, content, companies_dir=...)`.
+After a fresh LLM synthesis, record the metric:
+`record_company_research_metric(conn, slug=slug, outcome="generated")`
 
 ## Failure modes
 

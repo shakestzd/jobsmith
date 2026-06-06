@@ -426,6 +426,11 @@ def apply(
     ),
     slug: str | None = typer.Option(None, "--slug", help="Override auto-derived slug"),
     run_id: str | None = typer.Option(None, "--run-id", help="Override auto-generated run discriminator"),
+    no_reuse: bool = typer.Option(
+        False,
+        "--no-reuse",
+        help="Bypass the reuse-planner entirely; regenerate all phases (legacy behavior).",
+    ),
 ) -> None:
     """Run the three-phase apply pipeline against a JD URL."""
     from .apply import run_apply
@@ -433,7 +438,8 @@ def apply(
     resolved_jd_text: str | None = jd_text_file.read_text(encoding="utf-8") if jd_text_file is not None else jd_text
     raise typer.Exit(
         run_apply(url, skip_confirm=yes, force=force, verbosity=verbose,
-                  jd_text=resolved_jd_text, slug=slug, run_id=run_id)
+                  jd_text=resolved_jd_text, slug=slug, run_id=run_id,
+                  no_reuse=no_reuse)
     )
 
 
@@ -2344,6 +2350,13 @@ def _copy_file(src: Path, dst: Path, force: bool) -> bool:
     shutil.copy(src, dst)
     console.print(f"  COPIED {dst}")
     return True
+
+
+# ---------- reuse subcommand group (feat-6623ee3b) ----------
+
+from jobsmith.reuse._cli_reuse import reuse_app  # noqa: E402
+
+app.add_typer(reuse_app, name="reuse")
 
 
 if __name__ == "__main__":

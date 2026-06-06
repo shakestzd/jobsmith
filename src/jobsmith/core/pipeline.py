@@ -29,8 +29,8 @@ from jobsmith.core.manifest import (
     phase_completed,
 )
 from jobsmith.core.paths import (
-    apply_state_dir,
     applications_dir,
+    apply_state_dir,
     build_paths,
     pipeline_db_path,
 )
@@ -181,6 +181,131 @@ def _auto_freeze_contracts(contracts_path: Path) -> None:
         )
 
 
+def _load_reuse_plan_from_state(state_dir: Path) -> object | None:
+    """Load reuse-plan.json from *state_dir*; return parsed dict or None.
+
+    Returns None when the file is missing, malformed, or the draft decision
+    is absent.  The pipeline uses this to detect a warm-start trigger.
+    Never raises — any error degrades to None (regenerate path).
+    """
+    plan_path = state_dir / "reuse-plan.json"
+    if not plan_path.exists():
+        return None
+    try:
+        import json as _json
+
+        return _json.loads(plan_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("pipeline: could not load reuse-plan.json: %s", exc)
+        return None
+
+
+def _build_warmstart_prompt_suffix(
+    slug: str,
+    resolved_cwd: Path,
+    reuse_plan_dict: dict,
+) -> str:
+    """Build a prompt suffix for the warm-start draft path.
+
+    Computes the warm-start delta and returns a text block to append to the
+    draft phase prompt.  The block tells the prose-writer agent exactly:
+    - which bullets are carried forward verbatim (anchors + reused)
+    - which requirement hashes must be freshly addressed
+
+    Returns an empty string on any error (falls back to full regeneration).
+    """
+    try:
+        bullet_map: dict[str, str] = reuse_plan_dict.get("bullet_map") or {}
+        matched_slug: str | None = reuse_plan_dict.get("matched_slug")
+        if not matched_slug:
+            return ""
+
+        apps_dir = applications_dir(resolved_cwd)
+        if apps_dir is None:
+            return ""
+
+        prior_state_dir = apps_dir / matched_slug / ".apply-state"
+        if not prior_state_dir.is_dir():
+            logger.debug(
+                "pipeline: warm-start prior state dir missing: %s", prior_state_dir
+            )
+            return ""
+
+        # Load current requirement hashes from the current app's state dir
+        current_state_dir = apply_state_dir(slug, resolved_cwd)
+        current_req_hashes: list[str] = []
+        if current_state_dir is not None:
+            jd_parsed_path = current_state_dir / "jd-parsed.json"
+            if jd_parsed_path.exists():
+                try:
+                    import json as _json2
+
+                    jd_parsed = _json2.loads(
+                        jd_parsed_path.read_text(encoding="utf-8")
+                    )
+                    must_haves = jd_parsed.get("must_haves") or []
+                    nice_to_haves = jd_parsed.get("nice_to_haves") or []
+                    # Use the SINGLE requirement-hash contract (canonical_tag +
+                    # normalized_phrase) so these hashes match the planner's
+                    # bullet_map keys and the evidence map.  Hashing raw text
+                    # here would never match, mis-flagging covered requirements
+                    # as delta/escalated work.
+                    from jobsmith.reuse.canonicalize import requirement_content_hash
+
+                    for req in must_haves + nice_to_haves:
+                        if not isinstance(req, dict):
+                            continue
+                        current_req_hashes.append(requirement_content_hash({
+                            "canonical_tag": req.get("canonical_tag"),
+                            "normalized_phrase": req.get(
+                                "normalized_phrase", req.get("raw", "")
+                            ),
+                        }))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "pipeline: warm-start could not load jd-parsed.json: %s", exc
+                    )
+
+        from jobsmith.reuse.warmstart import compute_warm_start
+
+        ws = compute_warm_start(
+            prior_state_dir=prior_state_dir,
+            current_requirement_hashes=current_req_hashes,
+            bullet_map=bullet_map,
+        )
+
+        anchor_ids = [
+            b.get("master_bullet_id", "")
+            for b in ws.anchors_carried
+            if b.get("master_bullet_id")
+        ]
+        lines = [
+            "",
+            "## Warm-start mode (diff-and-tweak)",
+            "",
+            f"Prior application: {matched_slug}",
+            f"Reused bullet IDs (no rewrite needed): {ws.reused_bullet_ids or 'none'}",
+            f"Anchor bullets (carry VERBATIM, do NOT rewrite): {anchor_ids or 'none'}",
+            f"Delta requirement hashes (MUST address): {ws.delta_requirement_hashes or 'none'}",
+            f"Escalated requirements (full generation): {ws.escalated_requirement_hashes or 'none'}",
+            "",
+            "Instructions:",
+            "- Load the prior prose-draft.md from the matched application as your base.",
+            "- Anchor bullets are SACRED — copy them verbatim, never rewrite.",
+            "- Reused bullet IDs are already covered — keep them with minor JD-keyword tuning only.",
+            "- Delta requirements need fresh bullets — write new bullets from master YAML only.",
+            "- Escalated requirements need full generation — treat as normal draft for those bullets.",
+            "- Do NOT fabricate. Every metric must be in master YAML or gap-resolutions.",
+        ]
+        return "\n".join(lines)
+
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "pipeline: warm-start prompt suffix failed — falling back to full draft: %s", exc
+        )
+        return ""
+
+
 def _snapshot_phase_drafts(phase: str, slug: str, cwd: Path) -> None:
     """Persist immutable agent-draft snapshots after a phase completes.
 
@@ -205,6 +330,104 @@ def _snapshot_phase_drafts(phase: str, slug: str, cwd: Path) -> None:
         src = src_root if src_root.exists() else src_state
         if src.exists():
             shutil.copy2(src, state_dir / "cover-letter-draft.agent.md")
+
+
+# ---------------------------------------------------------------------------
+# Correctness backstop helper (slice-8)
+# ---------------------------------------------------------------------------
+
+
+def _run_backstop_gate(slug: str, resolved_cwd: Path) -> None:
+    """Run the correctness backstop (guard + factcheck) after render phase.
+
+    This is UNCONDITIONAL — it runs whether or not reuse/warm-start was used.
+    ``BackstopError`` is intentionally NOT caught here: when all retries and
+    fallback are exhausted the error propagates to the phase loop's outer
+    ``except Exception`` handler, which emits a ``phase_failed`` event and
+    stops the render phase.  Only non-critical infrastructure errors (config
+    loading, DB metric writes, path resolution) are suppressed.
+
+    Retry behaviour: the live path gates ONCE and fails closed.  In-process
+    regeneration/fallback callbacks are not wired here (regenerating a piece
+    means re-invoking a specialist phase, which the wrapper — not the gate —
+    owns), so ``run_backstop`` is called with ``regen_retry_bound=0``.  On a
+    gate failure the apply aborts (return code 2) rather than shipping ungated
+    output; recovery is a re-run (optionally ``--no-reuse``).  The bounded
+    regenerate-and-re-gate policy (``config.reuse.regen_retry_bound``) applies
+    only to programmatic callers of ``run_backstop`` that supply regen/fallback
+    callbacks (e.g. tests).
+    """
+    from jobsmith.config import find_config, load_config
+
+    config_path = find_config(resolved_cwd)
+
+    apps_dir = applications_dir(resolved_cwd)
+    if apps_dir is None:
+        logger.debug("backstop: no applications_dir — skipping")
+        return
+
+    app_dir = apps_dir / slug
+    state_dir = apply_state_dir(slug, resolved_cwd)
+    if state_dir is None or not state_dir.is_dir():
+        logger.debug("backstop: state_dir missing for %s — skipping", slug)
+        return
+
+    # Locate artifacts: resume prose-draft and cover-letter-draft
+    resume_path = state_dir / "prose-draft.md"
+    cl_candidates = [
+        app_dir / "cover-letter-draft.md",
+        state_dir / "cover-letter-draft.md",
+    ]
+    cl_path = next((p for p in cl_candidates if p.exists()), None)
+
+    resume_text = resume_path.read_text(encoding="utf-8") if resume_path.exists() else ""
+    cover_letter_text = cl_path.read_text(encoding="utf-8") if cl_path else ""
+
+    if not resume_text and not cover_letter_text:
+        logger.debug("backstop: no artifact text found for %s — skipping", slug)
+        return
+
+    # Locate gate inputs
+    master_path = state_dir.parent.parent / "assets" / "content" / "work.yml"
+    if config_path is not None and not master_path.exists():
+        try:
+            cfg = load_config(config_path)
+            master_path = (config_path.parent / cfg.master.work_yml).resolve()
+        except Exception:  # noqa: BLE001
+            pass
+
+    content_dir = master_path.parent if master_path.exists() else resolved_cwd
+    selection_path = state_dir / "bullet-selection.json"
+    decisions_path = state_dir / "bullet-decisions.json"
+
+    # Open DB connection for metric recording (best-effort, non-critical)
+    db_conn = None
+    with contextlib.suppress(Exception):
+        db_conn = _open_pipeline_db_for_run(resolved_cwd)
+
+    try:
+        from jobsmith.reuse.backstop import run_backstop
+
+        # BackstopError propagates uncaught — correctness gates MUST pass.
+        run_backstop(
+            slug=slug,
+            resume_text=resume_text,
+            cover_letter_text=cover_letter_text,
+            master_path=master_path,
+            content_dir=content_dir,
+            selection_path=selection_path,
+            decisions_path=decisions_path if decisions_path.exists() else None,
+            # Live path gates once and fails closed — no in-process regen
+            # callbacks are wired (see docstring), so do not claim a retry bound
+            # that would never be honoured.
+            regen_retry_bound=0,
+            db_conn=db_conn,
+        )
+    finally:
+        # DB close is non-critical; suppress any close error.
+        if db_conn is not None:
+            with contextlib.suppress(Exception):
+                db_conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +610,8 @@ def _run_phase_iter_body(
                         # for targeted phase specialists.
                         from jobsmith.db import (
                             get_state as _get_state,
+                        )
+                        from jobsmith.db import (
                             put_state as _put_state,
                         )
 
@@ -506,6 +731,25 @@ def _run_phase_iter_body(
             jd_text_file=jd_text_file if phase_name == "gather" else None,
         )
 
+        # Step 3c-warmstart: when the reuse plan says warm-start for draft,
+        # append the delta/anchor context to the prompt so the prose-writer
+        # only rewrites the delta bullets and carries anchors verbatim.
+        if phase_name == "draft":
+            _state_dir_for_plan = apply_state_dir(slug, resolved_cwd)
+            if _state_dir_for_plan is not None:
+                _reuse_plan_dict = _load_reuse_plan_from_state(_state_dir_for_plan)
+                if (
+                    _reuse_plan_dict is not None
+                    and isinstance(_reuse_plan_dict, dict)
+                    and (_reuse_plan_dict.get("draft") or {}).get("decision")
+                    == "warm-start"
+                ):
+                    _ws_suffix = _build_warmstart_prompt_suffix(
+                        slug, resolved_cwd, _reuse_plan_dict
+                    )
+                    if _ws_suffix:
+                        prompt_text = prompt_text + _ws_suffix
+
         # Step 3f: stream events from headless
         phase_succeeded = False
         try:
@@ -579,6 +823,24 @@ def _run_phase_iter_body(
                 _time.sleep(0)  # cooperative yield point
             if reconciled:
                 record_url_mapping(url, slug, resolved_cwd)
+
+        # Step 3h: correctness backstop after render (UNCONDITIONAL — runs on
+        # every completed render, whether reuse was active or not).  A failed
+        # gate raises BackstopError, which MUST surface as a structured
+        # ``phase_failed`` event (not escape the generator raw — consumers
+        # expect PipelineEvent failures, never a thrown exception).
+        if phase_name == "render":
+            from jobsmith.reuse.backstop import BackstopError
+
+            try:
+                _run_backstop_gate(slug, resolved_cwd)
+            except BackstopError as exc:
+                yield PipelineEvent(
+                    kind="phase_failed",
+                    phase=phase_name,
+                    payload={"error": f"{type(exc).__name__}: {exc}"},
+                )
+                return
 
         yield PipelineEvent(kind="phase_complete", phase=phase_name)
 

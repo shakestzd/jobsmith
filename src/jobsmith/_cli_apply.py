@@ -48,6 +48,7 @@ from .render import ApplyRenderer
 
 if TYPE_CHECKING:
     from .api.client import JobsmithClient
+    from .reuse.planner import ReusePlan
 
 logger = logging.getLogger(__name__)
 
@@ -300,6 +301,268 @@ def _run_step45_orchestration(slug: str, cwd: Path) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Reuse-planner helpers
+# ---------------------------------------------------------------------------
+
+
+def _write_reuse_plan_artifact_safe(
+    plan: "ReusePlan",
+    slug: str,
+    resolved_cwd: Path,
+    apply_state_dir_fn: object,
+) -> None:
+    """Write ``reuse-plan.json`` to ``.apply-state/``; log and continue on error.
+
+    Parameters
+    ----------
+    plan:
+        The :class:`~jobsmith.reuse.planner.ReusePlan` to serialize.
+    slug:
+        Current application slug.
+    resolved_cwd:
+        Working directory for config resolution.
+    apply_state_dir_fn:
+        Callable ``(slug, cwd) -> Path | None`` — resolved through apply's
+        namespace so test patches propagate.
+    """
+    try:
+        from jobsmith.reuse.planner import write_reuse_plan_artifact
+
+        state_dir = apply_state_dir_fn(slug, resolved_cwd)  # type: ignore[operator]
+        if state_dir is None:
+            logger.warning("reuse-planner: cannot resolve state dir — artifact not written")
+            return
+        write_reuse_plan_artifact(plan, state_dir)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("reuse-planner: failed to write artifact — continuing: %s", exc)
+
+
+def _compute_pipeline_reuse_plan(
+    *,
+    resolved_cwd: Path,
+    slug: str,
+    db_conn: object,
+    no_reuse: bool,
+    jd_text: str | None = None,
+) -> "ReusePlan":
+    """Compute the ReusePlan for the current run; return no_reuse_plan() on any error.
+
+    Imported lazily to avoid circular-import issues (reuse modules import from
+    jobsmith.config but not from jobsmith._cli_apply).
+
+    Parameters
+    ----------
+    resolved_cwd:
+        Working directory for config / DB path resolution.
+    slug:
+        Current application slug.
+    db_conn:
+        Open pipeline DB connection (may be None — degrade gracefully).
+    no_reuse:
+        When True, bypass the planner entirely and return no_reuse_plan().
+    """
+    from jobsmith.reuse.planner import ReusePlan, no_reuse_plan  # noqa: F401
+
+    if no_reuse:
+        return no_reuse_plan()
+
+    try:
+        from jobsmith.config import find_config, load_config
+        from jobsmith.reuse.planner import compute_reuse_plan
+
+        if db_conn is None:
+            return no_reuse_plan()
+
+        config_path = find_config(resolved_cwd)
+        if config_path is None:
+            return no_reuse_plan()
+
+        config = load_config(config_path)
+        cfg = config.reuse
+        repo_root = config_path.parent
+        companies_dir = repo_root / "private" / "companies"
+
+        # Best-effort: read company name from jd-parsed.json if available.
+        company_name = _read_company_name(slug, resolved_cwd, config, repo_root)
+
+        return compute_reuse_plan(
+            conn=db_conn,
+            # Real raw JD text (finding #2): drives find_duplicate_jd against
+            # prior application_fingerprints.  Empty string when no JD body was
+            # supplied — dedup then simply finds no match and regenerates.
+            jd_text=jd_text or "",
+            current_slug=slug,
+            cfg=cfg,
+            companies_dir=companies_dir,
+            company_name=company_name,
+            current_bullet_texts={},  # bullet text loading is best-effort
+            requirement_hashes=[],    # populated by gather phase post-run
+        )
+    except Exception as exc:  # noqa: BLE001 — planner must never abort pipeline
+        logger.warning("reuse-planner failed — falling back to no-reuse plan: %s", exc)
+        from jobsmith.reuse.planner import no_reuse_plan
+        return no_reuse_plan()
+
+
+def _read_company_name(slug: str, cwd: Path, config: object, repo_root: Path) -> str:
+    """Read company name from .apply-state/jd-parsed.json; return '' on any error."""
+    import json as _json
+
+    try:
+        from jobsmith.paths import resolve
+        apps_dir = resolve(config.output.applications_dir, repo_root)
+        jd_path = apps_dir / slug / ".apply-state" / "jd-parsed.json"
+        if not jd_path.exists():
+            return ""
+        data = _json.loads(jd_path.read_text(encoding="utf-8"))
+        return data.get("company", "") or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _persist_reuse_tables(
+    db_conn: object,
+    *,
+    slug: str,
+    state_dir: Path,
+    jd_text: str | None,
+) -> None:
+    """Persist reuse tables after the gather phase (finding #3).
+
+    Best-effort: each write is independently guarded so a single persistence
+    error can never abort the apply.  Writes:
+
+    1. application_fingerprints + run_metrics (JD fingerprint) via
+       ``dedup.write_jd_fingerprint`` — uses the supplied raw ``jd_text`` when
+       present, else the ``jd_text_clean`` field of ``jd-parsed.json``.
+    2. canonical_requirements via ``db_ingest.ingest_canonical_requirements``.
+    3. requirement_evidence_map via
+       ``evidence_map.populate_from_bullet_selection``.
+
+    Without this, those three tables stay empty during normal applies, so a
+    later run has nothing to reuse.
+    """
+    import json as _json
+
+    if db_conn is None:
+        return
+
+    jd_parsed: dict = {}
+    try:
+        jd_path = state_dir / "jd-parsed.json"
+        if jd_path.exists():
+            jd_parsed = _json.loads(jd_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("reuse-persist: failed to read jd-parsed.json: %s", exc)
+
+    # 1. JD fingerprint.
+    try:
+        from jobsmith.reuse.dedup import write_jd_fingerprint
+
+        fp_text = jd_text if (jd_text and jd_text.strip()) else jd_parsed.get(
+            "jd_text_clean", ""
+        )
+        if fp_text and fp_text.strip():
+            write_jd_fingerprint(db_conn, slug=slug, jd_text=fp_text)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("reuse-persist: JD fingerprint write failed: %s", exc)
+
+    # 2. Canonical requirements.
+    try:
+        from jobsmith.db_ingest import ingest_canonical_requirements
+
+        if jd_parsed:
+            ingest_canonical_requirements(db_conn, jd_parsed=jd_parsed)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("reuse-persist: canonical requirements ingest failed: %s", exc)
+
+    # 3. Bullet evidence map.
+    try:
+        from jobsmith.reuse.evidence_map import populate_from_bullet_selection
+
+        sel_path = state_dir / "bullet-selection.json"
+        if sel_path.exists():
+            selection = _json.loads(sel_path.read_text(encoding="utf-8"))
+            populate_from_bullet_selection(db_conn, selection=selection)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("reuse-persist: bullet evidence map populate failed: %s", exc)
+
+
+def _requirement_hashes_from_jd(jd_parsed: dict) -> list[str]:
+    """Canonical requirement hashes for every must-have / nice-to-have."""
+    from jobsmith.reuse.canonicalize import requirement_content_hash
+
+    hashes: list[str] = []
+    for key in ("must_haves", "nice_to_haves"):
+        for req in jd_parsed.get(key, []) or []:
+            if not isinstance(req, dict):
+                continue
+            hashes.append(requirement_content_hash({
+                "canonical_tag": req.get("canonical_tag"),
+                "normalized_phrase": req.get("normalized_phrase", req.get("raw", "")),
+            }))
+    return hashes
+
+
+def _recompute_reuse_plan_after_gather(
+    db_conn: object,
+    *,
+    slug: str,
+    resolved_cwd: Path,
+    state_dir: Path,
+) -> None:
+    """Recompute ``reuse-plan.json`` after gather using the real parsed JD.
+
+    The pre-gather plan runs before ``jd-parsed.json`` exists, so on URL-based
+    applies it has no JD text / company / requirements to work with.  Once
+    gather has produced ``jd-parsed.json`` we have ``jd_text_clean``, the parsed
+    company, the master bullet texts, and the canonical requirement hashes —
+    recompute the plan so the draft phase's warm-start decision and bullet map
+    are meaningful.  Best-effort: keep the pre-gather plan on any error.
+    """
+    if db_conn is None:
+        return
+    try:
+        import json as _json
+
+        from jobsmith.config import find_config, load_config
+        from jobsmith.reuse._cli_reuse import _load_current_bullet_texts
+        from jobsmith.reuse.planner import (
+            compute_reuse_plan,
+            write_reuse_plan_artifact,
+        )
+
+        jd_path = state_dir / "jd-parsed.json"
+        config_path = find_config(resolved_cwd)
+        if not jd_path.exists() or config_path is None:
+            return
+        jd_parsed = _json.loads(jd_path.read_text(encoding="utf-8"))
+        config = load_config(config_path)
+
+        plan = compute_reuse_plan(
+            conn=db_conn,
+            jd_text=jd_parsed.get("jd_text_clean", "") or "",
+            current_slug=slug,
+            cfg=config.reuse,
+            companies_dir=config_path.parent / "private" / "companies",
+            company_name=jd_parsed.get("company", "") or "",
+            current_bullet_texts=_load_current_bullet_texts(resolved_cwd),
+            requirement_hashes=_requirement_hashes_from_jd(jd_parsed),
+        )
+        write_reuse_plan_artifact(plan, state_dir)
+        logger.info(
+            "reuse-planner: recomputed post-gather plan for %s "
+            "(draft=%s, jd-parse=%s)",
+            slug, plan.draft.decision, plan.jd_parse.decision,
+        )
+    except Exception as exc:  # noqa: BLE001 — recompute must never abort the apply
+        logger.warning(
+            "reuse-planner: post-gather recompute failed — keeping pre-gather plan: %s",
+            exc,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Phase loop
 # ---------------------------------------------------------------------------
 
@@ -323,6 +586,8 @@ def _run_apply_phases(
     db_status_ref: list[str],
     jd_text_file: Path | None = None,
     cancel_event: "threading.Event | None" = None,
+    no_reuse: bool = False,
+    jd_text: str | None = None,
 ) -> int:
     """Phase-loop body extracted so the surrounding ``run_apply`` can wrap it
     with the apply_runs DB lifecycle (insert before, UPDATE after, with the
@@ -349,7 +614,11 @@ def _run_apply_phases(
         _PHASE_MAX_TURNS,
         _PHASES,
         _auto_freeze_contracts,
+    )
+    from jobsmith.core.pipeline import (
         _snapshot_phase_drafts as _snapshot_phase_drafts_core,
+    )
+    from jobsmith.core.pipeline import (
         build_phase_prompt as _build_phase_prompt_core,
     )
     from jobsmith.core.session import get_or_create_session_id as _get_or_create_session_id_core
@@ -376,6 +645,38 @@ def _run_apply_phases(
     _auto_freeze_contracts(
         plugin_directory / "agents" / "apply" / "specialist-contracts.yaml"
     )
+
+    # Reuse-planner pre-phase (feat-6623ee3b): compute a ReusePlan before the
+    # phase loop so prompts and future pipeline layers can consult it.
+    # When no_reuse=True the planner is fully bypassed (--no-reuse flag).
+    reuse_plan = _compute_pipeline_reuse_plan(
+        resolved_cwd=resolved_cwd,
+        slug=slug,
+        db_conn=db_conn,
+        no_reuse=no_reuse,
+        jd_text=jd_text,
+    )
+    # Emit reuse-plan artifact BEFORE the phase loop / gather so specialists
+    # can consult it.  Best-effort: pipeline continues even if the write fails.
+    _write_reuse_plan_artifact_safe(reuse_plan, slug, resolved_cwd, _apply_state_dir)
+    rdr.print_info(
+        f"reuse-planner: jd-parse={reuse_plan.jd_parse.decision} "
+        f"company={reuse_plan.company_research.decision} "
+        f"draft={reuse_plan.draft.decision} "
+        f"bullets={len(reuse_plan.bullet_map)} mapped"
+    )
+
+    # NOTE: the reuse-plan is emitted as an artifact (above) for the
+    # prompt-side reuse path (specialists consult reuse-plan.json + the
+    # `jobsmith reuse` CLI) and for warm-start (slice-7).  We intentionally do
+    # NOT skip the whole gather phase at the wrapper level: gather is an atomic
+    # phase that runs all five specialists (jd-parse, fit-score, hm-enrich,
+    # bullet-selection, company-research) in one agent turn, so wholesale
+    # skipping would also drop bullet-selection/tailoring outputs that draft
+    # and render require — and would bypass the post-gather canonical-slug
+    # reconciliation.  Reuse is therefore applied per-specialist inside the
+    # phases (and re-gated unconditionally by the backstop), not by skipping
+    # the gather phase here.
 
     for phase_name, phase_num in _PHASES:
         # Step 3pre: just-in-time wrapper-owned prerequisites that must run
@@ -692,6 +993,31 @@ def _run_apply_phases(
                         state_dir=state_dir_for_ingest,
                     )
 
+        # Finding #3 (bug-6204cdad): after the GATHER phase, persist the reuse
+        # tables (application_fingerprints, canonical_requirements,
+        # requirement_evidence_map) so later applies have something to reuse.
+        # Best-effort and isolated from the ingest above so a persistence
+        # failure cannot abort the apply.  Skipped under --no-reuse to keep the
+        # legacy path byte-for-byte (no reuse state ever written).
+        if phase_name == "gather" and db_conn is not None and not no_reuse:
+            state_dir_for_reuse = _apply_state_dir(slug, resolved_cwd)
+            if state_dir_for_reuse is not None:
+                _persist_reuse_tables(
+                    db_conn,
+                    slug=slug,
+                    state_dir=state_dir_for_reuse,
+                    jd_text=jd_text,
+                )
+                # Recompute reuse-plan.json now that the real parsed JD exists,
+                # so the draft phase's warm-start decision is meaningful on
+                # URL-based applies (the pre-gather plan ran with empty JD data).
+                _recompute_reuse_plan_after_gather(
+                    db_conn,
+                    slug=slug,
+                    resolved_cwd=resolved_cwd,
+                    state_dir=state_dir_for_reuse,
+                )
+
         # Step 3i (feat-ff4ccde2): snapshot fresh specialist outputs into
         # llm_cache so the next apply with the same JD + master content can
         # short-circuit this phase. Skipped on cache-hit replays — the rows
@@ -708,6 +1034,31 @@ def _run_apply_phases(
                         phase=phase_name,
                         state_dir=state_dir_for_cache,
                     )
+
+        # Step 3h-backstop (slice-8, finding #2 guardrail): UNCONDITIONAL
+        # correctness backstop after the render phase. Re-gates the final
+        # output regardless of whether reuse copied any upstream artifacts —
+        # reused/copied artifacts are never trusted blindly.  Mirrors the
+        # unconditional backstop in pipeline.py's run_phase_iter body so both
+        # apply entrypoints (CLI renderer + SSE generator) re-gate the output.
+        #
+        # BackstopError (gate failure after retries + fallback) MUST abort the
+        # apply — never ship ungated output (bug-6204cdad #1).  Only
+        # non-critical infrastructure errors are suppressed.
+        if phase_name == "render":
+            from jobsmith.core.pipeline import _run_backstop_gate
+            from jobsmith.reuse.backstop import BackstopError
+
+            try:
+                _run_backstop_gate(slug, resolved_cwd)
+            except BackstopError as exc:
+                rdr.print_error(
+                    f"Correctness backstop failed for {slug}: {exc}. "
+                    f"Refusing to ship ungated output. Aborting."
+                )
+                return 2
+            except Exception as exc:  # noqa: BLE001 — infra errors are non-critical
+                logger.warning("backstop: non-critical gate error for %s: %s", slug, exc)
 
         # Step 3h: confirm gate (not after the last phase, and not after a
         # phase that was skipped — only fresh-run phases prompt).
@@ -744,6 +1095,7 @@ def run_apply(
     run_id: str | None = None,
     cancel_event: "threading.Event | None" = None,
     start_from_phase: str | None = None,
+    no_reuse: bool = False,
 ) -> int:
     """Run the three-phase apply pipeline.
 
@@ -844,25 +1196,44 @@ def run_apply(
         # Look up _run_apply_phases through apply's namespace to support test
         # patches like patch("jobsmith.apply._run_apply_phases", fake_phases).
         _phases_fn = _resolve_from_apply("_run_apply_phases", _run_apply_phases)
-        return _phases_fn(
-            url=url,
-            resolved_cwd=resolved_cwd,
-            rdr=rdr,
-            plugin_directory=plugin_directory,
-            slug=slug,
-            apps_dir=apps_dir,
-            session_id=session_id,
-            phase_done=phase_done,
-            total_phases=total_phases,
-            skip_confirm=skip_confirm,
-            started_at=started_at,
-            db_conn=db_conn,
-            db_run_id=db_run_id,
-            db_slug_ref=db_slug_ref,
-            db_status_ref=db_status_ref,
-            jd_text_file=jd_text_file,
-            cancel_event=cancel_event,
-        )
+
+        # --no-reuse must also disable PROMPT-side reuse: the gather selector
+        # calls `jobsmith reuse lookup-bullet` (a subprocess that inherits this
+        # process's env).  Export JOBSMITH_NO_REUSE=1 for the duration of the
+        # phase run so lookup-bullet returns no-reuse and existing evidence-map
+        # rows can never alter selection.  Restore the prior value afterwards so
+        # in-process callers (tests, server) do not leak the flag.
+        _prior_no_reuse = os.environ.get("JOBSMITH_NO_REUSE")
+        if no_reuse:
+            os.environ["JOBSMITH_NO_REUSE"] = "1"
+        try:
+            return _phases_fn(
+                url=url,
+                resolved_cwd=resolved_cwd,
+                rdr=rdr,
+                plugin_directory=plugin_directory,
+                slug=slug,
+                apps_dir=apps_dir,
+                session_id=session_id,
+                phase_done=phase_done,
+                total_phases=total_phases,
+                skip_confirm=skip_confirm,
+                started_at=started_at,
+                db_conn=db_conn,
+                db_run_id=db_run_id,
+                db_slug_ref=db_slug_ref,
+                db_status_ref=db_status_ref,
+                jd_text_file=jd_text_file,
+                cancel_event=cancel_event,
+                no_reuse=no_reuse,  # captured from outer run_apply closure
+                jd_text=jd_text,  # captured from outer run_apply closure
+            )
+        finally:
+            if no_reuse:
+                if _prior_no_reuse is None:
+                    os.environ.pop("JOBSMITH_NO_REUSE", None)
+                else:
+                    os.environ["JOBSMITH_NO_REUSE"] = _prior_no_reuse
 
     # Look up ensure_bootstrap through apply's namespace so that
     # patches on jobsmith.apply._run_init propagate (ensure_bootstrap

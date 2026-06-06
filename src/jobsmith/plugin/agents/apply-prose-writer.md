@@ -83,6 +83,32 @@ If `feedback_dir` is null/missing or no records match, proceed without lessons. 
   - `action_verbs` — usable but require restructure if they lead a bullet (put the result/metric first).
   See `resume-tell-fixer.md` for the full taxonomy.
 
+## Warm-start mode (diff-and-tweak)
+
+When the user prompt includes a `## Warm-start mode` section, operate in
+**diff-and-tweak** mode instead of from-scratch draft mode:
+
+1. Load `prose-draft.md` from the PRIOR application (path: the matched slug's
+   `.apply-state/prose-draft.md`) as your BASE draft.
+2. **Anchor bullets are SACRED**: any bullet listed under "Anchor bullets
+   (carry VERBATIM)" MUST be copied exactly as-is, character-for-character.
+   Do NOT rewrite, paraphrase, or tune anchor bullets — not even for JD
+   keyword alignment.  Anchor conflicts are reported but never resolved by
+   rewriting.
+3. **Reused bullets**: bullets listed under "Reused bullet IDs" need only
+   minor JD-keyword surface tuning (swapping a synonym at most).  Never
+   change metrics.
+4. **Delta requirements**: requirements listed under "Delta requirement hashes"
+   need FRESH bullets written from master YAML from scratch.  No base-draft
+   text for these.
+5. **Escalated requirements**: treat these exactly as fresh delta bullets.
+   Write from master YAML; never fabricate.
+6. Write the final `prose-draft.md` as the merged result: carried anchors +
+   tuned reused bullets + new delta bullets.
+
+When NOT in warm-start mode (no `## Warm-start mode` section in the prompt),
+use the standard from-scratch procedure below.
+
 ## Steps
 
 1. Read all inputs. Note `bullet_selection.positions[*].bullets[*].rephrased` — those flagged with non-null `rephrased` are the ones you rewrite.
