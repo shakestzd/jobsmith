@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>JD-parse &#43; fit-score dedup for near-duplicate JDs</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-42d39d4a"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-06T07:06:54.262567"
+             data-updated="2026-06-06T08:04:41.684005" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
+
+        <header>
+            <h1>JD-parse &#43; fit-score dedup for near-duplicate JDs</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-45e7fcd5.html" data-relationship="part_of" data-since="2026-06-06T07:06:54.276893">trk-45e7fcd5</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-a58a6ad7.html" data-relationship="planned_in" data-since="2026-06-06T07:06:54.30388">plan-a58a6ad7</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-4dfd1a0b.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:54.315051">feat-4dfd1a0b</a></li>
+                    <li><a href="feat-5024375d.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:54.323974">feat-5024375d</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="2dc17467-59ed-416e-9cf4-53feb0ecd9eb.html" data-relationship="implemented_in" data-since="2026-06-06T08:04:41.683891">session 2dc17467-59ed-416e-9cf4-53feb0ecd9eb</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Compute an application_fingerprint per JD from its normalized requirement set
++ normalized text (slice-2). On a new JD, look up application_fingerprints; if
+a prior JD is a near-duplicate above the (config) dedup threshold, reuse its
+jd-parsed.json and fit-score.json (read via src/jobsmith/_state_readers.py:36
+and :44) instead of re-running apply-jd-parser / apply-fit-scorer. Below
+threshold, run normally and store the new fingerprint. This is the FUZZY tier
+above llm_cache's exact jd_hash keying -- it catches reposts/edited JDs that
+llm_cache misses.</p>
+        </section>
+    </article>
+</body>
+</html>
