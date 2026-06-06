@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Roborev remediation: per-artifact reuse gating &#43; E2E warm-start assertion &#43; backfill metrics count</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="bug-b3e4a556"
+             data-type="bug"
+             data-status="todo"
+             data-priority="high"
+             data-created="2026-06-06T21:10:44.031744"
+             data-updated="2026-06-06T21:10:44.050404" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.21">
+
+        <header>
+            <h1>Roborev remediation: per-artifact reuse gating &#43; E2E warm-start assertion &#43; backfill metrics count</h1>
+            <div class="metadata">
+                <span class="badge status-todo">Todo</span>
+                <span class="badge priority-high">High Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-45e7fcd5.html" data-relationship="part_of" data-since="2026-06-06T21:10:44.05029">trk-45e7fcd5</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Post-merge roborev findings (jobs 994/995/996): (HIGH) _replay_gather_specialist_artifacts copies fit-score.json whenever jd_parse==reuse, ignoring fit_score.decision -> stale reuse; (MEDIUM) test_reuse_ab_e2e skips draft phase so warm-start suffix path never exercised; (LOW) backfill under-counts run_metrics rows + no run_metrics test coverage.</p>
+        </section>
+    </article>
+</body>
+</html>
