@@ -10,15 +10,15 @@
 <body>
     <article id="feat-42d39d4a"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-06T07:06:54.262567"
-             data-updated="2026-06-06T08:04:41.684005" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
+             data-updated="2026-06-06T08:11:25.32629" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
 
         <header>
             <h1>JD-parse &#43; fit-score dedup for near-duplicate JDs</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
@@ -60,7 +60,8 @@ jd-parsed.json and fit-score.json (read via src/jobsmith/_state_readers.py:36
 and :44) instead of re-running apply-jd-parser / apply-fit-scorer. Below
 threshold, run normally and store the new fingerprint. This is the FUZZY tier
 above llm_cache's exact jd_hash keying -- it catches reposts/edited JDs that
-llm_cache misses.</p>
+llm_cache misses.
+[2026-06-06 08:11 claude-code] accepted-advisory (provenance override): Committed as 1d6617c — feat(reuse/dedup): JD near-duplicate detection + artifact reuse primitives</p>
         </section>
     </article>
 </body>
