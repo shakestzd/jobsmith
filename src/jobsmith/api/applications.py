@@ -18,17 +18,19 @@ POST /applications
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib.util
 import json
 import logging
 import re
+import shutil
 import subprocess
 import sys
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 logger = logging.getLogger(__name__)
 
@@ -995,27 +997,31 @@ def get_review(slug: str) -> dict:
     }
 
 
-@router.put("/applications/{slug}/cover-letter")
-def save_cover_letter(slug: str, body: dict) -> dict:
-    """Save edited cover letter text to disk (atomic write)."""
-    text = body.get("text", "")
-    if not isinstance(text, str):
-        raise HTTPException(status_code=422, detail="body.text must be a string")
+def _resolve_cover_letter_write_path(slug: str) -> Path | None:
+    """Return the path cover-letter-draft.md should be written to for *slug*.
 
+    Prefers an already-resolved existing draft (handles slug rekeys); falls
+    back to ``<app_dir>/cover-letter-draft.md`` when the app dir exists but no
+    draft has been written yet.  Returns None when there is no app directory.
+    """
     db_path = _get_db_path()
     conn = _open_conn(db_path)
     try:
         cl_path = _resolve_cover_letter(slug, conn)
-        if cl_path is None:
-            app_dir = _get_app_dir(slug)
-            if app_dir is not None and app_dir.exists():
-                cl_path = app_dir / _COVER_LETTER_FILENAME
     finally:
         conn.close()
-
     if cl_path is None:
-        raise HTTPException(status_code=404, detail=f"No application directory for {slug!r}")
+        app_dir = _get_app_dir(slug)
+        if app_dir is not None and app_dir.exists():
+            cl_path = app_dir / _COVER_LETTER_FILENAME
+    return cl_path
 
+
+def _write_cover_letter_atomic(cl_path: Path, text: str) -> None:
+    """Atomically write *text* to *cl_path* via tmp-file rename.
+
+    Raises HTTPException(500) on OS failure so callers surface a clean error.
+    """
     tmp_path = cl_path.with_suffix(".tmp")
     try:
         tmp_path.write_text(text, encoding="utf-8")
@@ -1023,8 +1029,150 @@ def save_cover_letter(slug: str, body: dict) -> dict:
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Write failed: {exc}") from exc
 
+
+@router.put("/applications/{slug}/cover-letter")
+def save_cover_letter(slug: str, body: dict) -> dict:
+    """Save edited cover letter text to disk (atomic write)."""
+    text = body.get("text", "")
+    if not isinstance(text, str):
+        raise HTTPException(status_code=422, detail="body.text must be a string")
+
+    cl_path = _resolve_cover_letter_write_path(slug)
+    if cl_path is None:
+        raise HTTPException(status_code=404, detail=f"No application directory for {slug!r}")
+
+    _write_cover_letter_atomic(cl_path, text)
     words = len(text.split())
     return {"saved": True, "words": words}
+
+
+def _content_dir_for_slug(slug: str) -> Path:
+    """Resolve the master-content directory used to fact-check a draft.
+
+    Mirrors the CLI ``fact-check`` resolution: the directory containing the
+    configured ``master.work_yml``.  The slug-specific extra sources (DB master
+    content + JD context) are layered on top by the caller.
+    """
+    from jobsmith.config import find_config, load_config
+    from jobsmith.paths import resolve
+
+    config_path = find_config(repo_root_for())
+    config = load_config(path=config_path) if config_path else load_config()
+    repo_root = config_path.parent if config_path else repo_root_for()
+    return resolve(config.master.work_yml, repo_root).parent
+
+
+def _render_cover_letter(cl_path: Path) -> tuple[str, str | None]:
+    """Best-effort single-doc cover-letter render via quarto.
+
+    Returns ``(status, rendered_relpath | None)`` where status is one of
+    ``"ok"``, ``"skipped"``, or an error string.  Renders only when a
+    ``cover-letter.qmd`` exists alongside the draft (the quarto project the
+    apply pipeline produced); otherwise returns ``"skipped"`` rather than
+    invent a fragile render path.
+    """
+    app_dir = cl_path.parent
+    qmd = app_dir / "cover-letter.qmd"
+    if not qmd.exists():
+        logger.info(
+            "cover-letter apply: no cover-letter.qmd at %s — render skipped", app_dir
+        )
+        return "skipped", None
+    quarto = shutil.which("quarto")
+    if quarto is None:
+        logger.info("cover-letter apply: quarto not on PATH — render skipped")
+        return "skipped", None
+    try:
+        proc = subprocess.run(
+            [quarto, "render", "cover-letter.qmd"],
+            cwd=str(app_dir),
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("cover-letter apply: quarto render failed: %s", exc)
+        return f"error: {exc}", None
+    if proc.returncode != 0:
+        logger.warning(
+            "cover-letter apply: quarto exited %s: %s",
+            proc.returncode,
+            proc.stderr.strip()[-300:],
+        )
+        return f"error: quarto exit {proc.returncode}", None
+    for candidate in (
+        app_dir / "documents" / _FINAL_COVER_LETTER.replace(".md", ".pdf"),
+        app_dir / "cover-letter.pdf",
+        app_dir / "documents" / _FINAL_COVER_LETTER,
+    ):
+        if candidate.exists():
+            try:
+                return "ok", str(candidate.relative_to(app_dir))
+            except ValueError:
+                return "ok", str(candidate)
+    return "ok", None
+
+
+@router.post("/applications/{slug}/cover-letter/apply")
+def apply_cover_letter(slug: str, body: dict) -> dict:
+    """Validate + apply a chat-proposed cover-letter revision.
+
+    Contract (feat-fae0fda6 / Approach A):
+    - Body: ``{"new_content": "<complete revised cover letter markdown>"}``.
+    - Runs ``check_draft`` FIRST (before any write). On failure returns HTTP
+      422 ``{applied: false, reason: "fact_check_failed", failed_claims: [...]}``
+      and does NOT write.
+    - On pass: writes ``cover-letter-draft.md`` atomically, re-renders to
+      ``documents/`` when a single-doc render path is available, and returns
+      ``{applied: true, words: N, render: "ok"|"skipped"|"error: ...",
+      rendered_path?: ...}``.
+    """
+    new_content = body.get("new_content", "")
+    if not isinstance(new_content, str) or not new_content.strip():
+        raise HTTPException(
+            status_code=422, detail="body.new_content must be a non-empty string"
+        )
+
+    cl_path = _resolve_cover_letter_write_path(slug)
+    if cl_path is None:
+        raise HTTPException(
+            status_code=404, detail=f"No application directory for {slug!r}"
+        )
+
+    # --- Gate FIRST: fact-check before writing (no rollback needed) ---
+    from jobsmith.factcheck import (
+        check_draft,
+        load_db_master_content,
+        load_jd_context_for_draft,
+    )
+
+    content_dir = _content_dir_for_slug(slug)
+    extra_sources = load_db_master_content()
+    with contextlib.suppress(Exception):
+        extra_sources.update(load_jd_context_for_draft(cl_path))
+    result = check_draft(new_content, content_dir, extra_sources=extra_sources)
+    if not result.passed:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "applied": False,
+                "reason": "fact_check_failed",
+                "failed_claims": result.failed_claims,
+            },
+        )
+
+    # --- Passed: write atomically, then best-effort re-render ---
+    _write_cover_letter_atomic(cl_path, new_content)
+    render_status, rendered_path = _render_cover_letter(cl_path)
+
+    out: dict = {
+        "applied": True,
+        "words": len(new_content.split()),
+        "render": render_status,
+    }
+    if rendered_path is not None:
+        out["rendered_path"] = rendered_path
+    return out
 
 
 @router.post("/applications/{slug}/review-status")

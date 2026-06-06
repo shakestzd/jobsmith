@@ -326,6 +326,68 @@ export async function chatResetSession(slug: string): Promise<void> {
   await apiPost('/api/chat/session/reset', { slug });
 }
 
+// ── Chat-proposed cover-letter edits (feat-fae0fda6) ──────────────────────
+
+/** A structured asset-edit proposal emitted by the chat agent. */
+export interface ChatProposal {
+  asset: string;            // e.g. "cover_letter"
+  slug: string;
+  summary: string;
+  rationale: string;
+  new_content: string;      // COMPLETE revised draft
+}
+
+/** Result of applying a cover-letter proposal. */
+export interface ApplyCoverLetterResult {
+  applied: boolean;
+  words?: number;
+  render?: string;          // "ok" | "skipped" | "error: ..."
+  rendered_path?: string;
+  reason?: string;          // "fact_check_failed" on 422
+  failed_claims?: string[]; // populated on 422
+}
+
+/** Fetch the current cover-letter-draft.md text (the "OLD" side of the diff). */
+export async function getCoverLetterDraft(slug: string): Promise<string> {
+  return apiGetText(
+    `/api/applications/${encodeURIComponent(slug)}/documents/cover-letter-draft.md`,
+  );
+}
+
+/**
+ * Apply a chat-proposed cover-letter revision. Reads the JSON body for BOTH
+ * success and the 422 fact-check-failure case so the caller can surface the
+ * failed claims (we do not use apiPost here because it throws on 422 and would
+ * discard the structured body).
+ */
+export async function applyCoverLetter(
+  slug: string,
+  newContent: string,
+): Promise<ApplyCoverLetterResult> {
+  const res = await fetch(
+    `${BASE_URL}/api/applications/${encodeURIComponent(slug)}/cover-letter/apply`,
+    {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ new_content: newContent }),
+    },
+  );
+  let data: ApplyCoverLetterResult;
+  try {
+    data = (await res.json()) as ApplyCoverLetterResult;
+  } catch {
+    throw new JobsmithApiError(res.statusText || 'Apply failed', res.status);
+  }
+  // 422 = fact-check failure (structured body, not an exception). Any other
+  // non-OK status is a genuine error.
+  if (!res.ok && res.status !== 422) {
+    const detail = (data as unknown as Record<string, unknown>).detail;
+    throw new JobsmithApiError(formatDetail(detail, res.statusText), res.status);
+  }
+  notifyDataChanged(`/api/applications/${slug}/cover-letter`);
+  return data;
+}
+
 /**
  * Redact secrets from any string before it lands in the DOM, clipboard, logs,
  * or any other user-visible surface. Catches:

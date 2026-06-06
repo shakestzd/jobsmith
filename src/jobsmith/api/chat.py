@@ -14,6 +14,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Annotated
@@ -43,6 +44,42 @@ def _project_root() -> Path:
 
 def _review_db_dir() -> Path:
     return _project_root() / "private" / ".review"
+
+
+# ---------------------------------------------------------------------------
+# Proposal extraction
+# ---------------------------------------------------------------------------
+
+# Matches a fenced ```jobsmith-proposal ... ``` block (case-insensitive tag).
+_PROPOSAL_RE = re.compile(
+    r"```jobsmith-proposal\s*\n(?P<body>.*?)\n?```",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def extract_proposal(text: str) -> tuple[str, dict | None]:
+    """Split *text* into (human_readable_text, proposal_dict | None).
+
+    The agent is instructed to append a fenced ``jobsmith-proposal`` block
+    containing JSON when (and only when) it proposes an asset edit.  This
+    helper strips that block out of the visible/persisted text and returns the
+    parsed JSON proposal (or None when absent / unparseable).
+
+    On parse failure the original text is returned unchanged with None so the
+    caller falls back to streaming the raw text.
+    """
+    match = _PROPOSAL_RE.search(text)
+    if match is None:
+        return text, None
+    body = match.group("body").strip()
+    try:
+        proposal = json.loads(body)
+    except (json.JSONDecodeError, TypeError):
+        return text, None  # malformed → fall back to raw text
+    if not isinstance(proposal, dict):
+        return text, None
+    clean = (text[: match.start()] + text[match.end() :]).strip()
+    return clean, proposal
 
 
 # ---------------------------------------------------------------------------
@@ -78,10 +115,16 @@ def get_chat_history(
         finally:
             conn.close()
 
-        messages = [
-            {"role": r["role"], "content": r["text"], "created_at": r["created_at"]}
-            for r in reversed(rows)
-        ]
+        messages = []
+        for r in reversed(rows):
+            content = r["text"]
+            if r["role"] == "assistant":
+                # Strip any persisted jobsmith-proposal block so reloaded
+                # history shows only the human-readable summary, not raw JSON.
+                content, _ = extract_proposal(content)
+            messages.append(
+                {"role": r["role"], "content": content, "created_at": r["created_at"]}
+            )
         session_id: str | None = session_row["session_uuid"] if session_row else None
         return {"messages": messages, "session_id": session_id}
     except Exception:  # noqa: BLE001 — DB may not exist yet; return empty
@@ -138,14 +181,62 @@ async def send_chat_message(body: ChatSendRequest) -> EventSourceResponse:
 
         threading.Thread(target=producer, daemon=True).start()
 
+        # Accumulate the full assistant text so we can extract a trailing
+        # jobsmith-proposal block.  We stream chunks live until the proposal
+        # fence opener appears, then hold back the remainder (the raw JSON
+        # block must never reach the user).  After the stream completes we
+        # parse the buffered block and emit a dedicated ``proposal`` event.
+        proposal_fence = "```jobsmith-proposal"
+        full_text = ""
+        proposal_started = False
+        errored = False
+
         while True:
             item = await q.get()
             if item is None:
                 break
             if "error" in item:
                 yield ServerSentEvent(data=json.dumps({"error": item["error"]}))
+                errored = True
                 break
-            yield ServerSentEvent(data=json.dumps({"chunk": item["chunk"]}))
+
+            chunk = item["chunk"]
+            full_text += chunk
+
+            if proposal_started:
+                # We've already entered the proposal block — buffer silently.
+                continue
+
+            # Detect the fence opener spanning the accumulated text.  Once seen,
+            # stream only the portion of *this chunk* that precedes the fence,
+            # then suppress the rest of the stream.
+            fence_idx = full_text.find(proposal_fence)
+            if fence_idx == -1:
+                yield ServerSentEvent(data=json.dumps({"chunk": chunk}))
+            else:
+                proposal_started = True
+                visible_total = full_text[:fence_idx]
+                already_streamed = len(full_text) - len(chunk)
+                if already_streamed < len(visible_total):
+                    tail = visible_total[already_streamed:]
+                    if tail:
+                        yield ServerSentEvent(data=json.dumps({"chunk": tail}))
+
+        if not errored:
+            clean_text, proposal = extract_proposal(full_text)
+            if proposal is not None:
+                # Normalise/validate minimally before emitting.
+                payload = {
+                    "asset": proposal.get("asset"),
+                    "slug": proposal.get("slug") or slug,
+                    "summary": proposal.get("summary", ""),
+                    "rationale": proposal.get("rationale", ""),
+                    "new_content": proposal.get("new_content", ""),
+                }
+                if payload["new_content"]:
+                    yield ServerSentEvent(
+                        data=json.dumps({"proposal": payload})
+                    )
 
         yield ServerSentEvent(
             data=json.dumps({"done": True, "session_id": backend.session_id})
@@ -181,6 +272,32 @@ def reset_chat_session(body: ChatResetRequest) -> dict:
 # ---------------------------------------------------------------------------
 
 
+# Instructions appended to the slug-scoped system prompt that teach the
+# (read-only) agent how to PROPOSE a cover-letter edit.  The agent never writes
+# files; it emits a structured proposal that the UI renders as a diff and the
+# user explicitly applies.
+_PROPOSAL_INSTRUCTIONS = """\
+## Editing the cover letter (propose-only)
+You CANNOT write files. If and ONLY IF the user asks you to change, edit, \
+rewrite, shorten, or otherwise revise the cover letter, do the following:
+1. First write a short plain-text summary of what you changed and why.
+2. THEN append a single fenced code block tagged `jobsmith-proposal` containing \
+JSON with exactly these keys:
+```jobsmith-proposal
+{{"asset":"cover_letter","slug":"{slug}","summary":"<one-line summary>",\
+"rationale":"<why these changes>","new_content":"<COMPLETE revised cover \
+letter markdown>"}}
+```
+The `new_content` value MUST be the COMPLETE revised cover letter (the full \
+document), not a partial excerpt and not a diff. Only make claims that are \
+supported by the work.yml / cover letter content provided below — do not \
+invent companies, numbers, dates, or metrics, as the proposal is fact-checked \
+before it can be applied.
+For normal questions (anything that is not a request to edit the cover \
+letter), answer normally and do NOT emit a `jobsmith-proposal` block.
+"""
+
+
 def _build_system_prompt(slug: str) -> str | None:
     """Load work.yml and cover letter content for a slug to inject as context."""
     from jobsmith.api.applications import _get_app_dir
@@ -195,23 +312,36 @@ def _build_system_prompt(slug: str) -> str | None:
         with contextlib.suppress(OSError):
             work_content = work_yml.read_text(encoding="utf-8")[:3000]
 
+    # Include the FULL current cover-letter-draft.md so the agent can revise it
+    # accurately (it must output the complete revised draft in new_content).
     cover_content = ""
-    docs_dir = app_dir / "documents"
-    if docs_dir.exists():
-        for suffix in (".md", ".txt"):
-            matches = sorted(
-                (f for f in docs_dir.iterdir() if f.name.lower().startswith("cover") and f.suffix == suffix),
-                key=lambda p: p.name,
-            )
-            if matches:
-                with contextlib.suppress(OSError):
-                    cover_content = matches[0].read_text(encoding="utf-8")[:2000]
-                break
+    cover_draft = app_dir / "cover-letter-draft.md"
+    if cover_draft.exists():
+        with contextlib.suppress(OSError):
+            cover_content = cover_draft.read_text(encoding="utf-8")
+    else:
+        # Fall back to a rendered cover-letter document if no draft exists yet.
+        docs_dir = app_dir / "documents"
+        if docs_dir.exists():
+            for suffix in (".md", ".txt"):
+                matches = sorted(
+                    (
+                        f
+                        for f in docs_dir.iterdir()
+                        if f.name.lower().startswith("cover") and f.suffix == suffix
+                    ),
+                    key=lambda p: p.name,
+                )
+                if matches:
+                    with contextlib.suppress(OSError):
+                        cover_content = matches[0].read_text(encoding="utf-8")
+                    break
 
     return (
         f"Application: {slug}\n\n"
         f"## work.yml\n{work_content}\n\n"
-        f"## Cover Letter\n{cover_content}"
+        f"## Cover Letter (current cover-letter-draft.md)\n{cover_content}\n\n"
+        + _PROPOSAL_INSTRUCTIONS.format(slug=slug)
     )
 
 
