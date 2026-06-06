@@ -1,11 +1,12 @@
 meta:
     id: plan-a58a6ad7
+    track_id: trk-45e7fcd5
     title: Apply-pipeline incremental-reuse / caching layer
     description: ""
     created_at: ""
     status: draft
     schema_version: v3
-    version: 1
+    version: 11
 design:
     problem: |
         Every `jobsmith apply` re-runs the full 3-phase pipeline (gather -> draft ->
@@ -77,6 +78,7 @@ slices:
       complexity: complex
       approved: false
       comment: ""
+      approval_status: approved
       questions:
         - id: q-blob
           text: Store large cached payloads inline as TEXT or offload to files referenced by the index?
@@ -137,6 +139,7 @@ slices:
       complexity: complex
       approved: false
       comment: ""
+      approval_status: approved
       questions:
         - id: q-fuzzy
           text: Fuzzy backend -- sqlite FTS5 or in-process token-set ratio?
@@ -188,6 +191,7 @@ slices:
       complexity: standard
       approved: false
       comment: ""
+      approval_status: approved
       decisions_notes: |
         **Reconcile:** EXTEND research.py's existing file cache (slugify/is_fresh/
         cache_path_for + private/companies/) -- do NOT add a parallel DB table (critic:
@@ -239,6 +243,7 @@ slices:
       complexity: complex
       approved: false
       comment: ""
+      approval_status: approved
       questions:
         - id: q-context
           text: Can a bullet that satisfied a requirement in JD-A be wrong for JD-B even if the tag matches?
@@ -293,6 +298,7 @@ slices:
       complexity: standard
       approved: false
       comment: ""
+      approval_status: approved
       decisions_notes: |
         **Key:** fingerprint = feature-set over normalized requirements + JD text
         (slice-2). **Relationship to llm_cache:** llm_cache keys on EXACT jd_hash; this
@@ -340,6 +346,7 @@ slices:
       complexity: complex
       approved: false
       comment: ""
+      approval_status: approved
       questions:
         - id: q-overlap
           text: How is JD-overlap for the warm-start decision computed?
@@ -393,6 +400,7 @@ slices:
       complexity: complex
       approved: false
       comment: ""
+      approval_status: approved
       questions:
         - id: q-anchor
           text: What if an anchor bullet conflicts with the new JD?
@@ -448,6 +456,7 @@ slices:
       complexity: complex
       approved: false
       comment: ""
+      approval_status: approved
       questions:
         - id: q-retry
           text: How many regenerate-and-re-gate retries before failing the run?
@@ -501,6 +510,7 @@ slices:
       complexity: standard
       approved: false
       comment: ""
+      approval_status: approved
       decisions_notes: |
         **State:** run_metrics table (slice-1) holds per-run counts; report renders
         from it. **Acceptance:** the A/B harness is the hard gate -- it FAILS if
