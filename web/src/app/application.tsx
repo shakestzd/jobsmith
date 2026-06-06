@@ -11,7 +11,8 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { SampleApp, AppPhase, AppStatus, IconName } from '../types';
 import { Icon, Badge, StatusBadge } from './shared';
 import { useApplication } from '../api/hooks';
-import { JobsmithApiError, postApplication, buildEventsUrl, redactSensitive, apiGet, apiPost, apiPut, apiGetBlob, apiGetText, notifyDataChanged } from '../api/client';
+import { JobsmithApiError, postApplication, buildEventsUrl, redactSensitive, apiGet, apiPost, apiPut, apiGetBlob, apiGetText, notifyDataChanged, renderCoverLetterPdf } from '../api/client';
+import type { RenderCoverLetterPdfResult } from '../api/client';
 import type {
   ApplicationDetail as ApiApplicationDetail,
   ApplicationArtifact as ApiApplicationArtifact,
@@ -616,6 +617,7 @@ function ArtifactsTab({ artifacts }: ArtifactsTabProps) {
 
 function DocumentsTab({ slug }: { slug: string }) {
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [clPdfBlobUrl, setClPdfBlobUrl] = useState<string | null>(null);
   const [coverLetter, setCoverLetter] = useState<string | null>(null);
   const [coverLetterName, setCoverLetterName] = useState<string>('cover-letter.md');
   const [loading, setLoading] = useState(true);
@@ -623,23 +625,28 @@ function DocumentsTab({ slug }: { slug: string }) {
 
   useEffect(() => {
     let blobUrl: string | null = null;
+    let clPdfUrl: string | null = null;
     let cancelled = false;
 
     async function load() {
       try {
         const names: string[] = await apiGet<string[]>(`/api/applications/${slug}/documents`).catch((): string[] => []);
         const resumeName = names.includes('resume.pdf') ? 'resume.pdf' : null;
+        const hasCoverPdf = names.includes('cover-letter.pdf');
         const coverName = names.includes('cover-letter.md')
           ? 'cover-letter.md'
           : (names.includes('cover-letter-draft.md') ? 'cover-letter-draft.md' : null);
         setCoverLetterName(coverName ?? 'cover-letter.md');
-        const [pdfBlob, clText] = await Promise.allSettled([
+        const [pdfBlob, clText, clPdfBlob] = await Promise.allSettled([
           resumeName
             ? apiGetBlob(`/api/applications/${slug}/documents/${resumeName}`)
             : Promise.reject(new Error('resume.pdf not found')),
           coverName
             ? apiGetText(`/api/applications/${slug}/documents/${coverName}`)
             : Promise.reject(new Error('cover letter not found')),
+          hasCoverPdf
+            ? apiGetBlob(`/api/applications/${slug}/documents/cover-letter.pdf`)
+            : Promise.reject(new Error('cover-letter.pdf not found')),
         ]);
         if (cancelled) return;
         if (pdfBlob.status === 'fulfilled') {
@@ -649,7 +656,11 @@ function DocumentsTab({ slug }: { slug: string }) {
         if (clText.status === 'fulfilled') {
           setCoverLetter(clText.value);
         }
-        if (pdfBlob.status === 'rejected' && clText.status === 'rejected') {
+        if (clPdfBlob.status === 'fulfilled') {
+          clPdfUrl = URL.createObjectURL(clPdfBlob.value);
+          setClPdfBlobUrl(clPdfUrl);
+        }
+        if (pdfBlob.status === 'rejected' && clText.status === 'rejected' && clPdfBlob.status === 'rejected') {
           setMissing(true);
         }
       } finally {
@@ -661,6 +672,7 @@ function DocumentsTab({ slug }: { slug: string }) {
     return () => {
       cancelled = true;
       if (blobUrl) URL.revokeObjectURL(blobUrl);
+      if (clPdfUrl) URL.revokeObjectURL(clPdfUrl);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
@@ -695,6 +707,20 @@ function DocumentsTab({ slug }: { slug: string }) {
             <iframe
               src={pdfBlobUrl}
               title="resume.pdf"
+              style={{ width: '100%', height: 700, border: 'none', display: 'block', colorScheme: 'light' }}
+            />
+          </div>
+        </div>
+      )}
+      {clPdfBlobUrl && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>
+            cover-letter.pdf
+          </div>
+          <div style={{ background: '#fff' }}>
+            <iframe
+              src={clPdfBlobUrl}
+              title="cover-letter.pdf"
               style={{ width: '100%', height: 700, border: 'none', display: 'block', colorScheme: 'light' }}
             />
           </div>
@@ -741,6 +767,43 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [statusSaving, setStatusSaving] = useState(false);
+
+  // On-demand cover-letter PDF (feat-0e29138c). The PDF is produced only by an
+  // explicit click — no auto-render on apply/save.
+  const [pdfRendering, setPdfRendering] = useState(false);
+  const [pdfResult, setPdfResult] = useState<RenderCoverLetterPdfResult | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  // The generated PDF is fetched as an authenticated blob (mirrors resume.pdf)
+  // so the View-PDF link works in token-auth mode where a bare href cannot
+  // carry the Authorization header.
+  const [clPdfBlobUrl, setClPdfBlobUrl] = useState<string | null>(null);
+
+  // Revoke the cover-letter PDF blob URL on unmount / when it changes.
+  useEffect(() => {
+    return () => {
+      if (clPdfBlobUrl) URL.revokeObjectURL(clPdfBlobUrl);
+    };
+  }, [clPdfBlobUrl]);
+
+  const handleGeneratePdf = async () => {
+    setPdfRendering(true);
+    setPdfError(null);
+    try {
+      const result = await renderCoverLetterPdf(slug);
+      setPdfResult(result);
+      if (result.rendered) {
+        const blob = await apiGetBlob(`/api/applications/${slug}/documents/cover-letter.pdf`);
+        setClPdfBlobUrl(prev => {
+          if (prev) URL.revokeObjectURL(prev);
+          return URL.createObjectURL(blob);
+        });
+      }
+    } catch (err) {
+      setPdfError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPdfRendering(false);
+    }
+  };
 
   // Proposal context — for the full-width diff panel.
   const { pendingProposal, applyProposal, rejectProposal } = useProposal();
@@ -1100,6 +1163,64 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
               <pre style={{ margin: 0, padding: '14px 16px', whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.7, fontFamily: 'var(--font-sans, inherit)' }}>
                 {state?.cover_letter ?? 'no cover letter yet — run phase 3'}
               </pre>
+            )}
+            {/* On-demand PDF generation (feat-0e29138c). Optional last step. */}
+            {!editing && state?.cover_letter && (
+              <div
+                style={{
+                  padding: '10px 14px',
+                  borderTop: '1px solid var(--border)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <button
+                  className="btn sm primary"
+                  onClick={() => { void handleGeneratePdf(); }}
+                  disabled={pdfRendering}
+                  aria-label="Generate a PDF of the cover letter"
+                >
+                  {pdfRendering ? 'Generating…' : 'Generate PDF'}
+                </button>
+                {pdfResult?.rendered && clPdfBlobUrl && (
+                  <a
+                    className="btn sm ghost"
+                    href={clPdfBlobUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Open the generated cover letter PDF in a new tab"
+                  >
+                    View PDF ↗
+                  </a>
+                )}
+                {pdfResult && !pdfResult.rendered && pdfResult.reason === 'quarto_not_available' && (
+                  <span role="status" style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
+                    PDF rendering needs Quarto installed.
+                  </span>
+                )}
+                {pdfResult && !pdfResult.rendered && pdfResult.error && (
+                  <span role="alert" style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>
+                    render failed: {pdfResult.error.slice(0, 200)}
+                  </span>
+                )}
+                {pdfError && (
+                  <span role="alert" style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>
+                    {pdfError}
+                  </span>
+                )}
+              </div>
+            )}
+            {/* Inline preview of the generated cover-letter PDF. */}
+            {pdfResult?.rendered && clPdfBlobUrl && (
+              <div style={{ background: '#fff', borderTop: '1px solid var(--border)' }}>
+                <iframe
+                  src={clPdfBlobUrl}
+                  title="cover-letter.pdf"
+                  style={{ width: '100%', height: 520, border: 'none', display: 'block', colorScheme: 'light' }}
+                />
+              </div>
             )}
           </div>
 

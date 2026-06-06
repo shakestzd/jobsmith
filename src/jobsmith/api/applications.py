@@ -1113,6 +1113,231 @@ def _render_cover_letter(cl_path: Path) -> tuple[str, str | None]:
     return "ok", None
 
 
+_COVER_LETTER_QMD = "cover-letter.qmd"
+_COVER_LETTER_PDF = "cover-letter.pdf"
+
+
+def _load_letter_author(docs_dir: Path) -> dict:
+    """Best-effort contact header for the cover-letter, read from documents/.
+
+    Prefers ``author.yml`` (the resume's authoritative source) and falls back to
+    the app-root ``_variables.yml`` flat ``user.*`` block. Returns a dict with
+    keys: name, position, location, email, phone, github, linkedin. Missing
+    values are empty strings — the template renders only non-empty rows.
+    """
+    import yaml
+
+    name = position = location = email = phone = github = linkedin = ""
+
+    author_yml = docs_dir / "author.yml"
+    if author_yml.is_file():
+        with contextlib.suppress(Exception):
+            data = yaml.safe_load(author_yml.read_text(encoding="utf-8")) or {}
+            author = data.get("author", {}) if isinstance(data, dict) else {}
+            first = str(author.get("firstname", "") or "").strip()
+            last = str(author.get("lastname", "") or "").strip()
+            name = " ".join(p for p in (first, last) if p)
+            position = str(author.get("position", "") or "").strip()
+            for c in author.get("contacts", []) or []:
+                if not isinstance(c, dict):
+                    continue
+                icon = str(c.get("icon", "")).lower()
+                text = str(c.get("text", "") or "").strip()
+                if not text:
+                    continue
+                if "location" in icon and not location:
+                    location = text
+                elif "envelope" in icon and not email:
+                    email = text
+                elif "phone" in icon and not phone:
+                    phone = text
+                elif "github" in icon and not github:
+                    github = text
+                elif "linkedin" in icon and not linkedin:
+                    linkedin = text
+
+    # Fill gaps from _variables.yml (app root, one level above documents/).
+    variables_yml = docs_dir.parent / "_variables.yml"
+    if variables_yml.is_file():
+        with contextlib.suppress(Exception):
+            data = yaml.safe_load(variables_yml.read_text(encoding="utf-8")) or {}
+            user = data.get("user", {}) if isinstance(data, dict) else {}
+            if isinstance(user, dict):
+                name = name or str(user.get("name", "") or "").strip()
+                location = location or str(user.get("location", "") or "").strip()
+                email = email or str(user.get("email", "") or "").strip()
+                phone = phone or str(user.get("phone", "") or "").strip()
+                github = github or str(user.get("github", "") or "").strip()
+                linkedin = linkedin or str(user.get("linkedin", "") or "").strip()
+
+    return {
+        "name": name,
+        "position": position,
+        "location": location,
+        "email": email,
+        "phone": phone,
+        "github": github,
+        "linkedin": linkedin,
+    }
+
+
+def _typst_escape(s: str) -> str:
+    """Escape a plain string for safe insertion inside a Typst string literal."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _build_cover_letter_qmd(body_md: str, author: dict) -> str:
+    """Render a self-contained ``cover-letter.qmd`` (standalone ``format: typst``).
+
+    Chosen over reusing the resume's awesomecv extension because awesomecv is a
+    resume-only format (no letter layout) and reusing its internals risks Typst
+    compile errors. This standalone layout pulls the contact header from
+    author.yml/_variables.yml (passed in *author*) and renders the draft body as
+    markdown paragraphs — guaranteed to compile to a professional letter.
+    """
+    name = _typst_escape(author.get("name", "") or "")
+    position = _typst_escape(author.get("position", "") or "")
+
+    contact_bits: list[str] = []
+    for key in ("location", "email", "phone"):
+        val = author.get(key)
+        if val:
+            contact_bits.append(_typst_escape(val))
+    for key, prefix in (("github", "github.com/"), ("linkedin", "linkedin.com/in/")):
+        val = author.get(key)
+        if val:
+            v = str(val)
+            label = v if v.startswith(("http", prefix)) else f"{prefix}{v}"
+            contact_bits.append(_typst_escape(label))
+    contact_line = "  ·  ".join(contact_bits)
+
+    # Body paragraphs: blank-line-separated blocks become markdown paragraphs.
+    body = body_md.strip()
+
+    # NOTE: text values are placed inside Typst STRING LITERALS (#text(...)["..."])
+    # rather than raw content brackets, because characters like "@" and "." in an
+    # email/url parse as Typst label/reference syntax inside content blocks and
+    # break compilation. String literals are inert.
+    header_typ = (
+        '#align(center)[\n'
+        f'  #text(size: 17pt, weight: "bold")[#"{name}"]\n'
+    )
+    if position:
+        header_typ += f'  #v(2pt)\n  #text(size: 9.5pt, fill: rgb("#555"))[#"{position}"]\n'
+    if contact_line:
+        header_typ += f'  #v(3pt)\n  #text(size: 9pt, fill: rgb("#666"))[#"{contact_line}"]\n'
+    header_typ += ']\n#v(6pt)\n#line(length: 100%, stroke: 0.5pt + rgb("#ccc"))\n#v(12pt)\n'
+
+    return (
+        "---\n"
+        "format:\n"
+        "  typst:\n"
+        "    margin:\n"
+        '      x: 1.6cm\n'
+        '      y: 1.8cm\n'
+        '    fontsize: 11pt\n'
+        "---\n\n"
+        "```{=typst}\n"
+        f"{header_typ}"
+        "```\n\n"
+        f"{body}\n"
+    )
+
+
+def _render_cover_letter_pdf(slug: str) -> dict:
+    """Generate documents/cover-letter.qmd from the current draft and render a PDF.
+
+    On-demand only (feat-0e29138c). Mirrors the resume render: writes the qmd
+    into ``documents/`` (where the ``_extensions`` symlink and author.yml live)
+    and runs ``quarto render cover-letter.qmd`` with cwd = documents/.
+
+    Returns one of:
+      - ``{"rendered": True, "path": "cover-letter.pdf"}``
+      - ``{"rendered": False, "reason": "quarto_not_available"}``
+      - ``{"rendered": False, "error": "<stderr tail>"}``
+    Raises HTTPException(404) when no draft / no documents dir.
+    """
+    db_path = _get_db_path()
+    conn = _open_conn(db_path)
+    try:
+        cl_path = _resolve_cover_letter(slug, conn)
+        docs_dir = _resolve_docs_dir(slug, conn)
+    finally:
+        conn.close()
+
+    if cl_path is None or not cl_path.is_file():
+        raise HTTPException(status_code=404, detail=f"No cover-letter draft for {slug!r}")
+
+    # documents/ may not have render outputs yet (cover-letter-only flow) —
+    # fall back to <app_dir>/documents next to the resolved draft.
+    if docs_dir is None:
+        app_dir = cl_path.parent
+        # draft may live in .apply-state/ — climb to the app root.
+        if app_dir.name == ".apply-state":
+            app_dir = app_dir.parent
+        docs_dir = app_dir / "documents"
+    if not docs_dir.exists():
+        raise HTTPException(status_code=404, detail=f"No documents directory for {slug!r}")
+
+    body_md = cl_path.read_text(encoding="utf-8")
+    if not body_md.strip():
+        raise HTTPException(status_code=404, detail=f"Cover-letter draft for {slug!r} is empty")
+
+    author = _load_letter_author(docs_dir)
+    qmd_text = _build_cover_letter_qmd(body_md, author)
+    qmd_path = docs_dir / _COVER_LETTER_QMD
+    try:
+        qmd_path.write_text(qmd_text, encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Write failed: {exc}") from exc
+
+    quarto = shutil.which("quarto")
+    if quarto is None:
+        logger.info("cover-letter render-pdf: quarto not on PATH — skipped")
+        return {"rendered": False, "reason": "quarto_not_available"}
+
+    try:
+        proc = subprocess.run(
+            [quarto, "render", _COVER_LETTER_QMD, "--to", "typst"],
+            cwd=str(docs_dir),
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("cover-letter render-pdf: quarto render failed: %s", exc)
+        return {"rendered": False, "error": str(exc)}
+
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "").strip()[-600:]
+        logger.warning("cover-letter render-pdf: quarto exit %s: %s", proc.returncode, tail)
+        return {"rendered": False, "error": tail or f"quarto exit {proc.returncode}"}
+
+    pdf_path = docs_dir / _COVER_LETTER_PDF
+    if not pdf_path.is_file():
+        return {"rendered": False, "error": "quarto reported success but no PDF was produced"}
+
+    logger.info("cover-letter render-pdf: wrote %s (%d bytes)", pdf_path, pdf_path.stat().st_size)
+    return {"rendered": True, "path": _COVER_LETTER_PDF}
+
+
+@router.post("/applications/{slug}/cover-letter/render-pdf")
+def render_cover_letter_pdf(slug: str) -> dict:
+    """On-demand: render the current cover-letter draft to documents/cover-letter.pdf.
+
+    Contract (feat-0e29138c):
+    - 404 if no draft / no documents directory / empty draft.
+    - 200 ``{"rendered": true, "path": "cover-letter.pdf"}`` on success.
+    - 200 ``{"rendered": false, "reason": "quarto_not_available"}`` when quarto
+      is not installed (graceful skip, not a 500).
+    - 200 ``{"rendered": false, "error": "<stderr tail>"}`` on a quarto failure.
+
+    Does NOT touch the text-only apply endpoint and performs no auto-render
+    anywhere else — the PDF is produced only by an explicit click.
+    """
+    return _render_cover_letter_pdf(slug)
+
+
 @router.post("/applications/{slug}/cover-letter/apply")
 def apply_cover_letter(slug: str, body: dict) -> dict:
     """Validate + apply a chat-proposed cover-letter revision.

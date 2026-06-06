@@ -388,6 +388,29 @@ export async function applyCoverLetter(
   return data;
 }
 
+/** Result of POST /api/applications/{slug}/cover-letter/render-pdf (feat-0e29138c). */
+export interface RenderCoverLetterPdfResult {
+  rendered: boolean;
+  path?: string;   // "cover-letter.pdf" on success
+  reason?: string; // "quarto_not_available" when quarto isn't installed
+  error?: string;  // quarto stderr tail on a render failure
+}
+
+/**
+ * On-demand: render the current cover-letter draft to a PDF. The cover letter
+ * stays editable text; the PDF is produced ONLY by this explicit call (no
+ * auto-render on apply). Returns a structured result for every non-404 outcome
+ * (success, quarto-missing, render-error) so the caller can message the user.
+ */
+export async function renderCoverLetterPdf(
+  slug: string,
+): Promise<RenderCoverLetterPdfResult> {
+  return apiPost<RenderCoverLetterPdfResult>(
+    `/api/applications/${encodeURIComponent(slug)}/cover-letter/render-pdf`,
+    {},
+  );
+}
+
 /**
  * Redact secrets from any string before it lands in the DOM, clipboard, logs,
  * or any other user-visible surface. Catches:
