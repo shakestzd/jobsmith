@@ -16,6 +16,8 @@ import type {
   ApplicationDetail as ApiApplicationDetail,
   ApplicationArtifact as ApiApplicationArtifact,
 } from '../api/types';
+import { useProposal } from './proposalContext';
+import { lineDiff } from '../utils/diff';
 
 // ── Public prop type ─────────────────────────────────────────────────────────
 
@@ -730,7 +732,7 @@ const REVIEW_STATUS_LABELS: Record<string, { label: string; color: string }> = {
   'needs-revision': { label: 'needs revision',  color: 'var(--warn, #e67e22)' },
 };
 
-function ReviewTab({ slug }: { slug: string }) {
+function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
   const [state, setState] = useState<ReviewState | null>(null);
   const [loading, setLoading] = useState(true);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
@@ -740,10 +742,17 @@ function ReviewTab({ slug }: { slug: string }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [statusSaving, setStatusSaving] = useState(false);
 
+  // Proposal context — for the full-width diff panel.
+  const { pendingProposal, applyProposal, rejectProposal } = useProposal();
+  // Only show the proposal panel when it belongs to this application slug.
+  const activeProposal =
+    pendingProposal?.proposal.slug === slug ? pendingProposal : null;
+
   useEffect(() => {
     let cancelled = false;
     let blobUrl: string | null = null;
     async function load() {
+      setLoading(true);
       try {
         const [reviewData, pdfBlob] = await Promise.allSettled([
           apiGet<ReviewState>(`/api/applications/${slug}/review`),
@@ -767,7 +776,7 @@ function ReviewTab({ slug }: { slug: string }) {
       if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug]);
+  }, [slug, reviewKey]);
 
   const handleEdit = () => {
     setDraft(state?.cover_letter ?? '');
@@ -818,6 +827,184 @@ function ReviewTab({ slug }: { slug: string }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Full-width proposal diff panel */}
+      {activeProposal && (
+        <div
+          className="card"
+          role="region"
+          aria-label="Proposed cover letter revision"
+          style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--accent)' }}
+        >
+          {/* Panel header */}
+          <div style={{
+            padding: '12px 16px',
+            borderBottom: '1px solid var(--border)',
+            background: 'var(--bg-sunk)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: activeProposal.proposal.rationale ? 4 : 0 }}>
+                ✍️ Proposed revision
+                {activeProposal.proposal.summary && (
+                  <span style={{ fontWeight: 400, marginLeft: 8, color: 'var(--fg-muted)' }}>
+                    — {activeProposal.proposal.summary}
+                  </span>
+                )}
+              </div>
+              {activeProposal.proposal.rationale && (
+                <div style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+                  {activeProposal.proposal.rationale}
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
+              <button
+                className="btn primary sm"
+                onClick={() => { void applyProposal(); }}
+                disabled={activeProposal.applying}
+                aria-label="Apply proposed cover letter change"
+              >
+                {activeProposal.applying ? 'Applying…' : 'Apply'}
+              </button>
+              <button
+                className="btn sm ghost"
+                onClick={rejectProposal}
+                disabled={activeProposal.applying}
+                aria-label="Reject proposed cover letter change"
+              >
+                Reject
+              </button>
+            </div>
+          </div>
+
+          {/* Fact-check failure warning */}
+          {activeProposal.failedClaims && (
+            <div
+              role="alert"
+              style={{
+                padding: '10px 16px',
+                background: 'var(--danger-soft)',
+                borderBottom: '1px solid var(--danger)',
+                fontSize: 12.5,
+                color: 'var(--danger)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>
+                ⚠ Fact-check rejected this revision — the following claims could not be verified:
+              </span>
+              <ul style={{ margin: '2px 0 0', paddingLeft: 18 }}>
+                {activeProposal.failedClaims.map((c, k) => (
+                  <li key={k}>{c}</li>
+                ))}
+              </ul>
+              <span style={{ color: 'var(--fg-muted)' }}>Ask the chat to revise it, then apply again.</span>
+            </div>
+          )}
+
+          {/* Side-by-side diff */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 0,
+            maxHeight: 520,
+            overflow: 'hidden',
+          }}>
+            {/* Old (removed lines) */}
+            <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{
+                padding: '6px 12px',
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'var(--fg-muted)',
+                background: 'var(--bg-sunk)',
+                borderBottom: '1px solid var(--border)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+              }}>
+                Before
+              </div>
+              <pre style={{
+                margin: 0,
+                padding: '10px 0',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 12,
+                lineHeight: 1.55,
+                overflowY: 'auto',
+                flex: 1,
+              }}>
+                {lineDiff(
+                  activeProposal.oldContent || (state?.cover_letter ?? ''),
+                  activeProposal.proposal.new_content,
+                ).filter(ln => ln.type !== 'add').map((ln, k) => (
+                  <span
+                    key={k}
+                    style={{
+                      display: 'block',
+                      padding: '0 12px',
+                      background: ln.type === 'del' ? 'var(--danger-soft)' : 'transparent',
+                      color: ln.type === 'del' ? 'var(--danger)' : 'var(--fg-muted)',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {ln.type === 'del' ? '− ' : '  '}{ln.text || ' '}
+                  </span>
+                ))}
+              </pre>
+            </div>
+            {/* New (added lines) */}
+            <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{
+                padding: '6px 12px',
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'var(--fg-muted)',
+                background: 'var(--bg-sunk)',
+                borderBottom: '1px solid var(--border)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+              }}>
+                After
+              </div>
+              <pre style={{
+                margin: 0,
+                padding: '10px 0',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 12,
+                lineHeight: 1.55,
+                overflowY: 'auto',
+                flex: 1,
+              }}>
+                {lineDiff(
+                  activeProposal.oldContent || (state?.cover_letter ?? ''),
+                  activeProposal.proposal.new_content,
+                ).filter(ln => ln.type !== 'del').map((ln, k) => (
+                  <span
+                    key={k}
+                    style={{
+                      display: 'block',
+                      padding: '0 12px',
+                      background: ln.type === 'add' ? 'var(--success-soft)' : 'transparent',
+                      color: ln.type === 'add' ? 'var(--success)' : 'var(--fg-muted)',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {ln.type === 'add' ? '+ ' : '  '}{ln.text || ' '}
+                  </span>
+                ))}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header bar */}
       <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         {fitPct != null && (
@@ -1470,6 +1657,9 @@ function specialistEventStatus(status: string): SpecialistRunStatus {
 export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   const { data: apiDetail, isLoading, error } = useApplication(slug);
 
+  // Proposal context — auto-switch to Review tab + refresh after apply.
+  const { pendingProposal, appliedVersion } = useProposal();
+
   const app = useMemo<SampleApp>(() => fromApi(slug, apiDetail), [slug, apiDetail]);
   const {
     progress: initialProgress,
@@ -1478,6 +1668,8 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   } = deriveProgress(app);
 
   const [tab, setTab] = useState<TabName>('pipeline');
+  // reviewKey is bumped on successful apply so ReviewTab re-fetches.
+  const [reviewKey, setReviewKey] = useState(0);
   const [activePhase, setActivePhase] = useState<number>(initialActivePhase);
   const [running, setRunning] = useState<boolean>(app.status === 'running');
   const [progress, setProgress] = useState<ProgressMap>(initialProgress);
@@ -1541,6 +1733,21 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     setSpecialistStatuses(fromArtifacts);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiDetail]);
+
+  // Auto-switch to the Review tab when a proposal arrives for this slug.
+  useEffect(() => {
+    if (pendingProposal?.proposal.slug === slug && tab !== 'review') {
+      setTab('review');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingProposal, slug]);
+
+  // Bump reviewKey after a successful apply so ReviewTab re-fetches.
+  useEffect(() => {
+    if (appliedVersion > 0) {
+      setReviewKey((k) => k + 1);
+    }
+  }, [appliedVersion]);
 
   // ── Subscribe to SSE stream ──────────────────────────────────────────
   const subscribeToEvents = useCallback((targetSlug: string) => {
@@ -2047,7 +2254,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
       </div>
 
       {tab === 'pipeline' && <PipelineTab events={events} running={running} phase={activePhase} progress={progress} sseStatus={sseStatus} failedPhaseNum={failedPhaseNum} specialistStatuses={specialistStatuses} />}
-      {tab === 'review' && <ReviewTab slug={slug} />}
+      {tab === 'review' && <ReviewTab slug={slug} reviewKey={reviewKey} />}
       {tab === 'documents' && <DocumentsTab slug={slug} />}
       {tab === 'artifacts' && <ArtifactsTab artifacts={apiDetail?.artifacts ?? []} />}
       {tab === 'factcheck' && <FactCheckTab artifacts={apiDetail?.artifacts ?? []} />}

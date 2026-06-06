@@ -12,10 +12,9 @@ import {
   authHeaders,
   chatHistory,
   chatResetSession,
-  getCoverLetterDraft,
-  applyCoverLetter,
 } from '../api/client';
 import type { ChatMessage, ChatProposal } from '../api/client';
+import { useProposal } from './proposalContext';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,60 +24,6 @@ interface ErrorState {
   message: string;   // friendly message shown prominently
   detail: string;    // raw/technical detail shown subtly
   lastUserMsg: string; // for retry
-}
-
-// A pending asset-edit proposal awaiting user Apply/Reject. `oldContent` is the
-// current on-disk draft (the OLD side of the diff); `proposal.new_content` is
-// the NEW side.
-interface PendingProposal {
-  proposal: ChatProposal;
-  oldContent: string;       // current cover-letter-draft.md (may be '' if unfetched)
-  applying: boolean;
-  failedClaims: string[] | null; // populated when a 422 fact-check rejects apply
-}
-
-// ---------------------------------------------------------------------------
-// Minimal line-level diff (no external dep; LCS-based)
-// ---------------------------------------------------------------------------
-
-type DiffLine = { type: 'add' | 'del' | 'ctx'; text: string };
-
-function lineDiff(oldText: string, newText: string): DiffLine[] {
-  const a = oldText.split('\n');
-  const b = newText.split('\n');
-  const n = a.length;
-  const m = b.length;
-  // LCS dynamic-programming table.
-  const lcs: number[][] = Array.from({ length: n + 1 }, () =>
-    new Array<number>(m + 1).fill(0),
-  );
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      lcs[i][j] =
-        a[i] === b[j]
-          ? lcs[i + 1][j + 1] + 1
-          : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
-    }
-  }
-  const out: DiffLine[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (a[i] === b[j]) {
-      out.push({ type: 'ctx', text: a[i] });
-      i++;
-      j++;
-    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
-      out.push({ type: 'del', text: a[i] });
-      i++;
-    } else {
-      out.push({ type: 'add', text: b[j] });
-      j++;
-    }
-  }
-  while (i < n) out.push({ type: 'del', text: a[i++] });
-  while (j < m) out.push({ type: 'add', text: b[j++] });
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +223,14 @@ export interface ChatPanelProps {
 export function ChatPanel({ slug, open, width, onClose, onScopeChange, onResizeStart }: ChatPanelProps) {
   const effectiveSlug = slug ?? '__global__';
 
+  // Proposal state is shared with ReviewTab via context.
+  const {
+    pendingProposal,
+    receiveProposal,
+    rejectProposal: handleRejectProposal,
+    setOnApplied,
+  } = useProposal();
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -285,9 +238,6 @@ export function ChatPanel({ slug, open, width, onClose, onScopeChange, onResizeS
   const [loadingFirst, setLoadingFirst] = useState(false); // waiting for first chunk
   const [error, setError] = useState<ErrorState | null>(null);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
-  // The single pending proposal card (attached to the most recent assistant
-  // turn). Slice 1 supports one at a time.
-  const [pendingProposal, setPendingProposal] = useState<PendingProposal | null>(null);
 
   // Global scope (no slug) cannot apply proposals — apply needs a slug.
   const isGlobal = slug === null;
@@ -300,7 +250,6 @@ export function ChatPanel({ slug, open, width, onClose, onScopeChange, onResizeS
   useEffect(() => {
     if (!open) return;
     setError(null);
-    setPendingProposal(null);
     chatHistory(effectiveSlug)
       .then((msgs) => setMessages(msgs))
       .catch(() => setMessages([]));
@@ -390,28 +339,9 @@ export function ChatPanel({ slug, open, width, onClose, onScopeChange, onResizeS
                 setStreamingContent(accumulated);
               }
               if (parsed.proposal) {
-                // Stash the proposal; fetch the current draft (OLD side of the
-                // diff) lazily. Only meaningful in slug scope.
-                const prop = parsed.proposal;
-                setPendingProposal({
-                  proposal: prop,
-                  oldContent: '',
-                  applying: false,
-                  failedClaims: null,
-                });
-                if (!isGlobal) {
-                  void getCoverLetterDraft(effectiveSlug)
-                    .then((old) =>
-                      setPendingProposal((cur) =>
-                        cur && cur.proposal === prop
-                          ? { ...cur, oldContent: old }
-                          : cur,
-                      ),
-                    )
-                    .catch(() => {
-                      /* leave oldContent empty — diff still shows additions */
-                    });
-                }
+                // Delegate to context — fetches OLD content lazily and stores
+                // the proposal so ReviewTab can render the full diff.
+                receiveProposal(parsed.proposal);
               }
               if (parsed.done) {
                 // Finalise: push full assistant message.
@@ -518,42 +448,14 @@ export function ChatPanel({ slug, open, width, onClose, onScopeChange, onResizeS
     ]);
   }
 
-  async function handleApplyProposal() {
-    if (!pendingProposal || pendingProposal.applying) return;
-    if (isGlobal) return; // apply needs a slug; guarded in UI too
-    const { proposal } = pendingProposal;
-    setPendingProposal((cur) => (cur ? { ...cur, applying: true, failedClaims: null } : cur));
-    try {
-      const result = await applyCoverLetter(effectiveSlug, proposal.new_content);
-      if (result.applied) {
-        const renderNote =
-          result.render && result.render !== 'ok'
-            ? ` (render: ${result.render})`
-            : '';
-        pushAssistantNote(`✓ Applied — cover letter updated${renderNote}.`);
-        setPendingProposal(null);
-      } else {
-        // 422 fact-check failure — keep the card so the user can ask for a fix.
-        setPendingProposal((cur) =>
-          cur
-            ? { ...cur, applying: false, failedClaims: result.failed_claims ?? [] }
-            : cur,
-        );
-      }
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : 'Unknown error';
-      setPendingProposal((cur) => (cur ? { ...cur, applying: false } : cur));
-      setError({
-        message: 'Could not apply the proposed change.',
-        detail,
-        lastUserMsg: '',
-      });
-    }
-  }
-
-  function handleRejectProposal() {
-    setPendingProposal(null);
-  }
+  // Register this chat's pushAssistantNote as the callback for post-apply notes.
+  // This runs whenever the chat is mounted/unmounted so ReviewTab can inject a
+  // confirmation message into the chat thread after a successful apply.
+  useEffect(() => {
+    setOnApplied(pushAssistantNote);
+    return () => setOnApplied(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setOnApplied]);
 
   function handleCopy(text: string, idx: number) {
     void navigator.clipboard.writeText(text).then(() => {
@@ -931,96 +833,35 @@ export function ChatPanel({ slug, open, width, onClose, onScopeChange, onResizeS
           text-align: center;
           padding: 20px;
         }
-        /* Proposal / diff card */
-        .chat-proposal-card {
+        /* Compact proposal pointer chip (full diff lives in Review tab) */
+        .chat-proposal-chip {
           align-self: stretch;
-          border: 1px solid var(--accent);
-          border-radius: var(--radius-lg, 10px);
-          background: var(--bg-elev);
-          overflow: hidden;
-          display: flex;
-          flex-direction: column;
-        }
-        .chat-proposal-head {
           display: flex;
           align-items: center;
-          gap: 6px;
-          padding: 8px 11px;
-          background: var(--bg-sunk);
-          border-bottom: 1px solid var(--border);
+          gap: 8px;
+          padding: 9px 12px;
+          background: var(--bg-elev);
+          border: 1px solid var(--accent);
+          border-radius: var(--radius-lg, 10px);
           font-size: 12px;
-          font-weight: 600;
           color: var(--fg);
         }
-        .chat-proposal-body { padding: 9px 11px; display: flex; flex-direction: column; gap: 6px; }
-        .chat-proposal-summary { font-size: 12.5px; color: var(--fg); }
-        .chat-proposal-rationale { font-size: 11.5px; color: var(--fg-muted); }
-        .chat-diff {
-          font-family: var(--font-mono);
-          font-size: 11px;
-          line-height: 1.5;
-          background: var(--bg-code);
-          border: 1px solid var(--border);
-          border-radius: var(--radius, 6px);
-          max-height: 260px;
-          overflow: auto;
-          margin: 2px 0;
-        }
-        .chat-diff-line { display: block; padding: 0 8px; white-space: pre-wrap; word-break: break-word; }
-        .chat-diff-line.add { background: var(--success-soft, rgba(46,160,67,0.15)); color: var(--success, #2ea043); }
-        .chat-diff-line.del { background: var(--danger-soft); color: var(--danger); }
-        .chat-diff-line.ctx { color: var(--fg-muted); }
-        .chat-diff-line.add::before { content: '+ '; }
-        .chat-diff-line.del::before { content: '- '; }
-        .chat-diff-line.ctx::before { content: '  '; }
-        .chat-proposal-warning {
-          display: flex;
-          flex-direction: column;
-          gap: 3px;
-          padding: 8px 10px;
-          background: var(--danger-soft);
-          border: 1px solid var(--danger);
-          border-radius: var(--radius, 6px);
-          font-size: 11.5px;
-          color: var(--danger);
-        }
-        .chat-proposal-warning ul { margin: 2px 0 0; padding-left: 16px; }
-        .chat-proposal-actions {
-          display: flex;
-          gap: 8px;
-          padding: 9px 11px;
-          border-top: 1px solid var(--border);
-        }
-        .chat-proposal-apply {
-          background: var(--accent);
-          color: var(--accent-fg, white);
-          border: none;
-          border-radius: var(--radius, 6px);
-          padding: 5px 14px;
-          font-size: 12px;
-          font-weight: 600;
-          cursor: pointer;
-          font-family: var(--font-sans);
-        }
-        .chat-proposal-apply:hover { filter: brightness(1.08); }
-        .chat-proposal-apply:disabled { opacity: 0.5; cursor: not-allowed; }
-        .chat-proposal-reject {
+        .chat-proposal-chip-icon { flex-shrink: 0; font-size: 14px; line-height: 1; }
+        .chat-proposal-chip-text { flex: 1; line-height: 1.4; color: var(--fg-muted); }
+        .chat-proposal-chip-text strong { color: var(--fg); font-weight: 600; }
+        .chat-proposal-chip-view {
+          flex-shrink: 0;
           background: none;
-          color: var(--fg-muted);
           border: 1px solid var(--border);
-          border-radius: var(--radius, 6px);
-          padding: 5px 14px;
-          font-size: 12px;
+          border-radius: var(--radius-sm, 4px);
+          padding: 3px 9px;
+          font-size: 11px;
+          color: var(--fg-muted);
           cursor: pointer;
           font-family: var(--font-sans);
+          transition: background 80ms, color 80ms;
         }
-        .chat-proposal-reject:hover { background: var(--bg-sunk); color: var(--fg); }
-        .chat-proposal-note {
-          padding: 9px 11px;
-          font-size: 11.5px;
-          color: var(--fg-muted);
-          font-style: italic;
-        }
+        .chat-proposal-chip-view:hover { background: var(--bg-sunk); color: var(--fg); border-color: var(--border-strong); }
         /* Scope header bar */
         .chat-scope-bar {
           display: flex;
@@ -1172,77 +1013,23 @@ export function ChatPanel({ slug, open, width, onClose, onScopeChange, onResizeS
             )
           )}
 
-          {/* Proposal / diff card */}
+          {/* Compact proposal pointer chip — full diff + Apply/Reject lives in the Review tab */}
           {pendingProposal && (
-            <div className="chat-proposal-card" role="region" aria-label="Proposed cover letter change">
-              <div className="chat-proposal-head">
-                <Icon name="msg" size={13} />
-                Proposed cover-letter revision
-              </div>
-              <div className="chat-proposal-body">
-                {pendingProposal.proposal.summary && (
-                  <div className="chat-proposal-summary">
-                    {pendingProposal.proposal.summary}
-                  </div>
-                )}
-                {pendingProposal.proposal.rationale && (
-                  <div className="chat-proposal-rationale">
-                    {pendingProposal.proposal.rationale}
-                  </div>
-                )}
-
-                {isGlobal ? (
-                  <div className="chat-proposal-note">
-                    This is a proposal for an application cover letter. Open the
-                    application (scope this chat to a slug) to review and apply it.
-                  </div>
-                ) : (
-                  <div className="chat-diff" aria-label="Diff of old vs new cover letter">
-                    {lineDiff(
-                      pendingProposal.oldContent,
-                      pendingProposal.proposal.new_content,
-                    ).map((ln, k) => (
-                      <span key={k} className={`chat-diff-line ${ln.type}`}>
-                        {ln.text || ' '}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {pendingProposal.failedClaims && (
-                  <div className="chat-proposal-warning" role="alert">
-                    <span>
-                      ⚠ Fact-check rejected this revision — the following claims
-                      could not be verified against your master content:
-                    </span>
-                    <ul>
-                      {pendingProposal.failedClaims.map((c, k) => (
-                        <li key={k}>{c}</li>
-                      ))}
-                    </ul>
-                    <span>Ask the chat to revise it, then apply again.</span>
-                  </div>
-                )}
-              </div>
+            <div className="chat-proposal-chip" role="status" aria-label="Cover letter revision pending review">
+              <span className="chat-proposal-chip-icon">✍️</span>
+              <span className="chat-proposal-chip-text">
+                Proposed a cover-letter revision — review &amp; apply in the{' '}
+                <strong>Review tab</strong>.
+              </span>
               {!isGlobal && (
-                <div className="chat-proposal-actions">
-                  <button
-                    className="chat-proposal-apply"
-                    onClick={() => void handleApplyProposal()}
-                    disabled={pendingProposal.applying}
-                    aria-label="Apply proposed cover letter change"
-                  >
-                    {pendingProposal.applying ? 'Applying…' : 'Apply'}
-                  </button>
-                  <button
-                    className="chat-proposal-reject"
-                    onClick={handleRejectProposal}
-                    disabled={pendingProposal.applying}
-                    aria-label="Reject proposed cover letter change"
-                  >
-                    Reject
-                  </button>
-                </div>
+                <button
+                  className="chat-proposal-chip-view"
+                  aria-label="View cover letter proposal in Review tab"
+                  onClick={handleRejectProposal}
+                  title="Dismiss this pointer (the proposal is in the Review tab)"
+                >
+                  dismiss
+                </button>
               )}
             </div>
           )}

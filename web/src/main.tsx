@@ -13,6 +13,7 @@ import { MasterContent, MarkAnchorsView } from './app/master';
 import { SiteView, FeedbackView, DoctorView, ConfigView } from './app/views';
 import { OnboardWizard } from './app/onboard';
 import { ChatPanel } from './app/chat';
+import { ProposalProvider } from './app/proposalContext';
 
 const TWEAK_DEFAULTS: TweakValues = {
   theme: 'light',
@@ -239,6 +240,8 @@ function App() {
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ProposalProvider>
+      <App />
+    </ProposalProvider>
   </React.StrictMode>,
 );
