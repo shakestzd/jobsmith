@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Reuse layer inactive end-to-end &#43; backstop bypass (roborev findings)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="bug-6204cdad"
+             data-type="bug"
+             data-status="todo"
+             data-priority="medium"
+             data-created="2026-06-06T16:22:53.912003"
+             data-updated="2026-06-06T16:22:53.927882" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.20">
+
+        <header>
+            <h1>Reuse layer inactive end-to-end &#43; backstop bypass (roborev findings)</h1>
+            <div class="metadata">
+                <span class="badge status-todo">Todo</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-45e7fcd5.html" data-relationship="part_of" data-since="2026-06-06T16:22:53.927654">trk-45e7fcd5</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>roborev branch review of trk-45e7fcd5 found 5 findings (3 High, 2 Medium): (1) pipeline.py:416 _run_backstop_gate swallows BackstopError so ungated output ships; (2) _cli_apply.py:387 planner called with empty inputs + decisions ignored; (3) _cli_apply.py:812 post-phase ingest never persists fingerprints/canonical_requirements/requirement_evidence_map; (4) _cli_reuse.py:99 wrong master-YAML shape; (5) apply-bullet-selector.md:145 inconsistent requirement-hash contract.</p>
+        </section>
+    </article>
+</body>
+</html>
