@@ -218,6 +218,7 @@ def test_iter_records_to_db(minimal_repo, mock_plugin_dir, pipeline_db, tmp_path
         patch("jobsmith.apply.get_plugin_dir", return_value=mock_plugin_dir),
         patch("jobsmith.apply._build_paths", return_value={}),
         patch("jobsmith.apply._reconcile_canonical_slug", return_value=(slug, False)),
+        patch("jobsmith.core.pipeline.reconcile_canonical_slug", return_value=(slug, False)),
         patch("jobsmith.apply._run_step45_orchestration", return_value=0),
         patch("jobsmith.apply.ensure_bootstrap"),
     ):
@@ -405,8 +406,13 @@ def test_slug_changed_event_emitted(minimal_repo, mock_plugin_dir):
             "jobsmith.apply._reconcile_canonical_slug",
             return_value=(canonical_slug, True),
         ),
+        patch(
+            "jobsmith.core.pipeline.reconcile_canonical_slug",
+            return_value=(canonical_slug, True),
+        ),
         patch("jobsmith.apply._run_step45_orchestration", return_value=0),
         patch("jobsmith.apply._record_url_mapping"),
+        patch("jobsmith.core.pipeline.record_url_mapping"),
         patch("jobsmith.apply.ensure_bootstrap"),
     ):
         for event in run_phase_iter(
@@ -453,8 +459,8 @@ def test_guard_failed_event_or_exception(minimal_repo, mock_plugin_dir):
         patch("jobsmith.apply.get_plugin_dir", return_value=mock_plugin_dir),
         patch("jobsmith.apply._build_paths", return_value={}),
         patch("jobsmith.apply._reconcile_canonical_slug", return_value=(slug, False)),
-        # Guard returns non-zero (failure)
-        patch("jobsmith.apply._run_step45_orchestration", return_value=2),
+        patch("jobsmith.core.pipeline.reconcile_canonical_slug", return_value=(slug, False)),
+        patch("jobsmith.apply._run_step45_orchestration", return_value=0),
         patch("jobsmith.apply.ensure_bootstrap"),
     ):
         try:
@@ -463,6 +469,8 @@ def test_guard_failed_event_or_exception(minimal_repo, mock_plugin_dir):
                 cwd=minimal_repo,
                 skip_confirm=True,
                 force=True,
+                # Injected anchor guard returns non-zero → triggers guard_failed event
+                anchor_guard=lambda s, c: 2,
             ):
                 if event.kind == "guard_failed":
                     guard_failed_events.append(event)
