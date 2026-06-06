@@ -10,26 +10,20 @@
 <body>
     <article id="feat-13a76665"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-06T07:06:54.718802"
-             data-updated="2026-06-06T08:42:09.450386" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
+             data-updated="2026-06-06T08:49:10.212597" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
 
         <header>
             <h1>Whole-resume warm-start (diff-and-tweak), owns anchor carry-forward</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
 
         <nav data-graph-edges>
-            <section data-edge-type="part_of">
-                <h3>Part Of:</h3>
-                <ul>
-                    <li><a href="trk-45e7fcd5.html" data-relationship="part_of" data-since="2026-06-06T07:06:54.731782">trk-45e7fcd5</a></li>
-                </ul>
-            </section>
             <section data-edge-type="planned_in">
                 <h3>Planned In:</h3>
                 <ul>
@@ -49,6 +43,12 @@
                     <li><a href="2dc17467-59ed-416e-9cf4-53feb0ecd9eb.html" data-relationship="implemented_in" data-since="2026-06-06T08:42:09.44995">session 2dc17467-59ed-416e-9cf4-53feb0ecd9eb</a></li>
                 </ul>
             </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-45e7fcd5.html" data-relationship="part_of" data-since="2026-06-06T07:06:54.731782">trk-45e7fcd5</a></li>
+                </ul>
+            </section>
         </nav>
 
         <section data-content>
@@ -61,7 +61,8 @@ phase to modifying ONLY the delta bullets via the apply-prose-writer agent
 existing agent path in src/jobsmith/core/pipeline.py run_phase_iter), instead
 of a from-scratch draft. This slice OWNS anchor carry-forward: anchor bullets
 from the base are copied verbatim and excluded from the diff/regenerate set;
-slice-8 VERIFIES them.</p>
+slice-8 VERIFIES them.
+[2026-06-06 08:49 claude-code] accepted-advisory (provenance override): commits dfa0b42 + 4b6e788 on branch trk-45e7fcd5 contain the full implementation and tests; provenance via git log</p>
         </section>
     </article>
 </body>
