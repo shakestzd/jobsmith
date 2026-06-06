@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Whole-resume warm-start (diff-and-tweak), owns anchor carry-forward</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-13a76665"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-06T07:06:54.718802"
+             data-updated="2026-06-06T08:42:09.450386" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
+
+        <header>
+            <h1>Whole-resume warm-start (diff-and-tweak), owns anchor carry-forward</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-45e7fcd5.html" data-relationship="part_of" data-since="2026-06-06T07:06:54.731782">trk-45e7fcd5</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-a58a6ad7.html" data-relationship="planned_in" data-since="2026-06-06T07:06:54.74639">plan-a58a6ad7</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-6623ee3b.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:54.757488">feat-6623ee3b</a></li>
+                    <li><a href="feat-08e32ed5.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:54.765363">feat-08e32ed5</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="2dc17467-59ed-416e-9cf4-53feb0ecd9eb.html" data-relationship="implemented_in" data-since="2026-06-06T08:42:09.44995">session 2dc17467-59ed-416e-9cf4-53feb0ecd9eb</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>When the planner selects warm-start, load the nearest prior resume + its
+bullet-selection as a base, compute the requirement delta (what the new JD
+needs that the base does not already satisfy), and short-circuit the draft
+phase to modifying ONLY the delta bullets via the apply-prose-writer agent
+(src/jobsmith/plugin/agents/apply-prose-writer.md, dispatched through the
+existing agent path in src/jobsmith/core/pipeline.py run_phase_iter), instead
+of a from-scratch draft. This slice OWNS anchor carry-forward: anchor bullets
+from the base are copied verbatim and excluded from the diff/regenerate set;
+slice-8 VERIFIES them.</p>
+        </section>
+    </article>
+</body>
+</html>
