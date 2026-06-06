@@ -62,10 +62,34 @@ When in doubt, KEEP the anchor. Re-rank it lower if the JD doesn't reward it, bu
 
 ## Steps
 
+0. **Consult the reuse map BEFORE doing selection work (skip work already done).**
+
+   For each requirement in `jd_parsed.must_haves` and `jd_parsed.nice_to_haves`, check
+   whether a previously selected bullet is still valid:
+
+   ```bash
+   jobsmith reuse lookup-bullet \
+     --requirement-raw "<requirement text>" \
+     --slug {slug}
+   ```
+
+   The command exits 0 and prints `{"master_bullet_id": "<id>", "reused": true}` when a
+   fresh mapping exists (bullet text unchanged since last selection).
+   It exits 0 and prints `{"master_bullet_id": null, "reused": false}` when: no prior
+   mapping, prior bullet was edited (hash mismatch → invalidated), or the requirement is new.
+
+   **Reuse rule:**
+   - If `reused: true` — place that bullet in the corresponding position without re-selecting.
+     Mark its entry in `bullet-selection.json` with `"reuse_source": "evidence_map"`.
+   - If `reused: false` — proceed with normal selection (steps 1-9 below) for that requirement.
+
+   This step is a fast DB read; it does not invoke the LLM.  Do it unconditionally at the
+   start of every run so warm-start calls skip as much selection work as possible.
+
 1. Fetch master `work` from the DB via `Bash("jobsmith db dump-master --section work")`. Identify all anchor bullets. Record their IDs/text in your working notes.
 2. Read `jd-parsed.json` (top_keywords, must_haves, nice_to_haves) and `fit-score.json` (matched_evidence, concerns).
 3. Read `gap-resolutions.md` if it exists — the user's answers from a prior inquiry cycle constrain selection.
-4. For each position in master work.yml, build a selection:
+4. For each position in master work.yml, build a selection (skipping requirements already resolved in step 0):
    - Max 3 positions for single-page fit.
    - Max 3 bullets per position; 2 for the oldest. Match INGU template density.
    - Every retained bullet must contain a metric ($, %, count, time).
@@ -116,6 +140,11 @@ When in doubt, KEEP the anchor. Re-rank it lower if the JD doesn't reward it, bu
 ## Outputs
 
 Write `.apply-state/bullet-selection.json` per the contract schema (positions, anchor lists, kept/dropped/rewritten per bullet, **restoration_queue**).
+
+Each bullet entry in `positions[].bullets[]` MUST carry two reuse fields (set regardless of whether reuse fired — this populates the map for FUTURE runs):
+- `"matched_requirement_hash"`: the `content_hash` of the canonical requirement this bullet covers (from `jd_parsed.must_haves[n].content_hash` or the equivalent from `jobsmith reuse lookup-bullet`). Set to `null` if no requirement maps to this bullet.
+- `"reuse_source"`: `"evidence_map"` when reused from the map (step 0), `"selection"` when freshly selected.
+
 Write `.apply-state/bullet-diff.md` (anchor guard does this; you ensure it's complete).
 Write `.apply-state/bullet-decisions.json` — `{bullet_id: reason}` for every dropped anchor.
 Write `private/applications/{slug}/documents/work.yml`, `skill.yml`, `education.yml`, `author.yml`.

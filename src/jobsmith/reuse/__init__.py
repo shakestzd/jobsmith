@@ -18,6 +18,9 @@ Public API (used by slices 2-9):
   match.match                — tiered matcher (exact_tag → phrase → fuzzy)
   match.MatchResult          — typed result for slice-4 and slice-5 consumers
 
+  evidence_map.populate_from_bullet_selection — write req→bullet mapping rows
+  evidence_map.lookup_mapped_bullet           — read fresh bullet for a requirement
+
   company_cache.normalize_company_key  — strip legal suffixes, produce stable slug
   company_cache.check_cache            — cache hit/miss with normalized key + TTL
   company_cache.write_cache            — write research to normalized cache path
@@ -33,6 +36,7 @@ from jobsmith.reuse.company_cache import (
     record_company_research_metric,
     write_cache,
 )
+from jobsmith.reuse.evidence_map import lookup_mapped_bullet, populate_from_bullet_selection
 from jobsmith.reuse.match import MatchResult, match
 from jobsmith.reuse.store import (
     content_hash,
@@ -60,8 +64,10 @@ __all__ = [
     "get_run_metrics",
     "is_fresh",
     "load_taxonomy",
+    "lookup_mapped_bullet",
     "match",
     "normalize_company_key",
+    "populate_from_bullet_selection",
     "record_company_research_metric",
     "resolve_tag",
     "upsert_application_fingerprint",
