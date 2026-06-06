@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Reuse store: migration 009 &#43; hash/TTL &#43; config surface</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-4dfd1a0b"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-06T07:06:42.018504"
+             data-updated="2026-06-06T07:13:23.660116" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
+
+        <header>
+            <h1>Reuse store: migration 009 &#43; hash/TTL &#43; config surface</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-45e7fcd5.html" data-relationship="part_of" data-since="2026-06-06T07:06:42.050113">trk-45e7fcd5</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-a58a6ad7.html" data-relationship="planned_in" data-since="2026-06-06T07:06:42.483292">plan-a58a6ad7</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="2dc17467-59ed-416e-9cf4-53feb0ecd9eb.html" data-relationship="implemented_in" data-since="2026-06-06T07:13:23.658642">session 2dc17467-59ed-416e-9cf4-53feb0ecd9eb</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Add reuse tables to the pipeline DB (private/jobsmith.db) via a new migration
+src/jobsmith/migrations/009_reuse_store.sql registered in _PIPELINE_MIGRATIONS
+(src/jobsmith/db.py:50-58): canonical_requirements, requirement_evidence_map,
+application_fingerprints, and run_metrics. (Company research reuses the
+existing file cache -- see slice-3 -- so NO company table here.) Add a
+reuse-store module (src/jobsmith/reuse/store.py) with typed read/write helpers
+and two freshness primitives: content_hash(inputs) (stable SHA over normalized
+input bytes) and is_fresh(row, ttl). Add a config surface
+(src/jobsmith/config.py or existing settings module) that owns ALL reuse
+knobs with documented defaults: fuzzy cutoff, JD-overlap warm-start threshold,
+dedup threshold, company TTL, and the regen retry bound. This is the
+foundation every later slice keys off and the home for all tunables.</p>
+        </section>
+    </article>
+</body>
+</html>
