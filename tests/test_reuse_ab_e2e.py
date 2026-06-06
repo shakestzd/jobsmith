@@ -78,8 +78,12 @@ PHASES = [
     "render",
 ]
 
-# In the reuse arm, these phases are skipped (their artifacts are reused or warm-started)
-REUSE_SKIP_PHASES = {"jd-parse", "fit-score", "draft"}
+# In the reuse arm, these phases are skipped — their artifacts are replayed from
+# the prior app (no model call).  NOTE: "draft" is deliberately NOT skipped: a
+# warm-started draft still makes a model call, just with a warm-start suffix
+# appended.  Counting draft as eliminated would overstate the savings and never
+# exercise _build_warmstart_prompt_suffix_safe.
+REUSE_SKIP_PHASES = {"jd-parse", "fit-score"}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -408,13 +412,15 @@ def _run_phases_with_wiring(
     apps_dir: Path,
     tmp_path: Path,
     skip_phases: set[str],
-) -> dict[str, str]:
+) -> tuple[dict[str, str], bool]:
     """Run a stub phase loop exercising the real wiring functions.
 
     - Calls ``_replay_gather_specialist_artifacts`` before the loop.
-    - Calls ``_build_warmstart_prompt_suffix_safe`` for the draft phase.
+    - Calls ``_build_warmstart_prompt_suffix_safe`` for the draft phase (which
+      still makes a model call — warm-start appends a suffix, it does not skip).
     - Skips phases listed in *skip_phases* (simulates reuse elision).
-    - Returns gate verdicts (deterministic stubs).
+    - Returns ``(gate verdicts, warmstart_fired)`` where *warmstart_fired* is
+      True iff the draft phase actually appended a non-empty warm-start suffix.
     """
     def fake_apply_state_dir(s: str, cwd: Path) -> Path:
         return apps_dir / s / ".apply-state"
@@ -428,12 +434,15 @@ def _run_phases_with_wiring(
             apply_state_dir_fn=fake_apply_state_dir,
         )
 
+    warmstart_fired = False
     for phase in phases:
         if phase in skip_phases:
-            # Reused phase — no model call
+            # Reused phase — artifact replayed, no model call
             continue
 
-        # Real wiring function #2: warm-start suffix for draft
+        # Real wiring function #2: warm-start suffix for draft.  The draft phase
+        # is NOT skipped — it still makes a model call, but with the suffix
+        # appended when the plan warm-starts it.
         if phase == "draft":
             with patch(
                 "jobsmith.core.pipeline._build_warmstart_prompt_suffix",
@@ -442,10 +451,9 @@ def _run_phases_with_wiring(
                 suffix = _build_warmstart_prompt_suffix_safe(
                     reuse_plan, slug=slug, resolved_cwd=tmp_path
                 )
-            # suffix would be appended to prompt_text in real pipeline;
-            # here we just verify it's non-empty when warm-start fires
+            # suffix would be appended to prompt_text in the real pipeline.
             if reuse_plan.draft.decision == "warm-start" and suffix:
-                metrics.increment_model_calls(0)  # model call still happens, but with suffix
+                warmstart_fired = True
 
         counter.call()
         metrics.increment_model_calls(1)
@@ -454,7 +462,7 @@ def _run_phases_with_wiring(
     source = "reused" if skip_phases else "generated"
     metrics.record_candidate(slug, source)
 
-    return {"resume": "pass", "cover_letter": "pass"}
+    return {"resume": "pass", "cover_letter": "pass"}, warmstart_fired
 
 
 class TestReuseABWiringE2E:
@@ -462,15 +470,17 @@ class TestReuseABWiringE2E:
 
     A/B numbers:
       - no-reuse arm: 8 phases × 1 call each = 8 calls, 8.0 s
-      - reuse arm: skip {jd-parse, fit-score, draft} = 5 calls, 5.0 s
-      - call reduction = 3/8 = 37.5 %
-      - wall-clock reduction = 3/8 = 37.5 %
+      - reuse arm: skip {jd-parse, fit-score} = 6 calls, 6.0 s
+        (draft still runs — warm-started, not skipped)
+      - call reduction = 2/8 = 25.0 %
+      - wall-clock reduction = 2/8 = 25.0 %
 
     The 50% A/B harness threshold applies to the stub pipeline in
     test_reuse_ab.py (which skips 4/8 phases).  This test asserts the actual
-    wiring fires correctly (functions called, artifacts copied, suffix non-empty).
-    The savings assertion here uses a 30% threshold (conservative) to reflect
-    real wiring overhead while still demonstrating measurable benefit.
+    wiring fires correctly (functions called, artifacts copied, AND the
+    warm-start suffix is genuinely appended on the draft model call).  The
+    savings assertion uses a 20% threshold to reflect that warm-start reduces
+    the COST of the draft call without eliminating it.
     """
 
     SLUG_NO_REUSE = "target-app-no-reuse"
@@ -494,7 +504,7 @@ class TestReuseABWiringE2E:
         # --- No-reuse arm ---
         counter_nr = _FakeModelCounter()
         metrics_nr = RunMetrics()
-        verdicts_nr = _run_phases_with_wiring(
+        verdicts_nr, warmstart_nr = _run_phases_with_wiring(
             phases=PHASES,
             reuse_plan=no_reuse_plan(),
             counter=counter_nr,
@@ -508,9 +518,23 @@ class TestReuseABWiringE2E:
 
         # --- Reuse arm ---
         reuse_plan = _make_reuse_plan(self.PRIOR_SLUG)
+
+        # Guard (roborev 996): the hard-coded skip set must be backed by actual
+        # "reuse" decisions in the plan, so the savings below reflect real
+        # plan-driven elision rather than an arbitrary constant.
+        _phase_decision = {
+            "jd-parse": reuse_plan.jd_parse.decision,
+            "fit-score": reuse_plan.fit_score.decision,
+        }
+        for _skipped in REUSE_SKIP_PHASES:
+            assert _phase_decision.get(_skipped) == "reuse", (
+                f"skip phase {_skipped!r} is not backed by a 'reuse' plan decision "
+                f"(got {_phase_decision.get(_skipped)!r})"
+            )
+
         counter_r = _FakeModelCounter()
         metrics_r = RunMetrics()
-        verdicts_r = _run_phases_with_wiring(
+        verdicts_r, warmstart_r = _run_phases_with_wiring(
             phases=PHASES,
             reuse_plan=reuse_plan,
             counter=counter_r,
@@ -531,20 +555,37 @@ class TestReuseABWiringE2E:
         time_nr = summary_nr["run.wall_clock_seconds"]
         time_r = summary_r["run.wall_clock_seconds"]
 
-        # (a) call count reduction >= 30% (3 phases skipped out of 8)
+        # Exact counts: no-reuse runs all 8 phases; reuse skips jd-parse +
+        # fit-score (2) and still runs the warm-started draft → 6 calls.
+        assert calls_nr == len(PHASES), f"no-reuse must run all {len(PHASES)} phases, got {calls_nr}"
+        assert calls_r == len(PHASES) - len(REUSE_SKIP_PHASES), (
+            f"reuse must skip exactly {len(REUSE_SKIP_PHASES)} phases, got {calls_r}"
+        )
+
+        # (a) call count reduction >= 20% (2 phases skipped out of 8 = 25%)
         assert calls_nr > 0, "no-reuse arm must make model calls"
         calls_reduction = (calls_nr - calls_r) / calls_nr
-        assert calls_reduction >= 0.30, (
-            f"call reduction {calls_reduction:.1%} below 30% threshold "
+        assert calls_reduction >= 0.20, (
+            f"call reduction {calls_reduction:.1%} below 20% threshold "
             f"(no-reuse={calls_nr}, reuse={calls_r})"
         )
 
-        # (b) wall-clock reduction >= 30%
+        # (b) wall-clock reduction >= 20%
         assert time_nr > 0, "no-reuse arm must have non-zero wall-clock"
         time_reduction = (time_nr - time_r) / time_nr
-        assert time_reduction >= 0.30, (
-            f"wall-clock reduction {time_reduction:.1%} below 30% threshold "
+        assert time_reduction >= 0.20, (
+            f"wall-clock reduction {time_reduction:.1%} below 20% threshold "
             f"(no-reuse={time_nr:.2f}s, reuse={time_r:.2f}s)"
+        )
+
+        # (a2) the warm-start suffix path was ACTUALLY exercised in the reuse arm
+        #      (and not in the no-reuse arm) — proves draft is warm-started, not skipped.
+        assert warmstart_r, (
+            "reuse arm must invoke _build_warmstart_prompt_suffix_safe with a "
+            "non-empty suffix on the draft phase"
+        )
+        assert not warmstart_nr, (
+            "no-reuse arm must NOT fire the warm-start suffix (draft regenerates)"
         )
 
         # (c) gate verdict parity

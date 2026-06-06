@@ -127,6 +127,30 @@ def test_backfill_slug_reuse_populates_fingerprints(db_conn, applications_dir):
     assert _row_count(db_conn, "application_fingerprints") >= 1
 
 
+def test_backfill_slug_reuse_populates_run_metrics(db_conn, applications_dir):
+    """backfill_slug_reuse writes the JD normalized-text row to run_metrics.
+
+    write_jd_fingerprint populates BOTH application_fingerprints and run_metrics;
+    a regression that dropped the metrics write must be caught (roborev 995).
+    """
+    from jobsmith.reuse.backfill import backfill_slug_reuse
+
+    jd = _make_jd_parsed()
+    _make_app_dir(applications_dir, "acme-swe-2025-01", jd_parsed=jd)
+
+    inserted = backfill_slug_reuse(db_conn, "acme-swe-2025-01", applications_dir)
+
+    rm_rows = db_conn.execute(
+        "SELECT COUNT(*) FROM run_metrics WHERE slug = ?", ("acme-swe-2025-01",)
+    ).fetchone()[0]
+    assert rm_rows >= 1, "backfill must populate run_metrics (JD normalized text)"
+    # The reported insert count must reflect rows across BOTH tables, not just
+    # application_fingerprints — so it is strictly greater than 1 on a fresh slug.
+    assert inserted >= 2, (
+        f"insert count must span application_fingerprints + run_metrics, got {inserted}"
+    )
+
+
 def test_backfill_slug_reuse_populates_canonical_requirements(db_conn, applications_dir):
     """backfill_slug_reuse writes canonical requirements from jd-parsed.json."""
     from jobsmith.reuse.backfill import backfill_slug_reuse
