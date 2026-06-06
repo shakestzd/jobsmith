@@ -25,6 +25,11 @@ Public API (used by slices 2-9):
   company_cache.check_cache            — cache hit/miss with normalized key + TTL
   company_cache.write_cache            — write research to normalized cache path
   company_cache.record_company_research_metric — write reused/generated signal to run_metrics
+
+  dedup.write_jd_fingerprint  — persist slug → JD content_hash + normalized text
+  dedup.find_duplicate_jd     — near-duplicate JD lookup (slice-6 entry point)
+  dedup.load_prior_artifacts  — read jd-parsed.json + fit-score.json from prior state dir
+  dedup.DedupResult           — typed result: decision, matched_slug, similarity
 """
 from __future__ import annotations
 
@@ -35,6 +40,12 @@ from jobsmith.reuse.company_cache import (
     normalize_company_key,
     record_company_research_metric,
     write_cache,
+)
+from jobsmith.reuse.dedup import (
+    DedupResult,
+    find_duplicate_jd,
+    load_prior_artifacts,
+    write_jd_fingerprint,
 )
 from jobsmith.reuse.evidence_map import lookup_mapped_bullet, populate_from_bullet_selection
 from jobsmith.reuse.match import MatchResult, match
@@ -54,15 +65,18 @@ from jobsmith.reuse.taxonomy import load_taxonomy, resolve_tag
 
 __all__ = [
     "METRIC_KEY_COMPANY_RESEARCH_SOURCE",
+    "DedupResult",
     "MatchResult",
     "canonicalize",
     "check_cache",
     "content_hash",
+    "find_duplicate_jd",
     "get_application_fingerprint",
     "get_canonical_requirement",
     "get_requirement_evidence",
     "get_run_metrics",
     "is_fresh",
+    "load_prior_artifacts",
     "load_taxonomy",
     "lookup_mapped_bullet",
     "match",
@@ -75,4 +89,5 @@ __all__ = [
     "upsert_requirement_evidence",
     "upsert_run_metric",
     "write_cache",
+    "write_jd_fingerprint",
 ]
