@@ -368,7 +368,21 @@ def _replay_gather_specialist_artifacts(
     """
     import shutil as _shutil
 
-    if reuse_plan.jd_parse.decision != "reuse":
+    # Gate each artifact on its OWN phase decision.  jd_parse and fit_score
+    # are independent: a JD whose requirements match a prior app (jd_parse ==
+    # "reuse") can still warrant a fresh fit-score (fit_score == "regenerate").
+    # Copying fit-score.json on the jd_parse decision alone would pre-populate
+    # stale fit data and make the gather specialist skip a regeneration the
+    # plan explicitly requested.
+    artifacts = [
+        name
+        for name, decision in (
+            ("jd-parsed.json", reuse_plan.jd_parse.decision),
+            ("fit-score.json", reuse_plan.fit_score.decision),
+        )
+        if decision == "reuse"
+    ]
+    if not artifacts:
         return
     matched_slug = reuse_plan.matched_slug
     if not matched_slug:
@@ -386,7 +400,7 @@ def _replay_gather_specialist_artifacts(
             return
         current_state_dir.mkdir(parents=True, exist_ok=True)
 
-        for artifact in ("jd-parsed.json", "fit-score.json"):
+        for artifact in artifacts:
             src = prior_state_dir / artifact
             if not src.exists():
                 logger.debug(

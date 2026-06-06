@@ -150,7 +150,14 @@ def _backfill_jd_fingerprint(
     slug: str,
     state_dir: Path,
 ) -> int:
-    """Write JD fingerprint rows; returns 1 if new row inserted, 0 if already present."""
+    """Write JD fingerprint rows; returns the number of new rows inserted.
+
+    ``write_jd_fingerprint`` populates BOTH ``application_fingerprints`` and a
+    ``run_metrics`` normalized-text row, so the count spans both tables.
+    Counting only ``application_fingerprints`` would under-report (and return 0
+    when a prior partial backfill left the fingerprint present but the metrics
+    row missing).
+    """
     try:
         from jobsmith.reuse.dedup import write_jd_fingerprint
 
@@ -163,14 +170,19 @@ def _backfill_jd_fingerprint(
         if not fp_text or not fp_text.strip():
             return 0
 
-        # Capture row count before/after to report new inserts
-        before = conn.execute(
-            "SELECT COUNT(*) FROM application_fingerprints WHERE slug = ?", (slug,)
-        ).fetchone()[0]
+        # Capture row counts across BOTH tables write_jd_fingerprint touches.
+        def _counts() -> int:
+            fp = conn.execute(
+                "SELECT COUNT(*) FROM application_fingerprints WHERE slug = ?", (slug,)
+            ).fetchone()[0]
+            rm = conn.execute(
+                "SELECT COUNT(*) FROM run_metrics WHERE slug = ?", (slug,)
+            ).fetchone()[0]
+            return fp + rm
+
+        before = _counts()
         write_jd_fingerprint(conn, slug=slug, jd_text=fp_text)
-        after = conn.execute(
-            "SELECT COUNT(*) FROM application_fingerprints WHERE slug = ?", (slug,)
-        ).fetchone()[0]
+        after = _counts()
         return max(0, after - before)
     except Exception as exc:  # noqa: BLE001
         logger.warning("reuse-backfill: JD fingerprint failed for %s: %s", slug, exc)

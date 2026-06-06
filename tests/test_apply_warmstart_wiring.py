@@ -381,6 +381,86 @@ def test_gather_replay_copies_fit_score_when_reuse(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 4b. Per-artifact gating: jd_parse=reuse but fit_score=regenerate must NOT
+#     replay fit-score.json (roborev job 994 — HIGH).
+# ---------------------------------------------------------------------------
+
+
+def test_gather_replay_gates_fit_score_independently(tmp_path: Path) -> None:
+    """jd_parse=reuse + fit_score=regenerate copies jd-parsed.json but NOT fit-score.json.
+
+    The two phase decisions are independent. Pre-populating fit-score.json on the
+    jd_parse decision alone would make the gather specialist skip a regeneration
+    the plan explicitly requested, carrying stale fit data forward.
+    """
+    repo = _minimal_repo(tmp_path)
+    plugin_dir = _mock_plugin_dir(tmp_path)
+    url = "https://example.com/jobs/replay-mixed-decisions"
+    slug = derive_slug(url)
+    prior_slug = "prior-mixed-app"
+
+    apps_dir = repo / "private" / "applications"
+    # Prior app has BOTH artifacts available on disk.
+    _seed_prior_state(
+        apps_dir,
+        prior_slug,
+        jd_parsed={
+            "company": "PriorCo",
+            "position": "Engineer",
+            "jd_text_clean": "Python dev role",
+            "must_haves": [],
+            "nice_to_haves": [],
+        },
+        fit_score={"score": 87, "summary": "Strong match", "gaps": []},
+    )
+
+    call_index = [0]
+    phase_seq = ["gather", "draft", "render"]
+
+    def fake_run_phase(*args, **kwargs):
+        yield Event(type="phase_complete", name=phase_seq[call_index[0]])
+        call_index[0] += 1
+
+    # jd_parse reusable, fit_score must regenerate.
+    plan = ReusePlan(
+        jd_parse=PhaseDecision(decision="reuse", source=prior_slug, score=0.98),
+        fit_score=PhaseDecision(decision="regenerate", source=None, score=0.0),
+        company_research=PhaseDecision(decision="regenerate", source=None, score=0.0),
+        bullet_map={},
+        matched_slug=prior_slug,
+        draft=PhaseDecision(decision="regenerate", source=None, score=0.0),
+    )
+
+    rdr = ApplyRenderer(
+        yes=True,
+        verbosity=0,
+        console=Console(file=io.StringIO(), force_terminal=False),
+    )
+
+    with (
+        patch("jobsmith.apply.headless.run_phase", fake_run_phase),
+        patch("jobsmith.apply.get_plugin_dir", return_value=plugin_dir),
+        patch("jobsmith.apply._build_paths", return_value={}),
+        patch("jobsmith.apply._reconcile_canonical_slug", return_value=(slug, False)),
+        patch("jobsmith.apply._run_step45_orchestration", return_value=0),
+        patch("jobsmith.apply.ensure_bootstrap"),
+        patch("jobsmith._cli_apply._compute_pipeline_reuse_plan", return_value=plan),
+    ):
+        rc = run_apply(url, cwd=repo, skip_confirm=True, force=True, renderer=rdr)
+
+    assert rc == 0, f"run_apply returned {rc}"
+
+    state_dir = apps_dir / slug / ".apply-state"
+    assert (state_dir / "jd-parsed.json").exists(), (
+        "jd-parsed.json should be replayed (jd_parse.decision == reuse)"
+    )
+    assert not (state_dir / "fit-score.json").exists(), (
+        "fit-score.json must NOT be replayed when fit_score.decision == regenerate "
+        "— stale fit data would suppress the requested regeneration"
+    )
+
+
+# ---------------------------------------------------------------------------
 # 5. Gather replay skipped when --no-reuse
 # ---------------------------------------------------------------------------
 
