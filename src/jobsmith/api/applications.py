@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import importlib.util
 import json
 import logging
 import re
@@ -31,8 +30,6 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse, JSONResponse
-
-logger = logging.getLogger(__name__)
 
 from jobsmith.api.artifacts import _get_db_path, _row_to_envelope
 from jobsmith.api.schemas.artifacts import ArtifactEnvelope
@@ -47,6 +44,8 @@ from .schemas.applications import (
     ApplicationCreated,
     ApplicationDetail,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["applications"])
 
@@ -953,10 +952,8 @@ def get_review(slug: str) -> dict:
         ).fetchone()
         fit_data: dict = {}
         if fit_row:
-            try:
+            with contextlib.suppress(json.JSONDecodeError, TypeError):
                 fit_data = json.loads(fit_row["output_json"])
-            except (json.JSONDecodeError, TypeError):
-                pass
 
         # Review status from apply_state
         from jobsmith.db import get_state, open_pipeline_db
@@ -969,10 +966,8 @@ def get_review(slug: str) -> dict:
             db_conn2.close()
         review_status_data = {}
         if review_blob:
-            try:
+            with contextlib.suppress(json.JSONDecodeError, TypeError):
                 review_status_data = json.loads(review_blob)
-            except (json.JSONDecodeError, TypeError):
-                pass
     finally:
         conn.close()
 
@@ -1420,6 +1415,7 @@ def set_review_status(slug: str, body: dict) -> dict:
         conn.close()
 
     from datetime import datetime, timezone
+
     from jobsmith.db import open_pipeline_db, put_state
     db_conn2 = open_pipeline_db(db_path)
     try:

@@ -142,7 +142,7 @@ def test_post_onboard_uses_in_process_path_not_subprocess(client):
     """POST /onboard must NOT spawn a subprocess; uses asyncio.to_thread."""
     with (
         patch("jobsmith.api.onboard_routes.run_onboard_pipeline") as mock_pipe,
-        patch("asyncio.create_task") as mock_task,
+        patch("asyncio.create_task"),
         patch("subprocess.Popen") as mock_popen,
     ):
         mock_pipe.return_value = 0

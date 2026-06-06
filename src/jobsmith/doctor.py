@@ -16,7 +16,6 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
 
 # Imported at module level so tests can monkeypatch jobsmith.doctor.find_web_dist.
 from .api.staticui import find_web_dist
@@ -27,7 +26,7 @@ class CheckResult:
     name: str
     ok: bool
     message: str          # short pass/fail explanation
-    remediation: Optional[str] = None   # shown on fail
+    remediation: str | None = None   # shown on fail
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +105,7 @@ def check_anthropic_api_key() -> CheckResult:
     return check_claude_auth()
 
 
-def check_benchmarks(config_path: Optional[Path] = None, cwd: Optional[Path] = None) -> CheckResult:
+def check_benchmarks(config_path: Path | None = None, cwd: Path | None = None) -> CheckResult:
     """Check that benchmark files are resolvable.
 
     - No config / no benchmarks section: WARN (skip — not a hard failure).
@@ -114,8 +113,8 @@ def check_benchmarks(config_path: Optional[Path] = None, cwd: Optional[Path] = N
     - ``required=True`` and some files missing: FAIL with remediation.
     - All five user files set and on disk: PASS with count message.
     """
-    from .config import find_config, load_config
     from .benchmarks import count_user_benchmarks
+    from .config import find_config, load_config
 
     directory = cwd or Path.cwd()
     cp = config_path or find_config(directory)
@@ -157,7 +156,7 @@ def check_benchmarks(config_path: Optional[Path] = None, cwd: Optional[Path] = N
         return CheckResult(
             name="benchmarks",
             ok=True,
-            message=f"5/5 user benchmarks resolved",
+            message="5/5 user benchmarks resolved",
         )
 
     unset_count = total - set_count
@@ -184,7 +183,7 @@ def check_benchmarks(config_path: Optional[Path] = None, cwd: Optional[Path] = N
     )
 
 
-def check_apply_config(cwd: Optional[Path] = None) -> CheckResult:
+def check_apply_config(cwd: Path | None = None) -> CheckResult:
     """Verify ``.apply-config.yaml`` is reachable from the working directory.
 
     Walks up the directory tree like ``jobsmith.config.find_config`` so that
@@ -208,7 +207,7 @@ def check_apply_config(cwd: Optional[Path] = None) -> CheckResult:
     )
 
 
-def check_master_yaml(cwd: Optional[Path] = None) -> CheckResult:
+def check_master_yaml(cwd: Path | None = None) -> CheckResult:
     """Verify every master YAML file declared by ``.apply-config.yaml`` exists.
 
     Resolves the config via ``find_config`` (subdirectory-aware), loads it,
@@ -423,7 +422,7 @@ def check_plugin_dir_resolves() -> CheckResult:
 # Aggregate helpers
 # ---------------------------------------------------------------------------
 
-def run_all_checks(cwd: Optional[Path] = None) -> list[CheckResult]:
+def run_all_checks(cwd: Path | None = None) -> list[CheckResult]:
     """Run every preflight check and return results in a stable order."""
     from .config import find_config
 
@@ -443,7 +442,7 @@ def run_all_checks(cwd: Optional[Path] = None) -> list[CheckResult]:
     ]
 
 
-def preflight(cwd: Optional[Path] = None) -> bool:
+def preflight(cwd: Path | None = None) -> bool:
     """Run all checks; return True if all pass, False otherwise.
 
     Prints per-check status to stderr in the format::

@@ -25,13 +25,13 @@ from pathlib import Path
 import yaml
 
 from .anchors import (
+    _ASSET_COUNT_RE,
+    _MONEY_RE,
+    _PERCENT_RE,
     DEFAULT_ASSET_COUNT_THRESHOLD,
     DEFAULT_MONEY_THRESHOLD_USD,
     DEFAULT_PERCENT_THRESHOLD,
     Anchor,
-    _ASSET_COUNT_RE,
-    _MONEY_RE,
-    _PERCENT_RE,
     is_anchor,
 )
 

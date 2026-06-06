@@ -20,7 +20,6 @@ from fastapi.testclient import TestClient
 
 from jobsmith.api.artifacts import router as artifacts_router
 
-
 # ---------------------------------------------------------------------------
 # Human-readable kind label map (mirrors events.py)
 # ---------------------------------------------------------------------------

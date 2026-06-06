@@ -80,9 +80,11 @@ class TestRepoRootForPrecedence:
         """Falls back to cwd when no env, no settings, no config found."""
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("JOBSMITH_REPO_ROOT", None)
-            with patch("jobsmith.paths.find_config", return_value=None):
-                with patch("jobsmith.settings.read_repo_root", return_value=None):
-                    result = repo_root_for(cwd=tmp_path)
+            with (
+                patch("jobsmith.paths.find_config", return_value=None),
+                patch("jobsmith.settings.read_repo_root", return_value=None),
+            ):
+                result = repo_root_for(cwd=tmp_path)
         assert result == tmp_path
 
 
@@ -94,14 +96,16 @@ class TestRepoRootForPrecedence:
 class TestAppStateRepoRoot:
     def test_app_state_repo_root_set_by_lifespan(self, tmp_path: Path) -> None:
         """After lifespan startup, app.state.repo_root is a Path."""
-        with patch.dict(os.environ, {TOKEN_ENV_VAR: TOKEN, "JOBSMITH_REPO_ROOT": str(tmp_path)}):
-            with patch("jobsmith.api.main._try_ingest_master"):
-                with patch("jobsmith.config.find_config", return_value=None):
-                    app = create_app()
-                    with TestClient(app):
-                        # During the with-block lifespan runs
-                        assert hasattr(app.state, "repo_root")
-                        assert isinstance(app.state.repo_root, Path)
+        with (
+            patch.dict(os.environ, {TOKEN_ENV_VAR: TOKEN, "JOBSMITH_REPO_ROOT": str(tmp_path)}),
+            patch("jobsmith.api.main._try_ingest_master"),
+            patch("jobsmith.config.find_config", return_value=None),
+        ):
+            app = create_app()
+            with TestClient(app):
+                # During the with-block lifespan runs
+                assert hasattr(app.state, "repo_root")
+                assert isinstance(app.state.repo_root, Path)
 
     def test_get_repo_root_dep_reads_app_state(self, tmp_path: Path) -> None:
         """get_repo_root() dependency returns app.state.repo_root."""
@@ -128,10 +132,12 @@ class TestAppStateRepoRoot:
 
     def test_master_helpers_use_app_state_repo_root(self, tmp_path: Path) -> None:
         """_require_config_path and _get_db_path_for_master accept repo_root param."""
+        from fastapi import HTTPException
+
         from jobsmith.api.master import _get_db_path_for_master, _require_config_path
 
         # _require_config_path should 404 when no config found at repo_root
-        with pytest.raises(Exception):  # HTTPException 404
+        with pytest.raises(HTTPException):  # 404
             _require_config_path(repo_root=tmp_path)
 
         # _get_db_path_for_master should return None when no config found

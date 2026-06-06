@@ -93,6 +93,21 @@ _resolve_starting_slug = resolve_starting_slug
 _save_url_index = save_url_index
 _scan_for_url_match = scan_for_url_match
 
+from jobsmith._cli_apply import (  # noqa: E402,F401
+    _build_client_if_enabled,
+    _coerce_to_dict,
+    _dual_write_enabled,
+    _render_event,
+    _run_apply_phases,
+    _run_step45_orchestration,
+    dual_write_phase_artifacts,
+    run_apply,
+)
+
+# ---------------------------------------------------------------------------
+# Private module re-exports — back-compat aliases so test patches keep working
+# ---------------------------------------------------------------------------
+from jobsmith._init import _run_init  # noqa: E402,F401
 from jobsmith.core.pipeline import (  # noqa: E402,F401
     _PHASE_MAX_TURNS,
     _PHASES,
@@ -103,23 +118,6 @@ from jobsmith.core.pipeline import (  # noqa: E402,F401
     build_phase_prompt,
     core_run_apply,
     run_phase_iter,
-)
-
-# ---------------------------------------------------------------------------
-# Private module re-exports — back-compat aliases so test patches keep working
-# ---------------------------------------------------------------------------
-
-from jobsmith._init import _run_init  # noqa: E402,F401
-
-from jobsmith._cli_apply import (  # noqa: E402,F401
-    _build_client_if_enabled,
-    _coerce_to_dict,
-    _dual_write_enabled,
-    _render_event,
-    _run_apply_phases,
-    _run_step45_orchestration,
-    dual_write_phase_artifacts,
-    run_apply,
 )
 
 # ---------------------------------------------------------------------------

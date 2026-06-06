@@ -150,7 +150,7 @@ class TestClobberGuard:
         runner = CliRunner()
         with patch("jobsmith.onboard.pipeline.dispatch_onboard_pipeline") as mock_dispatch:
             mock_dispatch.return_value = 0
-            result = runner.invoke(
+            runner.invoke(
                 app,
                 [
                     "onboard",
@@ -168,7 +168,7 @@ class TestClobberGuard:
         runner = CliRunner()
         with patch("jobsmith.onboard.pipeline.dispatch_onboard_pipeline") as mock_dispatch:
             mock_dispatch.return_value = 0
-            result = runner.invoke(
+            runner.invoke(
                 app,
                 [
                     "onboard",
@@ -188,7 +188,7 @@ class TestClobberGuard:
         runner = CliRunner()
         with patch("jobsmith.onboard.pipeline.dispatch_onboard_pipeline") as mock_dispatch:
             mock_dispatch.return_value = 0
-            result = runner.invoke(
+            runner.invoke(
                 app,
                 ["onboard", "--resume-file", "/dev/null", "--repo-root", str(tmp_path)],
             )

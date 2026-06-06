@@ -120,6 +120,13 @@ target-version = "py310"
 select = ["E", "F", "I", "B", "UP", "N", "SIM"]
 ignore = ["E501"]
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI/Typer use call expressions as argument defaults by design
+# (Depends(), typer.Option(), typer.Argument()). These are the framework's
+# intended dependency-injection sentinels, not the mutable-default footgun
+# B008 targets — treat them as immutable.
+extend-immutable-calls = ["fastapi.Depends", "typer.Option", "typer.Argument"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

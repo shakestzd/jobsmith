@@ -17,9 +17,6 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -312,7 +309,7 @@ class TestWarmstartRegeneratesOnlyDelta:
 
         # Set up a prior app with bullet-selection
         prior_slug = "prior-app-2024-01"
-        prior_state = _make_state_dir(
+        _make_state_dir(
             tmp_path,
             slug=prior_slug,
             selection=_make_bullet_selection(

@@ -18,6 +18,7 @@ SSE endpoints (browser EventSource cannot set headers) get
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import secrets
@@ -27,8 +28,6 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
-
-import hashlib
 
 import bcrypt
 import jwt

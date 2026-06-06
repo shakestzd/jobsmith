@@ -8,7 +8,6 @@ import pytest
 import yaml
 
 from jobsmith.config import (
-    AnchorThresholds,
     BenchmarkConfig,
     JobsmithConfig,
     find_config,

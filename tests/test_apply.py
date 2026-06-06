@@ -1141,6 +1141,7 @@ def test_build_paths_feedback_dir_null_when_missing(tmp_path: Path) -> None:
 def test_build_paths_injects_voice_profile_json(tmp_path: Path) -> None:
     """voice_profile_json key always present, pointing into the slug's .apply-state."""
     import json
+
     import yaml
 
     from jobsmith.apply import _build_paths
@@ -1193,6 +1194,7 @@ def test_build_paths_injects_projects_paths_when_configured(tmp_path: Path) -> N
     master.projects_yml and projects_filtered_json keys are injected, and the
     filtered JSON contains only entries that passed all filters."""
     import json
+
     import yaml
 
     from jobsmith.apply import _build_paths
@@ -3535,7 +3537,7 @@ def test_transcript_has_phase_boundary_markers(tmp_path: Path) -> None:
 
 def test_rolling_status_updates_on_tool_call_in_quiet_mode() -> None:
     """Quiet mode: tool call events update the spinner description, not print a line."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import MagicMock
 
     con, buf = _make_test_console()
     # Use a TTY-like console so spinner would activate (but yes=False, verbosity=0)
@@ -3799,6 +3801,7 @@ def test_auto_freeze_stamps_frozen_at_when_null(
     TDD: fails before _auto_freeze_contracts() is wired in.
     """
     import yaml
+
     from jobsmith.apply import run_apply
 
     _scaffold_apply_config_minimal(tmp_path)
@@ -3840,6 +3843,7 @@ def test_auto_freeze_is_idempotent(
 ) -> None:
     """When frozen_at is already set, run_apply must NOT overwrite it."""
     import yaml
+
     from jobsmith.apply import run_apply
 
     _scaffold_apply_config_minimal(tmp_path)
@@ -4113,8 +4117,8 @@ def test_run_phase_iter_force_clears_apply_state(tmp_path: Path, monkeypatch) ->
     rule in phase prompts and the specialists the user asked to rerun
     would be silently skipped (roborev job 959 HIGH).
     """
-    from jobsmith.db import open_pipeline_db, put_state
     from jobsmith.apply import run_phase_iter
+    from jobsmith.db import open_pipeline_db, put_state
 
     plugin_fake = _scaffold_resume_project(tmp_path)
     monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
@@ -4162,8 +4166,8 @@ def test_run_phase_iter_force_scoped_preserves_upstream(tmp_path: Path, monkeypa
     phase needs. Only the target phase's spec/result rows should drop
     (roborev job 960 HIGH).
     """
-    from jobsmith.db import open_pipeline_db, put_state
     from jobsmith.apply import run_phase_iter
+    from jobsmith.db import open_pipeline_db, put_state
 
     plugin_fake = _scaffold_resume_project(tmp_path)
     monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
@@ -4281,8 +4285,8 @@ def test_run_phase_iter_force_scoped_prunes_manifest_invocations(tmp_path: Path,
     """Scoped force-reset must strip the targeted phase's invocations from
     manifest so a later normal apply does not see "phase done" and skip
     the rerun work (roborev job 963 MEDIUM)."""
-    from jobsmith.db import get_state, open_pipeline_db, put_state
     from jobsmith.apply import run_phase_iter
+    from jobsmith.db import get_state, open_pipeline_db, put_state
 
     plugin_fake = _scaffold_resume_project(tmp_path)
     monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)
@@ -4344,8 +4348,8 @@ def test_user_decline_at_confirm_gate_records_cancelled_not_done(tmp_path: Path,
     rc=0 because user-decline is not a CLI failure, but the DB row must
     NOT be marked 'done' — that would make the partial run look completed
     in the UI / list views (closes roborev job 967 MEDIUM)."""
-    from jobsmith.db import open_pipeline_db
     from jobsmith.apply import run_apply
+    from jobsmith.db import open_pipeline_db
 
     plugin_fake = _scaffold_resume_project(tmp_path)
     monkeypatch.setattr("jobsmith.apply.get_plugin_dir", lambda: plugin_fake)

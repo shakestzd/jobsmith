@@ -210,7 +210,7 @@ def render_site(
     root: Path,
     mode: str = "private",
     output_dir: Path | None = None,
-    runner: "subprocess.CompletedProcess | None" = None,  # type: ignore[name-defined]  # noqa: F821
+    runner: subprocess.CompletedProcess | None = None,  # type: ignore[name-defined]  # noqa: F821
     profile: str = "private",
 ) -> Path:
     """Render the Quarto site with the given privacy mode.

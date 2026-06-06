@@ -25,7 +25,6 @@ Retained tests
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -33,7 +32,6 @@ from jobsmith.api.supervisor import (
     RunSupervisor,
     TranscriptEvent,
 )
-
 
 # ---------------------------------------------------------------------------
 # Supervisor EventSink → TranscriptEvent path
@@ -62,6 +60,7 @@ class TestSupervisorEventSinkBuffering:
     def test_sink_emit_broadcasts_to_subscriber_queues(self) -> None:
         """Sink emit pushes items to every registered subscriber queue."""
         import asyncio
+
         from jobsmith.core.events import PipelineEvent
 
         sup = RunSupervisor(max_buffered_lines=100)
@@ -82,8 +81,9 @@ class TestSupervisorEventSinkBuffering:
 
     def test_sink_swallows_exceptions(self) -> None:
         """EventSink.emit must not raise even if internal _append fails."""
-        from jobsmith.core.events import PipelineEvent
         from unittest.mock import patch
+
+        from jobsmith.core.events import PipelineEvent
 
         sup = RunSupervisor(max_buffered_lines=100)
         sink = sup.register_run(run_id="r-exc", slug="exc-slug")
@@ -163,9 +163,11 @@ def test_render_writes_to_state_log_not_disk(tmp_path):
     to apply_state_log only. The transcript_path argument was removed.
     """
     import io
+
+    from rich.console import Console
+
     from jobsmith.db import open_pipeline_db, read_state_log
     from jobsmith.render import ApplyRenderer
-    from rich.console import Console
 
     db_path = tmp_path / "private" / "jobsmith.db"
     db_path.parent.mkdir(parents=True)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import sys
 from io import StringIO
 from pathlib import Path
 from unittest import mock
@@ -13,12 +12,13 @@ from unittest.mock import MagicMock
 import pytest
 from typer.testing import CliRunner
 
+from jobsmith.cli import app
 from jobsmith.doctor import (
     CheckResult,
     check_anthropic_api_key,
+    check_apply_config,
     check_benchmarks,
     check_claude_auth,
-    check_apply_config,
     check_claude_binary,
     check_master_yaml,
     check_plugin_dir_resolves,
@@ -26,8 +26,6 @@ from jobsmith.doctor import (
     preflight,
     run_all_checks,
 )
-from jobsmith.cli import app
-
 
 # ---------------------------------------------------------------------------
 # check_claude_binary
@@ -426,8 +424,8 @@ def test_cli_doctor_exit_1_any_fail(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_check_contracts_frozen_pass_when_frozen(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """check_contracts_frozen passes when frozen_at is a non-null ISO date."""
-    from jobsmith.doctor import check_contracts_frozen
     import jobsmith
+    from jobsmith.doctor import check_contracts_frozen
 
     plugin_fake = tmp_path / "plugin"
     agents_apply = plugin_fake / "agents" / "apply"
@@ -444,8 +442,8 @@ def test_check_contracts_frozen_pass_when_frozen(tmp_path: Path, monkeypatch: py
 
 def test_check_contracts_frozen_fail_when_null(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """check_contracts_frozen fails when frozen_at is null and includes remediation command."""
-    from jobsmith.doctor import check_contracts_frozen
     import jobsmith
+    from jobsmith.doctor import check_contracts_frozen
 
     plugin_fake = tmp_path / "plugin"
     agents_apply = plugin_fake / "agents" / "apply"
@@ -468,8 +466,8 @@ def test_check_contracts_frozen_pass_when_file_missing(tmp_path: Path, monkeypat
 
     Non-blocking: users who don't use the apply pipeline should not see a red row.
     """
-    from jobsmith.doctor import check_contracts_frozen
     import jobsmith
+    from jobsmith.doctor import check_contracts_frozen
 
     plugin_fake = tmp_path / "plugin"
     plugin_fake.mkdir(parents=True, exist_ok=True)

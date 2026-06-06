@@ -20,7 +20,7 @@ import hashlib
 import json
 import re
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel, ValidationError

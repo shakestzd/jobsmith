@@ -407,10 +407,7 @@ def load_projects(
         against the portfolio site appearing twice in the rendered resume
     """
     p = Path(projects_path_or_master_dir)
-    if p.is_dir():
-        projects_path = p / "projects.yml"
-    else:
-        projects_path = p
+    projects_path = p / "projects.yml" if p.is_dir() else p
     if not projects_path.exists():
         return []
 
@@ -790,13 +787,10 @@ def assemble_application(
     cover_letter_pdf_documents = app_dir / "documents" / "cover-letter.pdf"
     cover_letter_qmd_root = app_dir / "cover-letter.qmd"
     if cover_letter_pdf_root.exists():
-        cover_letter_pdf_path = cover_letter_pdf_root
         cover_letter_pdf_relpath = "cover-letter.pdf"
     elif cover_letter_pdf_documents.exists():
-        cover_letter_pdf_path = cover_letter_pdf_documents
         cover_letter_pdf_relpath = "documents/cover-letter.pdf"
     else:
-        cover_letter_pdf_path = None
         cover_letter_pdf_relpath = None
 
     # Resolve user identity by checking, in order:
