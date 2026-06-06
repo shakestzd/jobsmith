@@ -48,6 +48,7 @@ from .render import ApplyRenderer
 
 if TYPE_CHECKING:
     from .api.client import JobsmithClient
+    from .reuse.planner import ReusePlan
 
 logger = logging.getLogger(__name__)
 
@@ -300,6 +301,122 @@ def _run_step45_orchestration(slug: str, cwd: Path) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Reuse-planner helpers
+# ---------------------------------------------------------------------------
+
+
+def _write_reuse_plan_artifact_safe(
+    plan: "ReusePlan",
+    slug: str,
+    resolved_cwd: Path,
+    apply_state_dir_fn: object,
+) -> None:
+    """Write ``reuse-plan.json`` to ``.apply-state/``; log and continue on error.
+
+    Parameters
+    ----------
+    plan:
+        The :class:`~jobsmith.reuse.planner.ReusePlan` to serialize.
+    slug:
+        Current application slug.
+    resolved_cwd:
+        Working directory for config resolution.
+    apply_state_dir_fn:
+        Callable ``(slug, cwd) -> Path | None`` — resolved through apply's
+        namespace so test patches propagate.
+    """
+    try:
+        from jobsmith.reuse.planner import write_reuse_plan_artifact
+
+        state_dir = apply_state_dir_fn(slug, resolved_cwd)  # type: ignore[operator]
+        if state_dir is None:
+            logger.warning("reuse-planner: cannot resolve state dir — artifact not written")
+            return
+        write_reuse_plan_artifact(plan, state_dir)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("reuse-planner: failed to write artifact — continuing: %s", exc)
+
+
+def _compute_pipeline_reuse_plan(
+    *,
+    resolved_cwd: Path,
+    slug: str,
+    db_conn: object,
+    no_reuse: bool,
+) -> "ReusePlan":
+    """Compute the ReusePlan for the current run; return no_reuse_plan() on any error.
+
+    Imported lazily to avoid circular-import issues (reuse modules import from
+    jobsmith.config but not from jobsmith._cli_apply).
+
+    Parameters
+    ----------
+    resolved_cwd:
+        Working directory for config / DB path resolution.
+    slug:
+        Current application slug.
+    db_conn:
+        Open pipeline DB connection (may be None — degrade gracefully).
+    no_reuse:
+        When True, bypass the planner entirely and return no_reuse_plan().
+    """
+    from jobsmith.reuse.planner import ReusePlan, no_reuse_plan  # noqa: F401
+
+    if no_reuse:
+        return no_reuse_plan()
+
+    try:
+        from jobsmith.config import find_config, load_config
+        from jobsmith.reuse.planner import compute_reuse_plan
+
+        if db_conn is None:
+            return no_reuse_plan()
+
+        config_path = find_config(resolved_cwd)
+        if config_path is None:
+            return no_reuse_plan()
+
+        config = load_config(config_path)
+        cfg = config.reuse
+        repo_root = config_path.parent
+        companies_dir = repo_root / "private" / "companies"
+
+        # Best-effort: read company name from jd-parsed.json if available.
+        company_name = _read_company_name(slug, resolved_cwd, config, repo_root)
+
+        return compute_reuse_plan(
+            conn=db_conn,
+            jd_text="",  # empty — dedup uses fingerprints already in DB
+            current_slug=slug,
+            cfg=cfg,
+            companies_dir=companies_dir,
+            company_name=company_name,
+            current_bullet_texts={},  # bullet text loading is best-effort
+            requirement_hashes=[],    # populated by gather phase post-run
+        )
+    except Exception as exc:  # noqa: BLE001 — planner must never abort pipeline
+        logger.warning("reuse-planner failed — falling back to no-reuse plan: %s", exc)
+        from jobsmith.reuse.planner import no_reuse_plan
+        return no_reuse_plan()
+
+
+def _read_company_name(slug: str, cwd: Path, config: object, repo_root: Path) -> str:
+    """Read company name from .apply-state/jd-parsed.json; return '' on any error."""
+    import json as _json
+
+    try:
+        from jobsmith.paths import resolve
+        apps_dir = resolve(config.output.applications_dir, repo_root)
+        jd_path = apps_dir / slug / ".apply-state" / "jd-parsed.json"
+        if not jd_path.exists():
+            return ""
+        data = _json.loads(jd_path.read_text(encoding="utf-8"))
+        return data.get("company", "") or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+# ---------------------------------------------------------------------------
 # Phase loop
 # ---------------------------------------------------------------------------
 
@@ -323,6 +440,7 @@ def _run_apply_phases(
     db_status_ref: list[str],
     jd_text_file: Path | None = None,
     cancel_event: "threading.Event | None" = None,
+    no_reuse: bool = False,
 ) -> int:
     """Phase-loop body extracted so the surrounding ``run_apply`` can wrap it
     with the apply_runs DB lifecycle (insert before, UPDATE after, with the
@@ -349,7 +467,11 @@ def _run_apply_phases(
         _PHASE_MAX_TURNS,
         _PHASES,
         _auto_freeze_contracts,
+    )
+    from jobsmith.core.pipeline import (
         _snapshot_phase_drafts as _snapshot_phase_drafts_core,
+    )
+    from jobsmith.core.pipeline import (
         build_phase_prompt as _build_phase_prompt_core,
     )
     from jobsmith.core.session import get_or_create_session_id as _get_or_create_session_id_core
@@ -375,6 +497,25 @@ def _run_apply_phases(
     # Must run before the gather phase so the agent sees frozen_at non-null.
     _auto_freeze_contracts(
         plugin_directory / "agents" / "apply" / "specialist-contracts.yaml"
+    )
+
+    # Reuse-planner pre-phase (feat-6623ee3b): compute a ReusePlan before the
+    # phase loop so prompts and future pipeline layers can consult it.
+    # When no_reuse=True the planner is fully bypassed (--no-reuse flag).
+    reuse_plan = _compute_pipeline_reuse_plan(
+        resolved_cwd=resolved_cwd,
+        slug=slug,
+        db_conn=db_conn,
+        no_reuse=no_reuse,
+    )
+    # Emit reuse-plan artifact BEFORE the phase loop / gather so specialists
+    # can consult it.  Best-effort: pipeline continues even if the write fails.
+    _write_reuse_plan_artifact_safe(reuse_plan, slug, resolved_cwd, _apply_state_dir)
+    rdr.print_info(
+        f"reuse-planner: jd-parse={reuse_plan.jd_parse.decision} "
+        f"company={reuse_plan.company_research.decision} "
+        f"draft={reuse_plan.draft.decision} "
+        f"bullets={len(reuse_plan.bullet_map)} mapped"
     )
 
     for phase_name, phase_num in _PHASES:
@@ -744,6 +885,7 @@ def run_apply(
     run_id: str | None = None,
     cancel_event: "threading.Event | None" = None,
     start_from_phase: str | None = None,
+    no_reuse: bool = False,
 ) -> int:
     """Run the three-phase apply pipeline.
 
@@ -862,6 +1004,7 @@ def run_apply(
             db_status_ref=db_status_ref,
             jd_text_file=jd_text_file,
             cancel_event=cancel_event,
+            no_reuse=no_reuse,  # captured from outer run_apply closure
         )
 
     # Look up ensure_bootstrap through apply's namespace so that
