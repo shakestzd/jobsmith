@@ -6,7 +6,7 @@ meta:
     created_at: ""
     status: draft
     schema_version: v3
-    version: 14
+    version: 15
 design:
     problem: |
         Every `jobsmith apply` re-runs the full 3-phase pipeline (gather -> draft ->
@@ -207,6 +207,7 @@ slices:
         (defeats cross-role reuse); a new DB company table (forks the live file cache).
         Similar-company fuzzy reuse deferred -- v1 is same-company normalized identity.
     - id: slice-4
+      feature_id: feat-08e32ed5
       num: 4
       title: Requirement->evidence/bullet map + reuse
       what: |
@@ -250,6 +251,7 @@ slices:
       approved: false
       comment: ""
       approval_status: approved
+      execution_status: promoted
       questions:
         - id: q-context
           text: Can a bullet that satisfied a requirement in JD-A be wrong for JD-B even if the tag matches?
