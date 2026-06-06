@@ -298,6 +298,31 @@ letter), answer normally and do NOT emit a `jobsmith-proposal` block.
 """
 
 
+def _resolve_work_yml(app_dir: Path) -> Path | None:
+    """Resolve work.yml for an app, trying app_dir first, then documents/."""
+    for candidate in (app_dir / "work.yml", app_dir / "documents" / "work.yml"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _resolve_cover_letter_draft(app_dir: Path) -> Path | None:
+    """Resolve cover-letter-draft.md, trying root, .apply-state/, then documents/.
+
+    This mirrors the multi-location resolution used elsewhere in the codebase
+    (e.g., _cover_letter_candidates in applications.py) to handle both new
+    drafts and backfilled applications.
+    """
+    for candidate in (
+        app_dir / "cover-letter-draft.md",
+        app_dir / ".apply-state" / "cover-letter-draft.md",
+        app_dir / "documents" / "cover-letter.md",
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def _build_system_prompt(slug: str) -> str | None:
     """Load work.yml and cover letter content for a slug to inject as context."""
     from jobsmith.api.applications import _get_app_dir
@@ -306,36 +331,21 @@ def _build_system_prompt(slug: str) -> str | None:
     if app_dir is None:
         return None
 
+    # Resolve work.yml robustly: try root first, then documents/
     work_content = ""
-    work_yml = app_dir / "work.yml"
-    if work_yml.exists():
+    work_path = _resolve_work_yml(app_dir)
+    if work_path is not None:
         with contextlib.suppress(OSError):
-            work_content = work_yml.read_text(encoding="utf-8")[:3000]
+            work_content = work_path.read_text(encoding="utf-8")[:3000]
 
     # Include the FULL current cover-letter-draft.md so the agent can revise it
     # accurately (it must output the complete revised draft in new_content).
+    # Resolve robustly: try root, .apply-state/, then documents/
     cover_content = ""
-    cover_draft = app_dir / "cover-letter-draft.md"
-    if cover_draft.exists():
+    cover_path = _resolve_cover_letter_draft(app_dir)
+    if cover_path is not None:
         with contextlib.suppress(OSError):
-            cover_content = cover_draft.read_text(encoding="utf-8")
-    else:
-        # Fall back to a rendered cover-letter document if no draft exists yet.
-        docs_dir = app_dir / "documents"
-        if docs_dir.exists():
-            for suffix in (".md", ".txt"):
-                matches = sorted(
-                    (
-                        f
-                        for f in docs_dir.iterdir()
-                        if f.name.lower().startswith("cover") and f.suffix == suffix
-                    ),
-                    key=lambda p: p.name,
-                )
-                if matches:
-                    with contextlib.suppress(OSError):
-                        cover_content = matches[0].read_text(encoding="utf-8")
-                    break
+            cover_content = cover_path.read_text(encoding="utf-8")
 
     return (
         f"Application: {slug}\n\n"
