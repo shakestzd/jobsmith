@@ -267,7 +267,7 @@ class TestPostApplicationsForce:
 
         captured: dict = {}
 
-        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None):
+        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None, start_from_phase=None):
             captured["force"] = force
             return "run-force-001"
 
@@ -293,7 +293,7 @@ class TestPostApplicationsForce:
 
         captured: dict = {}
 
-        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None):
+        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None, start_from_phase=None):
             captured["force"] = force
             return "run-force-002"
 
@@ -319,7 +319,7 @@ class TestPostApplicationsForce:
 
         captured: dict = {}
 
-        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None):
+        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None, start_from_phase=None):
             captured["force"] = force
             return "run-force-003"
 
@@ -355,7 +355,7 @@ class TestPostApplicationsJdText:
 
         captured: dict = {}
 
-        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None):
+        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None, start_from_phase=None):
             captured["jd_text"] = jd_text
             return "run-paste-001"
 
@@ -382,7 +382,7 @@ class TestPostApplicationsJdText:
 
         captured: dict = {}
 
-        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None):
+        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None, start_from_phase=None):
             captured["jd_text"] = jd_text
             return "run-fetch-001"
 
@@ -403,7 +403,7 @@ class TestPostApplicationsJdText:
 
         captured: dict = {}
 
-        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None):
+        async def fake_launch(supervisor, slug, url, cwd, force=False, jd_text=None, start_from_phase=None):
             captured["jd_text"] = jd_text
             return "run-empty-001"
 
