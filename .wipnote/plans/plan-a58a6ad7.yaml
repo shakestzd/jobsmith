@@ -6,7 +6,7 @@ meta:
     created_at: ""
     status: draft
     schema_version: v3
-    version: 13
+    version: 14
 design:
     problem: |
         Every `jobsmith apply` re-runs the full 3-phase pipeline (gather -> draft ->
@@ -159,6 +159,7 @@ slices:
         (violates local-first); pure deterministic synonym table (brittle -- LLM
         normalize covers the long tail without a vector DB).
     - id: slice-3
+      feature_id: feat-62ac0b17
       num: 3
       title: Company-research cross-role reuse (extend existing file cache)
       what: |
@@ -196,6 +197,7 @@ slices:
       approved: false
       comment: ""
       approval_status: approved
+      execution_status: promoted
       decisions_notes: |
         **Reconcile:** EXTEND research.py's existing file cache (slugify/is_fresh/
         cache_path_for + private/companies/) -- do NOT add a parallel DB table (critic:
