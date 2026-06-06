@@ -306,7 +306,7 @@ def _run_step45_orchestration(slug: str, cwd: Path) -> int:
 
 
 def _write_reuse_plan_artifact_safe(
-    plan: "ReusePlan",
+    plan: ReusePlan,
     slug: str,
     resolved_cwd: Path,
     apply_state_dir_fn: object,
@@ -337,6 +337,117 @@ def _write_reuse_plan_artifact_safe(
         logger.warning("reuse-planner: failed to write artifact — continuing: %s", exc)
 
 
+def _replay_gather_specialist_artifacts(
+    reuse_plan: ReusePlan,
+    *,
+    slug: str,
+    resolved_cwd: Path,
+    apply_state_dir_fn: object,
+) -> None:
+    """Copy jd-parsed.json and fit-score.json from the matched prior slug.
+
+    Called BEFORE the gather phase when ``reuse_plan.jd_parse.decision == "reuse"``
+    and a ``matched_slug`` is present.  The agent sees these pre-populated
+    artifacts alongside ``reuse-plan.json`` so the jd-parse and fit-score
+    specialists skip their LLM calls and carry the prior outputs forward.
+
+    Best-effort: any copy error is logged and silently ignored so the gather
+    phase still runs from scratch.
+
+    Parameters
+    ----------
+    reuse_plan:
+        The :class:`~jobsmith.reuse.planner.ReusePlan` computed pre-gather.
+    slug:
+        Current application slug.
+    resolved_cwd:
+        Working directory for config resolution.
+    apply_state_dir_fn:
+        Callable ``(slug, cwd) -> Path | None`` — resolved through apply's
+        namespace so test patches propagate.
+    """
+    import shutil as _shutil
+
+    if reuse_plan.jd_parse.decision != "reuse":
+        return
+    matched_slug = reuse_plan.matched_slug
+    if not matched_slug:
+        return
+
+    try:
+        from jobsmith.core.paths import applications_dir
+
+        apps_dir = applications_dir(resolved_cwd)
+        if apps_dir is None:
+            return
+        prior_state_dir = apps_dir / matched_slug / ".apply-state"
+        current_state_dir = apply_state_dir_fn(slug, resolved_cwd)  # type: ignore[operator]
+        if current_state_dir is None:
+            return
+        current_state_dir.mkdir(parents=True, exist_ok=True)
+
+        for artifact in ("jd-parsed.json", "fit-score.json"):
+            src = prior_state_dir / artifact
+            if not src.exists():
+                logger.debug(
+                    "reuse-replay: prior artifact missing — skipping: %s", src
+                )
+                continue
+            dst = current_state_dir / artifact
+            _shutil.copy2(src, dst)
+            logger.info(
+                "reuse-replay: copied %s from %s → %s", artifact, matched_slug, slug
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "reuse-replay: gather specialist replay failed — gather will regenerate: %s",
+            exc,
+        )
+
+
+def _build_warmstart_prompt_suffix_safe(
+    reuse_plan: ReusePlan,
+    *,
+    slug: str,
+    resolved_cwd: Path,
+) -> str:
+    """Return the warm-start prompt suffix for the draft phase, or ''.
+
+    Delegates to :func:`~jobsmith.core.pipeline._build_warmstart_prompt_suffix`
+    using the already-computed *reuse_plan* so we avoid re-reading
+    ``reuse-plan.json`` from disk (the object is already in memory).
+
+    Returns an empty string on any error — the draft phase falls back to
+    full regeneration, which is always safe.
+
+    Parameters
+    ----------
+    reuse_plan:
+        The :class:`~jobsmith.reuse.planner.ReusePlan` computed pre-phases.
+    slug:
+        Current application slug.
+    resolved_cwd:
+        Working directory for config resolution.
+    """
+    if reuse_plan.draft.decision != "warm-start":
+        return ""
+    if not reuse_plan.matched_slug:
+        return ""
+    try:
+        from dataclasses import asdict
+
+        from jobsmith.core.pipeline import _build_warmstart_prompt_suffix
+
+        reuse_plan_dict = asdict(reuse_plan)
+        return _build_warmstart_prompt_suffix(slug, resolved_cwd, reuse_plan_dict)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "reuse-warmstart: prompt suffix build failed — falling back to full draft: %s",
+            exc,
+        )
+        return ""
+
+
 def _compute_pipeline_reuse_plan(
     *,
     resolved_cwd: Path,
@@ -344,7 +455,7 @@ def _compute_pipeline_reuse_plan(
     db_conn: object,
     no_reuse: bool,
     jd_text: str | None = None,
-) -> "ReusePlan":
+) -> ReusePlan:
     """Compute the ReusePlan for the current run; return no_reuse_plan() on any error.
 
     Imported lazily to avoid circular-import issues (reuse modules import from
@@ -585,7 +696,7 @@ def _run_apply_phases(
     db_slug_ref: list[str],
     db_status_ref: list[str],
     jd_text_file: Path | None = None,
-    cancel_event: "threading.Event | None" = None,
+    cancel_event: threading.Event | None = None,
     no_reuse: bool = False,
     jd_text: str | None = None,
 ) -> int:
@@ -666,6 +777,18 @@ def _run_apply_phases(
         f"bullets={len(reuse_plan.bullet_map)} mapped"
     )
 
+    # bug-88fcc597 fix (#2 HIGH): pre-populate jd-parsed.json and fit-score.json
+    # from the matched prior slug BEFORE gather runs, so the gather agent's
+    # jd-parse and fit-score specialists see the prior artifacts alongside
+    # reuse-plan.json and can carry them forward without an LLM call.
+    # Best-effort: any copy failure is logged; gather regenerates from scratch.
+    _replay_gather_specialist_artifacts(
+        reuse_plan,
+        slug=slug,
+        resolved_cwd=resolved_cwd,
+        apply_state_dir_fn=_apply_state_dir,
+    )
+
     # NOTE: the reuse-plan is emitted as an artifact (above) for the
     # prompt-side reuse path (specialists consult reuse-plan.json + the
     # `jobsmith reuse` CLI) and for warm-start (slice-7).  We intentionally do
@@ -741,6 +864,20 @@ def _run_apply_phases(
             paths=phase_paths,
             jd_text_file=jd_text_file if phase_name == "gather" else None,
         )
+
+        # Step 3d-warmstart (bug-88fcc597 fix #1 HIGH): when the reuse plan
+        # says warm-start for the draft phase, append the delta/anchor context
+        # so the prose-writer rewrites only delta bullets and carries anchors
+        # verbatim.  Mirrors the identical logic in run_phase_iter (pipeline.py)
+        # so both apply paths share the same warm-start behaviour.
+        if phase_name == "draft":
+            _ws_suffix = _build_warmstart_prompt_suffix_safe(
+                reuse_plan,
+                slug=slug,
+                resolved_cwd=resolved_cwd,
+            )
+            if _ws_suffix:
+                prompt_text = prompt_text + _ws_suffix
 
         # Step 3e: render phase header and start spinner
         rdr.print_header(phase_num, total_phases, phase_name)
@@ -1093,7 +1230,7 @@ def run_apply(
     jd_text: str | None = None,
     slug: str | None = None,
     run_id: str | None = None,
-    cancel_event: "threading.Event | None" = None,
+    cancel_event: threading.Event | None = None,
     start_from_phase: str | None = None,
     no_reuse: bool = False,
 ) -> int:
