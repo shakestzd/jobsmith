@@ -29,8 +29,8 @@ from jobsmith.core.manifest import (
     phase_completed,
 )
 from jobsmith.core.paths import (
-    apply_state_dir,
     applications_dir,
+    apply_state_dir,
     build_paths,
     pipeline_db_path,
 )
@@ -339,7 +339,7 @@ def _run_backstop_gate(slug: str, resolved_cwd: Path) -> None:
     """
     try:
         from jobsmith.config import find_config, load_config
-        from jobsmith.core.paths import apply_state_dir, applications_dir
+        from jobsmith.core.paths import applications_dir, apply_state_dir
 
         config_path = find_config(resolved_cwd)
         regen_retry_bound = 3  # default
@@ -599,6 +599,8 @@ def _run_phase_iter_body(
                         # for targeted phase specialists.
                         from jobsmith.db import (
                             get_state as _get_state,
+                        )
+                        from jobsmith.db import (
                             put_state as _put_state,
                         )
 
