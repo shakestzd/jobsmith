@@ -337,18 +337,19 @@ def _run_backstop_gate(slug: str, resolved_cwd: Path) -> None:
     stops the render phase.  Only non-critical infrastructure errors (config
     loading, DB metric writes, path resolution) are suppressed.
 
-    Config (``config.reuse.regen_retry_bound``) drives the retry bound.
+    Retry behaviour: the live path gates ONCE and fails closed.  In-process
+    regeneration/fallback callbacks are not wired here (regenerating a piece
+    means re-invoking a specialist phase, which the wrapper — not the gate —
+    owns), so ``run_backstop`` is called with ``regen_retry_bound=0``.  On a
+    gate failure the apply aborts (return code 2) rather than shipping ungated
+    output; recovery is a re-run (optionally ``--no-reuse``).  The bounded
+    regenerate-and-re-gate policy (``config.reuse.regen_retry_bound``) applies
+    only to programmatic callers of ``run_backstop`` that supply regen/fallback
+    callbacks (e.g. tests).
     """
     from jobsmith.config import find_config, load_config
 
     config_path = find_config(resolved_cwd)
-    regen_retry_bound = 3  # default
-    if config_path is not None:
-        try:
-            cfg = load_config(config_path)
-            regen_retry_bound = cfg.reuse.regen_retry_bound
-        except Exception:  # noqa: BLE001
-            pass
 
     apps_dir = applications_dir(resolved_cwd)
     if apps_dir is None:
@@ -406,7 +407,10 @@ def _run_backstop_gate(slug: str, resolved_cwd: Path) -> None:
             content_dir=content_dir,
             selection_path=selection_path,
             decisions_path=decisions_path if decisions_path.exists() else None,
-            regen_retry_bound=regen_retry_bound,
+            # Live path gates once and fails closed — no in-process regen
+            # callbacks are wired (see docstring), so do not claim a retry bound
+            # that would never be honoured.
+            regen_retry_bound=0,
             db_conn=db_conn,
         )
     finally:

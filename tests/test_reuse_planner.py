@@ -518,6 +518,57 @@ class TestReuseLookupBulletCLI:
         # the selector can seed requirement_evidence_map for future reuse.
         assert output["matched_hash"], "fresh selection must still carry matched_hash"
 
+    def test_lookup_bullet_honors_no_reuse_env(self, tmp_path: Path, monkeypatch):
+        """JOBSMITH_NO_REUSE=1 → no-reuse even when a valid mapping exists.
+
+        Guards finding: --no-reuse must also disable prompt-side reuse so an
+        existing evidence-map row cannot alter selection.
+        """
+        from typer.testing import CliRunner
+
+        from jobsmith.cli import app
+        from jobsmith.reuse.canonicalize import canonicalize
+        from jobsmith.reuse.store import content_hash, upsert_canonical_requirement
+
+        req_raw = "5+ years Python experience"
+        bullet_id = "abc123def456"
+        bullet_text = "Built Python ETL pipelines at scale"
+
+        monkeypatch.setenv("JOBSMITH_NO_REUSE", "1")
+
+        runner = CliRunner()
+        with patch("jobsmith.reuse._cli_reuse._resolve_db_conn") as mock_conn, \
+             patch("jobsmith.reuse._cli_reuse._load_current_bullet_texts") as mock_bullets:
+            # Seed a real, matchable mapping — it must be IGNORED under no-reuse.
+            c = jobsmith_db.open_pipeline_db(tmp_path / "jobsmith.db")
+            _, norm = canonicalize(req_raw)
+            h = content_hash({"normalized_phrase": norm, "canonical_tag": None})
+            upsert_canonical_requirement(c, content_hash=h, payload=json.dumps({
+                "normalized_phrase": norm, "canonical_tag": None,
+            }))
+            c.execute(
+                "INSERT OR IGNORE INTO requirement_evidence_map "
+                "(requirement_hash, evidence_key, evidence_text, created_at) VALUES (?, ?, ?, ?)",
+                (h, bullet_id, content_hash(bullet_text), "2024-01-01T00:00:00+00:00"),
+            )
+            c.commit()
+            mock_conn.return_value = c
+            mock_bullets.return_value = {bullet_id: bullet_text}
+
+            result = runner.invoke(app, [
+                "reuse", "lookup-bullet",
+                "--requirement-raw", req_raw,
+                "--slug", "test-slug",
+            ])
+
+        assert result.exit_code == 0, result.output
+        output = json.loads(result.output.strip())
+        # Despite a valid mapping, no-reuse env forces a miss.
+        assert output["reused"] is False
+        assert output["master_bullet_id"] is None
+        # The DB resolver must not even be consulted under the env guard.
+        mock_conn.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Gap 1: reuse-plan artifact written before gather

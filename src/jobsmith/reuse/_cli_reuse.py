@@ -36,12 +36,17 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 from pathlib import Path
 
 import typer
 
 logger = logging.getLogger(__name__)
+
+# Env guard: when set to "1" (by an apply running with --no-reuse), lookup-bullet
+# returns no-reuse unconditionally so prompt-side reuse cannot alter selection.
+_NO_REUSE_ENV = "JOBSMITH_NO_REUSE"
 
 reuse_app = typer.Typer(
     name="reuse",
@@ -153,6 +158,14 @@ def lookup_bullet(
     # compute it up front so it is returned even on the no-reuse / no-DB paths.
     req_hash = _requirement_hash_safe(requirement_raw)
 
+    # --no-reuse guard (finding: prompt-side reuse must also be disabled).  When
+    # the apply runs with --no-reuse the wrapper sets JOBSMITH_NO_REUSE=1; honor
+    # it here so an existing evidence-map row can never alter selection even if
+    # the (static) selector prompt still calls lookup-bullet.
+    if os.environ.get(_NO_REUSE_ENV) == "1":
+        _print_no_reuse(req_hash)
+        return
+
     conn = _resolve_db_conn(slug, resolved_cwd)
     if conn is None:
         _print_no_reuse(req_hash)
@@ -160,23 +173,31 @@ def lookup_bullet(
 
     try:
         current_bullet_texts = _load_current_bullet_texts(resolved_cwd)
-        bullet_id = _do_lookup(conn, requirement_raw, current_bullet_texts)
+        bullet_id, matched_canonical = _do_lookup(
+            conn, requirement_raw, current_bullet_texts
+        )
     except Exception as exc:  # noqa: BLE001 — degrade to no-reuse, never error
         logger.warning("lookup-bullet: lookup failed — returning no-reuse: %s", exc)
-        bullet_id = None
+        bullet_id, matched_canonical = None, None
     finally:
         import contextlib
         with contextlib.suppress(Exception):
             conn.close()
 
+    # Prefer the canonical hash match() resolved (synonym/fuzzy-aware) so the
+    # value we emit matches the row keyed in canonical_requirements /
+    # requirement_evidence_map.  Fall back to the locally-computed hash only
+    # when no canonical requirement matched at all (a brand-new requirement).
+    effective_hash = matched_canonical or req_hash
+
     if bullet_id is not None:
         typer.echo(json.dumps({
             "master_bullet_id": bullet_id,
             "reused": True,
-            "matched_hash": req_hash,
+            "matched_hash": effective_hash,
         }))
     else:
-        _print_no_reuse(req_hash)
+        _print_no_reuse(effective_hash)
 
 
 def _requirement_hash_safe(requirement_raw: str) -> str | None:
@@ -213,23 +234,34 @@ def _do_lookup(
     conn: sqlite3.Connection,
     requirement_raw: str,
     current_bullet_texts: dict[str, str],
-) -> str | None:
-    """Core lookup logic: find match via canonical requirements, return bullet_id."""
+) -> tuple[str | None, str | None]:
+    """Core lookup logic.
+
+    Returns ``(bullet_id, matched_canonical_hash)``:
+
+    - ``matched_canonical_hash`` is the hash ``match()`` resolved to when a
+      canonical requirement matched (synonym/fuzzy-aware) — the hash actually
+      keyed in ``requirement_evidence_map`` — or ``None`` when no canonical
+      requirement matched (caller falls back to the locally-computed hash).
+    - ``bullet_id`` is the mapped master bullet id, or ``None`` when there is
+      no canonical match OR no fresh mapped bullet for the matched hash.
+    """
     from jobsmith.reuse.evidence_map import lookup_mapped_bullet
     from jobsmith.reuse.match import match
 
-    # First try a direct match to get the requirement hash
+    # First try a direct match to get the canonical requirement hash.
     match_result = match(requirement_raw, conn)
 
     if match_result.decision != "reuse" or match_result.matched_hash is None:
-        # No canonical requirement found → no mapping possible
-        return None
+        # No canonical requirement found → no mapping possible.
+        return None, None
 
-    return lookup_mapped_bullet(
+    bullet_id = lookup_mapped_bullet(
         conn,
         requirement_hash=match_result.matched_hash,
         current_bullet_texts=current_bullet_texts,
     )
+    return bullet_id, match_result.matched_hash
 
 
 __all__ = [

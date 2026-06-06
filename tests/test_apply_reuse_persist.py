@@ -294,3 +294,29 @@ def test_reuse_plan_artifact_written_before_phases(tmp_path: Path):
     assert (state_dir / "reuse-plan.json").exists()
     # Gather is NOT skipped at the wrapper level — the specialist still runs.
     assert "gather" in called_phases, f"gather was skipped: {called_phases}"
+
+
+def test_requirement_hashes_from_jd_uses_canonical_contract():
+    """Per-requirement hashes match the single requirement_content_hash contract."""
+    from jobsmith._cli_apply import _requirement_hashes_from_jd
+    from jobsmith.reuse.canonicalize import requirement_content_hash
+
+    jd_parsed = {
+        "must_haves": [
+            {"raw": "5+ years Python", "canonical_tag": "tag:python",
+             "normalized_phrase": "python experience"},
+        ],
+        "nice_to_haves": [
+            {"raw": "AWS", "canonical_tag": "tag:aws", "normalized_phrase": "aws experience"},
+            "not-a-dict-skipped",
+        ],
+    }
+
+    hashes = _requirement_hashes_from_jd(jd_parsed)
+
+    # Two dict requirements → two hashes; the non-dict entry is skipped.
+    assert len(hashes) == 2
+    expected_python = requirement_content_hash(
+        {"canonical_tag": "tag:python", "normalized_phrase": "python experience"}
+    )
+    assert expected_python in hashes
