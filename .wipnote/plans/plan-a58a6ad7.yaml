@@ -6,7 +6,7 @@ meta:
     created_at: ""
     status: draft
     schema_version: v3
-    version: 16
+    version: 17
 design:
     problem: |
         Every `jobsmith apply` re-runs the full 3-phase pipeline (gather -> draft ->
@@ -318,6 +318,7 @@ slices:
         reposts); deduping parse but re-scoring (fit-score is a function of the same
         parsed JD). Threshold in slice-1 config.
     - id: slice-6
+      feature_id: feat-6623ee3b
       num: 6
       title: Reuse-planner pre-phase + --no-reuse flag
       what: |
@@ -357,6 +358,7 @@ slices:
       approved: false
       comment: ""
       approval_status: approved
+      execution_status: promoted
       questions:
         - id: q-overlap
           text: How is JD-overlap for the warm-start decision computed?
