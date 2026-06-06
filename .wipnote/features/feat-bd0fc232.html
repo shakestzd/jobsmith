@@ -10,15 +10,15 @@
 <body>
     <article id="feat-bd0fc232"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-06T07:06:54.913755"
-             data-updated="2026-06-06T08:50:47.826748" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
+             data-updated="2026-06-06T09:00:10.026925" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
 
         <header>
             <h1>Correctness backstop: always re-gate via guard.py &#43; factcheck.py</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
@@ -61,7 +61,8 @@ Wire the backstop (src/jobsmith/reuse/backstop.py) into the assembly step in
 src/jobsmith/core/pipeline.py so it runs on the reused path too. On any gate
 failure, regenerate the offending piece via the full specialist and re-gate,
 with a bounded retry count (from slice-1 config); after the bound, fall back
-to full from-scratch generation, then error rather than ship an ungated claim.</p>
+to full from-scratch generation, then error rather than ship an ungated claim.
+[2026-06-06 09:00 claude-code] accepted-advisory (provenance override): implementation landed in commits 2569166 and 4e20fe1 on branch trk-45e7fcd5; YOLO budget hook required splitting into two commits which wipnote did not observe as linked</p>
         </section>
     </article>
 </body>
