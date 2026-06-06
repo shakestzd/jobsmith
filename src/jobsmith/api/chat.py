@@ -10,6 +10,7 @@ POST /chat/session/reset     Clear the stored session UUID for a slug.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -107,7 +108,7 @@ async def send_chat_message(body: ChatSendRequest) -> EventSourceResponse:
     if slug != "__global__":
         system_prompt = _build_system_prompt(slug)
 
-    from jobsmith.marimo.claude_chat import ClaudeChatBackend
+    from jobsmith.api.claude_chat import ClaudeChatBackend
 
     backend = ClaudeChatBackend(
         slug=slug,
@@ -191,10 +192,8 @@ def _build_system_prompt(slug: str) -> str | None:
     work_content = ""
     work_yml = app_dir / "work.yml"
     if work_yml.exists():
-        try:
+        with contextlib.suppress(OSError):
             work_content = work_yml.read_text(encoding="utf-8")[:3000]
-        except OSError:
-            pass
 
     cover_content = ""
     docs_dir = app_dir / "documents"
@@ -205,10 +204,8 @@ def _build_system_prompt(slug: str) -> str | None:
                 key=lambda p: p.name,
             )
             if matches:
-                try:
+                with contextlib.suppress(OSError):
                     cover_content = matches[0].read_text(encoding="utf-8")[:2000]
-                except OSError:
-                    pass
                 break
 
     return (
