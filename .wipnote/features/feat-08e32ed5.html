@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Requirement-&gt;evidence/bullet map &#43; reuse</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-08e32ed5"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-06T07:06:53.952978"
+             data-updated="2026-06-06T07:57:27.315126" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
+
+        <header>
+            <h1>Requirement-&gt;evidence/bullet map &#43; reuse</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-a58a6ad7.html" data-relationship="planned_in" data-since="2026-06-06T07:06:53.988182">plan-a58a6ad7</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-4dfd1a0b.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:53.998255">feat-4dfd1a0b</a></li>
+                    <li><a href="feat-5024375d.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:54.008508">feat-5024375d</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-45e7fcd5.html" data-relationship="part_of" data-since="2026-06-06T07:06:53.965911">trk-45e7fcd5</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="2dc17467-59ed-416e-9cf4-53feb0ecd9eb.html" data-relationship="implemented_in" data-since="2026-06-06T07:57:27.315032">session 2dc17467-59ed-416e-9cf4-53feb0ecd9eb</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Populate requirement_evidence_map from each completed application's
+bullet-selection.json (read via src/jobsmith/_state_readers.py:52, at
+/.apply-state/bullet-selection.json): (canonical requirement) ->
+(master bullet id + content hash of that bullet). On a new JD, for each
+requirement resolving to a prior canonical requirement (slice-2), reuse the
+previously selected master bullet INSTEAD of re-selecting -- but only when the
+bullet's current content hash still matches the stored hash. A master-YAML
+edit changes the bullet hash and auto-invalidates the mapping. The
+apply-bullet-selector prompt (src/jobsmith/plugin/agents/apply-bullet-selector.md)
+consults the map before doing work.</p>
+        </section>
+    </article>
+</body>
+</html>
