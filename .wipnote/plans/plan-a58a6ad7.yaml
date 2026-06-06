@@ -6,7 +6,7 @@ meta:
     created_at: ""
     status: draft
     schema_version: v3
-    version: 17
+    version: 18
 design:
     problem: |
         Every `jobsmith apply` re-runs the full 3-phase pipeline (gather -> draft ->
@@ -374,6 +374,7 @@ slices:
         **Rejected:** pre-population only (no central warm-start decision);
         per-specialist-only (no cross-specialist coordination / nearest-app).
     - id: slice-7
+      feature_id: feat-13a76665
       num: 7
       title: Whole-resume warm-start (diff-and-tweak), owns anchor carry-forward
       what: |
@@ -413,6 +414,7 @@ slices:
       approved: false
       comment: ""
       approval_status: approved
+      execution_status: promoted
       questions:
         - id: q-anchor
           text: What if an anchor bullet conflicts with the new JD?
