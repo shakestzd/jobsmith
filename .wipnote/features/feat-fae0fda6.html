@@ -10,15 +10,15 @@
 <body>
     <article id="feat-fae0fda6"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-06T04:36:20.569874"
-             data-updated="2026-06-06T04:40:39.013776" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.20">
+             data-updated="2026-06-06T04:55:49.588365" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.20">
 
         <header>
             <h1>Chat-driven cover-letter edits: propose -&gt; diff -&gt; apply (slice 1)</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
@@ -40,7 +40,8 @@
 
         <section data-content>
             <h3>Description</h3>
-            <p>Approach A propose/apply for the cover letter. Chat agent emits a fenced jobsmith-proposal JSON block (no FS access); SSE surfaces it as a proposal event; UI shows an old/new diff card with Apply/Reject; Apply runs check_draft fact-check gate, then writes cover-letter-draft.md and re-renders. Gate failure rejects the apply and returns reasons to chat. Establishes the shared propose/apply mechanism for later assets (work.yml, bullets, resume).</p>
+            <p>Approach A propose/apply for the cover letter. Chat agent emits a fenced jobsmith-proposal JSON block (no FS access); SSE surfaces it as a proposal event; UI shows an old/new diff card with Apply/Reject; Apply runs check_draft fact-check gate, then writes cover-letter-draft.md and re-renders. Gate failure rejects the apply and returns reasons to chat. Establishes the shared propose/apply mechanism for later assets (work.yml, bullets, resume).
+[2026-06-06 04:55 claude-code] accepted-advisory (provenance override): Implementation committed at 191f9145 (git subject + body reference feat-fae0fda6 and include a wipnote-id trailer). The 'wipnote commit' wrapper that records the source-commit link is unavailable in this restricted execution environment (permission-denied), and plain git commit does not auto-link here, so the provenance gate cannot be satisfied programmatically. Linking the commit is a follow-up.</p>
         </section>
     </article>
 </body>
