@@ -10,26 +10,20 @@
 <body>
     <article id="feat-b6b13580"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-06T20:17:37.936817"
-             data-updated="2026-06-06T20:49:04.704822" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.20">
+             data-updated="2026-06-06T20:55:36.306877" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.20">
 
         <header>
             <h1>Validate reuse fires end-to-end (A/B harness &#43; real JD)</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
 
         <nav data-graph-edges>
-            <section data-edge-type="implemented_in">
-                <h3>Implemented In:</h3>
-                <ul>
-                    <li><a href="f7efd933-40aa-45e9-bb30-c456a944632c.html" data-relationship="implemented_in" data-since="2026-06-06T20:49:04.704714">session f7efd933-40aa-45e9-bb30-c456a944632c</a></li>
-                </ul>
-            </section>
             <section data-edge-type="part_of">
                 <h3>Part Of:</h3>
                 <ul>
@@ -43,11 +37,18 @@
                     <li><a href="feat-60d8bef1.html" data-relationship="blocked_by" data-since="2026-06-06T20:17:38.155919">Backfill reuse store from existing applications</a></li>
                 </ul>
             </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="f7efd933-40aa-45e9-bb30-c456a944632c.html" data-relationship="implemented_in" data-since="2026-06-06T20:49:04.704714">session f7efd933-40aa-45e9-bb30-c456a944632c</a></li>
+                </ul>
+            </section>
         </nav>
 
         <section data-content>
             <h3>Description</h3>
-            <p>Acceptance validation that reuse actually fires once consumption (bug-88fcc597) and store backfill land. Run the A/B harness (tests/test_reuse_ab.py) plus a real jobsmith apply on a near-duplicate JD from the data-analyst cluster (the bestjobtool/LinkedIn posting provided by the user). Assert run_metrics shows reuse engaged with materially fewer model calls AND wall-clock vs --no-reuse, while anchor + no-fabrication + fact-check gates still pass (backstop). Capture before/after metrics in the reuse report.</p>
+            <p>Acceptance validation that reuse actually fires once consumption (bug-88fcc597) and store backfill land. Run the A/B harness (tests/test_reuse_ab.py) plus a real jobsmith apply on a near-duplicate JD from the data-analyst cluster (the bestjobtool/LinkedIn posting provided by the user). Assert run_metrics shows reuse engaged with materially fewer model calls AND wall-clock vs --no-reuse, while anchor + no-fabrication + fact-check gates still pass (backstop). Capture before/after metrics in the reuse report.
+[2026-06-06 20:55 claude-code] accepted-advisory (provenance override): test-only feature: all changes are in tests/test_reuse_ab_e2e.py — no source code added, only a new test file exercising existing wired consumption path</p>
         </section>
     </article>
 </body>
