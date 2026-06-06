@@ -416,6 +416,74 @@ def _read_company_name(slug: str, cwd: Path, config: object, repo_root: Path) ->
         return ""
 
 
+def _persist_reuse_tables(
+    db_conn: object,
+    *,
+    slug: str,
+    state_dir: Path,
+    jd_text: str | None,
+) -> None:
+    """Persist reuse tables after the gather phase (finding #3).
+
+    Best-effort: each write is independently guarded so a single persistence
+    error can never abort the apply.  Writes:
+
+    1. application_fingerprints + run_metrics (JD fingerprint) via
+       ``dedup.write_jd_fingerprint`` — uses the supplied raw ``jd_text`` when
+       present, else the ``jd_text_clean`` field of ``jd-parsed.json``.
+    2. canonical_requirements via ``db_ingest.ingest_canonical_requirements``.
+    3. requirement_evidence_map via
+       ``evidence_map.populate_from_bullet_selection``.
+
+    Without this, those three tables stay empty during normal applies, so a
+    later run has nothing to reuse.
+    """
+    import json as _json
+
+    if db_conn is None:
+        return
+
+    jd_parsed: dict = {}
+    try:
+        jd_path = state_dir / "jd-parsed.json"
+        if jd_path.exists():
+            jd_parsed = _json.loads(jd_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("reuse-persist: failed to read jd-parsed.json: %s", exc)
+
+    # 1. JD fingerprint.
+    try:
+        from jobsmith.reuse.dedup import write_jd_fingerprint
+
+        fp_text = jd_text if (jd_text and jd_text.strip()) else jd_parsed.get(
+            "jd_text_clean", ""
+        )
+        if fp_text and fp_text.strip():
+            write_jd_fingerprint(db_conn, slug=slug, jd_text=fp_text)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("reuse-persist: JD fingerprint write failed: %s", exc)
+
+    # 2. Canonical requirements.
+    try:
+        from jobsmith.db_ingest import ingest_canonical_requirements
+
+        if jd_parsed:
+            ingest_canonical_requirements(db_conn, jd_parsed=jd_parsed)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("reuse-persist: canonical requirements ingest failed: %s", exc)
+
+    # 3. Bullet evidence map.
+    try:
+        from jobsmith.reuse.evidence_map import populate_from_bullet_selection
+
+        sel_path = state_dir / "bullet-selection.json"
+        if sel_path.exists():
+            selection = _json.loads(sel_path.read_text(encoding="utf-8"))
+            populate_from_bullet_selection(db_conn, selection=selection)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("reuse-persist: bullet evidence map populate failed: %s", exc)
+
+
 # ---------------------------------------------------------------------------
 # Phase loop
 # ---------------------------------------------------------------------------
@@ -441,6 +509,7 @@ def _run_apply_phases(
     jd_text_file: Path | None = None,
     cancel_event: "threading.Event | None" = None,
     no_reuse: bool = False,
+    jd_text: str | None = None,
 ) -> int:
     """Phase-loop body extracted so the surrounding ``run_apply`` can wrap it
     with the apply_runs DB lifecycle (insert before, UPDATE after, with the
@@ -833,6 +902,22 @@ def _run_apply_phases(
                         state_dir=state_dir_for_ingest,
                     )
 
+        # Finding #3 (bug-6204cdad): after the GATHER phase, persist the reuse
+        # tables (application_fingerprints, canonical_requirements,
+        # requirement_evidence_map) so later applies have something to reuse.
+        # Best-effort and isolated from the ingest above so a persistence
+        # failure cannot abort the apply.  Skipped under --no-reuse to keep the
+        # legacy path byte-for-byte (no reuse state ever written).
+        if phase_name == "gather" and db_conn is not None and not no_reuse:
+            state_dir_for_reuse = _apply_state_dir(slug, resolved_cwd)
+            if state_dir_for_reuse is not None:
+                _persist_reuse_tables(
+                    db_conn,
+                    slug=slug,
+                    state_dir=state_dir_for_reuse,
+                    jd_text=jd_text,
+                )
+
         # Step 3i (feat-ff4ccde2): snapshot fresh specialist outputs into
         # llm_cache so the next apply with the same JD + master content can
         # short-circuit this phase. Skipped on cache-hit replays — the rows
@@ -1005,6 +1090,7 @@ def run_apply(
             jd_text_file=jd_text_file,
             cancel_event=cancel_event,
             no_reuse=no_reuse,  # captured from outer run_apply closure
+            jd_text=jd_text,  # captured from outer run_apply closure
         )
 
     # Look up ensure_bootstrap through apply's namespace so that
