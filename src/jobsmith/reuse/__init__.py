@@ -17,10 +17,22 @@ Public API (used by slices 2-9):
   taxonomy.resolve_tag       — alias → canonical tag
   match.match                — tiered matcher (exact_tag → phrase → fuzzy)
   match.MatchResult          — typed result for slice-4 and slice-5 consumers
+
+  company_cache.normalize_company_key  — strip legal suffixes, produce stable slug
+  company_cache.check_cache            — cache hit/miss with normalized key + TTL
+  company_cache.write_cache            — write research to normalized cache path
+  company_cache.record_company_research_metric — write reused/generated signal to run_metrics
 """
 from __future__ import annotations
 
 from jobsmith.reuse.canonicalize import canonicalize
+from jobsmith.reuse.company_cache import (
+    METRIC_KEY_COMPANY_RESEARCH_SOURCE,
+    check_cache,
+    normalize_company_key,
+    record_company_research_metric,
+    write_cache,
+)
 from jobsmith.reuse.match import MatchResult, match
 from jobsmith.reuse.store import (
     content_hash,
@@ -37,8 +49,10 @@ from jobsmith.reuse.store import (
 from jobsmith.reuse.taxonomy import load_taxonomy, resolve_tag
 
 __all__ = [
+    "METRIC_KEY_COMPANY_RESEARCH_SOURCE",
     "MatchResult",
     "canonicalize",
+    "check_cache",
     "content_hash",
     "get_application_fingerprint",
     "get_canonical_requirement",
@@ -47,9 +61,12 @@ __all__ = [
     "is_fresh",
     "load_taxonomy",
     "match",
+    "normalize_company_key",
+    "record_company_research_metric",
     "resolve_tag",
     "upsert_application_fingerprint",
     "upsert_canonical_requirement",
     "upsert_requirement_evidence",
     "upsert_run_metric",
+    "write_cache",
 ]

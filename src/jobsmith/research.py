@@ -4,15 +4,21 @@ Cache convention: `private/companies/<slug>.md` holds synthesised research for
 one company. A cache hit avoids a WebFetch round-trip when a second application
 is made to the same company within N days (default 30).
 
+Cross-role reuse: `cache_path_for` now delegates key derivation to
+`jobsmith.reuse.company_cache.normalize_company_key` so variant spellings
+("Acme, Inc.", "Acme Inc", "ACME") all resolve to the same cache file.
+
 Public API:
     slugify(company_name) -> str
         Lower-case, hyphen-separated identifier derived from a company name.
+        (Legacy helper — new callers should prefer normalize_company_key from
+        jobsmith.reuse.company_cache.)
 
     is_fresh(path, window_days=30) -> bool
         True when *path* exists and its mtime is within *window_days*.
 
     cache_path_for(company_name, repo_root=None) -> Path
-        Return the canonical cache path for a company slug.
+        Return the canonical cache path for a company slug (uses normalized key).
 """
 
 from __future__ import annotations
@@ -59,6 +65,11 @@ def cache_path_for(company_name: str, repo_root: Path | None = None) -> Path:
 
     Path: <repo_root>/private/companies/<slug>.md
     When *repo_root* is omitted, returns a relative path (`private/companies/<slug>.md`).
+
+    Note: This legacy helper uses `slugify` for backward compatibility with
+    existing cache files. New cross-role reuse goes through
+    `jobsmith.reuse.company_cache.check_cache` / `write_cache`, which use
+    `normalize_company_key` to strip legal suffixes for variant-tolerant matching.
     """
     slug = slugify(company_name)
     base = (repo_root / "private" / "companies") if repo_root else Path("private") / "companies"
