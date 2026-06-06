@@ -221,6 +221,47 @@ class BenchmarkConfig(BaseModel):
     required: bool = False
 
 
+class ReuseSettings(BaseModel):
+    """All reuse-layer knobs in one place.
+
+    Every threshold that controls caching, deduplication, or warm-start
+    behaviour lives here so a reviewer sees every dial at a glance.
+
+    Attributes
+    ----------
+    fuzzy_cutoff:
+        Minimum similarity ratio (0.0-1.0) for fuzzy string matching.
+        Used by the canonicalization/match slice (slice 2) when deciding
+        whether two requirement strings are the same.  Default 0.85.
+
+    jd_overlap_warm_start_threshold:
+        Minimum JD token-overlap ratio (0.0-1.0) required to reuse a
+        prior planner output as a warm-start for a new application.
+        Used by the warm-start slice (slice 7).  Default 0.80.
+
+    dedup_threshold:
+        Minimum similarity ratio (0.0-1.0) for near-duplicate JD detection.
+        Used by the JD dedup slice (slice 5).  Default 0.90.
+
+    company_ttl_days:
+        Maximum age (in whole days) before company-research results are
+        considered stale and must be refreshed.  Company research reuses
+        the existing file cache (slice 3), and this TTL governs when that
+        cache is considered fresh.  Default 30 days.
+
+    regen_retry_bound:
+        Maximum number of regeneration attempts before the re-gate
+        backstop (slice 8) gives up and marks the section as unresolvable.
+        Must be >= 1.  Default 3.
+    """
+
+    fuzzy_cutoff: float = 0.85
+    jd_overlap_warm_start_threshold: float = 0.80
+    dedup_threshold: float = 0.90
+    company_ttl_days: int = 30
+    regen_retry_bound: int = 3
+
+
 class JobsmithConfig(BaseModel):
     """Full jobsmith configuration loaded from `.apply-config.yaml`."""
 
@@ -234,6 +275,7 @@ class JobsmithConfig(BaseModel):
     fit_scorer: FitScorerSettings = Field(default_factory=FitScorerSettings)
     portfolio: PortfolioSettings = Field(default_factory=PortfolioSettings)
     benchmarks: BenchmarkConfig = Field(default_factory=BenchmarkConfig)
+    reuse: ReuseSettings = Field(default_factory=ReuseSettings)
 
     @field_validator("anchor_thresholds")
     @classmethod
@@ -285,6 +327,7 @@ __all__ = [
     "OutputPaths",
     "PortfolioSettings",
     "ResumeSettings",
+    "ReuseSettings",
     "UserIdentity",
     "VoiceSettings",
     "find_config",
