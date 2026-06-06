@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Requirement canonicalization &#43; tiered match &#43; taxonomy seed</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-5024375d"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-06T07:06:53.185505"
+             data-updated="2026-06-06T07:20:49.63069" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5">
+
+        <header>
+            <h1>Requirement canonicalization &#43; tiered match &#43; taxonomy seed</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-4dfd1a0b.html" data-relationship="blocked_by" data-since="2026-06-06T07:06:53.283814">feat-4dfd1a0b</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-45e7fcd5.html" data-relationship="part_of" data-since="2026-06-06T07:06:53.206566">trk-45e7fcd5</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-a58a6ad7.html" data-relationship="planned_in" data-since="2026-06-06T07:06:53.276066">plan-a58a6ad7</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="2dc17467-59ed-416e-9cf4-53feb0ecd9eb.html" data-relationship="implemented_in" data-since="2026-06-06T07:20:49.630566">session 2dc17467-59ed-416e-9cf4-53feb0ecd9eb</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Add a canonical skill/requirement taxonomy as a versioned seed file
+(src/jobsmith/reuse/taxonomy.py + a data seed, e.g. reuse/taxonomy_seed.yaml)
+with synonym aliases (advanced sql / strong sql skills / sql proficiency ->
+tag:sql) and a documented path for adding new tags. Add a normalizer
+(canonicalize.py): extend the apply-jd-parser prompt
+(src/jobsmith/plugin/agents/apply-jd-parser.md) to emit, per requirement, a
+canonical tag (when known) + a normalized phrase, and capture those in the
+post-phase ingest (src/jobsmith/db_ingest.py) into canonical_requirements.
+Implement match(req) (match.py) with tiered resolution: exact tag ->
+normalized-phrase equality -> fuzzy (token-set ratio) below the configured
+cutoff = no match; return reuse|regenerate + matched prior requirement id.</p>
+        </section>
+    </article>
+</body>
+</html>
