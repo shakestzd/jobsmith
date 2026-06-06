@@ -4,9 +4,9 @@ meta:
     title: Apply-pipeline incremental-reuse / caching layer
     description: ""
     created_at: ""
-    status: draft
+    status: active
     schema_version: v3
-    version: 20
+    version: 21
 design:
     problem: |
         Every `jobsmith apply` re-runs the full 3-phase pipeline (gather -> draft ->
