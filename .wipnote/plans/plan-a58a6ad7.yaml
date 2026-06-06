@@ -6,7 +6,7 @@ meta:
     created_at: ""
     status: draft
     schema_version: v3
-    version: 19
+    version: 20
 design:
     problem: |
         Every `jobsmith apply` re-runs the full 3-phase pipeline (gather -> draft ->
@@ -489,6 +489,7 @@ slices:
         cached-valid piece can be wrong in a new JD context); gating the plan up front
         then trusting it (weakest backstop). This slice is why slices 4/7 are safe.
     - id: slice-9
+      feature_id: feat-c49f116f
       num: 9
       title: Reuse metrics, report, and A/B acceptance harness
       what: |
@@ -527,6 +528,7 @@ slices:
       approved: false
       comment: ""
       approval_status: approved
+      execution_status: promoted
       decisions_notes: |
         **State:** run_metrics table (slice-1) holds per-run counts; report renders
         from it. **Acceptance:** the A/B harness is the hard gate -- it FAILS if
