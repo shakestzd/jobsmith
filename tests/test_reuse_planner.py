@@ -489,6 +489,8 @@ class TestReuseLookupBulletCLI:
         output = json.loads(result.output.strip())
         assert output["master_bullet_id"] == bullet_id
         assert output["reused"] is True
+        # matched_hash is returned on a reuse hit so the selector can persist it.
+        assert output["matched_hash"], "reuse hit must carry matched_hash"
 
     def test_lookup_bullet_reused_false_no_prior_data(self, tmp_path: Path):
         """When no mapping exists, exit 0, JSON reused=false, master_bullet_id=null."""
@@ -512,6 +514,9 @@ class TestReuseLookupBulletCLI:
         output = json.loads(result.output.strip())
         assert output["master_bullet_id"] is None
         assert output["reused"] is False
+        # Even a FRESH selection (no mapping) gets a canonical matched_hash so
+        # the selector can seed requirement_evidence_map for future reuse.
+        assert output["matched_hash"], "fresh selection must still carry matched_hash"
 
 
 # ---------------------------------------------------------------------------

@@ -136,16 +136,26 @@ def lookup_bullet(
     Prints JSON to stdout:
 
     \b
-    Reuse hit:     {"master_bullet_id": "<id>", "reused": true}
-    No mapping:    {"master_bullet_id": null, "reused": false}
+    Reuse hit:     {"master_bullet_id": "<id>", "reused": true,  "matched_hash": "<reqhash>"}
+    No mapping:    {"master_bullet_id": null,   "reused": false, "matched_hash": "<reqhash>"}
+
+    ``matched_hash`` is the canonical requirement hash (the
+    ``requirement_content_hash`` contract).  It is ALWAYS present — even for a
+    fresh selection with no prior mapping — so the selector can write it back
+    as ``matched_requirement_hash`` and seed ``requirement_evidence_map`` for
+    future reuse.  It is ``null`` only when the requirement cannot be hashed.
 
     Exit code is always 0 (the JSON payload signals the result).
     """
     resolved_cwd = cwd or Path.cwd()
 
+    # The canonical requirement hash is independent of any DB/mapping state —
+    # compute it up front so it is returned even on the no-reuse / no-DB paths.
+    req_hash = _requirement_hash_safe(requirement_raw)
+
     conn = _resolve_db_conn(slug, resolved_cwd)
     if conn is None:
-        _print_no_reuse()
+        _print_no_reuse(req_hash)
         return
 
     try:
@@ -160,13 +170,43 @@ def lookup_bullet(
             conn.close()
 
     if bullet_id is not None:
-        typer.echo(json.dumps({"master_bullet_id": bullet_id, "reused": True}))
+        typer.echo(json.dumps({
+            "master_bullet_id": bullet_id,
+            "reused": True,
+            "matched_hash": req_hash,
+        }))
     else:
-        _print_no_reuse()
+        _print_no_reuse(req_hash)
 
 
-def _print_no_reuse() -> None:
-    typer.echo(json.dumps({"master_bullet_id": None, "reused": False}))
+def _requirement_hash_safe(requirement_raw: str) -> str | None:
+    """Canonical requirement hash for *requirement_raw*, or None on error.
+
+    Uses the single ``requirement_content_hash`` contract so the value matches
+    ``canonical_requirements.content_hash`` and
+    ``requirement_evidence_map.requirement_hash``.
+    """
+    try:
+        from jobsmith.reuse.canonicalize import (
+            canonicalize,
+            requirement_content_hash,
+        )
+
+        tag, normalized = canonicalize(requirement_raw)
+        return requirement_content_hash(
+            {"canonical_tag": tag, "normalized_phrase": normalized}
+        )
+    except Exception as exc:  # noqa: BLE001 — never error the lookup on hashing
+        logger.warning("lookup-bullet: could not hash requirement: %s", exc)
+        return None
+
+
+def _print_no_reuse(matched_hash: str | None = None) -> None:
+    typer.echo(json.dumps({
+        "master_bullet_id": None,
+        "reused": False,
+        "matched_hash": matched_hash,
+    }))
 
 
 def _do_lookup(
