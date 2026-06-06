@@ -6,7 +6,7 @@ meta:
     created_at: ""
     status: draft
     schema_version: v3
-    version: 12
+    version: 13
 design:
     problem: |
         Every `jobsmith apply` re-runs the full 3-phase pipeline (gather -> draft ->
@@ -99,6 +99,7 @@ slices:
         **Freshness:** hash over NORMALIZED inputs so cosmetic master-YAML edits do
         not bust the cache; TTL applies to company research (slice-3).
     - id: slice-2
+      feature_id: feat-5024375d
       num: 2
       title: Requirement canonicalization + tiered match + taxonomy seed
       what: |
@@ -142,6 +143,7 @@ slices:
       approved: false
       comment: ""
       approval_status: approved
+      execution_status: promoted
       questions:
         - id: q-fuzzy
           text: Fuzzy backend -- sqlite FTS5 or in-process token-set ratio?
