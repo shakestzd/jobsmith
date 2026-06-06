@@ -507,9 +507,86 @@ def backfill_all(
     }
 
 
+def ingest_canonical_requirements(
+    conn: sqlite3.Connection,
+    *,
+    jd_parsed: dict,
+) -> int:
+    """Ingest per-requirement canonical fields from a jd-parsed payload.
+
+    Called after the apply-jd-parser phase completes.  Reads ``must_haves``
+    and ``nice_to_haves`` from *jd_parsed*; each item that carries
+    ``canonical_tag`` and/or ``normalized_phrase`` fields is upserted into
+    ``canonical_requirements`` keyed by the content-hash of the requirement
+    payload.
+
+    Idempotent via INSERT OR IGNORE — re-running produces 0 new rows.
+
+    Parameters
+    ----------
+    conn:
+        Open SQLite connection to the pipeline DB.
+    jd_parsed:
+        The parsed JD dict as emitted by the apply-jd-parser specialist.
+        Expected shape::
+
+            {
+                "must_haves": [
+                    {
+                        "raw": "<original phrase>",
+                        "canonical_tag": "<tag:*> | null",
+                        "normalized_phrase": "<normalized string>",
+                    },
+                    ...
+                ],
+                "nice_to_haves": [...],   # same item shape
+            }
+
+    Returns
+    -------
+    int
+        Number of *new* rows inserted (0 if all already present).
+    """
+    from jobsmith.reuse.store import content_hash as _content_hash
+
+    reqs: list[dict] = []
+    for key in ("must_haves", "nice_to_haves"):
+        items = jd_parsed.get(key) or []
+        for item in items:
+            if isinstance(item, dict):
+                reqs.append(item)
+
+    inserted = 0
+    finished_at = _now_iso()
+
+    with conn:
+        for req in reqs:
+            raw = req.get("raw", "")
+            canonical_tag = req.get("canonical_tag")
+            normalized_phrase = req.get("normalized_phrase", raw)
+
+            payload_obj = {
+                "raw": raw,
+                "canonical_tag": canonical_tag,
+                "normalized_phrase": normalized_phrase,
+            }
+            payload_str = json.dumps(payload_obj)
+            h = _content_hash(payload_obj)
+
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO canonical_requirements "
+                "(content_hash, payload, created_at) VALUES (?, ?, ?)",
+                (h, payload_str, finished_at),
+            )
+            inserted += cursor.rowcount
+
+    return inserted
+
+
 __all__ = [
     "backfill_all",
     "backfill_slug",
+    "ingest_canonical_requirements",
     "ingest_phase_outputs",
     "ingest_standalone_artifacts",
     "iter_backfillable_slugs",

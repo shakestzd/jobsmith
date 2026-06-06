@@ -1,0 +1,210 @@
+# Taxonomy seed — canonical skill/requirement tags with synonym aliases.
+#
+# Format:
+#   <tag_key>:
+#     description: <human-readable label>
+#     aliases:
+#       - <lowercase synonym phrase>
+#       - ...
+#
+# Rules for contributors:
+#   1. Tag keys must start with "tag:" and use snake_case after the prefix.
+#   2. Aliases must be lowercase; canonicalize.py normalizes input to lowercase
+#      before lookup, so mixed-case aliases are redundant.
+#   3. To add a new tag: append a new entry here — no Python code change needed.
+#   4. To add a new synonym to an existing tag: append to the aliases list.
+#   5. Keep aliases specific enough to avoid false-positive merges across
+#      semantically distinct skills (e.g., "sql" vs "nosql").
+#
+# Version: 1 (feat-5024375d)
+
+tag:sql:
+  description: "SQL / relational database query skills"
+  aliases:
+    - advanced sql
+    - strong sql skills
+    - sql proficiency
+    - sql experience
+    - proficiency in sql
+    - sql querying
+    - sql queries
+    - relational databases
+    - relational database skills
+    - sql and relational databases
+
+tag:python:
+  description: "Python programming language"
+  aliases:
+    - python programming
+    - python development
+    - python scripting
+    - python expertise
+    - proficiency in python
+    - strong python skills
+    - python experience
+    - python coding
+
+tag:machine_learning:
+  description: "Machine learning / ML engineering"
+  aliases:
+    - machine learning
+    - ml experience
+    - ml skills
+    - machine learning experience
+    - ml engineering
+    - applied machine learning
+    - machine learning models
+    - machine learning algorithms
+
+tag:data_engineering:
+  description: "Data engineering (pipelines, ETL, orchestration)"
+  aliases:
+    - data engineering
+    - etl development
+    - etl pipelines
+    - data pipelines
+    - pipeline development
+    - data pipeline experience
+    - batch processing
+    - stream processing
+
+tag:spark:
+  description: "Apache Spark / distributed data processing"
+  aliases:
+    - apache spark
+    - spark experience
+    - pyspark
+    - spark streaming
+    - spark sql
+    - experience with apache spark
+    - spark distributed processing
+
+tag:cloud_aws:
+  description: "Amazon Web Services (AWS)"
+  aliases:
+    - aws
+    - amazon web services
+    - aws cloud
+    - aws experience
+    - aws services
+    - cloud aws
+    - proficiency in aws
+
+tag:cloud_gcp:
+  description: "Google Cloud Platform"
+  aliases:
+    - gcp
+    - google cloud platform
+    - google cloud
+    - gcp experience
+    - cloud gcp
+
+tag:cloud_azure:
+  description: "Microsoft Azure"
+  aliases:
+    - azure
+    - microsoft azure
+    - azure cloud
+    - azure experience
+
+tag:kubernetes:
+  description: "Kubernetes / container orchestration"
+  aliases:
+    - kubernetes
+    - k8s
+    - kubernetes experience
+    - container orchestration
+    - knowledge of kubernetes
+
+tag:docker:
+  description: "Docker / containerization"
+  aliases:
+    - docker
+    - docker containers
+    - containerization
+    - docker experience
+    - docker compose
+
+tag:airflow:
+  description: "Apache Airflow / workflow orchestration"
+  aliases:
+    - apache airflow
+    - airflow
+    - airflow dags
+    - workflow orchestration with airflow
+    - airflow experience
+
+tag:dbt:
+  description: "dbt (data build tool)"
+  aliases:
+    - dbt
+    - data build tool
+    - dbt models
+    - dbt experience
+    - dbt core
+
+tag:deep_learning:
+  description: "Deep learning / neural networks"
+  aliases:
+    - deep learning
+    - neural networks
+    - deep learning models
+    - neural network experience
+    - tensorflow
+    - pytorch
+    - keras
+
+tag:llm:
+  description: "Large language models / LLM engineering"
+  aliases:
+    - llm
+    - large language models
+    - llm engineering
+    - llm experience
+    - llms
+    - prompt engineering
+    - rag
+    - retrieval augmented generation
+
+tag:data_visualization:
+  description: "Data visualization / BI dashboards"
+  aliases:
+    - data visualization
+    - dashboards
+    - bi dashboards
+    - tableau
+    - power bi
+    - looker
+    - data reporting
+    - reporting and dashboards
+
+tag:statistics:
+  description: "Statistics / statistical analysis"
+  aliases:
+    - statistics
+    - statistical analysis
+    - statistical modeling
+    - statistical methods
+    - applied statistics
+    - probability and statistics
+
+tag:communication:
+  description: "Communication / stakeholder management"
+  aliases:
+    - communication skills
+    - strong communication
+    - stakeholder management
+    - cross-functional collaboration
+    - written and verbal communication
+    - presentation skills
+
+tag:git:
+  description: "Git / version control"
+  aliases:
+    - git
+    - version control
+    - git experience
+    - source control
+    - git workflow
+    - github
+    - gitlab

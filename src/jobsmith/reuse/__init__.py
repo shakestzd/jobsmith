@@ -11,9 +11,17 @@ Public API (used by slices 2-9):
   store.get_application_fingerprint
   store.upsert_run_metric
   store.get_run_metrics
+
+  canonicalize.canonicalize  — (tag | None, normalized_phrase)
+  taxonomy.load_taxonomy     — load versioned tag/alias seed
+  taxonomy.resolve_tag       — alias → canonical tag
+  match.match                — tiered matcher (exact_tag → phrase → fuzzy)
+  match.MatchResult          — typed result for slice-4 and slice-5 consumers
 """
 from __future__ import annotations
 
+from jobsmith.reuse.canonicalize import canonicalize
+from jobsmith.reuse.match import MatchResult, match
 from jobsmith.reuse.store import (
     content_hash,
     get_application_fingerprint,
@@ -26,16 +34,22 @@ from jobsmith.reuse.store import (
     upsert_requirement_evidence,
     upsert_run_metric,
 )
+from jobsmith.reuse.taxonomy import load_taxonomy, resolve_tag
 
 __all__ = [
+    "MatchResult",
+    "canonicalize",
     "content_hash",
-    "is_fresh",
-    "upsert_canonical_requirement",
-    "get_canonical_requirement",
-    "upsert_requirement_evidence",
-    "get_requirement_evidence",
-    "upsert_application_fingerprint",
     "get_application_fingerprint",
-    "upsert_run_metric",
+    "get_canonical_requirement",
+    "get_requirement_evidence",
     "get_run_metrics",
+    "is_fresh",
+    "load_taxonomy",
+    "match",
+    "resolve_tag",
+    "upsert_application_fingerprint",
+    "upsert_canonical_requirement",
+    "upsert_requirement_evidence",
+    "upsert_run_metric",
 ]
