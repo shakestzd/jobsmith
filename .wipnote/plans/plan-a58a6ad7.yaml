@@ -6,7 +6,7 @@ meta:
     created_at: ""
     status: draft
     schema_version: v3
-    version: 15
+    version: 16
 design:
     problem: |
         Every `jobsmith apply` re-runs the full 3-phase pipeline (gather -> draft ->
@@ -268,6 +268,7 @@ slices:
         blob here (that is slice-7 warm-start); trusting the map without re-hashing
         (carries stale bullet text).
     - id: slice-5
+      feature_id: feat-42d39d4a
       num: 5
       title: JD-parse + fit-score dedup for near-duplicate JDs
       what: |
@@ -307,6 +308,7 @@ slices:
       approved: false
       comment: ""
       approval_status: approved
+      execution_status: promoted
       decisions_notes: |
         **Key:** fingerprint = feature-set over normalized requirements + JD text
         (slice-2). **Relationship to llm_cache:** llm_cache keys on EXACT jd_hash; this
