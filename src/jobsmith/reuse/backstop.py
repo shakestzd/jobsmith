@@ -88,10 +88,11 @@ def _gate_draft_text(
     master_path: Path,
     selection_path: Path,
     decisions_path: Path | None = None,
+    extra_sources: dict[str, str] | None = None,
 ) -> tuple[bool, int, bool, list[str]]:
     """Run both gates; return (overall_pass, anchor_rc, fc_passed, failed_claims)."""
     anchor_rc = _run_anchor_gate(master_path, selection_path, decisions_path)
-    fc_passed, failed_claims = _run_factcheck_gate(draft_text, content_dir)
+    fc_passed, failed_claims = _run_factcheck_gate(draft_text, content_dir, extra_sources)
     return (anchor_rc == 0) and fc_passed, anchor_rc, fc_passed, failed_claims
 
 
@@ -122,6 +123,7 @@ def run_backstop(
     content_dir: Path,
     selection_path: Path,
     decisions_path: Path | None = None,
+    extra_sources: dict[str, str] | None = None,
     regen_retry_bound: int = 3,
     resume_regen_fn: Callable[[], str] | None = None,
     resume_fallback_fn: Callable[[], str] | None = None,
@@ -133,6 +135,9 @@ def run_backstop(
 
     UNCONDITIONAL — runs whether or not reuse/warm-start was used.
     Raises BackstopError only when all retries + fallback are exhausted.
+
+    ``extra_sources`` is forwarded to ``check_draft`` so JD-domain terms
+    (IRA, Energy Community) can be verified against the job description.
     """
     resume_verdict = _gate_artifact(
         artifact="resume",
@@ -141,6 +146,7 @@ def run_backstop(
         content_dir=content_dir,
         selection_path=selection_path,
         decisions_path=decisions_path,
+        extra_sources=extra_sources,
         regen_retry_bound=regen_retry_bound,
         regen_fn=resume_regen_fn,
         fallback_fn=resume_fallback_fn,
@@ -154,6 +160,7 @@ def run_backstop(
         content_dir=content_dir,
         selection_path=selection_path,
         decisions_path=decisions_path,
+        extra_sources=extra_sources,
         regen_retry_bound=regen_retry_bound,
         regen_fn=cover_letter_regen_fn,
         fallback_fn=cover_letter_fallback_fn,
@@ -172,6 +179,7 @@ def _gate_artifact(
     content_dir: Path,
     selection_path: Path,
     decisions_path: Path | None,
+    extra_sources: dict[str, str] | None = None,
     regen_retry_bound: int,
     regen_fn: Callable[[], str] | None,
     fallback_fn: Callable[[], str] | None,
@@ -181,7 +189,7 @@ def _gate_artifact(
     regen_count = 0
 
     overall, anchor_rc, fc_passed, failed_claims = _gate_draft_text(
-        current_text, content_dir, master_path, selection_path, decisions_path
+        current_text, content_dir, master_path, selection_path, decisions_path, extra_sources
     )
     if overall:
         return GateVerdict(artifact=artifact, passed=True, anchor_exit_code=anchor_rc,
@@ -200,7 +208,7 @@ def _gate_artifact(
                 break
             regen_count += 1
             overall, anchor_rc, fc_passed, failed_claims = _gate_draft_text(
-                current_text, content_dir, master_path, selection_path, decisions_path
+                current_text, content_dir, master_path, selection_path, decisions_path, extra_sources
             )
             if overall:
                 return GateVerdict(artifact=artifact, passed=True, anchor_exit_code=anchor_rc,
@@ -216,7 +224,7 @@ def _gate_artifact(
             logger.warning("backstop: fallback_fn raised: %s", exc)
         else:
             overall, anchor_rc, fc_passed, failed_claims = _gate_draft_text(
-                current_text, content_dir, master_path, selection_path, decisions_path
+                current_text, content_dir, master_path, selection_path, decisions_path, extra_sources
             )
             if overall:
                 return GateVerdict(artifact=artifact, passed=True, anchor_exit_code=anchor_rc,
@@ -236,10 +244,11 @@ def gate_verdict_for_text(
     content_dir: Path,
     selection_path: Path,
     decisions_path: Path | None = None,
+    extra_sources: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Lightweight gate check returning a plain dict verdict for parity comparison."""
     anchor_rc = _run_anchor_gate(master_path, selection_path, decisions_path)
-    fc_passed, failed_claims = _run_factcheck_gate(draft_text, content_dir)
+    fc_passed, failed_claims = _run_factcheck_gate(draft_text, content_dir, extra_sources)
     return {
         "anchor_passed": anchor_rc == 0,
         "factcheck_passed": fc_passed,

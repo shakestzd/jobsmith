@@ -72,8 +72,10 @@ _MULTI_CAP_RE = re.compile(r"\b[A-Z][a-zA-Z]{3,}(?:[ \t]+[A-Z][a-zA-Z]{3,})+\b")
 _CAMEL_NAME_RE = re.compile(r"\b[A-Z][a-z]+[A-Z][a-zA-Z]+\b")
 
 # Countable metrics: "7 pipelines", "200K assets", "7 automated ETL pipelines".
+# Negative lookbehind prevents matching mid-number: "25B" inside "$4.25B",
+# or "000" inside "3,000". The lookbehind covers digit, decimal, comma, and $.
 _COUNT_RE = re.compile(
-    r"\b\d+[KMB]?\+?\s+(?:[\w\-]+\s+){0,3}"
+    r"(?<![\d.,$])\b\d+[KMB]?\+?\s+(?:[\w\-]+\s+){0,3}"
     r"(?:pipelines?|assets?|systems?|states?|clients?|"
     r"customers?|employees?|engineers?|applications?|reports?|dashboards?|"
     r"databases?|warehouses?|projects?|teams?|companies|markets?)\b",
@@ -89,6 +91,9 @@ _CONNECTED_CAP_RE = re.compile(
     r"(?:[ \t]+[A-Z][a-zA-Z]{3,})*"
     r"\b"
 )
+
+# Connector tokens used for segment-splitting proper-noun fallback.
+_CONNECTOR_SPLIT_RE = re.compile(r"\s+(?:and|of|the|in|for|at|on|to|&)\s+|,\s*", re.IGNORECASE)
 
 # Short acronyms (2-5 all-caps chars). Stoplist filters out generic skill
 # acronyms so only claim-worthy ones (MIT, IBM, IRS) make it through.
@@ -118,6 +123,10 @@ _PROPER_NOUN_STOPLIST = {
     "HR", "HQ", "IT", "QA", "PR",
     # Draft/letter boilerplate
     "Cover Letter", "Hiring Team",
+    # Jobsmith resume section headers — emitted by prose-writer agent
+    "Professional Summary", "Tailored Bullets", "Work Experience",
+    "Technical Skills", "Core Competencies", "Selected Experience",
+    "Key Achievements", "Selected Projects",
 }
 
 
@@ -256,12 +265,57 @@ def _auto_detect_kind(claim: str) -> str:
 
 
 def _claim_matches(claim: str, haystack: str, kind: str) -> bool:
-    if kind in {"money", "percent", "year_count", "count"}:
-        # Whole-token match — "$25" must not match "$250M"
+    if kind == "count":
+        # Count claims are stored as "{numeric_token} {noun_lemma}" (e.g. "200K+ asset").
+        # The two tokens may not be contiguous in the master ("200K+ solar asset portfolio"),
+        # so verify by requiring BOTH the numeric token (whole-word) AND the noun lemma
+        # (case-insensitive substring) to appear somewhere in the haystack.
+        parts = claim.split(None, 1)
+        if len(parts) < 2:
+            # Single-token fallback — whole-token match.
+            escaped = re.escape(claim)
+            pattern = rf"(?:^|[\s'\"\[\(]){escaped}(?:[\s,.!?:;+'\"\]\)]|$)"
+            return bool(re.search(pattern, haystack))
+        numeric, noun = parts[0], parts[1]
+        # Numeric token: whole-token match with trailing + allowed.
+        num_escaped = re.escape(numeric)
+        num_pattern = rf"(?:^|[\s'\"\[\(]){num_escaped}(?:[\s,.!?:;+'\"\]\)]|$)"
+        if not re.search(num_pattern, haystack):
+            return False
+        # Noun: case-insensitive substring — accept singular or plural forms.
+        noun_lower = noun.lower().rstrip("s")  # strip trailing 's' for base lemma
+        return noun_lower in haystack.lower()
+    if kind in {"money", "percent", "year_count"}:
+        # Whole-token match — "$25" must not match "$250M".
+        # Trailing boundary includes '+' so "$1B" matches "$1B+" in master,
+        # while the leading boundary stays strict to prevent left-side mis-matches.
         escaped = re.escape(claim)
-        pattern = rf"(?:^|[\s'\"\[\(]){escaped}(?:[\s,.!?:;'\"\]\)]|$)"
+        pattern = rf"(?:^|[\s'\"\[\(]){escaped}(?:[\s,.!?:;+'\"\]\)]|$)"
         return bool(re.search(pattern, haystack))
     return claim.lower() in haystack.lower()
+
+
+def _proper_noun_segments_all_verified(claim: str, all_sources: dict[str, str]) -> bool:
+    """Segment-fallback for proper-noun claims stitched by _CONNECTED_CAP_RE.
+
+    Splits on connector words (" and ", " of ", etc.) and verifies that EVERY
+    non-trivial segment (≥2 chars after stripping) appears as a case-insensitive
+    substring in some source body. Scoped to proper_noun kind only — numeric
+    claims never use this path.
+
+    Returns True only if there is ≥1 segment AND all segments verify. An
+    unverified segment means the whole claim remains failed (gate preserved).
+    """
+    segments = [s.strip() for s in _CONNECTOR_SPLIT_RE.split(claim)]
+    meaningful = [s for s in segments if len(s) >= 2]
+    if not meaningful:
+        return False
+    all_bodies = list(all_sources.values())
+    for seg in meaningful:
+        seg_lower = seg.lower()
+        if not any(seg_lower in body.lower() for body in all_bodies):
+            return False
+    return True
 
 
 def verify_claim(
@@ -276,6 +330,12 @@ def verify_claim(
     result if none match. When `kind` is None, the claim's shape is
     auto-detected — `$25`, `97%`, `3 years`, and `SunStrong` all route to
     the right matcher.
+
+    For proper-noun claims that fail the whole-phrase match, a segment-fallback
+    is attempted: the claim is split on connector words and each segment must
+    independently appear in some source. This resolves false positives from
+    _CONNECTED_CAP_RE stitching across connectors (e.g. "Credit and Energy
+    Community" from "...Investment Tax Credit and Energy Community...").
     """
     effective_kind = kind or _auto_detect_kind(claim)
     master = _load_master_content(content_dir)
@@ -286,6 +346,11 @@ def verify_claim(
             return VerificationResult(
                 claim=claim, kind=effective_kind, verified=True, source_file=name
             )
+    # Segment-fallback for proper nouns only — money/percent/count/year stay exact.
+    if effective_kind == "proper_noun" and _proper_noun_segments_all_verified(claim, master):
+        return VerificationResult(
+            claim=claim, kind=effective_kind, verified=True, source_file="segment-fallback"
+        )
     return VerificationResult(claim=claim, kind=effective_kind, verified=False)
 
 
