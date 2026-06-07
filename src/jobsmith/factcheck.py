@@ -295,6 +295,33 @@ def _claim_matches(claim: str, haystack: str, kind: str) -> bool:
     return claim.lower() in haystack.lower()
 
 
+_ACRONYM_CONNECTORS = r"(?:of|the|and|for|in|to|&|de|la|le)"
+
+
+def _acronym_expansion_matches(acronym: str, haystack: str) -> bool:
+    """Return True if haystack contains the spelled-out expansion of acronym.
+
+    Matches a run of Capitalized words whose leading letters, in order, spell
+    the acronym.  Up to 2 lowercase connector words (of, the, and, for, …) may
+    appear between any two consecutive letter-words; each letter-word must start
+    with the corresponding uppercase letter so "MIT" matches "Massachusetts
+    Institute of Technology" but NOT "my interesting thing".
+
+    Only pure-uppercase 2-5 char acronyms are expected as input (callers guard).
+    """
+    parts: list[str] = []
+    for i, letter in enumerate(acronym):
+        cap_word = rf"{re.escape(letter)}[a-zA-Z]+"
+        if i == 0:
+            parts.append(rf"\b{cap_word}")
+        else:
+            connector_run = rf"(?:\s+{_ACRONYM_CONNECTORS}\b){{0,2}}\s+"
+            parts.append(rf"{connector_run}{cap_word}")
+    parts[-1] += r"\b"
+    pattern = re.compile("".join(parts))
+    return bool(pattern.search(haystack))
+
+
 def _proper_noun_segments_all_verified(claim: str, all_sources: dict[str, str]) -> bool:
     """Segment-fallback for proper-noun claims stitched by _CONNECTED_CAP_RE.
 
@@ -351,6 +378,14 @@ def verify_claim(
         return VerificationResult(
             claim=claim, kind=effective_kind, verified=True, source_file="segment-fallback"
         )
+    # Initialism-match fallback: only for pure-uppercase 2-5 char acronyms.
+    if effective_kind == "proper_noun" and re.fullmatch(r"[A-Z]{2,5}", claim):
+        for name, body in master.items():
+            if _acronym_expansion_matches(claim, body):
+                return VerificationResult(
+                    claim=claim, kind=effective_kind, verified=True,
+                    source_file=f"initialism:{name}",
+                )
     return VerificationResult(claim=claim, kind=effective_kind, verified=False)
 
 
