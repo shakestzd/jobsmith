@@ -405,6 +405,73 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <a href="#design" class="nav-link active" data-spy="design" data-initial="D">Design</a>
   <a href="#slices" class="nav-link" data-spy="slices" data-initial="S">Slices</a>
   
+  <ul class="slice-nav-list" id="slice-nav-list">
+    
+    <li>
+      <a href="#slice-1" class="slice-nav-item" data-slice-nav="1">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="1"></span>
+        <span>#1 Global active-runs SSE feed — /api/runs/events (Tier 1)</span>
+        
+        <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-2" class="slice-nav-item" data-slice-nav="2">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="2"></span>
+        <span>#2 Front-end list-view live subscription + phase/spinner (Tier 1)</span>
+        
+        
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-3" class="slice-nav-item" data-slice-nav="3">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="3"></span>
+        <span>#3 run_events table + append writer + retention (Tier 2 foundation)</span>
+        
+        <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-4" class="slice-nav-item" data-slice-nav="4">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="4"></span>
+        <span>#4 DB-writing EventSink fan-out on CLI + onboarding runs (Tier 2)</span>
+        
+        <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-5" class="slice-nav-item" data-slice-nav="5">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="5"></span>
+        <span>#5 Stream run_events over the SSE poll (per-slug + global) (Tier 2)</span>
+        
+        <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-6" class="slice-nav-item" data-slice-nav="6">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="6"></span>
+        <span>#6 Front-end detail view consumes per-agent live events (Tier 2)</span>
+        
+        
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-7" class="slice-nav-item" data-slice-nav="7">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="7"></span>
+        <span>#7 End-to-end acceptance — CLI run captured over SSE (both tiers)</span>
+        
+        
+      </a>
+    </li>
+    
+  </ul>
+  
   <a href="#questions" class="nav-link" data-spy="questions" data-initial="Q">Decisions</a>
   <a href="#critique" class="nav-link" data-spy="critique" data-initial="C">Critique</a>
   <a href="#feedback-summary" class="nav-link" data-spy="feedback-summary" data-initial="P">Progress</a>
@@ -412,15 +479,15 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 </nav>
 <div class="plan-layout">
 <div class="plan-content">
-<article id="plan-7860775f" data-type="plan" data-plan-id="plan-7860775f" data-feature-id="trk-5d3b688f" data-status="draft" data-priority="medium">
+<article id="plan-7860775f" data-type="plan" data-plan-id="plan-7860775f" data-feature-id="" data-status="draft" data-priority="medium">
 
 <!-- Plan Header -->
 <header class="plan-header">
   <h1>Plan: Capture CLI apply runs in the web front-end live event stream (2 tiers)</h1>
-  <p style="color:var(--text-dim)">Make CLI jobsmith apply (and onboarding) runs surface live in the UI: Tier 1 global active-runs SSE + list-view phase progress (no pipeline changes); Tier 2 run_events DB log + fan-out EventSink for per-agent parity. DB as single source of truth.</p>
+  
   <div class="meta">
     <span class="badge badge-pending">Draft</span>
-    <span style="font-size:.75rem;color:var(--text-muted)">v2 · 0 slices · Created 2026-06-07</span>
+    <span style="font-size:.75rem;color:var(--text-muted)">v1 · 7 slices · Created 2026-06-07</span>
   </div>
 </header>
 <button id="themeToggle" style="position:fixed;top:16px;right:16px;z-index:100;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;color:var(--text);font-family:var(--mono);font-size:0.75rem;cursor:pointer;">
@@ -440,6 +507,13 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <section class="dep-graph" data-zone="dependency-graph">
   <h2>Dependency Graph</h2>
   <div id="graph-data" style="display:none">
+    <div data-node="1" data-name="Global active-runs SSE feed — /api/runs/events (Tier 1)" data-status="pending" data-deps="" data-files="3"></div>
+    <div data-node="2" data-name="Front-end list-view live subscription + phase/spinner (Tier 1)" data-status="pending" data-deps="1" data-files="1"></div>
+    <div data-node="3" data-name="run_events table + append writer + retention (Tier 2 foundation)" data-status="pending" data-deps="" data-files="3"></div>
+    <div data-node="4" data-name="DB-writing EventSink fan-out on CLI + onboarding runs (Tier 2)" data-status="pending" data-deps="3" data-files="3"></div>
+    <div data-node="5" data-name="Stream run_events over the SSE poll (per-slug + global) (Tier 2)" data-status="pending" data-deps="1,3,4" data-files="2"></div>
+    <div data-node="6" data-name="Front-end detail view consumes per-agent live events (Tier 2)" data-status="pending" data-deps="5" data-files="1"></div>
+    <div data-node="7" data-name="End-to-end acceptance — CLI run captured over SSE (both tiers)" data-status="pending" data-deps="2,6" data-files="1"></div>
     
     <!--PLAN_GRAPH_NODES-->
   </div>
@@ -452,17 +526,38 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <details id="design" class="section-card" open data-phase="design" data-status="pending">
   <summary><span>Design</span><span class="badge badge-pending" data-badge-for="design">Pending</span></summary>
   <div class="section-body">
-    <!--PLAN_DESIGN_CONTENT-->
-    <div class="sub-section">
-      <h4>Open Questions</h4>
-      <!--PLAN_QUESTIONS-->
-    </div>
+    <h4>Problem</h4>
+<div data-markdown>CLI `jobsmith apply` (and onboarding) runs are invisible in the web UI&#39;s
+live event stream. The front end&#39;s stream is fed by the server&#39;s in-memory
+RunSupervisor, which only sees runs launched in-process via
+POST /api/applications. CLI runs execute out-of-process, render to the
+terminal (ApplyRenderer), and never register — so the UI shows nothing
+live, only post-hoc DB state on refresh. The CLI already writes coarse
+state (apply_runs.phase, specialist_outputs) to the shared DB, but the
+front end only subscribes per-slug (detail page), never at the list level.
+</div>
+<h4>Goals</h4>
+<ol>
+<li data-markdown>Tier 1: any active run (incl. CLI) appears live on the list view with phase-level progress, no manual refresh and no pipeline changes.</li>
+<li data-markdown>Tier 2: CLI/onboarding runs stream the same fine-grained per-agent events as server runs, via a DB-backed event log (DB as single source of truth).</li>
+<li data-markdown>Producer-agnostic capture: CLI apply, server in-process, and future remote runs all surface uniformly.</li>
+<li data-markdown>Bounded storage: per-event log capped per run and pruned on terminal status.</li>
+</ol>
+<h4>Constraints</h4>
+<ul>
+<li data-markdown>No new runtime dependency — stdlib + existing FastAPI/sse_starlette/SQLite stack.</li>
+<li data-markdown>WAL DB must keep handling concurrent CLI-writer + server-reader (already the case); sink writes are best-effort and never abort a run.</li>
+<li data-markdown>Backward compatible: existing per-slug /api/applications/{slug}/events behavior and tests unchanged; migrations idempotent on existing DBs.</li>
+<li data-markdown>Front end bundles via Vite to web_dist (hatch); localhost auto-auth shim feeds the SSE token.</li>
+</ul>
+
     <div class="approval-row">
       <label><input type="checkbox" data-section="design" data-action="approve"> Approve design</label>
       <textarea data-section="design" data-comment-for="design" placeholder="Comments on design decisions..."></textarea>
     </div>
   </div>
 </details>
+
 
 <!-- Structure Outline (hidden when empty) -->
 
@@ -471,23 +566,1049 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <details id="slices" class="section-card" open data-phase="slices" data-status="pending">
   <summary><span>Slices</span><span class="badge badge-pending" data-badge-for="slices">Pending</span></summary>
   <div class="section-body">
+    <details class="slice-card" id="slice-1" data-slice="1" data-slice-name="slice-1" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 1: Global active-runs SSE feed — /api/runs/events (Tier 1)">
+    <span class="slice-num">#1</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Global active-runs SSE feed — /api/runs/events (Tier 1)</span>
+      <span class="slice-preview">Add an all-slugs SSE endpoint GET /api/runs/events that streams</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-1">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-1-approval" value="approved" data-section="slice-1" data-action="approve" aria-label="Approve slice 1">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-1-approval" value="changes_requested" data-section="slice-1" data-action="approve" aria-label="Request changes for slice 1">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-1-approval" value="rejected" data-section="slice-1" data-action="approve" aria-label="Reject slice 1">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
     
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-1-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Add an all-slugs SSE endpoint <code>GET /api/runs/events</code> that streams
+active-run + phase + specialist events across every slug, reusing the
+existing DB poll (events_poll._db_poll_once) instead of per-slug
+subscription. Producer-agnostic: any writer of apply_runs /
+specialist_outputs (CLI apply, server in-process, onboarding) surfaces.
+Emits <code>run</code>/<code>phase</code>/<code>status</code>/<code>specialist</code> events with run_id + slug so
+the list view can route them. Keep the per-slug
+/api/applications/{slug}/events endpoint untouched.</p>
+</div>
+          <label for="slice-1-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>CLI <code>jobsmith apply</code> already writes apply_runs.phase + specialist_outputs
+live, but the front end only subscribes per-slug (detail page), so a CLI
+run is invisible on the list. A global feed makes any active run appear
+live with zero pipeline changes.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/api/events.py, src/jobsmith/api/events_poll.py, src/jobsmith/api/main.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>GET /api/runs/events opens an SSE stream and emits a phase event when any apply_runs row changes phase/status, regardless of slug</li><li>A specialist_outputs insert for any run surfaces as a specialist event carrying run_id &#43; slug within one poll interval</li><li>The existing per-slug /api/applications/{slug}/events behavior and tests are unchanged</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-1-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> new all-slugs SSE route backed by the existing DB poll; no
+supervisor coupling so out-of-process producers (CLI) are captured.
+<strong>State:</strong> none new — reads apply_runs + specialist_outputs (already
+written live by both run paths).
+<strong>Payload:</strong> event {kind, run_id, slug, phase, status, [specialist,kind]}.
+<strong>Rejected:</strong> wildcard mode on the per-slug endpoint (overloads one
+route&#39;s semantics, harder to authorize/test); push from supervisor
+(misses out-of-process CLI runs entirely — the whole point).</p>
+</div>
+        <label for="slice-1-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 1</span>
+            <ul><li>subscribe to /api/runs/events, UPDATE apply_runs.phase for</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 1</span>
+            <ul><li>two different slugs, assert both phase events arrive with correct slug.</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="regression">
+            <span class="test-chip">REGRESSION &middot; 1</span>
+            <ul><li>existing events.py / events_poll tests still pass.</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>New global endpoint or extend the per-slug route?</p>
+          
+          
+          <textarea
+            data-section="slice-1-question-q-feed"
+            data-comment-for="slice-1-question-q-feed"
+            placeholder="Answer question q-feed...">New /api/runs/events — clean separation; detail page keeps the per-slug stream, list view uses the global one.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: none</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-1" data-comment-for="slice-1" placeholder="Comments on slice 1..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-2" data-slice="2" data-slice-name="slice-2" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 2: Front-end list-view live subscription &#43; phase/spinner (Tier 1)">
+    <span class="slice-num">#2</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Front-end list-view live subscription &#43; phase/spinner (Tier 1)</span>
+      <span class="slice-preview">Subscribe the applications LIST view to /api/runs/events (via the</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-2">Pending</span>
+          
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-2-approval" value="approved" data-section="slice-2" data-action="approve" aria-label="Approve slice 2">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-2-approval" value="changes_requested" data-section="slice-2" data-action="approve" aria-label="Request changes for slice 2">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-2-approval" value="rejected" data-section="slice-2" data-action="approve" aria-label="Reject slice 2">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Subscribe the applications LIST view to /api/runs/events (via the
+localhost auto-auth token shim). On <code>running</code> status, light up the row
+(spinner) and show the current phase (gather -&gt; draft -&gt; render) as it
+advances; tick anchors/artifacts as specialist events land. Reconcile
+with the existing DB-backed row state on (re)connect. No per-agent
+detail at the list level.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Delivers the user-visible outcome: a CLI run now appears live on the
+list without navigating to its slug or manually refreshing.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>web/src/</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Starting a run for any slug makes its list row show running &#43; current phase live, without a manual refresh</li><li>Phase advances (gather-&gt;draft-&gt;render) update the row in place as events arrive</li><li>On SSE reconnect the row reconciles to the authoritative apply_runs state (no stale/duplicate spinner)</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <div class="markdown-block serif-prose"><p><strong>Trigger:</strong> list view opens one global EventSource on mount; routes
+events to rows by run_id/slug.
+<strong>State:</strong> ephemeral per-row UI state, reconciled against the DB-backed
+list query on connect/reconnect.
+<strong>Rejected:</strong> per-row EventSource (N connections); inline mini event log
+(heavier UI/perf — deferred, list stays phase-level by design).</p>
+</div>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 2</span>
+            <ul><li>Component test for the list-row state machine (idle/running/phase/done).</li><li>animate live in Chrome.</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="manual smoke">
+            <span class="test-chip">MANUAL SMOKE &middot; 1</span>
+            <ul><li>run `jobsmith apply` from a terminal, watch the list row</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+
+    <div class="slice-deps">Dependencies: slices 1</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-2" data-comment-for="slice-2" placeholder="Comments on slice 2..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-3" data-slice="3" data-slice-name="slice-3" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 3: run_events table &#43; append writer &#43; retention (Tier 2 foundation)">
+    <span class="slice-num">#3</span>
+    <span class="slice-title-col">
+      <span class="slice-name">run_events table &#43; append writer &#43; retention (Tier 2 foundation)</span>
+      <span class="slice-preview">Add migration for an append-only runevents table</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-3">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-3-approval" value="approved" data-section="slice-3" data-action="approve" aria-label="Approve slice 3">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-3-approval" value="changes_requested" data-section="slice-3" data-action="approve" aria-label="Request changes for slice 3">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-3-approval" value="rejected" data-section="slice-3" data-action="approve" aria-label="Reject slice 3">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Add migration for an append-only <code>run_events</code> table
+(rowid PK, run_id, slug, seq, ts, kind, phase, payload_json) indexed for
+poll-by-rowid and by run_id. Add a small store helper to append an event
+and a retention routine that, on terminal run status, trims a run&#39;s
+events to a bounded tail (keep last N) — full fidelity while active,
+small table at rest.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Per-agent live parity (Tier 2) needs a pollable per-event log; apply_runs
+only carries coarse phase. A purpose-built table keeps event semantics
+clean and bounded.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/migrations/010_run_events.sql, src/jobsmith/reuse/store.py, src/jobsmith/db.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Migration 010 creates run_events with indexes on (rowid) and (run_id) and applies idempotently on a fresh and an existing DB</li><li>append_run_event() inserts a monotonic per-run seq row; reads by rowid return events in emission order</li><li>On terminal status, retention trims a run&#39;s events to the configured tail without touching active runs</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-3-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>State:</strong> new append-only run_events table (canonical event log);
+rebuildable is N/A — it is the source for live streaming, not derived.
+<strong>Payload:</strong> {run_id, slug, seq, ts, kind, phase, payload_json}.
+<strong>Retention:</strong> cap per-run + prune on terminal status (keep last N).
+<strong>Rejected:</strong> reuse apply_state_log (modeled for state snapshots, not an
+event stream — semantic overload + poll ambiguity); unbounded keep
+(table growth); time-based prune (unbounded between sweeps).</p>
+</div>
+        <label for="slice-3-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>append N events, assert ordering &#43; monotonic seq; apply retention,</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 2</span>
+            <ul><li>assert tail kept and active-run events untouched. Migration idempotency</li><li>test (apply twice).</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>Reuse apply_state_log or a new run_events table?</p>
+          
+          
+          <textarea
+            data-section="slice-3-question-q-store"
+            data-comment-for="slice-3-question-q-store"
+            placeholder="Answer question q-store...">New run_events — purpose-built append-only event log, indexed for rowid poll; avoids overloading the state-snapshot table.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: none</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-3" data-comment-for="slice-3" placeholder="Comments on slice 3..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-4" data-slice="4" data-slice-name="slice-4" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 4: DB-writing EventSink fan-out on CLI &#43; onboarding runs (Tier 2)">
+    <span class="slice-num">#4</span>
+    <span class="slice-title-col">
+      <span class="slice-name">DB-writing EventSink fan-out on CLI &#43; onboarding runs (Tier 2)</span>
+      <span class="slice-preview">Add a DbEventSink (implements the EventSink protocol) that appends each</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-4">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-4-approval" value="approved" data-section="slice-4" data-action="approve" aria-label="Approve slice 4">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-4-approval" value="changes_requested" data-section="slice-4" data-action="approve" aria-label="Request changes for slice 4">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-4-approval" value="rejected" data-section="slice-4" data-action="approve" aria-label="Reject slice 4">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-4-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Add a <code>DbEventSink</code> (implements the EventSink protocol) that appends each
+PipelineEvent to run_events via append_run_event. Compose it as a
+fan-out alongside the existing terminal ApplyRenderer using the
+CallbackEventSink/fan-out helper, so the CLI apply path
+(_cli_apply._run_apply_phases) and the onboarding run path emit to BOTH
+the terminal and the DB. Best-effort: a sink write error never aborts the
+pipeline.</p>
+</div>
+          <label for="slice-4-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>This is what makes out-of-process CLI (and onboarding) runs produce the
+same fine-grained PipelineEvents the in-memory supervisor gives server
+runs — captured uniformly in the DB.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/core/sinks.py, src/jobsmith/_cli_apply.py, src/jobsmith/core/pipeline.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>A CLI apply run writes one run_events row per PipelineEvent it emits, in order, tagged with run_id &#43; slug</li><li>The terminal ApplyRenderer output is unchanged (fan-out, not replacement)</li><li>A DbEventSink write failure is swallowed and the run continues (no BackstopError/abort from sink errors)</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-4-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> fan-out EventSink wired wherever events= is currently the
+ApplyRenderer (CLI apply + onboarding).
+<strong>State:</strong> writes run_events (slice-3); no other state.
+<strong>Payload:</strong> serialized PipelineEvent (kind, phase, name, payload).
+<strong>Rejected:</strong> replace ApplyRenderer with DbEventSink (loses terminal
+UX); IPC from CLI to the server supervisor (requires server running +
+couples processes — DB fan-out is decoupled and always works).</p>
+</div>
+        <label for="slice-4-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>drive a fake phase sequence through the fan-out sink, assert</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 1</span>
+            <ul><li>run_events rows match and ApplyRenderer still received every event.</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="fault-injection">
+            <span class="test-chip">FAULT-INJECTION &middot; 1</span>
+            <ul><li>make append raise, assert the run still completes.</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>What happens if the DB sink write fails mid-run?</p>
+          
+          
+          <textarea
+            data-section="slice-4-question-q-faulttol"
+            data-comment-for="slice-4-question-q-faulttol"
+            placeholder="Answer question q-faulttol...">Swallow and continue (best-effort) — same posture as the existing CallbackEventSink; live streaming is non-critical to producing the application.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: slices 3</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-4" data-comment-for="slice-4" placeholder="Comments on slice 4..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-5" data-slice="5" data-slice-name="slice-5" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 5: Stream run_events over the SSE poll (per-slug &#43; global) (Tier 2)">
+    <span class="slice-num">#5</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Stream run_events over the SSE poll (per-slug &#43; global) (Tier 2)</span>
+      <span class="slice-preview">Extend eventspoll/dbpollonce to also read new runevents rows</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-5">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-5-approval" value="approved" data-section="slice-5" data-action="approve" aria-label="Approve slice 5">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-5-approval" value="changes_requested" data-section="slice-5" data-action="approve" aria-label="Request changes for slice 5">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-5-approval" value="rejected" data-section="slice-5" data-action="approve" aria-label="Reject slice 5">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Extend events_poll/_db_poll_once to also read new run_events rows
+(poll-by-rowid) and emit them as fine-grained <code>event</code> SSE messages on
+both the per-slug /api/applications/{slug}/events and the global
+/api/runs/events feeds. Per-slug carries full per-agent detail; the
+global feed keeps phase-level for the list (filter granularity by feed).</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Makes the captured run_events visible to subscribers — completing the
+path from CLI emit -&gt; DB -&gt; SSE -&gt; UI for fine-grained parity.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/api/events_poll.py, src/jobsmith/api/events.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>New run_events rows surface on the per-slug SSE as ordered per-agent events within one poll interval</li><li>The global /api/runs/events feed stays phase-level (does not flood the list with per-agent events)</li><li>Poll cursor advances by rowid with no missed or duplicated events across reconnects</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <div class="markdown-block serif-prose"><p><strong>Trigger:</strong> extend the existing rowid-cursor poll to a third source
+(run_events) alongside apply_runs + specialist_outputs.
+<strong>Payload:</strong> per-slug = full event; global = phase-level only.
+<strong>Rejected:</strong> push/broadcaster for run_events (the poll is already the
+authoritative cross-process mechanism — keep one model).</p>
+</div>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 1</span>
+            <ul><li>append run_events for a slug, assert per-slug subscriber</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 2</span>
+            <ul><li>receives them in order; assert global feed does NOT emit the per-agent</li><li>ones. Cursor test across simulated reconnect.</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>Should the global list feed carry per-agent events too?</p>
+          
+          
+          <textarea
+            data-section="slice-5-question-q-granularity"
+            data-comment-for="slice-5-question-q-granularity"
+            placeholder="Answer question q-granularity...">No — global feed stays phase-level to keep the list light; per-agent detail is delivered only on the per-slug detail stream.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: slices 1,3,4</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-5" data-comment-for="slice-5" placeholder="Comments on slice 5..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-6" data-slice="6" data-slice-name="slice-6" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 6: Front-end detail view consumes per-agent live events (Tier 2)">
+    <span class="slice-num">#6</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Front-end detail view consumes per-agent live events (Tier 2)</span>
+      <span class="slice-preview">On the application DETAIL page, render the fine-grained runevents</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-6">Pending</span>
+          
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-6-approval" value="approved" data-section="slice-6" data-action="approve" aria-label="Approve slice 6">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-6-approval" value="changes_requested" data-section="slice-6" data-action="approve" aria-label="Request changes for slice 6">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-6-approval" value="rejected" data-section="slice-6" data-action="approve" aria-label="Reject slice 6">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>On the application DETAIL page, render the fine-grained run_events
+arriving over the per-slug SSE as a live per-agent activity log/timeline
+(mirrors the terminal &#39;Agent ✓ (3s)&#39; stream), for CLI and server runs
+alike. List view is unchanged (Tier 1 phase-level).</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Gives CLI runs full UI parity with server-launched runs — the per-agent
+detail, not just phase transitions.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>web/src/</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Opening a detail page during a CLI run shows per-agent events streaming live in order</li><li>Late subscribers backfill from the retained run_events tail then continue live (no gap/dup)</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <div class="markdown-block serif-prose"><p><strong>Trigger:</strong> detail page subscribes to per-slug SSE, renders run_events
+as a timeline keyed by seq.
+<strong>State:</strong> ephemeral; backfilled from retained tail on connect.
+<strong>Rejected:</strong> reusing the list-row component (different fidelity/UX).</p>
+</div>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 1</span>
+            <ul><li>Component test for the timeline reducer (append/dedup by seq). Manual</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="smoke">
+            <span class="test-chip">SMOKE &middot; 1</span>
+            <ul><li>CLI apply &#43; watch the detail page stream per-agent events.</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+
+    <div class="slice-deps">Dependencies: slices 5</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-6" data-comment-for="slice-6" placeholder="Comments on slice 6..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-7" data-slice="7" data-slice-name="slice-7" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 7: End-to-end acceptance — CLI run captured over SSE (both tiers)">
+    <span class="slice-num">#7</span>
+    <span class="slice-title-col">
+      <span class="slice-name">End-to-end acceptance — CLI run captured over SSE (both tiers)</span>
+      <span class="slice-preview">Integration test that launches a stubbed-LLM jobsmith apply in-process</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-pending badge-sm">Low</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-7">Pending</span>
+          
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-7-approval" value="approved" data-section="slice-7" data-action="approve" aria-label="Approve slice 7">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-7-approval" value="changes_requested" data-section="slice-7" data-action="approve" aria-label="Request changes for slice 7">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-7-approval" value="rejected" data-section="slice-7" data-action="approve" aria-label="Reject slice 7">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Integration test that launches a stubbed-LLM <code>jobsmith apply</code> in-process
+while subscribed to both feeds, asserting Tier 1 (global feed: phase
+transitions for the slug) AND Tier 2 (per-slug feed: ordered per-agent
+run_events) both arrive. Doubles as the regression guard for the
+DB-as-source-of-truth contract.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Pins the whole capture path so a future refactor can&#39;t silently drop CLI
+runs from the front end again.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>tests/test_cli_run_sse_capture.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>A stubbed CLI apply emits phase events observed on /api/runs/events AND per-agent events observed on /api/applications/{slug}/events</li><li>Test asserts event ordering and that no per-agent events leak onto the global feed</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <div class="markdown-block serif-prose"><p><strong>Trigger:</strong> acceptance test wiring the full path with a fake model
+client (deterministic, no network), mirroring tests/test_reuse_ab.py.
+<strong>Rejected:</strong> unit-only coverage (would not catch the cross-process
+DB-&gt;SSE wiring that is the entire point of this plan).</p>
+</div>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="markdown-block slice-tests"><p>This slice IS the test. Stub the model client (no live LLM); drive a real
+_run_apply_phases through the fan-out sink + poll + SSE in-process.</p>
+</div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+
+    <div class="slice-deps">Dependencies: slices 2,6</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-7" data-comment-for="slice-7" placeholder="Comments on slice 7..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+
     <!--PLAN_SLICE_CARDS-->
   </div>
 </details>
 
 <!-- Design Decisions (hidden for v2 plans — slice cards carry their own questions) -->
-<details id="questions" class="section-card" data-phase="questions" data-status="pending">
-  <summary><span>Design Decisions</span><span class="badge badge-pending" data-badge-for="questions">Pending</span></summary>
-  <div class="section-body">
-    <table class="q-table">
-      <thead><tr><th>Question</th><th>Selected</th><th>Status</th></tr></thead>
-      <tbody id="questionsRecap">
-        <!--PLAN_QUESTIONS_RECAP-->
-      </tbody>
-    </table>
-  </div>
-</details>
+
 
 
 
@@ -498,8 +1619,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <h2>Feedback Summary</h2>
   <div class="progress-stats">
     <div class="progress-stat"><strong id="approvedCount">0</strong> approved</div>
-    <div class="progress-stat"><strong id="totalSections">1</strong> sections</div>
-    <div class="progress-stat"><strong id="pendingCount">1</strong> pending</div>
+    <div class="progress-stat"><strong id="totalSections">8</strong> sections</div>
+    <div class="progress-stat"><strong id="pendingCount">8</strong> pending</div>
   </div>
   <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill" style="width:0%"></div></div>
   <div class="comments-summary">
@@ -579,7 +1700,7 @@ var planId=(function(){var a=document.querySelector('article[id]');return a?a.id
 
 (function(){
   'use strict';
-  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design"]/*END_PLAN_SECTIONS_JSON*/;
+  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design","slice-1","slice-2","slice-3","slice-4","slice-5","slice-6","slice-7"]/*END_PLAN_SECTIONS_JSON*/;
 
   function setBadge(el,ok){
     el.className='badge badge-'+(ok?'approved':'pending');

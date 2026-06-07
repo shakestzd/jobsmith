@@ -1,18 +1,313 @@
 meta:
     id: plan-7860775f
-    track_id: trk-5d3b688f
     title: Capture CLI apply runs in the web front-end live event stream (2 tiers)
-    description: 'Make CLI jobsmith apply (and onboarding) runs surface live in the UI: Tier 1 global active-runs SSE + list-view phase progress (no pipeline changes); Tier 2 run_events DB log + fan-out EventSink for per-agent parity. DB as single source of truth.'
-    created_at: "2026-06-07"
+    description: ""
+    created_at: ""
     status: draft
-    priority: medium
     schema_version: v3
-    version: 2
+    version: 1
 design:
-    problem: ""
-    goals: []
-    constraints: []
+    problem: |
+        CLI `jobsmith apply` (and onboarding) runs are invisible in the web UI's
+        live event stream. The front end's stream is fed by the server's in-memory
+        RunSupervisor, which only sees runs launched in-process via
+        POST /api/applications. CLI runs execute out-of-process, render to the
+        terminal (ApplyRenderer), and never register — so the UI shows nothing
+        live, only post-hoc DB state on refresh. The CLI already writes coarse
+        state (apply_runs.phase, specialist_outputs) to the shared DB, but the
+        front end only subscribes per-slug (detail page), never at the list level.
+    goals:
+        - 'Tier 1: any active run (incl. CLI) appears live on the list view with phase-level progress, no manual refresh and no pipeline changes.'
+        - 'Tier 2: CLI/onboarding runs stream the same fine-grained per-agent events as server runs, via a DB-backed event log (DB as single source of truth).'
+        - 'Producer-agnostic capture: CLI apply, server in-process, and future remote runs all surface uniformly.'
+        - 'Bounded storage: per-event log capped per run and pruned on terminal status.'
+    constraints:
+        - No new runtime dependency — stdlib + existing FastAPI/sse_starlette/SQLite stack.
+        - WAL DB must keep handling concurrent CLI-writer + server-reader (already the case); sink writes are best-effort and never abort a run.
+        - 'Backward compatible: existing per-slug /api/applications/{slug}/events behavior and tests unchanged; migrations idempotent on existing DBs.'
+        - Front end bundles via Vite to web_dist (hatch); localhost auto-auth shim feeds the SSE token.
     approved: false
     comment: ""
-slices: []
+slices:
+    - id: slice-1
+      num: 1
+      title: Global active-runs SSE feed — /api/runs/events (Tier 1)
+      what: |
+        Add an all-slugs SSE endpoint `GET /api/runs/events` that streams
+        active-run + phase + specialist events across every slug, reusing the
+        existing DB poll (events_poll._db_poll_once) instead of per-slug
+        subscription. Producer-agnostic: any writer of apply_runs /
+        specialist_outputs (CLI apply, server in-process, onboarding) surfaces.
+        Emits `run`/`phase`/`status`/`specialist` events with run_id + slug so
+        the list view can route them. Keep the per-slug
+        /api/applications/{slug}/events endpoint untouched.
+      why: |
+        CLI `jobsmith apply` already writes apply_runs.phase + specialist_outputs
+        live, but the front end only subscribes per-slug (detail page), so a CLI
+        run is invisible on the list. A global feed makes any active run appear
+        live with zero pipeline changes.
+      files:
+        - src/jobsmith/api/events.py
+        - src/jobsmith/api/events_poll.py
+        - src/jobsmith/api/main.py
+      deps: []
+      done_when:
+        - GET /api/runs/events opens an SSE stream and emits a phase event when any apply_runs row changes phase/status, regardless of slug
+        - A specialist_outputs insert for any run surfaces as a specialist event carrying run_id + slug within one poll interval
+        - The existing per-slug /api/applications/{slug}/events behavior and tests are unchanged
+      effort: M
+      risk: Med
+      tests: |
+        Integration: subscribe to /api/runs/events, UPDATE apply_runs.phase for
+        two different slugs, assert both phase events arrive with correct slug.
+        Regression: existing events.py / events_poll tests still pass.
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-feed
+          text: New global endpoint or extend the per-slug route?
+          answer: New /api/runs/events — clean separation; detail page keeps the per-slug stream, list view uses the global one.
+      decisions_notes: |
+        **Trigger:** new all-slugs SSE route backed by the existing DB poll; no
+          supervisor coupling so out-of-process producers (CLI) are captured.
+        **State:** none new — reads apply_runs + specialist_outputs (already
+          written live by both run paths).
+        **Payload:** event {kind, run_id, slug, phase, status, [specialist,kind]}.
+        **Rejected:** wildcard mode on the per-slug endpoint (overloads one
+          route's semantics, harder to authorize/test); push from supervisor
+          (misses out-of-process CLI runs entirely — the whole point).
+    - id: slice-2
+      num: 2
+      title: Front-end list-view live subscription + phase/spinner (Tier 1)
+      what: |
+        Subscribe the applications LIST view to /api/runs/events (via the
+        localhost auto-auth token shim). On `running` status, light up the row
+        (spinner) and show the current phase (gather -> draft -> render) as it
+        advances; tick anchors/artifacts as specialist events land. Reconcile
+        with the existing DB-backed row state on (re)connect. No per-agent
+        detail at the list level.
+      why: |
+        Delivers the user-visible outcome: a CLI run now appears live on the
+        list without navigating to its slug or manually refreshing.
+      files:
+        - web/src/
+      deps:
+        - 1
+      done_when:
+        - Starting a run for any slug makes its list row show running + current phase live, without a manual refresh
+        - Phase advances (gather->draft->render) update the row in place as events arrive
+        - On SSE reconnect the row reconciles to the authoritative apply_runs state (no stale/duplicate spinner)
+      effort: M
+      risk: Med
+      tests: |
+        Component test for the list-row state machine (idle/running/phase/done).
+        Manual smoke: run `jobsmith apply` from a terminal, watch the list row
+        animate live in Chrome.
+      complexity: standard
+      approved: false
+      comment: ""
+      decisions_notes: |
+        **Trigger:** list view opens one global EventSource on mount; routes
+          events to rows by run_id/slug.
+        **State:** ephemeral per-row UI state, reconciled against the DB-backed
+          list query on connect/reconnect.
+        **Rejected:** per-row EventSource (N connections); inline mini event log
+          (heavier UI/perf — deferred, list stays phase-level by design).
+    - id: slice-3
+      num: 3
+      title: run_events table + append writer + retention (Tier 2 foundation)
+      what: |
+        Add migration for an append-only `run_events` table
+        (rowid PK, run_id, slug, seq, ts, kind, phase, payload_json) indexed for
+        poll-by-rowid and by run_id. Add a small store helper to append an event
+        and a retention routine that, on terminal run status, trims a run's
+        events to a bounded tail (keep last N) — full fidelity while active,
+        small table at rest.
+      why: |
+        Per-agent live parity (Tier 2) needs a pollable per-event log; apply_runs
+        only carries coarse phase. A purpose-built table keeps event semantics
+        clean and bounded.
+      files:
+        - src/jobsmith/migrations/010_run_events.sql
+        - src/jobsmith/reuse/store.py
+        - src/jobsmith/db.py
+      deps: []
+      done_when:
+        - Migration 010 creates run_events with indexes on (rowid) and (run_id) and applies idempotently on a fresh and an existing DB
+        - append_run_event() inserts a monotonic per-run seq row; reads by rowid return events in emission order
+        - On terminal status, retention trims a run's events to the configured tail without touching active runs
+      effort: M
+      risk: Med
+      tests: |
+        Unit: append N events, assert ordering + monotonic seq; apply retention,
+        assert tail kept and active-run events untouched. Migration idempotency
+        test (apply twice).
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-store
+          text: Reuse apply_state_log or a new run_events table?
+          answer: New run_events — purpose-built append-only event log, indexed for rowid poll; avoids overloading the state-snapshot table.
+      decisions_notes: |
+        **State:** new append-only run_events table (canonical event log);
+          rebuildable is N/A — it is the source for live streaming, not derived.
+        **Payload:** {run_id, slug, seq, ts, kind, phase, payload_json}.
+        **Retention:** cap per-run + prune on terminal status (keep last N).
+        **Rejected:** reuse apply_state_log (modeled for state snapshots, not an
+          event stream — semantic overload + poll ambiguity); unbounded keep
+          (table growth); time-based prune (unbounded between sweeps).
+    - id: slice-4
+      num: 4
+      title: DB-writing EventSink fan-out on CLI + onboarding runs (Tier 2)
+      what: |
+        Add a `DbEventSink` (implements the EventSink protocol) that appends each
+        PipelineEvent to run_events via append_run_event. Compose it as a
+        fan-out alongside the existing terminal ApplyRenderer using the
+        CallbackEventSink/fan-out helper, so the CLI apply path
+        (_cli_apply._run_apply_phases) and the onboarding run path emit to BOTH
+        the terminal and the DB. Best-effort: a sink write error never aborts the
+        pipeline.
+      why: |
+        This is what makes out-of-process CLI (and onboarding) runs produce the
+        same fine-grained PipelineEvents the in-memory supervisor gives server
+        runs — captured uniformly in the DB.
+      files:
+        - src/jobsmith/core/sinks.py
+        - src/jobsmith/_cli_apply.py
+        - src/jobsmith/core/pipeline.py
+      deps:
+        - 3
+      done_when:
+        - A CLI apply run writes one run_events row per PipelineEvent it emits, in order, tagged with run_id + slug
+        - The terminal ApplyRenderer output is unchanged (fan-out, not replacement)
+        - A DbEventSink write failure is swallowed and the run continues (no BackstopError/abort from sink errors)
+      effort: M
+      risk: Med
+      tests: |
+        Unit: drive a fake phase sequence through the fan-out sink, assert
+        run_events rows match and ApplyRenderer still received every event.
+        Fault-injection: make append raise, assert the run still completes.
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-faulttol
+          text: What happens if the DB sink write fails mid-run?
+          answer: Swallow and continue (best-effort) — same posture as the existing CallbackEventSink; live streaming is non-critical to producing the application.
+      decisions_notes: |
+        **Trigger:** fan-out EventSink wired wherever events= is currently the
+          ApplyRenderer (CLI apply + onboarding).
+        **State:** writes run_events (slice-3); no other state.
+        **Payload:** serialized PipelineEvent (kind, phase, name, payload).
+        **Rejected:** replace ApplyRenderer with DbEventSink (loses terminal
+          UX); IPC from CLI to the server supervisor (requires server running +
+          couples processes — DB fan-out is decoupled and always works).
+    - id: slice-5
+      num: 5
+      title: Stream run_events over the SSE poll (per-slug + global) (Tier 2)
+      what: |
+        Extend events_poll/_db_poll_once to also read new run_events rows
+        (poll-by-rowid) and emit them as fine-grained `event` SSE messages on
+        both the per-slug /api/applications/{slug}/events and the global
+        /api/runs/events feeds. Per-slug carries full per-agent detail; the
+        global feed keeps phase-level for the list (filter granularity by feed).
+      why: |
+        Makes the captured run_events visible to subscribers — completing the
+        path from CLI emit -> DB -> SSE -> UI for fine-grained parity.
+      files:
+        - src/jobsmith/api/events_poll.py
+        - src/jobsmith/api/events.py
+      deps:
+        - 1
+        - 3
+        - 4
+      done_when:
+        - New run_events rows surface on the per-slug SSE as ordered per-agent events within one poll interval
+        - The global /api/runs/events feed stays phase-level (does not flood the list with per-agent events)
+        - Poll cursor advances by rowid with no missed or duplicated events across reconnects
+      effort: M
+      risk: Med
+      tests: |
+        Integration: append run_events for a slug, assert per-slug subscriber
+        receives them in order; assert global feed does NOT emit the per-agent
+        ones. Cursor test across simulated reconnect.
+      complexity: complex
+      approved: false
+      comment: ""
+      questions:
+        - id: q-granularity
+          text: Should the global list feed carry per-agent events too?
+          answer: No — global feed stays phase-level to keep the list light; per-agent detail is delivered only on the per-slug detail stream.
+      decisions_notes: |
+        **Trigger:** extend the existing rowid-cursor poll to a third source
+          (run_events) alongside apply_runs + specialist_outputs.
+        **Payload:** per-slug = full event; global = phase-level only.
+        **Rejected:** push/broadcaster for run_events (the poll is already the
+          authoritative cross-process mechanism — keep one model).
+    - id: slice-6
+      num: 6
+      title: Front-end detail view consumes per-agent live events (Tier 2)
+      what: |
+        On the application DETAIL page, render the fine-grained run_events
+        arriving over the per-slug SSE as a live per-agent activity log/timeline
+        (mirrors the terminal 'Agent ✓ (3s)' stream), for CLI and server runs
+        alike. List view is unchanged (Tier 1 phase-level).
+      why: |
+        Gives CLI runs full UI parity with server-launched runs — the per-agent
+        detail, not just phase transitions.
+      files:
+        - web/src/
+      deps:
+        - 5
+      done_when:
+        - Opening a detail page during a CLI run shows per-agent events streaming live in order
+        - Late subscribers backfill from the retained run_events tail then continue live (no gap/dup)
+      effort: M
+      risk: Med
+      tests: |
+        Component test for the timeline reducer (append/dedup by seq). Manual
+        smoke: CLI apply + watch the detail page stream per-agent events.
+      complexity: standard
+      approved: false
+      comment: ""
+      decisions_notes: |
+        **Trigger:** detail page subscribes to per-slug SSE, renders run_events
+          as a timeline keyed by seq.
+        **State:** ephemeral; backfilled from retained tail on connect.
+        **Rejected:** reusing the list-row component (different fidelity/UX).
+    - id: slice-7
+      num: 7
+      title: End-to-end acceptance — CLI run captured over SSE (both tiers)
+      what: |
+        Integration test that launches a stubbed-LLM `jobsmith apply` in-process
+        while subscribed to both feeds, asserting Tier 1 (global feed: phase
+        transitions for the slug) AND Tier 2 (per-slug feed: ordered per-agent
+        run_events) both arrive. Doubles as the regression guard for the
+        DB-as-source-of-truth contract.
+      why: |
+        Pins the whole capture path so a future refactor can't silently drop CLI
+        runs from the front end again.
+      files:
+        - tests/test_cli_run_sse_capture.py
+      deps:
+        - 2
+        - 6
+      done_when:
+        - A stubbed CLI apply emits phase events observed on /api/runs/events AND per-agent events observed on /api/applications/{slug}/events
+        - Test asserts event ordering and that no per-agent events leak onto the global feed
+      effort: M
+      risk: Low
+      tests: |
+        This slice IS the test. Stub the model client (no live LLM); drive a real
+        _run_apply_phases through the fan-out sink + poll + SSE in-process.
+      complexity: standard
+      approved: false
+      comment: ""
+      decisions_notes: |
+        **Trigger:** acceptance test wiring the full path with a fake model
+          client (deterministic, no network), mirroring tests/test_reuse_ab.py.
+        **Rejected:** unit-only coverage (would not catch the cross-process
+          DB->SSE wiring that is the entire point of this plan).
 questions: []
