@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Backstop factcheck gate false-rejects anchored resumes (mid-number extraction, count-reduction mismatch, money &#43; suffix, section headers, no JD context)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="bug-58680458"
+             data-type="bug"
+             data-status="todo"
+             data-priority="high"
+             data-created="2026-06-07T02:35:16.054107"
+             data-updated="2026-06-07T02:35:16.070228" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.21">
+
+        <header>
+            <h1>Backstop factcheck gate false-rejects anchored resumes (mid-number extraction, count-reduction mismatch, money &#43; suffix, section headers, no JD context)</h1>
+            <div class="metadata">
+                <span class="badge status-todo">Todo</span>
+                <span class="badge priority-high">High Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-45e7fcd5.html" data-relationship="part_of" data-since="2026-06-07T02:35:16.070105">trk-45e7fcd5</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Correctness backstop refuses to ship fully-anchored resumes. factcheck.py bugs: (1) _COUNT_RE matches mid-number -> '25B' from $4.25B, '000' from 3,000; (2) count claim reduced to '{first} {last}' so '200K+ solar asset' -> '200K+ asset' which cannot substring-match master; (3) money '$1B' fails to match master '$1B+' (trailing + not an allowed boundary); (4) section headers 'Professional Summary'/'Tailored Bullets' extracted as proper-noun claims; (5) backstop _gate_draft_text never passes JD/DB extra_sources, so JD-domain terms (IRA, Energy Community) can't verify. Real repro: advancedenergyunited-careers-2026-06.</p>
+        </section>
+    </article>
+</body>
+</html>
