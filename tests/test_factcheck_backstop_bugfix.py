@@ -1,11 +1,13 @@
 """TDD tests for bug-58680458: factcheck gate false-rejects fully-anchored resumes.
 
-Five root causes fixed:
+Six root causes fixed:
   Bug 1 — mid-number extraction: _COUNT_RE matches inside larger numbers
   Bug 2 — count-claim reduction breaks matching (reduced string not contiguous)
   Bug 3 — money + suffix boundary: "$1B" fails to match "$1B+" in master
   Bug 4 — resume section headers extracted as proper-noun claims
   Bug 5 — backstop never threads JD context into the factcheck gate
+  Bug 6 — _CONNECTED_CAP_RE stitches across connectors producing unverifiable
+           compound phrases; proper-noun segment-fallback fixes this.
 """
 
 from __future__ import annotations
@@ -336,3 +338,94 @@ class TestGateIntegrityFabricatedClaims:
             assert fp not in result.failed_claims, (
                 f"'{fp}' is still a false positive; all failed_claims={result.failed_claims}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Bug 6: Segment-fallback for stitched proper-noun compounds
+# ---------------------------------------------------------------------------
+
+
+class TestBug6SegmentFallback:
+    """Proper-noun claims stitched across connectors verify via segment-fallback."""
+
+    def test_stitched_compound_verifies_when_all_segments_anchored(self, tmp_path: Path) -> None:
+        """'Credit and Energy Community' from '_CONNECTED_CAP_RE' must verify when
+        both 'Credit' (via 'Investment Tax Credit') and 'Energy Community' are in sources."""
+        content = tmp_path / "content"
+        content.mkdir(parents=True, exist_ok=True)
+        (content / "work.yml").write_text(
+            "Analyzed Investment Tax Credit provisions for residential solar.\n"
+            "Applied Energy Community adder rules to 70K qualifying systems.\n",
+            encoding="utf-8",
+        )
+        result = check_draft(
+            "Applied Investment Tax Credit and Energy Community provisions to solar fleets.",
+            content,
+        )
+        assert "Credit and Energy Community" not in result.failed_claims, (
+            f"'Credit and Energy Community' should verify via segment-fallback; "
+            f"failed_claims={result.failed_claims}"
+        )
+
+    def test_stitched_compound_with_jd_extra_source(self, tmp_path: Path) -> None:
+        """Segment-fallback works across master + extra_sources (JD may hold one segment)."""
+        content = tmp_path / "content"
+        content.mkdir(parents=True, exist_ok=True)
+        # master has "Credit" context; JD has "Energy Community"
+        (content / "work.yml").write_text(
+            "Modeled Investment Tax Credit eligibility for solar programs.\n",
+            encoding="utf-8",
+        )
+        jd_extra = {
+            "jd:jd-parsed.json": (
+                '{"description":"Energy Community adder under IRA rules."}'
+            )
+        }
+        result = check_draft(
+            "Leveraged Investment Tax Credit and Energy Community provisions.",
+            content,
+            extra_sources=jd_extra,
+        )
+        assert "Credit and Energy Community" not in result.failed_claims, (
+            f"'Credit and Energy Community' should verify across master+JD; "
+            f"failed_claims={result.failed_claims}"
+        )
+
+    def test_partially_fabricated_compound_still_fails(self, tmp_path: Path) -> None:
+        """If one segment is absent, the stitched compound must still fail."""
+        content = tmp_path / "content"
+        content.mkdir(parents=True, exist_ok=True)
+        # master has "Credit" but NOT "Foobar Industries"
+        (content / "work.yml").write_text(
+            "Analyzed Investment Tax Credit provisions.\n",
+            encoding="utf-8",
+        )
+        result = check_draft(
+            "Applied Investment Tax Credit and Foobar Industries provisions.",
+            content,
+        )
+        # The stitched "Credit and Foobar Industries" must fail — "Foobar" not in master
+        assert result.passed is False, (
+            "Partially-fabricated compound must still fail the gate"
+        )
+        failed_texts = " ".join(result.failed_claims)
+        assert "Foobar" in failed_texts or "Credit and Foobar" in failed_texts, (
+            f"Expected 'Foobar Industries' segment to surface as failure; "
+            f"failed_claims={result.failed_claims}"
+        )
+
+    def test_whole_phrase_match_still_wins_without_splitting(self, tmp_path: Path) -> None:
+        """When the full compound IS in the master, it still verifies (no split needed)."""
+        content = tmp_path / "content"
+        content.mkdir(parents=True, exist_ok=True)
+        (content / "work.yml").write_text(
+            "Technology and Policy program at MIT.\n",
+            encoding="utf-8",
+        )
+        result = check_draft(
+            "Completed the Technology and Policy program at MIT.",
+            content,
+        )
+        assert "Technology and Policy" not in result.failed_claims, (
+            f"Whole-phrase match should still work; failed_claims={result.failed_claims}"
+        )

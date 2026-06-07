@@ -92,6 +92,9 @@ _CONNECTED_CAP_RE = re.compile(
     r"\b"
 )
 
+# Connector tokens used for segment-splitting proper-noun fallback.
+_CONNECTOR_SPLIT_RE = re.compile(r"\s+(?:and|of|the|in|for|at|on|to|&)\s+|,\s*", re.IGNORECASE)
+
 # Short acronyms (2-5 all-caps chars). Stoplist filters out generic skill
 # acronyms so only claim-worthy ones (MIT, IBM, IRS) make it through.
 _ACRONYM_RE = re.compile(r"\b[A-Z]{2,5}\b")
@@ -292,6 +295,29 @@ def _claim_matches(claim: str, haystack: str, kind: str) -> bool:
     return claim.lower() in haystack.lower()
 
 
+def _proper_noun_segments_all_verified(claim: str, all_sources: dict[str, str]) -> bool:
+    """Segment-fallback for proper-noun claims stitched by _CONNECTED_CAP_RE.
+
+    Splits on connector words (" and ", " of ", etc.) and verifies that EVERY
+    non-trivial segment (≥2 chars after stripping) appears as a case-insensitive
+    substring in some source body. Scoped to proper_noun kind only — numeric
+    claims never use this path.
+
+    Returns True only if there is ≥1 segment AND all segments verify. An
+    unverified segment means the whole claim remains failed (gate preserved).
+    """
+    segments = [s.strip() for s in _CONNECTOR_SPLIT_RE.split(claim)]
+    meaningful = [s for s in segments if len(s) >= 2]
+    if not meaningful:
+        return False
+    all_bodies = list(all_sources.values())
+    for seg in meaningful:
+        seg_lower = seg.lower()
+        if not any(seg_lower in body.lower() for body in all_bodies):
+            return False
+    return True
+
+
 def verify_claim(
     claim: str,
     content_dir: Path,
@@ -304,6 +330,12 @@ def verify_claim(
     result if none match. When `kind` is None, the claim's shape is
     auto-detected — `$25`, `97%`, `3 years`, and `SunStrong` all route to
     the right matcher.
+
+    For proper-noun claims that fail the whole-phrase match, a segment-fallback
+    is attempted: the claim is split on connector words and each segment must
+    independently appear in some source. This resolves false positives from
+    _CONNECTED_CAP_RE stitching across connectors (e.g. "Credit and Energy
+    Community" from "...Investment Tax Credit and Energy Community...").
     """
     effective_kind = kind or _auto_detect_kind(claim)
     master = _load_master_content(content_dir)
@@ -314,6 +346,11 @@ def verify_claim(
             return VerificationResult(
                 claim=claim, kind=effective_kind, verified=True, source_file=name
             )
+    # Segment-fallback for proper nouns only — money/percent/count/year stay exact.
+    if effective_kind == "proper_noun" and _proper_noun_segments_all_verified(claim, master):
+        return VerificationResult(
+            claim=claim, kind=effective_kind, verified=True, source_file="segment-fallback"
+        )
     return VerificationResult(claim=claim, kind=effective_kind, verified=False)
 
 
