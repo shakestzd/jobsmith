@@ -19,7 +19,8 @@ design:
     goals:
         - 'Tier 1: any active run (incl. CLI) appears live on the list view with phase-level progress, no manual refresh and no pipeline changes.'
         - 'Tier 2: CLI/onboarding runs stream the same fine-grained per-agent events as server runs, via a DB-backed event log (DB as single source of truth).'
-        - 'Producer-agnostic capture: CLI apply, server in-process, and future remote runs all surface uniformly.'
+        - 'Producer-agnostic capture: CLI apply, server in-process, and future remote runs all surface uniformly via Tier 2 run_events.'
+        - 'Scope correction (critique): Tier 1 (apply_runs/specialist_outputs poll) covers CLI apply + server runs only — onboarding never writes apply_runs, so onboarding surfaces via Tier 2 (run_events) ONLY, not the Tier 1 global feed.'
         - 'Bounded storage: per-event log capped per run and pruned on terminal status.'
     constraints:
         - No new runtime dependency — stdlib + existing FastAPI/sse_starlette/SQLite stack.
@@ -41,6 +42,13 @@ slices:
         Emits `run`/`phase`/`status`/`specialist` events with run_id + slug so
         the list view can route them. Keep the per-slug
         /api/applications/{slug}/events endpoint untouched.
+        NOTE (feasibility): events_poll._db_poll_once / _fetch_current_run_statuses
+        are slug-scoped (LIMIT 1 per slug, events_poll.py:58,81) — the global feed
+        needs a NEW all-slugs query (latest active run per slug across all slugs),
+        not a slug=wildcard swap. Filter active on the RUNTIME status='running'
+        (pipeline.py:1116), NOT the stale schema comment 'in-progress'
+        (001_initial_schema.sql:21). Mirror the per-slug endpoint's auth/ownership
+        on the global route (do not expose all slugs unscoped).
       why: |
         CLI `jobsmith apply` already writes apply_runs.phase + specialist_outputs
         live, but the front end only subscribes per-slug (detail page), so a CLI
@@ -55,6 +63,7 @@ slices:
         - GET /api/runs/events opens an SSE stream and emits a phase event when any apply_runs row changes phase/status, regardless of slug
         - A specialist_outputs insert for any run surfaces as a specialist event carrying run_id + slug within one poll interval
         - The existing per-slug /api/applications/{slug}/events behavior and tests are unchanged
+        - The global route applies the same auth/ownership scoping as the per-slug route (no unscoped all-slugs exposure)
       effort: M
       risk: Med
       tests: |
@@ -68,6 +77,19 @@ slices:
         - id: q-feed
           text: New global endpoint or extend the per-slug route?
           answer: New /api/runs/events — clean separation; detail page keeps the per-slug stream, list view uses the global one.
+      critic_revisions:
+        - source: haiku
+          severity: HIGH
+          summary: Global /api/runs/events needs explicit auth/ownership scoping (mirror per-slug); unscoped all-slugs exposure is an info-disclosure risk — addressed via new auth done_when.
+        - source: sonnet
+          severity: WARN
+          summary: events_poll is slug-scoped (LIMIT 1 per slug, events_poll.py:58,81) — global feed needs a NEW all-slugs query, not a slug-wildcard swap — addressed in what.
+        - source: sonnet
+          severity: WARN
+          summary: Filter active runs on runtime status='running' (pipeline.py:1116), not the stale schema comment 'in-progress' (001:21) — addressed.
+        - source: sonnet
+          severity: SUCCESS
+          summary: SSE EventSourceResponse + asyncio.to_thread poll is a clean template to copy; route add is one import (main.py:51).
       decisions_notes: |
         **Trigger:** new all-slugs SSE route backed by the existing DB poll; no
           supervisor coupling so out-of-process producers (CLI) are captured.
@@ -107,6 +129,16 @@ slices:
       complexity: standard
       approved: false
       comment: ""
+      critic_revisions:
+        - source: sonnet
+          severity: WARN
+          summary: dashboard.tsx has NO EventSource — uses React Query polling (useApplications, dashboard.tsx:115); this slice is new live-UI infra, not wiring an existing pattern.
+        - source: haiku
+          severity: WARN
+          summary: Reconnect 'reconcile to authoritative state' underspecified — define the UI-state vs DB-state merge/priority before review.
+        - source: haiku
+          severity: WARN
+          summary: 'Concurrent runs per slug unaddressed: list shows latest-run-per-slug today (_latest_run_per_slug, applications.py:66) — document the row is latest-run-per-slug.'
       decisions_notes: |
         **Trigger:** list view opens one global EventSource on mount; routes
           events to rows by run_id/slug.
@@ -123,14 +155,17 @@ slices:
         poll-by-rowid and by run_id. Add a small store helper to append an event
         and a retention routine that, on terminal run status, trims a run's
         events to a bounded tail (keep last N) — full fidelity while active,
-        small table at rest.
+        small table at rest. append_run_event() lives in db.py next to the
+        existing append_state_log (db.py:177) — NOT reuse/store.py (that module is
+        for reuse tables only). Register 010 in db.py _PIPELINE_MIGRATIONS
+        (db.py:50). Follow the apply_state_log AUTOINCREMENT+rowid precedent
+        (migration 005:34).
       why: |
         Per-agent live parity (Tier 2) needs a pollable per-event log; apply_runs
         only carries coarse phase. A purpose-built table keeps event semantics
         clean and bounded.
       files:
         - src/jobsmith/migrations/010_run_events.sql
-        - src/jobsmith/reuse/store.py
         - src/jobsmith/db.py
       deps: []
       done_when:
@@ -150,6 +185,16 @@ slices:
         - id: q-store
           text: Reuse apply_state_log or a new run_events table?
           answer: New run_events — purpose-built append-only event log, indexed for rowid poll; avoids overloading the state-snapshot table.
+      critic_revisions:
+        - source: sonnet
+          severity: WARN
+          summary: append_run_event belongs in db.py beside append_state_log (db.py:177), NOT reuse/store.py; register 010 in db.py _PIPELINE_MIGRATIONS (db.py:50) — addressed (files corrected).
+        - source: sonnet
+          severity: SUCCESS
+          summary: Migration 010 is the correct next number; AUTOINCREMENT+rowid append-poll precedent exists (005:34).
+        - source: haiku
+          severity: HIGH
+          summary: Retention prune-on-terminal can race a late detail backfill (slice-6) -> gapped timeline; define prune-defer-while-subscribed or bounded-backfill semantics (see slice-6).
       decisions_notes: |
         **State:** new append-only run_events table (canonical event log);
           rebuildable is N/A — it is the source for live streaming, not derived.
@@ -163,12 +208,18 @@ slices:
       title: DB-writing EventSink fan-out on CLI + onboarding runs (Tier 2)
       what: |
         Add a `DbEventSink` (implements the EventSink protocol) that appends each
-        PipelineEvent to run_events via append_run_event. Compose it as a
-        fan-out alongside the existing terminal ApplyRenderer using the
-        CallbackEventSink/fan-out helper, so the CLI apply path
-        (_cli_apply._run_apply_phases) and the onboarding run path emit to BOTH
-        the terminal and the DB. Best-effort: a sink write error never aborts the
-        pipeline.
+        PipelineEvent to run_events via append_run_event, plus a `FanOutSink`
+        (does not exist yet — sinks.py has only CallbackEventSink + NullEventSink)
+        that broadcasts one PipelineEvent to N sinks, swallowing per-sink errors.
+        WIRING REALITY (feasibility/DANGER): _run_apply_phases (_cli_apply.py:695)
+        takes `rdr: ApplyRenderer`, and the `events=` kwarg passed to
+        _phase_runner/core_run_apply (cli_apply.py:1297,1397) is DROPPED — never
+        forwarded to _run_apply_phases. So this slice must add a sink seam to
+        _run_apply_phases and forward it from _phase_runner (not just "compose a
+        helper"). Onboarding already HAS a real EventSink seam
+        (onboard/pipeline.py:268, wired from onboard_routes.py:101) — add the
+        DbEventSink there too (one-line). Best-effort: a sink write error never
+        aborts the pipeline.
       why: |
         This is what makes out-of-process CLI (and onboarding) runs produce the
         same fine-grained PipelineEvents the in-memory supervisor gives server
@@ -177,12 +228,15 @@ slices:
         - src/jobsmith/core/sinks.py
         - src/jobsmith/_cli_apply.py
         - src/jobsmith/core/pipeline.py
+        - src/jobsmith/onboard/pipeline.py
+        - src/jobsmith/api/onboard_routes.py
       deps:
         - 3
       done_when:
         - A CLI apply run writes one run_events row per PipelineEvent it emits, in order, tagged with run_id + slug
         - The terminal ApplyRenderer output is unchanged (fan-out, not replacement)
         - A DbEventSink write failure is swallowed and the run continues (no BackstopError/abort from sink errors)
+        - Onboarding runs also emit run_events via their existing EventSink seam (onboard/pipeline.py:268)
       effort: M
       risk: Med
       tests: |
@@ -196,6 +250,19 @@ slices:
         - id: q-faulttol
           text: What happens if the DB sink write fails mid-run?
           answer: Swallow and continue (best-effort) — same posture as the existing CallbackEventSink; live streaming is non-critical to producing the application.
+      critic_revisions:
+        - source: sonnet
+          severity: DANGER
+          summary: 'CLI fan-out seam does NOT exist: _run_apply_phases takes rdr:ApplyRenderer (cli_apply.py:695); events= is dropped before it (1297,1397). Must add a sink param + forward it — deeper than ''compose a helper'' — addressed in what.'
+        - source: sonnet
+          severity: DANGER
+          summary: No FanOutSink/MultiSink exists (sinks.py has only CallbackEventSink+NullEventSink) — must be written — addressed.
+        - source: sonnet
+          severity: DANGER
+          summary: Onboarding never writes apply_runs -> Tier 1 global feed is blind to it; onboarding is Tier 2 only. Onboard DOES have an EventSink seam (onboard/pipeline.py:268) — addressed (files+goals corrected).
+        - source: sonnet
+          severity: SUCCESS
+          summary: CallbackEventSink already swallows errors (sinks.py:38-41); PipelineEvent (events.py:13-42) carries kind/phase/payload to serialize.
       decisions_notes: |
         **Trigger:** fan-out EventSink wired wherever events= is currently the
           ApplyRenderer (CLI apply + onboarding).
@@ -240,6 +307,13 @@ slices:
         - id: q-granularity
           text: Should the global list feed carry per-agent events too?
           answer: No — global feed stays phase-level to keep the list light; per-agent detail is delivered only on the per-slug detail stream.
+      critic_revisions:
+        - source: sonnet
+          severity: WARN
+          summary: Extending _db_poll_once to a 3rd table changes its 5-tuple return; events.py _stream unpacker (577-662) must change too — regression surface for existing SSE tests.
+        - source: haiku
+          severity: WARN
+          summary: Global 'stays phase-level' is a requirement, not a mechanism — define which run_events kinds are filtered and where (poll vs route).
       decisions_notes: |
         **Trigger:** extend the existing rowid-cursor poll to a third source
           (run_events) alongside apply_runs + specialist_outputs.
@@ -311,3 +385,59 @@ slices:
         **Rejected:** unit-only coverage (would not catch the cross-process
           DB->SSE wiring that is the entire point of this plan).
 questions: []
+critique:
+    reviewed_at: "2026-06-07"
+    reviewers:
+        - Haiku (design)
+        - Sonnet (feasibility)
+    assumptions:
+        - id: A1
+          status: falsified
+          text: CLI _run_apply_phases has an events/EventSink seam to fan out into.
+          evidence: _cli_apply.py:695 (rdr:ApplyRenderer); events= dropped at 1297,1397
+        - id: A2
+          status: falsified
+          text: A CallbackEventSink/fan-out helper exists to compose sinks.
+          evidence: core/sinks.py:1-43 — only CallbackEventSink + NullEventSink
+        - id: A3
+          status: falsified
+          text: Tier 1 (apply_runs poll) captures onboarding runs uniformly.
+          evidence: onboard/pipeline.py never writes apply_runs/specialist_outputs
+        - id: A4
+          status: verified
+          text: Migration 010 is next; AUTOINCREMENT+rowid append-poll precedent exists.
+          evidence: migrations/ listing; 005_apply_state.sql:34
+        - id: A5
+          status: verified
+          text: WAL + 30s busy_timeout make concurrent CLI-writer + server-reader safe.
+          evidence: db.py:64,103-108
+        - id: A6
+          status: questionable
+          text: append_run_event belongs in reuse/store.py.
+          evidence: store.py is reuse-tables only; append_state_log lives in db.py:177
+    critics: []
+    risks:
+        - risk: 'Slice-4 mis-scoped: fan-out seam + FanOutSink must be built, not wired — a naive impl compiles but writes zero run_events.'
+          severity: High
+          mitigation: Add sink param to _run_apply_phases + forward from _phase_runner; write FanOutSink; assert run_events row count in slice-7.
+        - risk: Onboarding silently absent from the live list (Tier 1 blind).
+          severity: Medium
+          mitigation: 'Scope corrected: onboarding via Tier 2 run_events only; optionally write an apply_runs row for onboard if list-level parity is wanted (out of current scope).'
+        - risk: Retention prune races late detail backfill -> gapped timeline.
+          severity: Medium
+          mitigation: Defer prune while a run has active subscribers, or bound backfill and accept tail-only for late joiners; pin in slice-3/6 acceptance.
+        - risk: Run lifecycle/terminal states undefined (done/failed/cancelled; concurrent runs per slug).
+          severity: Low
+          mitigation: 'Add a lifecycle note: terminal = {done,failed,cancelled}; list row = latest-run-per-slug; slice-7 covers a failed-mid-run case.'
+    synthesis: |
+        Architecture is sound (WAL DB as SSE source of truth, rowid-cursor poll,
+        PipelineEvent serialization — all proven here). Tier 1 (slices 1-2) is
+        low-risk but is genuinely NEW live-UI infra (dashboard.tsx is query-only)
+        and needs auth scoping + a new all-slugs query. The blockers are all in
+        Tier 2 slice-4: A1/A2/A3 were FALSIFIED — the CLI events seam is dropped
+        before _run_apply_phases, no FanOutSink exists, and onboarding never writes
+        apply_runs (so Tier 1 can't see it). Those are now corrected in the slice
+        text/files/goals. Remaining design item for human review: the retention vs
+        late-backfill race (slice-3/6) and an explicit run lifecycle. append_run_event
+        relocated to db.py. With those baked in, the plan is ready for review;
+        start the reviewer on slice-4 (deepest change) and the retention semantics.
