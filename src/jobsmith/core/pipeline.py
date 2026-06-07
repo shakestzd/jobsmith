@@ -400,6 +400,14 @@ def _run_backstop_gate(slug: str, resolved_cwd: Path) -> None:
     selection_path = state_dir / "bullet-selection.json"
     decisions_path = state_dir / "bullet-decisions.json"
 
+    # Build extra_sources from JD and DB master content (best-effort — empty on failure).
+    extra_sources: dict[str, str] = {}
+    with contextlib.suppress(Exception):
+        from jobsmith.factcheck import load_db_master_content, load_jd_context_for_draft
+
+        extra_sources.update(load_jd_context_for_draft(resume_path))
+        extra_sources.update(load_db_master_content())
+
     # Open DB connection for metric recording (best-effort, non-critical)
     db_conn = None
     with contextlib.suppress(Exception):
@@ -417,6 +425,7 @@ def _run_backstop_gate(slug: str, resolved_cwd: Path) -> None:
             content_dir=content_dir,
             selection_path=selection_path,
             decisions_path=decisions_path if decisions_path.exists() else None,
+            extra_sources=extra_sources or None,
             # Live path gates once and fails closed — no in-process regen
             # callbacks are wired (see docstring), so do not claim a retry bound
             # that would never be honoured.

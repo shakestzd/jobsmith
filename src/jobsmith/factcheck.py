@@ -72,8 +72,10 @@ _MULTI_CAP_RE = re.compile(r"\b[A-Z][a-zA-Z]{3,}(?:[ \t]+[A-Z][a-zA-Z]{3,})+\b")
 _CAMEL_NAME_RE = re.compile(r"\b[A-Z][a-z]+[A-Z][a-zA-Z]+\b")
 
 # Countable metrics: "7 pipelines", "200K assets", "7 automated ETL pipelines".
+# Negative lookbehind prevents matching mid-number: "25B" inside "$4.25B",
+# or "000" inside "3,000". The lookbehind covers digit, decimal, comma, and $.
 _COUNT_RE = re.compile(
-    r"\b\d+[KMB]?\+?\s+(?:[\w\-]+\s+){0,3}"
+    r"(?<![\d.,$])\b\d+[KMB]?\+?\s+(?:[\w\-]+\s+){0,3}"
     r"(?:pipelines?|assets?|systems?|states?|clients?|"
     r"customers?|employees?|engineers?|applications?|reports?|dashboards?|"
     r"databases?|warehouses?|projects?|teams?|companies|markets?)\b",
@@ -118,6 +120,10 @@ _PROPER_NOUN_STOPLIST = {
     "HR", "HQ", "IT", "QA", "PR",
     # Draft/letter boilerplate
     "Cover Letter", "Hiring Team",
+    # Jobsmith resume section headers — emitted by prose-writer agent
+    "Professional Summary", "Tailored Bullets", "Work Experience",
+    "Technical Skills", "Core Competencies", "Selected Experience",
+    "Key Achievements", "Selected Projects",
 }
 
 
@@ -256,10 +262,32 @@ def _auto_detect_kind(claim: str) -> str:
 
 
 def _claim_matches(claim: str, haystack: str, kind: str) -> bool:
-    if kind in {"money", "percent", "year_count", "count"}:
-        # Whole-token match — "$25" must not match "$250M"
+    if kind == "count":
+        # Count claims are stored as "{numeric_token} {noun_lemma}" (e.g. "200K+ asset").
+        # The two tokens may not be contiguous in the master ("200K+ solar asset portfolio"),
+        # so verify by requiring BOTH the numeric token (whole-word) AND the noun lemma
+        # (case-insensitive substring) to appear somewhere in the haystack.
+        parts = claim.split(None, 1)
+        if len(parts) < 2:
+            # Single-token fallback — whole-token match.
+            escaped = re.escape(claim)
+            pattern = rf"(?:^|[\s'\"\[\(]){escaped}(?:[\s,.!?:;+'\"\]\)]|$)"
+            return bool(re.search(pattern, haystack))
+        numeric, noun = parts[0], parts[1]
+        # Numeric token: whole-token match with trailing + allowed.
+        num_escaped = re.escape(numeric)
+        num_pattern = rf"(?:^|[\s'\"\[\(]){num_escaped}(?:[\s,.!?:;+'\"\]\)]|$)"
+        if not re.search(num_pattern, haystack):
+            return False
+        # Noun: case-insensitive substring — accept singular or plural forms.
+        noun_lower = noun.lower().rstrip("s")  # strip trailing 's' for base lemma
+        return noun_lower in haystack.lower()
+    if kind in {"money", "percent", "year_count"}:
+        # Whole-token match — "$25" must not match "$250M".
+        # Trailing boundary includes '+' so "$1B" matches "$1B+" in master,
+        # while the leading boundary stays strict to prevent left-side mis-matches.
         escaped = re.escape(claim)
-        pattern = rf"(?:^|[\s'\"\[\(]){escaped}(?:[\s,.!?:;'\"\]\)]|$)"
+        pattern = rf"(?:^|[\s'\"\[\(]){escaped}(?:[\s,.!?:;+'\"\]\)]|$)"
         return bool(re.search(pattern, haystack))
     return claim.lower() in haystack.lower()
 
