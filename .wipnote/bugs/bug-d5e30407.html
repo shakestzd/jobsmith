@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Factcheck gate: verify acronym claims against their spelled-out expansion (initialism match)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="bug-d5e30407"
+             data-type="bug"
+             data-status="todo"
+             data-priority="high"
+             data-created="2026-06-07T05:51:17.251556"
+             data-updated="2026-06-07T05:51:17.264493" data-agent-assigned="claude-code" data-track-id="trk-45e7fcd5" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.60.21">
+
+        <header>
+            <h1>Factcheck gate: verify acronym claims against their spelled-out expansion (initialism match)</h1>
+            <div class="metadata">
+                <span class="badge status-todo">Todo</span>
+                <span class="badge priority-high">High Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-45e7fcd5.html" data-relationship="part_of" data-since="2026-06-07T05:51:17.264356">trk-45e7fcd5</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Acronym proper-noun claims (MIT, IRA, PJM) false-fail when the source spells out the full name but not the acronym (e.g. master has 'Massachusetts Institute of Technology' but resume says 'MIT'). Add an initialism-match fallback in factcheck.py: for an all-caps acronym claim not found literally, verify it against a sequence of capitalized words in any source whose leading letters spell the acronym (skipping lowercase connectors of/the/and/for). Ends recurring acronym whack-a-mole. Must not pass a fabricated acronym whose expansion is absent.</p>
+        </section>
+    </article>
+</body>
+</html>
