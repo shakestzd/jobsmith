@@ -137,38 +137,48 @@ def test_list_messages_parses_json() -> None:
         mailapp_mod._run_mail_app = original
 
 
-def test_list_messages_error_returns_empty() -> None:
-    import jobsmith.sourcing.email.mailapp as mailapp_mod
+def test_list_messages_error_returns_none() -> None:
+    """CLI failure returns None (degraded signal), not [] (empty mailbox)."""
     from jobsmith.sourcing.email.mailapp import list_messages
-
-    original = mailapp_mod._run_mail_app
 
     def mock_run(*args, **kwargs):
         return 1, "", "permission denied"
 
-    mailapp_mod._run_mail_app = mock_run
-    try:
-        result = list_messages("myaccount@gmail.com", "Job Alerts")
-        assert result == []
-    finally:
-        mailapp_mod._run_mail_app = original
+    result = list_messages("myaccount@gmail.com", "Job Alerts", _run_fn=mock_run)
+    assert result is None
 
 
-def test_list_messages_bad_json_returns_empty() -> None:
-    import jobsmith.sourcing.email.mailapp as mailapp_mod
+def test_list_messages_bad_json_returns_none() -> None:
+    """Unparseable CLI output returns None (degraded signal)."""
     from jobsmith.sourcing.email.mailapp import list_messages
-
-    original = mailapp_mod._run_mail_app
 
     def mock_run(*args, **kwargs):
         return 0, "NOT JSON", ""
 
-    mailapp_mod._run_mail_app = mock_run
-    try:
-        result = list_messages("myaccount@gmail.com", "Job Alerts")
-        assert result == []
-    finally:
-        mailapp_mod._run_mail_app = original
+    result = list_messages("myaccount@gmail.com", "Job Alerts", _run_fn=mock_run)
+    assert result is None
+
+
+def test_ingest_mailapp_alerts_cli_failure_marks_degraded() -> None:
+    """mail-app CLI failure (e.g. not on launchd PATH) marks the sender degraded."""
+    from jobsmith.sourcing.email.mailapp import ingest_mailapp_alerts
+
+    def mock_run(*args, **kwargs):
+        return 1, "", "mail-app not found on PATH"
+
+    postings, degraded = ingest_mailapp_alerts(
+        [
+            {
+                "type": "mailapp_alert",
+                "sender_slug": "linkedin-alert",
+                "account": "myaccount@gmail.com",
+                "mailbox": "Job Alerts",
+            }
+        ],
+        _run_fn=mock_run,
+    )
+    assert postings == []
+    assert "linkedin-alert" in degraded
 
 
 # ---------------------------------------------------------------------------

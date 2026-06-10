@@ -65,11 +65,13 @@ def list_messages(
     limit: int = 20,
     *,
     _run_fn=None,
-) -> list[dict]:
+) -> list[dict] | None:
     """List messages from a Mail.app mailbox as JSON.
 
     Returns a list of message dicts (id, subject, sender, date_received, ...).
-    Returns [] on error.
+    Returns [] for a genuinely empty mailbox. Returns None when the CLI
+    itself fails (not installed / non-zero exit / unparseable output) so
+    callers can mark the sender degraded instead of treating it as empty.
 
     Parameters
     ----------
@@ -86,7 +88,7 @@ def list_messages(
     )
     if rc != 0:
         logger.warning("mail-app list failed (rc=%d): %s", rc, stderr.strip())
-        return []
+        return None
     try:
         data = json.loads(stdout)
         if isinstance(data, list):
@@ -94,10 +96,10 @@ def list_messages(
         # Some versions wrap in {"messages": [...]}
         if isinstance(data, dict):
             return data.get("messages", [])
-        return []
+        return None
     except json.JSONDecodeError as exc:
         logger.warning("mail-app list JSON parse error: %s", exc)
-        return []
+        return None
 
 
 def extract_html_from_mime(raw_source: str) -> str | None:
@@ -214,11 +216,13 @@ def fetch_mailapp_messages(
     *,
     _run_fn=None,
     _source_fn=None,
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, str]] | None:
     """Fetch recent messages from a Mail.app mailbox as (message_id, html) pairs.
 
     Uses AppleScript to retrieve the raw MIME source for each message, then
-    decodes the text/html part.  Returns empty list on any error.
+    decodes the text/html part.  Returns [] for an empty mailbox; returns
+    None when the mail-app CLI itself fails (so callers can mark the sender
+    degraded).
 
     Parameters
     ----------
@@ -235,6 +239,8 @@ def fetch_mailapp_messages(
     source_fn = _source_fn or get_message_source
 
     messages = list_messages(account=account, mailbox=mailbox, limit=limit, _run_fn=run_fn)
+    if messages is None:
+        return None
     results = []
     for msg in messages:
         msg_id = str(msg.get("id", ""))
@@ -312,6 +318,13 @@ def ingest_mailapp_alerts(
             _run_fn=_run_fn,
             _source_fn=_source_fn,
         )
+        if messages is None:
+            logger.warning(
+                "mail-app CLI failed for %s (account=%r mailbox=%r) — marking degraded",
+                sender_slug, account, mailbox,
+            )
+            degraded.append(sender_slug)
+            continue
         if not messages:
             logger.debug("no messages in mailbox %r for %s", mailbox, sender_slug)
             continue
