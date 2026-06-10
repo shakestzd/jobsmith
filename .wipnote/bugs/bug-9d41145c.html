@@ -10,37 +10,38 @@
 <body>
     <article id="bug-9d41145c"
              data-type="bug"
-             data-status="in-progress"
+             data-status="done"
              data-priority="high"
              data-created="2026-06-10T21:54:06.270564"
-             data-updated="2026-06-10T21:54:26.662001" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8" data-created-by-cli-version="0.61.1">
+             data-updated="2026-06-10T22:09:10.593316" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8" data-created-by-cli-version="0.61.1">
 
         <header>
             <h1>Review-tab proposal diff card not scrollable — can&#39;t review all edits</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-high">High Priority</span>
             </div>
         </header>
 
         <nav data-graph-edges>
-            <section data-edge-type="part_of">
-                <h3>Part Of:</h3>
-                <ul>
-                    <li><a href="trk-5d3b688f.html" data-relationship="part_of" data-since="2026-06-10T21:54:06.287404">trk-5d3b688f</a></li>
-                </ul>
-            </section>
             <section data-edge-type="implemented_in">
                 <h3>Implemented In:</h3>
                 <ul>
                     <li><a href="8419646a-47b6-4091-a57b-d05f0fc3b06a.html" data-relationship="implemented_in" data-since="2026-06-10T21:54:26.661739">session 8419646a-47b6-4091-a57b-d05f0fc3b06a</a></li>
                 </ul>
             </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-5d3b688f.html" data-relationship="part_of" data-since="2026-06-10T21:54:06.287404">trk-5d3b688f</a></li>
+                </ul>
+            </section>
         </nav>
 
         <section data-content>
             <h3>Description</h3>
-            <p>The BEFORE/AFTER diff panes in the Review tab's proposed-revision card clip at the card boundary with no scroll, so long cover letters cannot be fully reviewed before Apply. Fix: max-height + overflow-y auto on the diff panes (web/src/app — proposal diff component in the review tab).</p>
+            <p>The BEFORE/AFTER diff panes in the Review tab's proposed-revision card clip at the card boundary with no scroll, so long cover letters cannot be fully reviewed before Apply. Fix: max-height + overflow-y auto on the diff panes (web/src/app — proposal diff component in the review tab).
+[2026-06-10 22:09 claude-code] accepted-advisory (provenance override): Fixed: application.tsx diff grid maxHeight 65vh + unified scroll; typecheck clean, 38/38 tests pass. Deploy deferred until apply-queue idle.</p>
         </section>
     </article>
 </body>
