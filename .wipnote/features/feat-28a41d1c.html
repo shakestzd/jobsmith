@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Funnel dashboard: per-stage counts, conversion, per-source yield</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-28a41d1c"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-10T19:40:26.265812"
+             data-updated="2026-06-10T20:46:30.713517" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034">
+
+        <header>
+            <h1>Funnel dashboard: per-stage counts, conversion, per-source yield</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-4def4798.html" data-relationship="planned_in" data-since="2026-06-10T19:40:26.271025">plan-4def4798</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-cf0dc034.html" data-relationship="part_of" data-since="2026-06-10T19:40:26.275002">trk-cf0dc034</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-850a076a.html" data-relationship="blocked_by">feat-850a076a</a></li>
+                    <li><a href="feat-827071e1.html" data-relationship="blocked_by">feat-827071e1</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="6221fdfe-a33d-40e3-a12c-f7940ef5412e.html" data-relationship="implemented_in" data-since="2026-06-10T20:46:30.713403">session 6221fdfe-a33d-40e3-a12c-f7940ef5412e</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>A funnel view in the web UI fed by a new GET /api/funnel: stage counts
+(sourced -> queued -> promoted/applied -> interview -> offer / rejected) with
+conversion rates between adjacent stages, a per-source breakdown (which boards/
+email senders produce postings that become applications and interviews), and a
+time-window filter (7/30/90 days/all; cohort = posting first_seen in window).
+Applications gain interview/offer in the UI status picker (vocabulary added in
+slice-1) so outcomes are recorded from the application detail — closing the
+loop the BECU rejection exercised manually via SQL. Funnel uses the
+APPLICATION's fit score post-promotion (triage score is pre-funnel ranking
+only). Nav wiring: ViewName (types.ts) + chrome.tsx sidebar, same as slice-5.</p>
+        </section>
+    </article>
+</body>
+</html>
