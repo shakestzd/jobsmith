@@ -1,24 +1,30 @@
 """Mail.app adapter for email job alert ingestion (feat-b1bd050e).
 
-Uses the installed `mail-app` CLI (external tool) to read messages from Apple
-Mail's local message store.  This is the fallback path for users who receive
-job alert emails in Mail.app but have not configured Gmail API credentials.
+Uses the installed `mail-app` CLI (external tool) to list messages from Apple
+Mail's local message store.  Raw MIME source is retrieved via AppleScript
+(osascript) since `mail-app` has no raw-source flag — the --body-only flag
+returns plain-text rendering with all hrefs stripped.
 
 Interface (probed from `mail-app --help`):
   mail-app messages list --account ACCT --mailbox MBOX --limit N --json
-  mail-app messages view --id ID --account ACCT --mailbox MBOX --body-only
+  (message source retrieved via osascript, not mail-app view)
 
 Design:
-  - fetch_mailapp_messages() shells out to the `mail-app` CLI.
+  - list_messages() shells out to the `mail-app` CLI.
+  - get_message_source() fetches the raw MIME source via AppleScript.
+  - extract_html_from_mime() decodes the text/html MIME part using stdlib email.
+  - fetch_mailapp_messages() combines list + source + MIME extraction.
   - ingest_mailapp_alerts() iterates configured alert senders, lists
-    recent messages from the configured mailbox, fetches body HTML,
-    and delegates to the per-sender HTML parsers.
+    recent messages, extracts HTML from raw MIME, and delegates to parsers.
   - An unparseable alert is counted in degraded_senders but never crashes.
   - All subprocess calls use capture_output=True so stdout is clean.
+  - _run_fn / osascript call are injectable for offline unit tests.
 """
 
 from __future__ import annotations
 
+import email as _email_stdlib
+import email.policy
 import json
 import logging
 import shutil
@@ -86,26 +92,111 @@ def list_messages(
         return []
 
 
-def get_message_body(
+def extract_html_from_mime(raw_source: str) -> str | None:
+    """Extract and decode the text/html part from a raw MIME message string.
+
+    Handles quoted-printable and base64 transfer encodings.  Uses the stdlib
+    ``email`` module exclusively.
+
+    Parameters
+    ----------
+    raw_source:
+        Full raw MIME source as returned by AppleScript ``source`` property.
+
+    Returns
+    -------
+    Decoded HTML string, or None if no text/html part is found.
+    """
+    try:
+        msg = _email_stdlib.message_from_string(raw_source, policy=email.policy.default)
+        for part in msg.walk():
+            if part.get_content_type() == "text/html":
+                return part.get_content()
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("MIME extraction failed: %s", exc)
+        return None
+
+
+def _as_script(
+    account: str,
+    mailbox: str,
+    msg_id: str,
+) -> str:
+    """Build the AppleScript source to fetch a message's raw MIME.
+
+    Embeds values using AppleScript double-quoted strings with any embedded
+    double-quote characters escaped as ``\" & quote & \"``.  Single-quoted
+    Python repr is *not* used because AppleScript treats unquoted apostrophes
+    as string delimiters in some contexts, which breaks comparisons.
+    """
+
+    def _esc(value: str) -> str:
+        # Escape embedded double-quotes: replace " with \" & quote & \"
+        # (AppleScript string concatenation via &)
+        if '"' not in value:
+            return f'"{value}"'
+        parts = value.split('"')
+        return '("' + '" & quote & "'.join(parts) + '")'
+
+    return (
+        'tell application "Mail"\n'
+        f'    set acct to first account whose name is {_esc(account)}\n'
+        f'    set mbox to mailbox {_esc(mailbox)} of acct\n'
+        '    set targetMsg to missing value\n'
+        '    repeat with m in (messages of mbox)\n'
+        f'        if (id of m as string) is {_esc(msg_id)} then\n'
+        '            set targetMsg to m\n'
+        '            exit repeat\n'
+        '        end if\n'
+        '    end repeat\n'
+        '    if targetMsg is missing value then\n'
+        '        return ""\n'
+        '    end if\n'
+        '    return source of targetMsg\n'
+        'end tell'
+    )
+
+
+def get_message_source(
     message_id: str,
     account: str,
     mailbox: str,
+    *,
+    timeout: int = 60,
 ) -> str:
-    """Fetch the body of a message by its mail-app numeric ID.
+    """Fetch the raw MIME source of a message via AppleScript / osascript.
 
-    Returns empty string on error.
+    Returns the raw MIME source string, or empty string on error.
+    The returned string can be passed to ``extract_html_from_mime``.
     """
-    rc, stdout, stderr = _run_mail_app(
-        "messages", "view",
-        "--id", str(message_id),
-        "--account", account,
-        "--mailbox", mailbox,
-        "--body-only",
+    script = _as_script(
+        account=account,
+        mailbox=mailbox,
+        msg_id=str(message_id),
     )
-    if rc != 0:
-        logger.warning("mail-app view failed (rc=%d): %s", rc, stderr.strip())
+    try:
+        proc = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if proc.returncode != 0:
+            logger.warning(
+                "osascript get_message_source failed (rc=%d) msg_id=%s: %s",
+                proc.returncode,
+                message_id,
+                proc.stderr.strip(),
+            )
+            return ""
+        return proc.stdout
+    except subprocess.TimeoutExpired:
+        logger.warning("osascript timed out after %ds for msg_id=%s", timeout, message_id)
         return ""
-    return stdout
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("osascript error for msg_id=%s: %s", message_id, exc)
+        return ""
 
 
 def fetch_mailapp_messages(
@@ -113,10 +204,10 @@ def fetch_mailapp_messages(
     mailbox: str,
     limit: int = 20,
 ) -> list[tuple[str, str]]:
-    """Fetch recent messages from a Mail.app mailbox.
+    """Fetch recent messages from a Mail.app mailbox as (message_id, html) pairs.
 
-    Returns a list of (message_id, body_html) tuples.
-    Empty list on any error.
+    Uses AppleScript to retrieve the raw MIME source for each message, then
+    decodes the text/html part.  Returns empty list on any error.
     """
     messages = list_messages(account=account, mailbox=mailbox, limit=limit)
     results = []
@@ -124,9 +215,12 @@ def fetch_mailapp_messages(
         msg_id = str(msg.get("id", ""))
         if not msg_id:
             continue
-        body = get_message_body(msg_id, account=account, mailbox=mailbox)
-        if body:
-            results.append((msg_id, body))
+        raw_source = get_message_source(msg_id, account=account, mailbox=mailbox)
+        if not raw_source:
+            continue
+        html = extract_html_from_mime(raw_source)
+        if html:
+            results.append((msg_id, html))
     return results
 
 
@@ -134,7 +228,8 @@ def ingest_mailapp_alerts(
     alert_senders: list[dict],
     *,
     max_per_sender: int = 20,
-    _run_fn=None,  # injectable for tests
+    _run_fn=None,   # injectable replacement for _run_mail_app (list calls)
+    _source_fn=None,  # injectable replacement for get_message_source
 ) -> tuple[list[dict], list[str]]:
     """Ingest job alerts from Mail.app for each configured alert sender.
 
@@ -151,7 +246,12 @@ def ingest_mailapp_alerts(
     max_per_sender:
         Cap on messages fetched per sender.
     _run_fn:
-        Injectable replacement for _run_mail_app (for unit tests).
+        Injectable replacement for _run_mail_app (for unit tests — handles
+        ``list`` sub-command).
+    _source_fn:
+        Injectable replacement for get_message_source (for unit tests — called
+        as ``_source_fn(msg_id, account, mailbox)`` and should return raw MIME
+        source or an already-decoded HTML string).
 
     Returns
     -------
@@ -159,16 +259,28 @@ def ingest_mailapp_alerts(
         postings: list of posting dicts (title/company/location/url/external_id/source)
         degraded_senders: list of sender slugs that failed or produced no postings
     """
+    import jobsmith.sourcing.email.mailapp as _self
+
     from .parsers import parse_alert_html
 
-    if _run_fn is not None:
-        import jobsmith.sourcing.email.mailapp as _self
-        original = _self._run_mail_app
+    original_run = None
+    original_source = None
 
-        def _patched(*args, **kwargs):
+    if _run_fn is not None:
+        original_run = _self._run_mail_app
+
+        def _patched_run(*args, **kwargs):
             return _run_fn(*args, **kwargs)
 
-        _self._run_mail_app = _patched  # type: ignore[attr-defined]
+        _self._run_mail_app = _patched_run  # type: ignore[attr-defined]
+
+    if _source_fn is not None:
+        original_source = _self.get_message_source
+
+        def _patched_source(msg_id, account, mailbox, **kwargs):  # type: ignore[misc]
+            return _source_fn(msg_id, account, mailbox)
+
+        _self.get_message_source = _patched_source  # type: ignore[attr-defined]
 
     try:
         postings: list[dict] = []
@@ -214,6 +326,7 @@ def ingest_mailapp_alerts(
 
         return postings, degraded
     finally:
-        if _run_fn is not None:
-            import jobsmith.sourcing.email.mailapp as _self
-            _self._run_mail_app = original  # type: ignore[attr-defined]
+        if original_run is not None:
+            _self._run_mail_app = original_run  # type: ignore[attr-defined]
+        if original_source is not None:
+            _self.get_message_source = original_source  # type: ignore[attr-defined]

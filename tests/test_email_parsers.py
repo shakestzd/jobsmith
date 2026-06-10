@@ -19,6 +19,12 @@ def linkedin_html() -> str:
 
 
 @pytest.fixture()
+def linkedin_html_real() -> str:
+    """Real-structure LinkedIn alert fixture (comm/jobs/view URLs, company·location format)."""
+    return (FIXTURES_DIR / "linkedin_alert_real.html").read_text()
+
+
+@pytest.fixture()
 def indeed_html() -> str:
     return (FIXTURES_DIR / "indeed_alert.html").read_text()
 
@@ -64,6 +70,83 @@ def test_parse_linkedin_no_personal_data(linkedin_html: str) -> None:
     """Fixtures must not contain real personal email addresses or PII."""
     # Fixture is sanitized — verify it uses fake names/companies
     assert "@" not in linkedin_html or "example.com" in linkedin_html or "linkedin.com" in linkedin_html
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn parser — real-structure fixture (comm/jobs/view URL format)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_linkedin_real_returns_jobs(linkedin_html_real: str) -> None:
+    """Real-structure fixture: parser returns >=3 jobs."""
+    from jobsmith.sourcing.email.parsers import parse_linkedin_alert
+
+    results = parse_linkedin_alert(linkedin_html_real)
+    assert len(results) >= 3, f"Expected >=3, got {len(results)}: {results}"
+
+
+def test_parse_linkedin_real_canonical_urls(linkedin_html_real: str) -> None:
+    """Real-structure fixture: all URLs are canonical /jobs/view/<id>/ with no tracking params."""
+    from jobsmith.sourcing.email.parsers import parse_linkedin_alert
+
+    results = parse_linkedin_alert(linkedin_html_real)
+    for r in results:
+        assert "linkedin.com/jobs/view/" in r["url"], f"URL not canonical: {r['url']}"
+        assert "?" not in r["url"], f"Tracking params not stripped: {r['url']}"
+        assert "comm" not in r["url"], f"comm subdomain not stripped: {r['url']}"
+        assert "trackingId" not in r["url"]
+        assert "midToken" not in r["url"]
+
+
+def test_parse_linkedin_real_title_company_location(linkedin_html_real: str) -> None:
+    """Real-structure fixture: title, company and location are populated."""
+    from jobsmith.sourcing.email.parsers import parse_linkedin_alert
+
+    results = parse_linkedin_alert(linkedin_html_real)
+    for r in results:
+        assert r["title"], f"Missing title in: {r}"
+        assert r["company"], f"Missing company in: {r}"
+        assert r["location"], f"Missing location in: {r}"
+
+
+def test_parse_linkedin_real_external_id(linkedin_html_real: str) -> None:
+    """Real-structure fixture: external_id is the numeric job ID from the URL."""
+    from jobsmith.sourcing.email.parsers import parse_linkedin_alert
+
+    results = parse_linkedin_alert(linkedin_html_real)
+    for r in results:
+        assert r["external_id"].isdigit(), f"external_id not numeric: {r['external_id']}"
+
+
+def test_parse_linkedin_real_first_job(linkedin_html_real: str) -> None:
+    """Spot-check first job entry from real-structure fixture."""
+    from jobsmith.sourcing.email.parsers import parse_linkedin_alert
+
+    results = parse_linkedin_alert(linkedin_html_real)
+    first = results[0]
+    assert first["title"] == "Senior Data Engineer"
+    assert first["company"] == "Acme Systems"
+    assert "Remote" in first["location"]
+    assert first["url"] == "https://www.linkedin.com/jobs/view/3001100001/"
+    assert first["external_id"] == "3001100001"
+
+
+def test_parse_linkedin_url_normalization_comm_subdomain() -> None:
+    """Parser normalizes comm.linkedin.com/comm/jobs/view to linkedin.com/jobs/view."""
+    from jobsmith.sourcing.email.parsers import parse_linkedin_alert
+
+    html = """<html><body>
+    <a href="https://www.linkedin.com/comm/jobs/view/9999000001/?trackingId=ABC&midToken=XYZ&trk=test">
+      <table><tr><td>Staff Engineer</td></tr>
+      <tr><td>OmegaCorp &middot; Austin, TX</td></tr></table>
+    </a>
+    </body></html>"""
+    results = parse_linkedin_alert(html)
+    assert len(results) == 1
+    assert results[0]["url"] == "https://www.linkedin.com/jobs/view/9999000001/"
+    assert results[0]["title"] == "Staff Engineer"
+    assert results[0]["company"] == "OmegaCorp"
+    assert results[0]["location"] == "Austin, TX"
 
 
 # ---------------------------------------------------------------------------

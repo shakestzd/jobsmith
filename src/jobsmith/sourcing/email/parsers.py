@@ -60,43 +60,86 @@ def _glassdoor_job_id(url: str) -> str:
     return hashlib.sha256(url.encode()).hexdigest()[:16]
 
 
+def _normalize_linkedin_url(raw_url: str) -> str:
+    """Return a canonical LinkedIn job URL with tracking params stripped.
+
+    Converts ``https://www.linkedin.com/comm/jobs/view/<id>/?tracking=...``
+    to ``https://www.linkedin.com/jobs/view/<id>/`` — the ``/comm/`` prefix
+    used in email links is normalized to the public ``/jobs/view/`` form.
+    """
+    m = re.search(r"/jobs/view/(\d+)", raw_url)
+    if not m:
+        return raw_url.split("?")[0]
+    job_id = m.group(1)
+    return f"https://www.linkedin.com/jobs/view/{job_id}/"
+
+
 def parse_linkedin_alert(html: str) -> list[dict]:
     """Parse a LinkedIn Jobs Alert HTML email into job entries.
 
-    Returns a list of dicts with keys: title, company, location, url, external_id.
-    Returns [] on parse failure (never raises).
+    Handles both the legacy authored fixture format
+    (``/jobs/view/<id>/`` with separate sibling text nodes) and the real
+    email format (``/comm/jobs/view/<id>/`` with ``company · location`` in a
+    single text node).
+
+    Returns a list of dicts with keys: title, company, location, url,
+    external_id.  Returns [] on parse failure (never raises).
     """
     try:
         soup = BeautifulSoup(html, "html.parser")
         results = []
+        seen_ids: set[str] = set()
 
-        # LinkedIn alert emails: anchors pointing to /jobs/view/<id>/
+        # Real LinkedIn emails use /comm/jobs/view/<id>/ in href; legacy
+        # authored fixtures use /jobs/view/<id>/ directly — match both.
         job_links = soup.find_all(
-            "a", href=re.compile(r"linkedin\.com/jobs/view/\d+")
+            "a", href=re.compile(r"linkedin\.com(?:/comm)?/jobs/view/\d+")
         )
 
         for link in job_links:
-            url = link.get("href", "").split("?")[0]  # strip tracking params
-            title = _clean(link.get_text())
-            if not title or not url:
+            raw_href = link.get("href", "")
+            m = re.search(r"/jobs/view/(\d+)", raw_href)
+            if not m:
+                continue
+            job_id = m.group(1)
+
+            # Skip duplicate appearances of the same job ID (icon links repeat)
+            if job_id in seen_ids:
                 continue
 
-            # Company and location are siblings after the link in the same cell
-            parent = link.parent
-            texts = [
-                _clean(t) for t in parent.stripped_strings if _clean(t) != title
-            ]
-            company = texts[0] if len(texts) > 0 else ""
-            location = texts[1] if len(texts) > 1 else ""
+            canonical_url = _normalize_linkedin_url(raw_href)
 
-            external_id = _linkedin_job_id(url)
+            # Collect text nodes from within this anchor
+            texts = [_clean(t) for t in link.stripped_strings if _clean(t)]
+            if not texts:
+                continue
+
+            title = texts[0]
+
+            # Real email format: texts[1] is "company · location"
+            company = ""
+            location = ""
+            if len(texts) >= 2 and "·" in texts[1]:
+                # U+00B7 MIDDLE DOT — the · separator LinkedIn uses
+                parts = texts[1].split("·", 1)
+                company = _clean(parts[0])
+                location = _clean(parts[1])
+            elif len(texts) >= 2:
+                # Legacy fixture format: separate text nodes
+                company = texts[1]
+                location = texts[2] if len(texts) > 2 else ""
+
+            if not title:
+                continue
+
+            seen_ids.add(job_id)
             results.append(
                 {
                     "title": title,
                     "company": company,
                     "location": location,
-                    "url": url,
-                    "external_id": external_id,
+                    "url": canonical_url,
+                    "external_id": job_id,
                 }
             )
 
