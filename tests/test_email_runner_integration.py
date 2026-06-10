@@ -82,12 +82,12 @@ def test_run_email_alerts_upserts_postings(pipeline_db) -> None:
             }
         ], []
 
-    upserted, new_count, degraded = run_email_alerts(
+    upserted, new_ids, degraded = run_email_alerts(
         conn, senders, _mailapp_ingest_fn=_mock_ingest
     )
 
     assert upserted == 1
-    assert new_count == 1
+    assert len(new_ids) == 1
     assert degraded == []
 
     row = conn.execute("SELECT * FROM postings WHERE external_id = '3001000001'").fetchone()
@@ -115,7 +115,7 @@ def test_run_email_alerts_records_degraded(pipeline_db) -> None:
     def _mock_ingest(senders, **kwargs):
         return [], ["linkedin-alert"]
 
-    upserted, new_count, degraded = run_email_alerts(
+    upserted, new_ids, degraded = run_email_alerts(
         conn, senders, _gmail_ingest_fn=_mock_ingest
     )
 
@@ -152,7 +152,7 @@ def test_run_email_alerts_dry_run_no_writes(pipeline_db) -> None:
             }
         ], []
 
-    upserted, new_count, degraded = run_email_alerts(
+    upserted, new_ids, degraded = run_email_alerts(
         conn, senders, dry_run=True, _mailapp_ingest_fn=_mock_ingest
     )
 
@@ -172,26 +172,9 @@ def test_run_crawl_with_alert_senders(pipeline_db) -> None:
 
     repo_root, db_path = pipeline_db
 
-    def _mock_mailapp(senders, **kwargs):
-        # Return 2 postings with proper fields so upsert_posting can write them
-        return [
-            {
-                "source": "mailapp/linkedin-alert",
-                "title": "Data Engineer",
-                "company": "Acme",
-                "location": "Remote",
-                "url": "https://www.linkedin.com/jobs/view/9991/",
-                "external_id": "9991",
-            },
-            {
-                "source": "mailapp/linkedin-alert",
-                "title": "Senior Data Engineer",
-                "company": "Beta",
-                "location": "NYC",
-                "url": "https://www.linkedin.com/jobs/view/9992/",
-                "external_id": "9992",
-            },
-        ], []
+    def _mock_email_alerts(conn, senders, *, dry_run=False, max_per_sender=20):
+        # Return (upserted, new_ids, degraded) matching run_email_alerts signature
+        return 2, [1, 2], []
 
     summary = run_crawl(
         db_path=db_path,
@@ -205,7 +188,7 @@ def test_run_crawl_with_alert_senders(pipeline_db) -> None:
             }
         ],
         no_llm=True,
-        _run_email_alerts_fn=_mock_mailapp,
+        _run_email_alerts_fn=_mock_email_alerts,
     )
 
     assert summary["roles_upserted"] == 2
@@ -217,8 +200,8 @@ def test_run_crawl_email_degraded_recorded(pipeline_db) -> None:
 
     _, db_path = pipeline_db
 
-    def _mock_mailapp(senders, **kwargs):
-        return [], ["linkedin-alert"]
+    def _mock_email_alerts(conn, senders, *, dry_run=False, max_per_sender=20):
+        return 0, [], ["linkedin-alert"]
 
     summary = run_crawl(
         db_path=db_path,
@@ -228,7 +211,7 @@ def test_run_crawl_email_degraded_recorded(pipeline_db) -> None:
              "account": "me@example.com", "mailbox": "Job Alerts"}
         ],
         no_llm=True,
-        _run_email_alerts_fn=_mock_mailapp,
+        _run_email_alerts_fn=_mock_email_alerts,
     )
 
     assert "linkedin-alert" in summary["degraded_sources"]

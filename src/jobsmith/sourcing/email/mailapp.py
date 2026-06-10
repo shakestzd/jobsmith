@@ -63,13 +63,21 @@ def list_messages(
     account: str,
     mailbox: str,
     limit: int = 20,
+    *,
+    _run_fn=None,
 ) -> list[dict]:
     """List messages from a Mail.app mailbox as JSON.
 
     Returns a list of message dicts (id, subject, sender, date_received, ...).
     Returns [] on error.
+
+    Parameters
+    ----------
+    _run_fn:
+        Injectable replacement for _run_mail_app (for unit tests).
     """
-    rc, stdout, stderr = _run_mail_app(
+    run_fn = _run_fn or _run_mail_app
+    rc, stdout, stderr = run_fn(
         "messages", "list",
         "--account", account,
         "--mailbox", mailbox,
@@ -203,19 +211,36 @@ def fetch_mailapp_messages(
     account: str,
     mailbox: str,
     limit: int = 20,
+    *,
+    _run_fn=None,
+    _source_fn=None,
 ) -> list[tuple[str, str]]:
     """Fetch recent messages from a Mail.app mailbox as (message_id, html) pairs.
 
     Uses AppleScript to retrieve the raw MIME source for each message, then
     decodes the text/html part.  Returns empty list on any error.
+
+    Parameters
+    ----------
+    _run_fn:
+        Injectable replacement for _run_mail_app (for tests).  Defaults to
+        the module-level ``_run_mail_app``.
+    _source_fn:
+        Injectable replacement for get_message_source (for tests).  Called as
+        ``_source_fn(msg_id, account, mailbox)`` and should return raw MIME
+        source or an already-decoded HTML string.  Defaults to the module-level
+        ``get_message_source``.
     """
-    messages = list_messages(account=account, mailbox=mailbox, limit=limit)
+    run_fn = _run_fn or _run_mail_app
+    source_fn = _source_fn or get_message_source
+
+    messages = list_messages(account=account, mailbox=mailbox, limit=limit, _run_fn=run_fn)
     results = []
     for msg in messages:
         msg_id = str(msg.get("id", ""))
         if not msg_id:
             continue
-        raw_source = get_message_source(msg_id, account=account, mailbox=mailbox)
+        raw_source = source_fn(msg_id, account=account, mailbox=mailbox)
         if not raw_source:
             continue
         html = extract_html_from_mime(raw_source)
@@ -247,11 +272,13 @@ def ingest_mailapp_alerts(
         Cap on messages fetched per sender.
     _run_fn:
         Injectable replacement for _run_mail_app (for unit tests — handles
-        ``list`` sub-command).
+        ``list`` sub-command).  Threaded into fetch_mailapp_messages; module
+        globals are never mutated.
     _source_fn:
         Injectable replacement for get_message_source (for unit tests — called
         as ``_source_fn(msg_id, account, mailbox)`` and should return raw MIME
-        source or an already-decoded HTML string).
+        source or an already-decoded HTML string).  Threaded as a parameter,
+        not a global mutation.
 
     Returns
     -------
@@ -259,74 +286,49 @@ def ingest_mailapp_alerts(
         postings: list of posting dicts (title/company/location/url/external_id/source)
         degraded_senders: list of sender slugs that failed or produced no postings
     """
-    import jobsmith.sourcing.email.mailapp as _self
-
     from .parsers import parse_alert_html
 
-    original_run = None
-    original_source = None
+    postings: list[dict] = []
+    degraded: list[str] = []
 
-    if _run_fn is not None:
-        original_run = _self._run_mail_app
+    for sender_cfg in alert_senders:
+        sender_slug = sender_cfg.get("sender_slug", "")
+        account = sender_cfg.get("account", "")
+        mailbox = sender_cfg.get("mailbox", "")
+        source_name = f"mailapp/{sender_slug}"
 
-        def _patched_run(*args, **kwargs):
-            return _run_fn(*args, **kwargs)
-
-        _self._run_mail_app = _patched_run  # type: ignore[attr-defined]
-
-    if _source_fn is not None:
-        original_source = _self.get_message_source
-
-        def _patched_source(msg_id, account, mailbox, **kwargs):  # type: ignore[misc]
-            return _source_fn(msg_id, account, mailbox)
-
-        _self.get_message_source = _patched_source  # type: ignore[attr-defined]
-
-    try:
-        postings: list[dict] = []
-        degraded: list[str] = []
-
-        for sender_cfg in alert_senders:
-            sender_slug = sender_cfg.get("sender_slug", "")
-            account = sender_cfg.get("account", "")
-            mailbox = sender_cfg.get("mailbox", "")
-            source_name = f"mailapp/{sender_slug}"
-
-            if not sender_slug or not account or not mailbox:
-                logger.warning(
-                    "mailapp_alert config incomplete (needs sender_slug, account, mailbox): %s",
-                    sender_cfg,
-                )
-                degraded.append(sender_slug or "?")
-                continue
-
-            messages = fetch_mailapp_messages(
-                account=account,
-                mailbox=mailbox,
-                limit=max_per_sender,
+        if not sender_slug or not account or not mailbox:
+            logger.warning(
+                "mailapp_alert config incomplete (needs sender_slug, account, mailbox): %s",
+                sender_cfg,
             )
-            if not messages:
-                logger.debug("no messages in mailbox %r for %s", mailbox, sender_slug)
-                continue
+            degraded.append(sender_slug or "?")
+            continue
 
-            parsed_any = False
-            for _msg_id, html in messages:
-                entries = parse_alert_html(sender_slug, html)
-                for entry in entries:
-                    entry["source"] = source_name
-                    postings.append(entry)
-                    parsed_any = True
+        messages = fetch_mailapp_messages(
+            account=account,
+            mailbox=mailbox,
+            limit=max_per_sender,
+            _run_fn=_run_fn,
+            _source_fn=_source_fn,
+        )
+        if not messages:
+            logger.debug("no messages in mailbox %r for %s", mailbox, sender_slug)
+            continue
 
-            if not parsed_any and messages:
-                logger.warning(
-                    "no postings parsed from mailbox %r (%d messages) for %s",
-                    mailbox, len(messages), sender_slug,
-                )
-                degraded.append(sender_slug)
+        parsed_any = False
+        for _msg_id, html in messages:
+            entries = parse_alert_html(sender_slug, html)
+            for entry in entries:
+                entry["source"] = source_name
+                postings.append(entry)
+                parsed_any = True
 
-        return postings, degraded
-    finally:
-        if original_run is not None:
-            _self._run_mail_app = original_run  # type: ignore[attr-defined]
-        if original_source is not None:
-            _self.get_message_source = original_source  # type: ignore[attr-defined]
+        if not parsed_any and messages:
+            logger.warning(
+                "no postings parsed from mailbox %r (%d messages) for %s",
+                mailbox, len(messages), sender_slug,
+            )
+            degraded.append(sender_slug)
+
+    return postings, degraded

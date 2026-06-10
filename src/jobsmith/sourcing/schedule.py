@@ -21,6 +21,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
+from xml.sax.saxutils import escape as _xml_escape
 
 LAUNCHD_LABEL = "com.jobsmith.sourcing"
 
@@ -118,16 +119,20 @@ def render_plist(
     home:
         HOME env var value; defaults to str(Path.home()).
     """
+    if not (0 <= hour <= 23):
+        raise ValueError(f"hour must be 0–23, got {hour}")
+    if not (0 <= minute <= 59):
+        raise ValueError(f"minute must be 0–59, got {minute}")
     if home is None:
         home = str(Path.home())
     return _PLIST_TEMPLATE.format(
-        label=label,
-        binary_path=str(binary_path),
-        repo_root=str(repo_root),
-        log_dir=str(log_dir),
+        label=_xml_escape(label),
+        binary_path=_xml_escape(str(binary_path)),
+        repo_root=_xml_escape(str(repo_root)),
+        log_dir=_xml_escape(str(log_dir)),
         hour=hour,
         minute=minute,
-        home=home,
+        home=_xml_escape(home),
     )
 
 
@@ -186,23 +191,37 @@ def install_schedule(
     plist_dest.write_text(plist_content, encoding="utf-8")
 
     # Load via launchctl. Prefer bootstrap (modern), fall back to load.
+    # Bootout first so re-installs work cleanly (ignore "not loaded" errors).
     import os
 
     uid = os.getuid()
+    domain = f"gui/{uid}"
+    service = f"{domain}/{LAUNCHD_LABEL}"
+    subprocess.run(
+        ["launchctl", "bootout", service],
+        capture_output=True,
+        text=True,
+        # Ignore non-zero return code — service may not be loaded yet.
+    )
+
     try:
         subprocess.run(
-            ["launchctl", "bootstrap", f"gui/{uid}", str(plist_dest)],
+            ["launchctl", "bootstrap", domain, str(plist_dest)],
             check=True,
             capture_output=True,
             text=True,
         )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        # Fallback for older macOS or if bootstrap fails (e.g. already loaded)
-        subprocess.run(
+    except (subprocess.CalledProcessError, FileNotFoundError) as bootstrap_exc:
+        # Fallback for older macOS
+        result = subprocess.run(
             ["launchctl", "load", str(plist_dest)],
             capture_output=True,
             text=True,
         )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"launchctl load failed (rc={result.returncode}): {result.stderr.strip()}"
+            ) from bootstrap_exc
 
     return plist_dest
 

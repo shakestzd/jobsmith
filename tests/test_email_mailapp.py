@@ -410,3 +410,88 @@ def test_ingest_mailapp_alerts_real_structure_fixture() -> None:
         assert "?" not in p["url"], f"tracking params in url: {p['url']}"
         assert p["title"]
         assert p["company"]
+
+
+# ---------------------------------------------------------------------------
+# Finding 7: ingest_mailapp_alerts does NOT mutate module globals
+# ---------------------------------------------------------------------------
+
+
+def test_ingest_mailapp_alerts_does_not_mutate_module_globals() -> None:
+    """_run_fn / _source_fn are threaded as parameters, never patched into globals (finding 7)."""
+    import jobsmith.sourcing.email.mailapp as mailapp_mod
+    from jobsmith.sourcing.email.mailapp import ingest_mailapp_alerts
+
+    original_run = mailapp_mod._run_mail_app
+    original_source = mailapp_mod.get_message_source
+
+    messages = [{"id": "501", "subject": "Jobs"}]
+    bodies = {"501": (FIXTURES_DIR / "linkedin_alert.html").read_text()}
+    run_fn, source_fn = _run_fn_view(messages, bodies)
+
+    senders = [
+        {
+            "type": "mailapp_alert",
+            "sender_slug": "linkedin-alert",
+            "account": "me@example.com",
+            "mailbox": "Job Alerts",
+        }
+    ]
+
+    ingest_mailapp_alerts(senders, _run_fn=run_fn, _source_fn=source_fn)
+
+    # Module-level functions must be unchanged after call
+    assert mailapp_mod._run_mail_app is original_run, \
+        "_run_mail_app was mutated — injectable must be threaded, not patched globally"
+    assert mailapp_mod.get_message_source is original_source, \
+        "get_message_source was mutated — injectable must be threaded, not patched globally"
+
+
+def test_ingest_mailapp_alerts_concurrency_safe() -> None:
+    """Two concurrent ingest_mailapp_alerts calls with different fns do not interfere (finding 7)."""
+    import threading
+    from jobsmith.sourcing.email.mailapp import ingest_mailapp_alerts
+
+    results: dict[str, list] = {}
+    errors: list[Exception] = []
+
+    html_a = (FIXTURES_DIR / "linkedin_alert.html").read_text()
+    html_b = (FIXTURES_DIR / "indeed_alert.html").read_text()
+
+    def _make_fns(msg_id: str, html: str):
+        messages = [{"id": msg_id, "subject": "Jobs"}]
+        bodies = {msg_id: html}
+        return _run_fn_view(messages, bodies)
+
+    run_fn_a, source_fn_a = _make_fns("601", html_a)
+    run_fn_b, source_fn_b = _make_fns("602", html_b)
+
+    senders_a = [{"type": "mailapp_alert", "sender_slug": "linkedin-alert",
+                  "account": "a@example.com", "mailbox": "Job Alerts"}]
+    senders_b = [{"type": "mailapp_alert", "sender_slug": "indeed-alert",
+                  "account": "b@example.com", "mailbox": "Job Alerts"}]
+
+    def run_a():
+        try:
+            postings, _ = ingest_mailapp_alerts(senders_a, _run_fn=run_fn_a, _source_fn=source_fn_a)
+            results["a"] = postings
+        except Exception as exc:
+            errors.append(exc)
+
+    def run_b():
+        try:
+            postings, _ = ingest_mailapp_alerts(senders_b, _run_fn=run_fn_b, _source_fn=source_fn_b)
+            results["b"] = postings
+        except Exception as exc:
+            errors.append(exc)
+
+    t_a = threading.Thread(target=run_a)
+    t_b = threading.Thread(target=run_b)
+    t_a.start()
+    t_b.start()
+    t_a.join()
+    t_b.join()
+
+    assert not errors, f"Concurrent ingest errors: {errors}"
+    assert "a" in results and results["a"], "thread A produced no postings"
+    assert "b" in results  # b may have 0 if indeed_alert parse yields nothing — no crash

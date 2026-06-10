@@ -329,6 +329,141 @@ def test_source_install_schedule_renders_and_mocks_launchctl(
     assert any("launchctl" in str(a) for a in called_args)
 
 
+# ---------------------------------------------------------------------------
+# Finding 4: Re-install issues bootout then bootstrap
+# ---------------------------------------------------------------------------
+
+
+def test_install_schedule_issues_bootout_before_bootstrap(tmp_path: Path) -> None:
+    """Re-install calls bootout before bootstrap so re-loading works (finding 4)."""
+    import shutil as shutil_mod
+    from jobsmith.sourcing.schedule import install_schedule
+
+    calls: list[list[str]] = []
+
+    def mock_run(args, **kwargs):
+        calls.append(list(args))
+        m = MagicMock()
+        m.returncode = 0
+        m.stdout = ""
+        m.stderr = ""
+        return m
+
+    with patch(subprocess.__name__ + ".run", mock_run), \
+         patch.object(shutil_mod, "which", return_value="/usr/local/bin/jobsmith"):
+        install_schedule(repo_root=tmp_path)
+
+    cmd_names = [c[0] for c in calls if c]
+    launchctl_calls = [c for c in calls if "launchctl" in c]
+    subcommands = [c[1] for c in launchctl_calls if len(c) > 1]
+
+    assert "bootout" in subcommands, f"bootout not issued; launchctl calls: {launchctl_calls}"
+    # bootstrap must come after bootout
+    assert subcommands.index("bootstrap") > subcommands.index("bootout")
+
+
+def test_install_schedule_bootstrap_failure_raises(tmp_path: Path) -> None:
+    """If bootstrap fails AND load fallback fails, RuntimeError is raised (finding 4)."""
+    import shutil as shutil_mod
+    from jobsmith.sourcing.schedule import install_schedule
+
+    def mock_run(args, **kwargs):
+        m = MagicMock()
+        if "bootstrap" in args:
+            m.returncode = 1
+            m.stdout = ""
+            m.stderr = "already loaded"
+            raise subprocess.CalledProcessError(1, args, stderr="already loaded")
+        if "load" in args:
+            m.returncode = 5
+            m.stdout = ""
+            m.stderr = "load failed: service not found"
+        else:
+            m.returncode = 0
+            m.stdout = ""
+            m.stderr = ""
+        return m
+
+    with patch(subprocess.__name__ + ".run", mock_run), \
+         patch.object(shutil_mod, "which", return_value="/usr/local/bin/jobsmith"):
+        with pytest.raises(RuntimeError, match="launchctl load failed"):
+            install_schedule(repo_root=tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Finding 6: render_plist XML escaping + hour/minute validation
+# ---------------------------------------------------------------------------
+
+
+def test_render_plist_xml_escapes_special_chars() -> None:
+    """render_plist escapes XML-unsafe chars in interpolated strings (finding 6)."""
+    from jobsmith.sourcing.schedule import render_plist
+
+    plist_str = render_plist(
+        binary_path=Path("/usr/bin/jobsmith"),
+        repo_root=Path("/tmp/repo & stuff"),
+        log_dir=Path("/tmp/logs<test>"),
+        label="com.jobsmith.sourcing&test",
+    )
+    # XML-unsafe chars must be escaped
+    assert "&amp;" in plist_str or "& stuff" not in plist_str
+    assert "<test>" not in plist_str
+    # The plist must still be valid XML
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(plist_str)
+    assert root.tag == "plist"
+
+
+def test_render_plist_rejects_invalid_hour() -> None:
+    """render_plist raises ValueError for hour outside 0-23 (finding 6)."""
+    from jobsmith.sourcing.schedule import render_plist
+
+    with pytest.raises(ValueError, match="hour"):
+        render_plist(
+            binary_path=Path("/usr/bin/jobsmith"),
+            repo_root=Path("/tmp/repo"),
+            log_dir=Path("/tmp/logs"),
+            hour=24,
+        )
+
+
+def test_render_plist_rejects_invalid_minute() -> None:
+    """render_plist raises ValueError for minute outside 0-59 (finding 6)."""
+    from jobsmith.sourcing.schedule import render_plist
+
+    with pytest.raises(ValueError, match="minute"):
+        render_plist(
+            binary_path=Path("/usr/bin/jobsmith"),
+            repo_root=Path("/tmp/repo"),
+            log_dir=Path("/tmp/logs"),
+            minute=60,
+        )
+
+
+def test_render_plist_accepts_boundary_hour_minute() -> None:
+    """render_plist accepts hour=0, minute=0 and hour=23, minute=59 (finding 6)."""
+    from jobsmith.sourcing.schedule import render_plist
+
+    plist_0 = render_plist(
+        binary_path=Path("/usr/bin/jobsmith"),
+        repo_root=Path("/tmp/repo"),
+        log_dir=Path("/tmp/logs"),
+        hour=0,
+        minute=0,
+    )
+    assert "<integer>0</integer>" in plist_0
+
+    plist_23 = render_plist(
+        binary_path=Path("/usr/bin/jobsmith"),
+        repo_root=Path("/tmp/repo"),
+        log_dir=Path("/tmp/logs"),
+        hour=23,
+        minute=59,
+    )
+    assert "<integer>23</integer>" in plist_23
+    assert "<integer>59</integer>" in plist_23
+
+
 def test_source_install_schedule_help() -> None:
     """'jobsmith source install-schedule --help' exits 0."""
     result = runner_cli.invoke(app, ["source", "install-schedule", "--help"])
