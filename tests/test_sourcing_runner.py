@@ -149,10 +149,79 @@ def test_role_dedup_key_stable() -> None:
     assert role_dedup_key(r1) == role_dedup_key(r2)
 
 
-def test_role_dedup_key_differs_for_different_url() -> None:
-    r1 = _make_role(url="https://testco.com/jobs/1")
-    r2 = _make_role(url="https://testco.com/jobs/2")
+def test_role_dedup_key_differs_for_different_url_no_external_id() -> None:
+    """Without an external_id, different URLs produce different dedup keys."""
+    r1 = Role(
+        id="",
+        source="greenhouse",
+        source_slug="testco",
+        company="TestCo",
+        title="Data Engineer",
+        location="Remote",
+        url="https://testco.com/jobs/1",
+        jd_text="",
+    )
+    r2 = Role(
+        id="",
+        source="greenhouse",
+        source_slug="testco",
+        company="TestCo",
+        title="Data Engineer",
+        location="Remote",
+        url="https://testco.com/jobs/2",
+        jd_text="",
+    )
     assert role_dedup_key(r1) != role_dedup_key(r2)
+
+
+def test_role_dedup_key_differs_for_different_external_id() -> None:
+    """Two Indeed jobs with same company/title but different jk= external IDs → different keys."""
+    r1 = Role(
+        id="abc123",
+        source="email",
+        source_slug="indeed-alert",
+        company="Acme",
+        title="Data Engineer",
+        location="Remote",
+        url="https://www.indeed.com/viewjob?jk=abc123",
+        jd_text="",
+    )
+    r2 = Role(
+        id="xyz789",
+        source="email",
+        source_slug="indeed-alert",
+        company="Acme",
+        title="Data Engineer",
+        location="Remote",
+        url="https://www.indeed.com/viewjob?jk=xyz789",
+        jd_text="",
+    )
+    assert role_dedup_key(r1) != role_dedup_key(r2)
+
+
+def test_role_dedup_key_same_external_id_collides_despite_different_url() -> None:
+    """Two postings with the same external_id produce the same dedup key."""
+    r1 = Role(
+        id="same-id",
+        source="greenhouse",
+        source_slug="testco",
+        company="TestCo",
+        title="Data Engineer",
+        location="Remote",
+        url="https://testco.com/jobs/1",
+        jd_text="",
+    )
+    r2 = Role(
+        id="same-id",
+        source="greenhouse",
+        source_slug="testco",
+        company="TestCo",
+        title="Data Engineer",
+        location="Remote",
+        url="https://testco.com/jobs/2",
+        jd_text="",
+    )
+    assert role_dedup_key(r1) == role_dedup_key(r2)
 
 
 # ---------------------------------------------------------------------------
@@ -414,3 +483,173 @@ def test_run_crawl_source_filter_limits_to_one_source(db_path: Path) -> None:
     assert "greenhouse/a" in summary["sources_checked"]
     assert "greenhouse/b" not in summary["sources_checked"]
     assert summary["roles_fetched"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Finding 1: Circuit breaker trips on a SINGLE adapter failure
+# ---------------------------------------------------------------------------
+
+
+def test_single_adapter_failure_marks_source_degraded(db_path: Path) -> None:
+    """A source that fails once in a run is immediately marked degraded (finding 1)."""
+    from jobsmith.sourcing.adapters.base import ATSSourceAdapter, SourceFetchError
+
+    class _CrashAdapter(ATSSourceAdapter):
+        name = "crash"
+
+        def fetch(self, slug: str):
+            raise SourceFetchError("boom")
+
+    def crashing_factory(spec):
+        return _CrashAdapter()
+
+    sources = [{"type": "greenhouse", "slug": "crashco"}]
+    summary = run_crawl(db_path, sources, adapter_factory=crashing_factory)
+
+    assert "greenhouse/crashco" in summary["degraded_sources"]
+
+
+def test_single_adapter_failure_triggers_run_record_degraded(db_path: Path) -> None:
+    """When a source fails, the sourcing_run record status is 'degraded' (finding 1)."""
+    from jobsmith.sourcing.adapters.base import ATSSourceAdapter, SourceFetchError
+
+    class _CrashAdapter(ATSSourceAdapter):
+        name = "crash"
+
+        def fetch(self, slug: str):
+            raise SourceFetchError("boom")
+
+    def crashing_factory(spec):
+        return _CrashAdapter()
+
+    sources = [{"type": "greenhouse", "slug": "crashco"}]
+    summary = run_crawl(db_path, sources, adapter_factory=crashing_factory)
+
+    conn = jobsmith_db.open_pipeline_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT status FROM sourcing_runs WHERE run_id = ?", (summary["run_id"],)
+        ).fetchone()
+        assert row is not None
+        assert row["status"] == "degraded"
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Finding 3: Email postings get LLM-rescored
+# ---------------------------------------------------------------------------
+
+
+def test_email_new_postings_included_in_rescore(db_path: Path) -> None:
+    """Email-sourced new postings are passed to the LLM rescore pass (finding 3)."""
+    rescored_ids: list[int] = []
+
+    def _fake_query_fn(prompt: str) -> str:
+        return '{"score_a": 70, "score_b": 65, "dominant_specialty": "data", "rationale": "ok"}'
+
+    from jobsmith import db as jobsmith_db_mod
+
+    # Pre-seed the DB so upsert_posting returns a real ID
+    conn = jobsmith_db_mod.open_pipeline_db(db_path)
+    conn.close()
+
+    def _mock_email_alerts(conn, senders, *, dry_run=False, max_per_sender=20):
+        """Return a fake newly-inserted posting so new_posting_ids get a real DB id."""
+        from jobsmith.sourcing.runner import run_email_alerts
+
+        def _mailapp_ingest(senders, *, max_per_sender=20):
+            return [
+                {
+                    "source": "mailapp/linkedin-alert",
+                    "title": "Data Engineer",
+                    "company": "EmailCo",
+                    "location": "Remote",
+                    "url": "https://www.linkedin.com/jobs/view/9900001/",
+                    "external_id": "9900001",
+                }
+            ], []
+
+        return run_email_alerts(
+            conn,
+            senders,
+            dry_run=dry_run,
+            max_per_sender=max_per_sender,
+            _mailapp_ingest_fn=_mailapp_ingest,
+        )
+
+    from unittest.mock import MagicMock, patch
+
+    rescore_call_ids: list = []
+
+    def _fake_rescore(conn, posting_ids, **kwargs):
+        rescore_call_ids.extend(posting_ids)
+        return []
+
+    with patch("jobsmith.sourcing.llm_rescore.rescore_postings", side_effect=_fake_rescore):
+        run_crawl(
+            db_path=db_path,
+            sources=[],
+            alert_senders=[
+                {
+                    "type": "mailapp_alert",
+                    "sender_slug": "linkedin-alert",
+                    "account": "me@example.com",
+                    "mailbox": "Job Alerts",
+                }
+            ],
+            no_llm=False,
+            _run_email_alerts_fn=_mock_email_alerts,
+            _query_fn=_fake_query_fn,
+        )
+
+    # The email-sourced posting ID should have been passed to rescore
+    assert len(rescore_call_ids) >= 1, "email postings were not included in LLM rescore"
+
+
+# ---------------------------------------------------------------------------
+# Finding 5: AppleScript injection escaping
+# ---------------------------------------------------------------------------
+
+
+def test_notify_failure_escapes_double_quotes() -> None:
+    """_notify_failure escapes double quotes and backslashes in messages (finding 5)."""
+    import platform
+    import subprocess as real_subprocess
+    from unittest.mock import MagicMock, patch
+
+    from jobsmith.sourcing.runner import _notify_failure
+
+    if platform.system() != "Darwin":
+        # On non-macOS the function returns early; just verify it doesn't raise
+        _notify_failure('Error: adapter "indeed" failed with \\path')
+        return
+
+    captured_scripts: list[str] = []
+
+    def _fake_run(cmd, **kwargs):
+        if isinstance(cmd, list):
+            captured_scripts.extend(cmd)
+        return MagicMock(returncode=0)
+
+    # _notify_failure does `import subprocess as _sp` locally, so we patch
+    # the subprocess module's run attribute directly.
+    with patch.object(real_subprocess, "run", side_effect=_fake_run):
+        _notify_failure('Error: adapter "indeed" failed with \\path\\issue')
+
+    # Find the osascript script argument (the -e value)
+    script_arg = ""
+    for i, arg in enumerate(captured_scripts):
+        if arg == "-e" and i + 1 < len(captured_scripts):
+            script_arg = captured_scripts[i + 1]
+            break
+
+    if script_arg:
+        # The message segment between 'display notification "' and '" with title'
+        # should use escaped quotes, not raw "
+        msg_start = 'display notification "'
+        assert msg_start in script_arg
+        after_open = script_arg.split(msg_start, 1)[1]
+        # The message should be escaped: \" for quotes, \\ for backslashes
+        assert '\\"' in after_open, f"double quotes not escaped in script: {script_arg}"
+        assert '\\\\' in after_open, f"backslashes not escaped in script: {script_arg}"

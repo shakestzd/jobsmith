@@ -125,27 +125,40 @@ def _make_fixture_adapter_factory(
 # Synthesize 2 email alert postings from the linkedin_alert.html fixture
 # by directly parsing it.
 
-def _mock_email_alerts_fn(senders: list[dict], **kwargs: Any):  # noqa: ANN201
-    """Return 2 inline postings (LinkedIn-style) — no real email / OAuth."""
-    postings = [
-        {
-            "source": "email/linkedin-alert",
-            "title": "Data Engineer",
-            "company": "Acme Corp",
-            "location": "Remote, United States",
-            "url": "https://www.linkedin.com/jobs/view/3001000001/",
-            "external_id": "3001000001",
-        },
-        {
-            "source": "email/linkedin-alert",
-            "title": "Senior Data Engineer",
-            "company": "Beta Inc",
-            "location": "Remote",
-            "url": "https://www.linkedin.com/jobs/view/3001000002/",
-            "external_id": "3001000002",
-        },
-    ]
-    return postings, []  # (postings, degraded_senders)
+def _mock_email_alerts_fn(conn: Any, senders: list[dict], *, dry_run: bool = False, max_per_sender: int = 20) -> tuple:  # noqa: ANN201
+    """Return (upserted, new_ids, degraded) — no real email / OAuth.
+
+    Signature matches run_email_alerts: (conn, senders, *, dry_run, max_per_sender).
+    """
+    from jobsmith.sourcing.runner import run_email_alerts
+
+    def _mailapp_ingest(senders, *, max_per_sender=20):
+        return [
+            {
+                "source": "email/linkedin-alert",
+                "title": "Data Engineer",
+                "company": "Acme Corp",
+                "location": "Remote, United States",
+                "url": "https://www.linkedin.com/jobs/view/3001000001/",
+                "external_id": "3001000001",
+            },
+            {
+                "source": "email/linkedin-alert",
+                "title": "Senior Data Engineer",
+                "company": "Beta Inc",
+                "location": "Remote",
+                "url": "https://www.linkedin.com/jobs/view/3001000002/",
+                "external_id": "3001000002",
+            },
+        ], []
+
+    return run_email_alerts(
+        conn,
+        senders,
+        dry_run=dry_run,
+        max_per_sender=max_per_sender,
+        _mailapp_ingest_fn=_mailapp_ingest,
+    )
 
 
 # ---------------------------------------------------------------------------
