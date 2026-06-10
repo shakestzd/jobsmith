@@ -22,7 +22,7 @@ meta:
     created_at: ""
     status: finalized
     schema_version: v3
-    version: 2
+    version: 11
 design:
     problem: |
         Job retrieval is disconnected from application tracking. The existing sourcing
@@ -50,6 +50,7 @@ design:
     comment: ""
 slices:
     - id: slice-1
+      feature_id: feat-850a076a
       num: 1
       title: Postings store + funnel states (migration, db layer, promote linkage)
       what: |
@@ -92,8 +93,10 @@ slices:
         Unit: TestNoResurrection — dismissed/promoted/expired + re-sight -> status unchanged
         Unit: TestPromoteLinksApplication — promote creates+links application row
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
+      approval_status: approved
+      execution_status: promoted
       critic_revisions:
         - source: sonnet
           severity: DANGER
@@ -120,6 +123,7 @@ slices:
         JSONL-only index (no relational funnel queries); auto-discovered migrations
         (db.py's explicit list is the established mechanism — work with it).
     - id: slice-2
+      feature_id: feat-5531c54b
       num: 2
       title: Port ATS adapters + deterministic crawler core (`jobsmith source run`)
       what: |
@@ -174,8 +178,10 @@ slices:
         Unit: TestAdapterFailureIsolation — one adapter raising doesn't kill the run
         Unit: TestAutoExpiry — stale posting flips to expired at N days
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
+      approval_status: approved
+      execution_status: promoted
       critic_revisions:
         - source: sonnet
           severity: DANGER
@@ -204,6 +210,7 @@ slices:
         **Rejected:** rewriting adapters (proven code); agentic crawl (the old failure
         mode); JobSpy (rejected in the old plan's slice 3); auto-applying anything.
     - id: slice-3
+      feature_id: feat-b1bd050e
       num: 3
       title: 'Email-alert ingestion: Gmail + Mail.app adapters, LinkedIn paste/batch'
       what: |
@@ -252,8 +259,10 @@ slices:
         Integration: TestManualAdd — paste IDs -> postings rows
         Unit: TestDriftedAlertDegrades — unknown format -> degraded record, run continues
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
+      approval_status: approved
+      execution_status: promoted
       critic_revisions:
         - source: sonnet
           severity: DANGER
@@ -278,6 +287,7 @@ slices:
         generic IMAP (more auth pain than the two real accounts need); LinkedIn
         scraping (ToS/auth-wall).
     - id: slice-4
+      feature_id: feat-1602d64c
       num: 4
       title: Shortlist LLM rescoring via agent-sdk (budget-capped triage score)
       what: |
@@ -316,8 +326,10 @@ slices:
         Unit: TestRescoreFallback — SDK error -> fast_score retained, run record notes it
         Integration: TestNoLlmFlag — run completes with rescorer never invoked
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
+      approval_status: approved
+      execution_status: promoted
       critic_revisions:
         - source: sonnet
           severity: DANGER
@@ -342,6 +354,7 @@ slices:
         inputs — snippet vs full JD + master — pretending they're comparable would
         mislead the inbox).
     - id: slice-5
+      feature_id: feat-827071e1
       num: 5
       title: Postings inbox in the web UI + one-click promote-to-apply
       what: |
@@ -389,8 +402,10 @@ slices:
         Integration: TestPromoteJdFetchFails — fetch error -> promote succeeds + warning
         Component: postings.test.tsx — render ranked list, dismiss, promote action
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
+      approval_status: approved
+      execution_status: promoted
       critic_revisions:
         - source: sonnet
           severity: WARN
@@ -412,6 +427,7 @@ slices:
         (human stays the trigger); blocking promote on JD fetch (an unreachable page
         shouldn't strand a posting outside the funnel).
     - id: slice-6
+      feature_id: feat-80affa8a
       num: 6
       title: 'Scheduling + run health: launchd, visible failure state, retire old pipeline'
       what: |
@@ -457,8 +473,10 @@ slices:
         Integration: TestHealthBannerApi — API exposes last-run state the UI banner reads
         Manual: launchctl load + kickstart cycle on the real machine -> run record (acceptance)
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
+      approval_status: approved
+      execution_status: promoted
       critic_revisions:
         - source: sonnet
           severity: DANGER
@@ -486,6 +504,7 @@ slices:
         the old wrapper as fallback (split-brain: two writers); deprecate-only for
         the old plist (re-enableable by accident).
     - id: slice-7
+      feature_id: feat-28a41d1c
       num: 7
       title: 'Funnel dashboard: per-stage counts, conversion, per-source yield'
       what: |
@@ -526,8 +545,10 @@ slices:
         Integration: TestFunnelApiWindow — time-window filtering (first_seen cohort)
         Component: funnel.test.tsx — renders stages + per-source table; status picker includes outcomes
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
+      approval_status: approved
+      execution_status: promoted
       critic_revisions:
         - source: sonnet
           severity: WARN
@@ -545,6 +566,7 @@ slices:
         **Rejected:** weekly digest email (deferred — in-product first); cohort/
         retention analytics (overkill for a single-user funnel).
     - id: slice-8
+      feature_id: feat-447088bc
       num: 8
       title: 'E2E acceptance: scheduled run -> inbox -> one-click apply -> funnel, live in Chrome'
       what: |
@@ -584,8 +606,10 @@ slices:
         E2E (CI, fixtures-only): TestSourceToFunnel — run -> postings -> promote -> application -> funnel counts
         Manual (acceptance): Chrome walkthrough with screenshots (inbox, promote, funnel, health banner states) on the real schedule
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
+      approval_status: approved
+      execution_status: promoted
       critic_revisions:
         - source: haiku
           severity: DANGER

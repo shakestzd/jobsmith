@@ -409,7 +409,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     
     <li>
       <a href="#slice-1" class="slice-nav-item" data-slice-nav="1">
-        <span class="slice-nav-dot" data-approval="pending" data-dot-for="1"></span>
+        <span class="slice-nav-dot" data-approval="approved" data-dot-for="1"></span>
         <span>#1 Postings store + funnel states (migration, db layer, promote linkage)</span>
         <span class="nav-triage-badge nav-triage-issue" title="4 issue(s)">&#9888;4</span>
         
@@ -418,7 +418,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     
     <li>
       <a href="#slice-2" class="slice-nav-item" data-slice-nav="2">
-        <span class="slice-nav-dot" data-approval="pending" data-dot-for="2"></span>
+        <span class="slice-nav-dot" data-approval="approved" data-dot-for="2"></span>
         <span>#2 Port ATS adapters + deterministic crawler core (`jobsmith source run`)</span>
         <span class="nav-triage-badge nav-triage-issue" title="5 issue(s)">&#9888;5</span>
         
@@ -427,7 +427,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     
     <li>
       <a href="#slice-3" class="slice-nav-item" data-slice-nav="3">
-        <span class="slice-nav-dot" data-approval="pending" data-dot-for="3"></span>
+        <span class="slice-nav-dot" data-approval="approved" data-dot-for="3"></span>
         <span>#3 Email-alert ingestion: Gmail + Mail.app adapters, LinkedIn paste/batch</span>
         <span class="nav-triage-badge nav-triage-issue" title="3 issue(s)">&#9888;3</span>
         
@@ -436,7 +436,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     
     <li>
       <a href="#slice-4" class="slice-nav-item" data-slice-nav="4">
-        <span class="slice-nav-dot" data-approval="pending" data-dot-for="4"></span>
+        <span class="slice-nav-dot" data-approval="approved" data-dot-for="4"></span>
         <span>#4 Shortlist LLM rescoring via agent-sdk (budget-capped triage score)</span>
         <span class="nav-triage-badge nav-triage-issue" title="3 issue(s)">&#9888;3</span>
         
@@ -445,7 +445,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     
     <li>
       <a href="#slice-5" class="slice-nav-item" data-slice-nav="5">
-        <span class="slice-nav-dot" data-approval="pending" data-dot-for="5"></span>
+        <span class="slice-nav-dot" data-approval="approved" data-dot-for="5"></span>
         <span>#5 Postings inbox in the web UI + one-click promote-to-apply</span>
         <span class="nav-triage-badge nav-triage-issue" title="3 issue(s)">&#9888;3</span>
         
@@ -454,7 +454,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     
     <li>
       <a href="#slice-6" class="slice-nav-item" data-slice-nav="6">
-        <span class="slice-nav-dot" data-approval="pending" data-dot-for="6"></span>
+        <span class="slice-nav-dot" data-approval="approved" data-dot-for="6"></span>
         <span>#6 Scheduling + run health: launchd, visible failure state, retire old pipeline</span>
         <span class="nav-triage-badge nav-triage-issue" title="4 issue(s)">&#9888;4</span>
         
@@ -463,7 +463,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     
     <li>
       <a href="#slice-7" class="slice-nav-item" data-slice-nav="7">
-        <span class="slice-nav-dot" data-approval="pending" data-dot-for="7"></span>
+        <span class="slice-nav-dot" data-approval="approved" data-dot-for="7"></span>
         <span>#7 Funnel dashboard: per-stage counts, conversion, per-source yield</span>
         <span class="nav-triage-badge nav-triage-issue" title="2 issue(s)">&#9888;2</span>
         
@@ -472,7 +472,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     
     <li>
       <a href="#slice-8" class="slice-nav-item" data-slice-nav="8">
-        <span class="slice-nav-dot" data-approval="pending" data-dot-for="8"></span>
+        <span class="slice-nav-dot" data-approval="approved" data-dot-for="8"></span>
         <span>#8 E2E acceptance: scheduled run -> inbox -> one-click apply -> funnel, live in Chrome</span>
         <span class="nav-triage-badge nav-triage-issue" title="2 issue(s)">&#9888;2</span>
         
@@ -512,7 +512,7 @@ left in place read-only.
 </p>
   <div class="meta">
     <span class="badge badge-approved">Done</span>
-    <span style="font-size:.75rem;color:var(--text-muted)">v2 · 8 slices · Created 2026-06-10</span>
+    <span style="font-size:.75rem;color:var(--text-muted)">v11 · 8 slices · Created 2026-06-10</span>
   </div>
 </header>
 <button id="themeToggle" style="position:fixed;top:16px;right:16px;z-index:100;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;color:var(--text);font-family:var(--mono);font-size:0.75rem;cursor:pointer;">
@@ -532,14 +532,14 @@ left in place read-only.
 <section class="dep-graph" data-zone="dependency-graph">
   <h2>Dependency Graph</h2>
   <div id="graph-data" style="display:none">
-    <div data-node="1" data-name="Postings store + funnel states (migration, db layer, promote linkage)" data-status="pending" data-deps="" data-files="5"></div>
-    <div data-node="2" data-name="Port ATS adapters + deterministic crawler core (`jobsmith source run`)" data-status="pending" data-deps="1" data-files="13"></div>
-    <div data-node="3" data-name="Email-alert ingestion: Gmail + Mail.app adapters, LinkedIn paste/batch" data-status="pending" data-deps="2" data-files="8"></div>
-    <div data-node="4" data-name="Shortlist LLM rescoring via agent-sdk (budget-capped triage score)" data-status="pending" data-deps="2" data-files="4"></div>
-    <div data-node="5" data-name="Postings inbox in the web UI + one-click promote-to-apply" data-status="pending" data-deps="1,2" data-files="9"></div>
-    <div data-node="6" data-name="Scheduling + run health: launchd, visible failure state, retire old pipeline" data-status="pending" data-deps="2" data-files="7"></div>
-    <div data-node="7" data-name="Funnel dashboard: per-stage counts, conversion, per-source yield" data-status="pending" data-deps="1,5" data-files="8"></div>
-    <div data-node="8" data-name="E2E acceptance: scheduled run -> inbox -> one-click apply -> funnel, live in Chrome" data-status="pending" data-deps="3,4,5,6,7" data-files="3"></div>
+    <div data-node="1" data-name="Postings store + funnel states (migration, db layer, promote linkage)" data-status="approved" data-deps="" data-files="5"></div>
+    <div data-node="2" data-name="Port ATS adapters + deterministic crawler core (`jobsmith source run`)" data-status="approved" data-deps="1" data-files="13"></div>
+    <div data-node="3" data-name="Email-alert ingestion: Gmail + Mail.app adapters, LinkedIn paste/batch" data-status="approved" data-deps="2" data-files="8"></div>
+    <div data-node="4" data-name="Shortlist LLM rescoring via agent-sdk (budget-capped triage score)" data-status="approved" data-deps="2" data-files="4"></div>
+    <div data-node="5" data-name="Postings inbox in the web UI + one-click promote-to-apply" data-status="approved" data-deps="1,2" data-files="9"></div>
+    <div data-node="6" data-name="Scheduling + run health: launchd, visible failure state, retire old pipeline" data-status="approved" data-deps="2" data-files="7"></div>
+    <div data-node="7" data-name="Funnel dashboard: per-stage counts, conversion, per-source yield" data-status="approved" data-deps="1,5" data-files="8"></div>
+    <div data-node="8" data-name="E2E acceptance: scheduled run -> inbox -> one-click apply -> funnel, live in Chrome" data-status="approved" data-deps="3,4,5,6,7" data-files="3"></div>
     
     <!--PLAN_GRAPH_NODES-->
   </div>
@@ -595,7 +595,7 @@ from discovery to outcome.
 <details id="slices" class="section-card" open data-phase="slices" data-status="pending">
   <summary><span>Slices</span><span class="badge badge-pending" data-badge-for="slices">Pending</span></summary>
   <div class="section-body">
-    <details class="slice-card" id="slice-1" data-slice="1" data-slice-name="slice-1" data-status="pending" data-approval="pending">
+    <details class="slice-card" id="slice-1" data-slice="1" data-slice-name="slice-1" data-status="pending" data-approval="approved">
   <summary class="slice-summary" aria-label="Slice 1: Postings store &#43; funnel states (migration, db layer, promote linkage)">
     <span class="slice-num">#1</span>
     <span class="slice-title-col">
@@ -606,15 +606,15 @@ from discovery to outcome.
           <span class="badge badge-revision badge-sm">M</span>
           <span class="badge badge-pending badge-sm">Low</span>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
-          
-          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-1">Pending</span>
+          <span class="badge badge-revision badge-sm" title="Execution: promoted">Promoted</span>
+          <span class="badge badge-approved badge-sm slice-approval-badge" data-badge-for="slice-1">Approved</span>
           <span class="badge badge-sm badge-issues" title="4 critic issue(s)">4 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
           <span class="approval-segmented" role="group" aria-label="Approval action">
             <label class="seg-btn seg-approve" title="Approve">
-              <input type="radio" name="slice-1-approval" value="approved" data-section="slice-1" data-action="approve" aria-label="Approve slice 1">
+              <input type="radio" name="slice-1-approval" value="approved" data-section="slice-1" data-action="approve" checked aria-label="Approve slice 1">
               &#10003;
             </label>
             <label class="seg-btn seg-changes" title="Request changes">
@@ -776,7 +776,7 @@ JSONL-only index (no relational funnel queries); auto-discovered migrations
     </details>
   </div>
 </details>
-<details class="slice-card" id="slice-2" data-slice="2" data-slice-name="slice-2" data-status="pending" data-approval="pending">
+<details class="slice-card" id="slice-2" data-slice="2" data-slice-name="slice-2" data-status="pending" data-approval="approved">
   <summary class="slice-summary" aria-label="Slice 2: Port ATS adapters &#43; deterministic crawler core (`jobsmith source run`)">
     <span class="slice-num">#2</span>
     <span class="slice-title-col">
@@ -787,15 +787,15 @@ JSONL-only index (no relational funnel queries); auto-discovered migrations
           <span class="badge badge-blocked badge-sm">L</span>
           <span class="badge badge-revision badge-sm">Med</span>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
-          
-          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-2">Pending</span>
+          <span class="badge badge-revision badge-sm" title="Execution: promoted">Promoted</span>
+          <span class="badge badge-approved badge-sm slice-approval-badge" data-badge-for="slice-2">Approved</span>
           <span class="badge badge-sm badge-issues" title="5 critic issue(s)">5 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
           <span class="approval-segmented" role="group" aria-label="Approval action">
             <label class="seg-btn seg-approve" title="Approve">
-              <input type="radio" name="slice-2-approval" value="approved" data-section="slice-2" data-action="approve" aria-label="Approve slice 2">
+              <input type="radio" name="slice-2-approval" value="approved" data-section="slice-2" data-action="approve" checked aria-label="Approve slice 2">
               &#10003;
             </label>
             <label class="seg-btn seg-changes" title="Request changes">
@@ -968,7 +968,7 @@ mode); JobSpy (rejected in the old plan&#39;s slice 3); auto-applying anything.<
     </details>
   </div>
 </details>
-<details class="slice-card" id="slice-3" data-slice="3" data-slice-name="slice-3" data-status="pending" data-approval="pending">
+<details class="slice-card" id="slice-3" data-slice="3" data-slice-name="slice-3" data-status="pending" data-approval="approved">
   <summary class="slice-summary" aria-label="Slice 3: Email-alert ingestion: Gmail &#43; Mail.app adapters, LinkedIn paste/batch">
     <span class="slice-num">#3</span>
     <span class="slice-title-col">
@@ -979,15 +979,15 @@ mode); JobSpy (rejected in the old plan&#39;s slice 3); auto-applying anything.<
           <span class="badge badge-blocked badge-sm">L</span>
           <span class="badge badge-blocked badge-sm">High</span>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
-          
-          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-3">Pending</span>
+          <span class="badge badge-revision badge-sm" title="Execution: promoted">Promoted</span>
+          <span class="badge badge-approved badge-sm slice-approval-badge" data-badge-for="slice-3">Approved</span>
           <span class="badge badge-sm badge-issues" title="3 critic issue(s)">3 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
           <span class="approval-segmented" role="group" aria-label="Approval action">
             <label class="seg-btn seg-approve" title="Approve">
-              <input type="radio" name="slice-3-approval" value="approved" data-section="slice-3" data-action="approve" aria-label="Approve slice 3">
+              <input type="radio" name="slice-3-approval" value="approved" data-section="slice-3" data-action="approve" checked aria-label="Approve slice 3">
               &#10003;
             </label>
             <label class="seg-btn seg-changes" title="Request changes">
@@ -1150,7 +1150,7 @@ scraping (ToS/auth-wall).</p>
     </details>
   </div>
 </details>
-<details class="slice-card" id="slice-4" data-slice="4" data-slice-name="slice-4" data-status="pending" data-approval="pending">
+<details class="slice-card" id="slice-4" data-slice="4" data-slice-name="slice-4" data-status="pending" data-approval="approved">
   <summary class="slice-summary" aria-label="Slice 4: Shortlist LLM rescoring via agent-sdk (budget-capped triage score)">
     <span class="slice-num">#4</span>
     <span class="slice-title-col">
@@ -1161,15 +1161,15 @@ scraping (ToS/auth-wall).</p>
           <span class="badge badge-revision badge-sm">M</span>
           <span class="badge badge-revision badge-sm">Med</span>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
-          
-          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-4">Pending</span>
+          <span class="badge badge-revision badge-sm" title="Execution: promoted">Promoted</span>
+          <span class="badge badge-approved badge-sm slice-approval-badge" data-badge-for="slice-4">Approved</span>
           <span class="badge badge-sm badge-issues" title="3 critic issue(s)">3 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
           <span class="approval-segmented" role="group" aria-label="Approval action">
             <label class="seg-btn seg-approve" title="Approve">
-              <input type="radio" name="slice-4-approval" value="approved" data-section="slice-4" data-action="approve" aria-label="Approve slice 4">
+              <input type="radio" name="slice-4-approval" value="approved" data-section="slice-4" data-action="approve" checked aria-label="Approve slice 4">
               &#10003;
             </label>
             <label class="seg-btn seg-changes" title="Request changes">
@@ -1329,7 +1329,7 @@ mislead the inbox).</p>
     </details>
   </div>
 </details>
-<details class="slice-card" id="slice-5" data-slice="5" data-slice-name="slice-5" data-status="pending" data-approval="pending">
+<details class="slice-card" id="slice-5" data-slice="5" data-slice-name="slice-5" data-status="pending" data-approval="approved">
   <summary class="slice-summary" aria-label="Slice 5: Postings inbox in the web UI &#43; one-click promote-to-apply">
     <span class="slice-num">#5</span>
     <span class="slice-title-col">
@@ -1340,15 +1340,15 @@ mislead the inbox).</p>
           <span class="badge badge-blocked badge-sm">L</span>
           <span class="badge badge-revision badge-sm">Med</span>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
-          
-          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-5">Pending</span>
+          <span class="badge badge-revision badge-sm" title="Execution: promoted">Promoted</span>
+          <span class="badge badge-approved badge-sm slice-approval-badge" data-badge-for="slice-5">Approved</span>
           <span class="badge badge-sm badge-issues" title="3 critic issue(s)">3 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
           <span class="approval-segmented" role="group" aria-label="Approval action">
             <label class="seg-btn seg-approve" title="Approve">
-              <input type="radio" name="slice-5-approval" value="approved" data-section="slice-5" data-action="approve" aria-label="Approve slice 5">
+              <input type="radio" name="slice-5-approval" value="approved" data-section="slice-5" data-action="approve" checked aria-label="Approve slice 5">
               &#10003;
             </label>
             <label class="seg-btn seg-changes" title="Request changes">
@@ -1508,7 +1508,7 @@ shouldn&#39;t strand a posting outside the funnel).</p>
     </details>
   </div>
 </details>
-<details class="slice-card" id="slice-6" data-slice="6" data-slice-name="slice-6" data-status="pending" data-approval="pending">
+<details class="slice-card" id="slice-6" data-slice="6" data-slice-name="slice-6" data-status="pending" data-approval="approved">
   <summary class="slice-summary" aria-label="Slice 6: Scheduling &#43; run health: launchd, visible failure state, retire old pipeline">
     <span class="slice-num">#6</span>
     <span class="slice-title-col">
@@ -1519,15 +1519,15 @@ shouldn&#39;t strand a posting outside the funnel).</p>
           <span class="badge badge-revision badge-sm">M</span>
           <span class="badge badge-revision badge-sm">Med</span>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
-          
-          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-6">Pending</span>
+          <span class="badge badge-revision badge-sm" title="Execution: promoted">Promoted</span>
+          <span class="badge badge-approved badge-sm slice-approval-badge" data-badge-for="slice-6">Approved</span>
           <span class="badge badge-sm badge-issues" title="4 critic issue(s)">4 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
           <span class="approval-segmented" role="group" aria-label="Approval action">
             <label class="seg-btn seg-approve" title="Approve">
-              <input type="radio" name="slice-6-approval" value="approved" data-section="slice-6" data-action="approve" aria-label="Approve slice 6">
+              <input type="radio" name="slice-6-approval" value="approved" data-section="slice-6" data-action="approve" checked aria-label="Approve slice 6">
               &#10003;
             </label>
             <label class="seg-btn seg-changes" title="Request changes">
@@ -1701,7 +1701,7 @@ the old plist (re-enableable by accident).</p>
     </details>
   </div>
 </details>
-<details class="slice-card" id="slice-7" data-slice="7" data-slice-name="slice-7" data-status="pending" data-approval="pending">
+<details class="slice-card" id="slice-7" data-slice="7" data-slice-name="slice-7" data-status="pending" data-approval="approved">
   <summary class="slice-summary" aria-label="Slice 7: Funnel dashboard: per-stage counts, conversion, per-source yield">
     <span class="slice-num">#7</span>
     <span class="slice-title-col">
@@ -1712,15 +1712,15 @@ the old plist (re-enableable by accident).</p>
           <span class="badge badge-revision badge-sm">M</span>
           <span class="badge badge-pending badge-sm">Low</span>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
-          
-          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-7">Pending</span>
+          <span class="badge badge-revision badge-sm" title="Execution: promoted">Promoted</span>
+          <span class="badge badge-approved badge-sm slice-approval-badge" data-badge-for="slice-7">Approved</span>
           <span class="badge badge-sm badge-issues" title="2 critic issue(s)">2 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
           <span class="approval-segmented" role="group" aria-label="Approval action">
             <label class="seg-btn seg-approve" title="Approve">
-              <input type="radio" name="slice-7-approval" value="approved" data-section="slice-7" data-action="approve" aria-label="Approve slice 7">
+              <input type="radio" name="slice-7-approval" value="approved" data-section="slice-7" data-action="approve" checked aria-label="Approve slice 7">
               &#10003;
             </label>
             <label class="seg-btn seg-changes" title="Request changes">
@@ -1872,7 +1872,7 @@ retention analytics (overkill for a single-user funnel).</p>
     </details>
   </div>
 </details>
-<details class="slice-card" id="slice-8" data-slice="8" data-slice-name="slice-8" data-status="pending" data-approval="pending">
+<details class="slice-card" id="slice-8" data-slice="8" data-slice-name="slice-8" data-status="pending" data-approval="approved">
   <summary class="slice-summary" aria-label="Slice 8: E2E acceptance: scheduled run -&gt; inbox -&gt; one-click apply -&gt; funnel, live in Chrome">
     <span class="slice-num">#8</span>
     <span class="slice-title-col">
@@ -1883,15 +1883,15 @@ retention analytics (overkill for a single-user funnel).</p>
           <span class="badge badge-revision badge-sm">M</span>
           <span class="badge badge-revision badge-sm">Med</span>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
-          
-          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-8">Pending</span>
+          <span class="badge badge-revision badge-sm" title="Execution: promoted">Promoted</span>
+          <span class="badge badge-approved badge-sm slice-approval-badge" data-badge-for="slice-8">Approved</span>
           <span class="badge badge-sm badge-issues" title="2 critic issue(s)">2 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
           <span class="approval-segmented" role="group" aria-label="Approval action">
             <label class="seg-btn seg-approve" title="Approve">
-              <input type="radio" name="slice-8-approval" value="approved" data-section="slice-8" data-action="approve" aria-label="Approve slice 8">
+              <input type="radio" name="slice-8-approval" value="approved" data-section="slice-8" data-action="approve" checked aria-label="Approve slice 8">
               &#10003;
             </label>
             <label class="seg-btn seg-changes" title="Request changes">
