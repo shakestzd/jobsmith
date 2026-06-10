@@ -543,7 +543,6 @@ def test_single_adapter_failure_triggers_run_record_degraded(db_path: Path) -> N
 
 def test_email_new_postings_included_in_rescore(db_path: Path) -> None:
     """Email-sourced new postings are passed to the LLM rescore pass (finding 3)."""
-    rescored_ids: list[int] = []
 
     def _fake_query_fn(prompt: str) -> str:
         return '{"score_a": 70, "score_b": 65, "dominant_specialty": "data", "rationale": "ok"}'
@@ -578,7 +577,7 @@ def test_email_new_postings_included_in_rescore(db_path: Path) -> None:
             _mailapp_ingest_fn=_mailapp_ingest,
         )
 
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
 
     rescore_call_ids: list = []
 

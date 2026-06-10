@@ -337,6 +337,7 @@ def test_source_install_schedule_renders_and_mocks_launchctl(
 def test_install_schedule_issues_bootout_before_bootstrap(tmp_path: Path) -> None:
     """Re-install calls bootout before bootstrap so re-loading works (finding 4)."""
     import shutil as shutil_mod
+
     from jobsmith.sourcing.schedule import install_schedule
 
     calls: list[list[str]] = []
@@ -353,7 +354,6 @@ def test_install_schedule_issues_bootout_before_bootstrap(tmp_path: Path) -> Non
          patch.object(shutil_mod, "which", return_value="/usr/local/bin/jobsmith"):
         install_schedule(repo_root=tmp_path)
 
-    cmd_names = [c[0] for c in calls if c]
     launchctl_calls = [c for c in calls if "launchctl" in c]
     subcommands = [c[1] for c in launchctl_calls if len(c) > 1]
 
@@ -365,6 +365,7 @@ def test_install_schedule_issues_bootout_before_bootstrap(tmp_path: Path) -> Non
 def test_install_schedule_bootstrap_failure_raises(tmp_path: Path) -> None:
     """If bootstrap fails AND load fallback fails, RuntimeError is raised (finding 4)."""
     import shutil as shutil_mod
+
     from jobsmith.sourcing.schedule import install_schedule
 
     def mock_run(args, **kwargs):
@@ -384,10 +385,12 @@ def test_install_schedule_bootstrap_failure_raises(tmp_path: Path) -> None:
             m.stderr = ""
         return m
 
-    with patch(subprocess.__name__ + ".run", mock_run), \
-         patch.object(shutil_mod, "which", return_value="/usr/local/bin/jobsmith"):
-        with pytest.raises(RuntimeError, match="launchctl load failed"):
-            install_schedule(repo_root=tmp_path)
+    with (
+        patch(subprocess.__name__ + ".run", mock_run),
+        patch.object(shutil_mod, "which", return_value="/usr/local/bin/jobsmith"),
+        pytest.raises(RuntimeError, match="launchctl load failed"),
+    ):
+        install_schedule(repo_root=tmp_path)
 
 
 # ---------------------------------------------------------------------------

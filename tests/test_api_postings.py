@@ -347,6 +347,7 @@ def test_list_postings_limit_exceeds_max_returns_422(client_and_ids) -> None:
 def test_fetch_jd_text_skips_file_scheme(tmp_path: Path) -> None:
     """file:// URLs must not be fetched."""
     import asyncio
+
     import jobsmith.api.postings_routes as pr_mod
 
     result = asyncio.get_event_loop().run_until_complete(
@@ -358,6 +359,7 @@ def test_fetch_jd_text_skips_file_scheme(tmp_path: Path) -> None:
 def test_fetch_jd_text_skips_localhost(tmp_path: Path) -> None:  # noqa: ARG001
     """http://localhost URLs must not be fetched."""
     import asyncio
+
     import jobsmith.api.postings_routes as pr_mod
 
     result = asyncio.get_event_loop().run_until_complete(
@@ -369,6 +371,7 @@ def test_fetch_jd_text_skips_localhost(tmp_path: Path) -> None:  # noqa: ARG001
 def test_fetch_jd_text_skips_127(tmp_path: Path) -> None:  # noqa: ARG001
     """http://127.0.0.1 URLs must not be fetched."""
     import asyncio
+
     import jobsmith.api.postings_routes as pr_mod
 
     result = asyncio.get_event_loop().run_until_complete(

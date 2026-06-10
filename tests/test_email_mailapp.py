@@ -450,6 +450,7 @@ def test_ingest_mailapp_alerts_does_not_mutate_module_globals() -> None:
 def test_ingest_mailapp_alerts_concurrency_safe() -> None:
     """Two concurrent ingest_mailapp_alerts calls with different fns do not interfere (finding 7)."""
     import threading
+
     from jobsmith.sourcing.email.mailapp import ingest_mailapp_alerts
 
     results: dict[str, list] = {}
