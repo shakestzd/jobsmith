@@ -1402,6 +1402,19 @@ def set_outcome_status(slug: str, body: dict) -> dict:
     Accepted values: interview, offer, rejected, done, in-progress.
     These are free-text statuses stored in apply_runs.status and are used
     by the funnel dashboard to track post-application outcomes.
+
+    Write strategy (branch-review finding #1):
+    The funnel joins outcomes through the slug of the promoted run, counting
+    any run for that slug. To stay consistent with the funnel's view we prefer
+    to write the outcome to the run_id referenced by
+    ``postings.promoted_application_id`` (i.e. the exact run the funnel's
+    posting cohort knows about).  This avoids the case where set_outcome_status
+    writes to a *newer* run for the same slug, but the funnel's posting still
+    points to the older run_id.
+
+    Fallback: if no posting references this slug we write to the latest run row
+    (original behaviour), so the outcome is still recorded and the slug-based
+    funnel join will find it.
     """
     new_status = body.get("status", "")
     valid_outcome = {"interview", "offer", "rejected", "done", "in-progress"}
@@ -1418,6 +1431,22 @@ def set_outcome_status(slug: str, body: dict) -> dict:
         if run_row is None:
             raise HTTPException(status_code=404, detail=f"No application found for slug {slug!r}")
         run_id = run_row["run_id"]
+
+        # Prefer writing to the run_id pointed to by postings.promoted_application_id
+        # so the outcome lands on the exact row the funnel's posting cohort references.
+        promoted_row = conn.execute(
+            """
+            SELECT ar.run_id
+            FROM postings p
+            JOIN apply_runs ar ON ar.run_id = p.promoted_application_id
+            WHERE ar.slug = ?
+            LIMIT 1
+            """,
+            (run_row["slug"],),
+        ).fetchone()
+        if promoted_row is not None:
+            run_id = promoted_row["run_id"]
+
         conn.execute(
             "UPDATE apply_runs SET status = ? WHERE run_id = ?",
             (new_status, run_id),

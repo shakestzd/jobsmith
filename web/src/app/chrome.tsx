@@ -7,9 +7,21 @@ import type { IconName, ThemeName, ViewName } from '../types';
 
 // ── Postings badge (new-since-last-visit) ─────────────────────────────────
 const LAST_VISIT_KEY = 'jobsmith.postings.last_visit';
+const JOBSMITH_DATA_CHANGED = 'jobsmith:data-changed';
 
 function usePostingsBadge(): number {
   const [count, setCount] = useState(0);
+  // Bump this counter to trigger a re-fetch; starts at 0 so we fetch on mount.
+  const [version, setVersion] = useState(0);
+
+  // Re-fetch whenever the app signals that data has changed (e.g. a posting was
+  // promoted/dismissed or a sourcing run completed).  This mirrors the pattern
+  // used by usePostings in hooks.ts (branch-review finding #4).
+  useEffect(() => {
+    const onChanged = () => setVersion((v) => v + 1);
+    window.addEventListener(JOBSMITH_DATA_CHANGED, onChanged);
+    return () => window.removeEventListener(JOBSMITH_DATA_CHANGED, onChanged);
+  }, []);
 
   useEffect(() => {
     // Compute badge by fetching sourced postings newer than last visit.
@@ -24,7 +36,7 @@ function usePostingsBadge(): number {
         })
         .catch(() => setCount(0));
     });
-  }, []);
+  }, [version]);
 
   return count;
 }

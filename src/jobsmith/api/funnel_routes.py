@@ -145,14 +145,42 @@ def compute_funnel(db_path: Path, window: int | None) -> FunnelResponse:
         queued = row["queued"] or 0
         promoted = row["promoted"] or 0
 
-        # interview and offer: from apply_runs whose linked posting is in cohort
+        # interview and offer: count postings whose promoted slug has ANY run
+        # carrying an outcome status.
+        #
+        # Design rationale (fix for branch-review finding #1):
+        #
+        #   set_outcome_status writes to the LATEST apply_runs row for the slug
+        #   (ordered started_at DESC).  If a newer run was started after the
+        #   outcome was recorded, p.promoted_application_id may point to the
+        #   *older* run_id — i.e. the run_id the funnel joined against — and the
+        #   outcome on the newer run becomes invisible.
+        #
+        #   To make the funnel resilient we:
+        #   1. Resolve the slug of the promoted run
+        #      (promoted_slug = apply_runs.slug WHERE run_id = promoted_application_id)
+        #   2. Join ALL apply_runs rows that share that slug (any run for the slug)
+        #   3. A posting counts as interview/offer when ANY of its runs carries
+        #      that status — so a newer run's outcome is still counted.
+        #
+        #   We use a per-slug MAX so that each promoted posting is counted at most
+        #   once even if multiple runs carry outcome statuses simultaneously.
         outcome_sql = f"""
             SELECT
-                SUM(CASE WHEN ar.status = 'interview' THEN 1 ELSE 0 END) AS interview,
-                SUM(CASE WHEN ar.status = 'offer'     THEN 1 ELSE 0 END) AS offer
-            FROM apply_runs ar
-            JOIN postings p ON p.promoted_application_id = ar.run_id
-            WHERE 1=1 {win_clause}
+                SUM(CASE WHEN slug_max.has_interview THEN 1 ELSE 0 END) AS interview,
+                SUM(CASE WHEN slug_max.has_offer     THEN 1 ELSE 0 END) AS offer
+            FROM postings p
+            JOIN apply_runs promo_ar ON promo_ar.run_id = p.promoted_application_id
+            JOIN (
+                SELECT
+                    slug,
+                    MAX(CASE WHEN status = 'interview' THEN 1 ELSE 0 END) AS has_interview,
+                    MAX(CASE WHEN status = 'offer'     THEN 1 ELSE 0 END) AS has_offer
+                FROM apply_runs
+                GROUP BY slug
+            ) slug_max ON slug_max.slug = promo_ar.slug
+            WHERE p.promoted_application_id IS NOT NULL
+              {win_clause}
         """
         orow = conn.execute(outcome_sql).fetchone()
         interview = orow["interview"] or 0
@@ -169,15 +197,25 @@ def compute_funnel(db_path: Path, window: int | None) -> FunnelResponse:
         interview_to_offer = _safe_rate(offer, interview)
 
         # ── Per-source yield ────────────────────────────────────────────────
+        # Uses the same slug-based join as the main outcome counts so that a
+        # newer run for the same slug does not hide a previously-recorded outcome.
         per_source_sql = f"""
             SELECT
                 p.source,
                 COUNT(*) AS postings,
                 SUM(CASE WHEN p.status = 'promoted' THEN 1 ELSE 0 END) AS applied,
-                SUM(CASE WHEN ar.status = 'interview' THEN 1 ELSE 0 END) AS interview,
-                SUM(CASE WHEN ar.status = 'offer'     THEN 1 ELSE 0 END) AS offer
+                SUM(CASE WHEN slug_max.has_interview THEN 1 ELSE 0 END) AS interview,
+                SUM(CASE WHEN slug_max.has_offer     THEN 1 ELSE 0 END) AS offer
             FROM postings p
-            LEFT JOIN apply_runs ar ON ar.run_id = p.promoted_application_id
+            LEFT JOIN apply_runs promo_ar ON promo_ar.run_id = p.promoted_application_id
+            LEFT JOIN (
+                SELECT
+                    slug,
+                    MAX(CASE WHEN status = 'interview' THEN 1 ELSE 0 END) AS has_interview,
+                    MAX(CASE WHEN status = 'offer'     THEN 1 ELSE 0 END) AS has_offer
+                FROM apply_runs
+                GROUP BY slug
+            ) slug_max ON slug_max.slug = promo_ar.slug
             WHERE 1=1 {win_clause}
             GROUP BY p.source
             ORDER BY postings DESC, p.source ASC

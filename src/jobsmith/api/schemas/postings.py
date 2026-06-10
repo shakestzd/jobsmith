@@ -6,7 +6,11 @@ from pydantic import BaseModel
 
 
 class PostingRow(BaseModel):
-    """One posting row returned by GET /api/postings."""
+    """One posting row returned by GET /api/postings.
+
+    jd_text is intentionally excluded from the list response (can be large;
+    only needed when rendering a single posting detail).
+    """
 
     id: int
     source: str
