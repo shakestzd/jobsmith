@@ -42,6 +42,8 @@ from ..sourcing.store import (
     upsert_sourcing_run,
 )
 
+# Email ingestion seam (feat-b1bd050e) — imported lazily in run_email_alerts()
+
 logger = logging.getLogger("jobsmith.sourcing.runner")
 
 CIRCUIT_BREAKER_THRESHOLD = 3
@@ -170,6 +172,138 @@ def expire_stale_postings(
 
 
 # ---------------------------------------------------------------------------
+# Email alert ingestion (feat-b1bd050e)
+# ---------------------------------------------------------------------------
+
+
+def run_email_alerts(
+    conn,
+    alert_senders: list[dict],
+    *,
+    dry_run: bool = False,
+    max_per_sender: int = 20,
+    _gmail_ingest_fn: Callable | None = None,
+    _mailapp_ingest_fn: Callable | None = None,
+) -> tuple[int, int, list[str]]:
+    """Ingest email job alerts and upsert postings into the DB.
+
+    Dispatches to the Gmail or Mail.app adapter based on each sender's type
+    field (gmail_alert or mailapp_alert). Email postings carry snippets only
+    (title/company/location/url) — full JD text is fetched at promote time.
+
+    Parameters
+    ----------
+    conn:
+        Open SQLite connection to the pipeline DB.
+    alert_senders:
+        Enabled alert-sender config dicts from sourcing.yaml.
+    dry_run:
+        When True, parse but do not write to DB.
+    max_per_sender:
+        Cap on messages fetched per sender.
+
+    Returns
+    -------
+    (upserted, new_ids_count, degraded_senders)
+        upserted: total posting rows written
+        new_ids_count: count of newly inserted rows (for LLM rescore seam)
+        degraded_senders: list of sender slugs that failed to produce postings
+    """
+    from .email.gmail import ingest_gmail_alerts as _default_gmail_ingest
+    from .email.mailapp import ingest_mailapp_alerts as _default_mailapp_ingest
+
+    _gmail_fn = _gmail_ingest_fn or _default_gmail_ingest
+    _mailapp_fn = _mailapp_ingest_fn or _default_mailapp_ingest
+
+    gmail_senders = [s for s in alert_senders if s.get("type") == "gmail_alert"]
+    mailapp_senders = [s for s in alert_senders if s.get("type") == "mailapp_alert"]
+
+    all_postings: list[dict] = []
+    all_degraded: list[str] = []
+
+    if gmail_senders:
+        try:
+            postings, degraded = _gmail_fn(
+                gmail_senders, max_per_sender=max_per_sender
+            )
+            all_postings.extend(postings)
+            all_degraded.extend(degraded)
+        except Exception as exc:
+            logger.warning("Gmail ingestion failed (non-fatal): %s", exc)
+            all_degraded.extend(
+                s.get("sender_slug", "?") for s in gmail_senders
+            )
+
+    if mailapp_senders:
+        try:
+            postings, degraded = _mailapp_fn(
+                mailapp_senders, max_per_sender=max_per_sender
+            )
+            all_postings.extend(postings)
+            all_degraded.extend(degraded)
+        except Exception as exc:
+            logger.warning("Mail.app ingestion failed (non-fatal): %s", exc)
+            all_degraded.extend(
+                s.get("sender_slug", "?") for s in mailapp_senders
+            )
+
+    upserted = 0
+    new_count = 0
+
+    if not dry_run:
+        for entry in all_postings:
+            source = entry.get("source", "email/unknown")
+            url = entry.get("url", "")
+            title = entry.get("title", "")
+            company = entry.get("company", "")
+            location = entry.get("location", "")
+            external_id = entry.get("external_id", "")
+
+            # Build a Role-compatible dedup key from the snippet data
+            from .adapters.base import Role as _Role
+            role = _Role(
+                id=external_id,
+                source=source.split("/")[0],
+                source_slug=source.split("/", 1)[-1] if "/" in source else source,
+                company=company,
+                title=title,
+                location=location,
+                url=url,
+                jd_text="",
+            )
+            dedup_key = role_dedup_key(role)
+            score_dict = score_role_fast("")  # snippets have no JD text
+
+            posting_id = upsert_posting(
+                conn,
+                source=source,
+                dedup_key=dedup_key,
+                external_id=external_id,
+                url=url,
+                title=title,
+                company=company,
+                location=location,
+                comp_text=None,
+                posted_date=None,
+                jd_text="",
+                fast_score=float(score_dict.get("score_a", 0)) / 100.0,
+                llm_score=None,
+                specialty=None,
+                rationale=None,
+                evidence_json=None,
+            )
+            row = conn.execute(
+                "SELECT first_seen_at, last_seen_at FROM postings WHERE id = ?",
+                (posting_id,),
+            ).fetchone()
+            if row and row["first_seen_at"] == row["last_seen_at"]:
+                new_count += 1
+            upserted += 1
+
+    return upserted, new_count, all_degraded
+
+
+# ---------------------------------------------------------------------------
 # Main crawl
 # ---------------------------------------------------------------------------
 
@@ -185,6 +319,11 @@ def run_crawl(
     dry_run: bool = False,
     no_llm: bool = False,
     source_filter: str | None = None,
+    # Email alert ingestion (feat-b1bd050e) — list of alert-sender config dicts
+    alert_senders: list[dict] | None = None,
+    # Injectable for tests — replaces the entire run_email_alerts call
+    # Signature: (senders, *, dry_run, max_per_sender) -> (postings, degraded)
+    _run_email_alerts_fn: Callable | None = None,
     # LLM rescore seam (feat-1602d64c) — injectable for tests; defaults to SDK
     _query_fn: Callable | None = None,
     _rescore_n_cap: int = 30,
@@ -234,7 +373,8 @@ def run_crawl(
         "roles_expired": 0,
     }
 
-    if not sources:
+    _alert_senders = alert_senders or []
+    if not sources and not _alert_senders:
         logger.info("no enabled sources — exiting clean")
         return summary
 
@@ -317,6 +457,77 @@ def run_crawl(
                 summary["roles_upserted"] += len(fetched)
 
             time.sleep(_INTER_SOURCE_SLEEP)
+
+        # Email alert ingestion (feat-b1bd050e) — runs after ATS sources
+        if _alert_senders:
+            if _run_email_alerts_fn is not None:
+                # Test injectable: simpler signature (senders, **kwargs) -> (postings, degraded)
+                try:
+                    _email_postings, _email_degraded = _run_email_alerts_fn(
+                        _alert_senders,
+                        dry_run=dry_run,
+                        max_per_sender=max_per_source,
+                    )
+                    if not dry_run:
+                        for _ep in _email_postings:
+                            _src = _ep.get("source", "email/unknown")
+                            _url = _ep.get("url", "")
+                            from .adapters.base import Role as _Role
+                            _role = _Role(
+                                id=_ep.get("external_id", ""),
+                                source=_src.split("/")[0],
+                                source_slug=_src.split("/", 1)[-1] if "/" in _src else _src,
+                                company=_ep.get("company", ""),
+                                title=_ep.get("title", ""),
+                                location=_ep.get("location", ""),
+                                url=_url,
+                                jd_text="",
+                            )
+                            _dk = role_dedup_key(_role)
+                            _sd = score_role_fast("")
+                            _pid = upsert_posting(
+                                conn,
+                                source=_src,
+                                dedup_key=_dk,
+                                external_id=_ep.get("external_id", ""),
+                                url=_url,
+                                title=_ep.get("title", ""),
+                                company=_ep.get("company", ""),
+                                location=_ep.get("location", ""),
+                                comp_text=None,
+                                posted_date=None,
+                                jd_text="",
+                                fast_score=float(_sd.get("score_a", 0)) / 100.0,
+                                llm_score=None,
+                                specialty=None,
+                                rationale=None,
+                                evidence_json=None,
+                            )
+                            summary["roles_upserted"] += 1
+                            summary["roles_fetched"] += 1
+                    degraded.extend(_email_degraded)
+                    if _email_postings:
+                        summary["sources_checked"].append("email_alerts")
+                except Exception as exc:
+                    logger.warning("email alert ingestion failed (non-fatal): %s", exc)
+                    degraded.append("email_alerts")
+            else:
+                try:
+                    email_upserted, email_new, email_degraded = run_email_alerts(
+                        conn,
+                        _alert_senders,
+                        dry_run=dry_run,
+                        max_per_sender=max_per_source,
+                    )
+                    summary["roles_upserted"] += email_upserted
+                    summary["roles_fetched"] += email_upserted
+                    new_count += email_new
+                    degraded.extend(email_degraded)
+                    if email_upserted > 0:
+                        summary["sources_checked"].append("email_alerts")
+                except Exception as exc:
+                    logger.warning("email alert ingestion failed (non-fatal): %s", exc)
+                    degraded.append("email_alerts")
 
         # LLM triage rescore seam (feat-1602d64c)
         if not dry_run and not no_llm and new_posting_ids:

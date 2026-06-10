@@ -60,6 +60,9 @@ dependencies = [
     # feat-5531c54b — ATS adapter scoring + HTML stripping.
     "rapidfuzz>=3.0",
     "beautifulsoup4>=4.12",
+    # feat-b1bd050e — Gmail adapter for email job alert ingestion (read-only).
+    "google-api-python-client>=2.100",
+    "google-auth-oauthlib>=1.2",
     # feat-1602d64c — LLM triage rescore via claude-agent-sdk (Max subscription).
     "claude-agent-sdk>=0.0.11",
     # trk-ac5661e4 — API server runtime deps.
