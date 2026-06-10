@@ -411,6 +411,69 @@ export async function renderCoverLetterPdf(
   );
 }
 
+// ── Postings API ─────────────────────────────────────────────────────────
+
+import type { PostingRow, PostingPromoteResponse } from './types';
+
+export interface PostingsFilter {
+  status?: string;
+  source?: string;
+  specialty?: string;
+  min_score?: number;
+}
+
+/** GET /api/postings — ranked list with optional filters. */
+export async function getPostings(filter: PostingsFilter = {}): Promise<PostingRow[]> {
+  const params = new URLSearchParams();
+  if (filter.status) params.set('status', filter.status);
+  if (filter.source) params.set('source', filter.source);
+  if (filter.specialty) params.set('specialty', filter.specialty);
+  if (filter.min_score != null) params.set('min_score', String(filter.min_score));
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  return apiGet<PostingRow[]>(`/api/postings${qs}`);
+}
+
+/** POST /api/postings/{id}/status — transition posting status. */
+export async function setPostingStatus(
+  id: number,
+  status: string,
+): Promise<PostingRow> {
+  return apiPost<PostingRow>(`/api/postings/${id}/status`, { status });
+}
+
+/** POST /api/postings/{id}/promote — promote to apply pipeline. */
+export async function promotePosting(
+  id: number,
+): Promise<PostingPromoteResponse> {
+  return apiPost<PostingPromoteResponse>(`/api/postings/${id}/promote`, {});
+}
+
+// ── Application outcome status ────────────────────────────────────────────
+
+export type OutcomeStatus = 'interview' | 'offer' | 'rejected' | 'done' | 'in-progress';
+
+/** POST /api/applications/{slug}/outcome-status — record interview/offer/etc outcome. */
+export async function setOutcomeStatus(
+  slug: string,
+  status: OutcomeStatus,
+): Promise<{ slug: string; status: string }> {
+  return apiPost<{ slug: string; status: string }>(
+    `/api/applications/${encodeURIComponent(slug)}/outcome-status`,
+    { status },
+  );
+}
+
+// ── Funnel API ────────────────────────────────────────────────────────────
+
+import type { FunnelResponse } from './types';
+
+export type FunnelWindow = 7 | 30 | 90 | 'all';
+
+/** GET /api/funnel — per-stage counts, conversions, per-source yield. */
+export async function getFunnel(window: FunnelWindow = 30): Promise<FunnelResponse> {
+  return apiGet<FunnelResponse>(`/api/funnel?window=${window}`);
+}
+
 /**
  * Redact secrets from any string before it lands in the DOM, clipboard, logs,
  * or any other user-visible surface. Catches:

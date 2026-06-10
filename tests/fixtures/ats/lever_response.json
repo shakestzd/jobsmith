@@ -1,0 +1,32 @@
+[
+  {
+    "_comment": "[REPRESENTATIVE] Synthesized from documented Lever postings API shape. Not a recorded live response.",
+    "id": "abc-123-def",
+    "text": "Senior Data Engineer",
+    "hostedUrl": "https://jobs.lever.co/netflix/abc-123-def",
+    "applyUrl": "https://jobs.lever.co/netflix/abc-123-def/apply",
+    "categories": {
+      "team": "Data Platform",
+      "department": "Engineering",
+      "location": "Remote",
+      "commitment": "Full-time"
+    },
+    "createdAt": 1744228800000,
+    "descriptionPlain": "Netflix is hiring a Senior Data Engineer for the Content Finance Data Platform. Build pipelines that process billions of streaming events into financial models. Strong Python, SQL, and Spark required. Fully remote within the US.",
+    "descriptionHtml": "<p>Netflix is hiring a Senior Data Engineer for the Content Finance Data Platform.</p>"
+  },
+  {
+    "id": "xyz-456-ghi",
+    "text": "Product Designer",
+    "hostedUrl": "https://jobs.lever.co/netflix/xyz-456-ghi",
+    "categories": {
+      "team": "Design",
+      "department": "Product",
+      "location": "Los Angeles, CA",
+      "commitment": "Full-time"
+    },
+    "createdAt": 1744142400000,
+    "descriptionPlain": "Design team. Visual + interaction design for Netflix product surfaces.",
+    "descriptionHtml": "<p>Design team.</p>"
+  }
+]

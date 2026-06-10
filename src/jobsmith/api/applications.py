@@ -1395,6 +1395,69 @@ def apply_cover_letter(slug: str, body: dict) -> dict:
     return out
 
 
+@router.post("/applications/{slug}/outcome-status")
+def set_outcome_status(slug: str, body: dict) -> dict:
+    """Set the apply_runs outcome status for an application slug.
+
+    Accepted values: interview, offer, rejected, done, in-progress.
+    These are free-text statuses stored in apply_runs.status and are used
+    by the funnel dashboard to track post-application outcomes.
+
+    Write strategy (branch-review finding #1):
+    The funnel joins outcomes through the slug of the promoted run, counting
+    any run for that slug. To stay consistent with the funnel's view we prefer
+    to write the outcome to the run_id referenced by
+    ``postings.promoted_application_id`` (i.e. the exact run the funnel's
+    posting cohort knows about).  This avoids the case where set_outcome_status
+    writes to a *newer* run for the same slug, but the funnel's posting still
+    points to the older run_id.
+
+    Fallback: if no posting references this slug we write to the latest run row
+    (original behaviour), so the outcome is still recorded and the slug-based
+    funnel join will find it.
+    """
+    new_status = body.get("status", "")
+    valid_outcome = {"interview", "offer", "rejected", "done", "in-progress"}
+    if new_status not in valid_outcome:
+        raise HTTPException(
+            status_code=422,
+            detail=f"status must be one of {sorted(valid_outcome)}",
+        )
+
+    db_path = _get_db_path()
+    conn = _open_conn(db_path)
+    try:
+        run_row = _find_run_row_for_slug(conn, slug)
+        if run_row is None:
+            raise HTTPException(status_code=404, detail=f"No application found for slug {slug!r}")
+        run_id = run_row["run_id"]
+
+        # Prefer writing to the run_id pointed to by postings.promoted_application_id
+        # so the outcome lands on the exact row the funnel's posting cohort references.
+        promoted_row = conn.execute(
+            """
+            SELECT ar.run_id
+            FROM postings p
+            JOIN apply_runs ar ON ar.run_id = p.promoted_application_id
+            WHERE ar.slug = ?
+            LIMIT 1
+            """,
+            (run_row["slug"],),
+        ).fetchone()
+        if promoted_row is not None:
+            run_id = promoted_row["run_id"]
+
+        conn.execute(
+            "UPDATE apply_runs SET status = ? WHERE run_id = ?",
+            (new_status, run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"slug": slug, "status": new_status}
+
+
 @router.post("/applications/{slug}/review-status")
 def set_review_status(slug: str, body: dict) -> dict:
     """Set review status ('approved', 'needs-revision', 'pending') in apply_state."""

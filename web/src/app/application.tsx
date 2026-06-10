@@ -11,8 +11,8 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { SampleApp, AppPhase, AppStatus, IconName } from '../types';
 import { Icon, Badge, StatusBadge } from './shared';
 import { useApplication } from '../api/hooks';
-import { JobsmithApiError, postApplication, buildEventsUrl, redactSensitive, apiGet, apiPost, apiPut, apiGetBlob, apiGetText, notifyDataChanged, renderCoverLetterPdf } from '../api/client';
-import type { RenderCoverLetterPdfResult } from '../api/client';
+import { JobsmithApiError, postApplication, buildEventsUrl, redactSensitive, apiGet, apiPost, apiPut, apiGetBlob, apiGetText, notifyDataChanged, renderCoverLetterPdf, setOutcomeStatus } from '../api/client';
+import type { RenderCoverLetterPdfResult, OutcomeStatus } from '../api/client';
 import type {
   ApplicationDetail as ApiApplicationDetail,
   ApplicationArtifact as ApiApplicationArtifact,
@@ -1775,6 +1775,65 @@ function specialistEventStatus(status: string): SpecialistRunStatus {
   return 'done';
 }
 
+// ── OutcomeStatusPicker ────────────────────────────────────────────────────
+
+const OUTCOME_OPTIONS: { value: OutcomeStatus; label: string }[] = [
+  { value: 'in-progress', label: 'in progress' },
+  { value: 'interview', label: 'interview' },
+  { value: 'offer', label: 'offer' },
+  { value: 'rejected', label: 'rejected' },
+  { value: 'done', label: 'done' },
+];
+
+interface OutcomeStatusPickerProps {
+  slug: string;
+  currentStatus: string;
+  onUpdated: (status: string) => void;
+}
+
+function OutcomeStatusPicker({ slug, currentStatus, onUpdated }: OutcomeStatusPickerProps) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const next = e.target.value as OutcomeStatus;
+    if (next === currentStatus) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await setOutcomeStatus(slug, next);
+      onUpdated(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <label style={{ fontSize: 12, color: 'var(--fg-muted)' }} htmlFor={`outcome-${slug}`}>
+        outcome:
+      </label>
+      <select
+        id={`outcome-${slug}`}
+        className="input"
+        style={{ fontSize: 12, padding: '3px 6px', height: 'auto' }}
+        value={currentStatus}
+        onChange={(e) => { void handleChange(e); }}
+        disabled={saving}
+        aria-label="Application outcome status"
+      >
+        {OUTCOME_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+      {saving && <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>saving…</span>}
+      {error && <span style={{ fontSize: 11, color: 'var(--danger, #c0392b)' }}>{error}</span>}
+    </div>
+  );
+}
+
 export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   const { data: apiDetail, isLoading, error } = useApplication(slug);
 
@@ -1815,6 +1874,8 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     initialFailedPhaseNum,
   );
   const [specialistStatuses, setSpecialistStatuses] = useState<SpecialistStatusMap>({});
+  // Outcome status (interview, offer, rejected, etc.) — updated via the picker.
+  const [outcomeStatus, setOutcomeStatus_] = useState<string>(app.status ?? 'in-progress');
 
   // Ref to hold the active EventSource so we can close it on cancel/unmount.
   const esRef = useRef<EventSource | null>(null);
@@ -2284,6 +2345,11 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
           </div>
         </div>
         <div className="actions">
+          <OutcomeStatusPicker
+            slug={slug}
+            currentStatus={outcomeStatus}
+            onUpdated={(s) => setOutcomeStatus_(s)}
+          />
           <button className="btn" onClick={() => {
             void apiPost(`/api/applications/${slug}/reveal`, {}).catch(console.error);
           }}><Icon name="folder" size={13} /> reveal in finder</button>

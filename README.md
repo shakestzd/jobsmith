@@ -150,6 +150,121 @@ context but copies user-authored `lesson` strings verbatim; review the YAML
 before syncing it. See [docs/render-benchmark.md](docs/render-benchmark.md)
 for the full record schema and read-back integration roadmap.
 
+## Sourcing runbook
+
+jobsmith can automatically discover job postings by crawling ATS boards and ingesting job alert emails.  All sourcing is configured in `sourcing.yaml` at the root of your job-search repo.
+
+### Enable / disable the schedule
+
+```bash
+# Install the daily launchd schedule (runs once per day, 08:00 local time)
+jobsmith source install-schedule
+
+# Disable without removing — pause the schedule while keeping config
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/dev.jobsmith.source.plist
+
+# Re-enable
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.jobsmith.source.plist
+
+# Remove permanently
+jobsmith source uninstall-schedule   # or manually: rm ~/Library/LaunchAgents/dev.jobsmith.source.plist
+```
+
+The schedule uses `JOBSMITH_REPO_ROOT` to locate your `.apply-config.yaml` + `sourcing.yaml`.  When running via launchd the environment variable must be set in the plist (done automatically by `install-schedule`).  If you move your repo, re-run `install-schedule` to update the plist.
+
+### Add an ATS source
+
+Edit (or create) `sourcing.yaml` in your repo root:
+
+```yaml
+sources:
+  - type: greenhouse      # greenhouse | lever | ashby | hn_whos_hiring | climatebase
+    slug: stripe          # the board slug (from the company's Greenhouse URL)
+    company: Stripe       # canonical company name shown in the UI
+    name: Stripe          # display name (used in per-source funnel table)
+    enabled: true         # omit or set false to pause without removing
+```
+
+Run a one-off crawl to verify:
+
+```bash
+jobsmith source run              # crawl all enabled sources
+jobsmith source run --source greenhouse/stripe   # single source
+jobsmith source run --no-llm     # skip LLM rescore (fast_score only, no API cost)
+jobsmith source run --dry-run    # fetch + parse, but do not write to DB
+```
+
+### Add an email alert sender
+
+jobsmith can ingest job alert emails from Gmail or Apple Mail.
+
+**Gmail** (reads via Gmail API — requires `gcloud auth application-default login`):
+
+```yaml
+alert_senders:
+  - type: gmail_alert
+    sender: jobs-noreply@linkedin.com   # the From: address of the alert emails
+    sender_slug: linkedin-alert         # used as the source key (email/linkedin-alert)
+    enabled: true
+```
+
+**Apple Mail** (reads from the local Mail.app store — macOS only):
+
+```yaml
+alert_senders:
+  - type: mailapp_alert
+    sender_slug: indeed-alert
+    account: myemail@example.com   # Mail.app account name
+    mailbox: Job Alerts            # mailbox name inside that account
+    enabled: true
+```
+
+Set `enabled: false` on any sender to pause ingestion without removing the config.
+
+### Read the funnel and run-health
+
+After a crawl, open the jobsmith UI (`jobsmith up`) and navigate to:
+
+- **Postings inbox** — ranked list (LLM score desc, fast_score desc) with source, title, company.
+- **Funnel** — stage counts (sourced → queued → promoted → interview → offer), conversion rates, per-source yield.
+- **Run health** — state (`ok` / `degraded` / `stale` / `failed`), last run timestamp, degraded sources.
+
+Or query the API directly:
+
+```bash
+curl -s http://127.0.0.1:8000/api/postings | python3 -m json.tool
+curl -s http://127.0.0.1:8000/api/funnel?window=30 | python3 -m json.tool
+curl -s http://127.0.0.1:8000/api/sourcing/run-health | python3 -m json.tool
+```
+
+### `--no-llm` and budget caps
+
+The LLM rescore pass ranks the top-N new postings by fast_score using the Anthropic API.  To disable it:
+
+```bash
+jobsmith source run --no-llm
+```
+
+Or cap cost per run in `sourcing.yaml`:
+
+```yaml
+rescore_n_cap: 30         # top-N by fast_score to send to the LLM (default: 30)
+rescore_budget_usd: 1.00  # soft USD ceiling — stops after this spend (default: $1.00)
+```
+
+### JOBSMITH_REPO_ROOT semantics for launchd
+
+launchd strips most environment variables.  `install-schedule` injects `JOBSMITH_REPO_ROOT` into the plist pointing to your job-search repo root (the directory containing `.apply-config.yaml`).  The sourcing run reads `sourcing.yaml` from that root.
+
+If you use multiple repos, run `install-schedule` once per repo — it will create or overwrite the plist.  Check the current value:
+
+```bash
+launchctl getenv JOBSMITH_REPO_ROOT   # (only works inside a launchd session)
+cat ~/Library/LaunchAgents/dev.jobsmith.source.plist | grep -A1 JOBSMITH_REPO_ROOT
+```
+
+---
+
 ## Key principles
 
 - **Evidence > assumptions.** Every metric on the rendered resume must trace back to your master YAML. Halt the pipeline rather than fabricate.

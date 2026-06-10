@@ -240,6 +240,69 @@ export interface DoctorCheckResult {
   message: string;
 }
 
+// ── Postings ─────────────────────────────────────────────────────────────
+
+/** One posting row from GET /api/postings. */
+export interface PostingRow {
+  id: number;
+  source: string;
+  external_id?: string | null;
+  url?: string | null;
+  title?: string | null;
+  company?: string | null;
+  location?: string | null;
+  comp_text?: string | null;
+  posted_date?: string | null;
+  fast_score?: number | null;
+  llm_score?: number | null;
+  specialty?: string | null;
+  rationale?: string | null;
+  status: string;
+  promoted_application_id?: string | null;
+  dedup_key: string;
+  first_seen_at: string;
+  last_seen_at: string;
+}
+
+/** Response from POST /api/postings/{id}/promote. */
+export interface PostingPromoteResponse {
+  run_id: string;
+  slug?: string | null;
+  jd_fetch_failed: boolean;
+}
+
+// ── Funnel ────────────────────────────────────────────────────────────────
+
+export interface FunnelStages {
+  sourced: number;
+  queued: number;
+  promoted: number;
+  interview: number;
+  offer: number;
+}
+
+export interface FunnelConversions {
+  sourced_to_queued: number | null;
+  queued_to_promoted: number | null;
+  promoted_to_interview: number | null;
+  interview_to_offer: number | null;
+}
+
+export interface PerSourceRow {
+  source: string;
+  postings: number;
+  applied: number;
+  interview: number;
+  offer: number;
+}
+
+export interface FunnelResponse {
+  window: number | null;
+  stages: FunnelStages;
+  conversions: FunnelConversions;
+  per_source: PerSourceRow[];
+}
+
 // ── Master validate ──────────────────────────────────────────────────────
 
 export interface MasterValidateError {

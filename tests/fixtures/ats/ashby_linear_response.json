@@ -1,0 +1,23 @@
+{
+  "_comment": "[AUTHORED] Synthesized Ashby posting-api GET response for linear. No live recording exists.",
+  "jobs": [
+    {
+      "id": "ashby-job-001",
+      "title": "Senior Software Engineer, Platform",
+      "jobUrl": "https://jobs.ashbyhq.com/linear/ashby-job-001",
+      "locationName": "Remote",
+      "publishedAt": "2026-05-01T00:00:00Z",
+      "descriptionHtml": "<p>Linear is building the new standard for software project management. We are looking for a Senior Software Engineer to join the Platform team.</p><ul><li>Strong experience with distributed systems</li><li>Proficiency in TypeScript or similar</li></ul>",
+      "description": ""
+    },
+    {
+      "id": "ashby-job-002",
+      "title": "Staff Data Engineer",
+      "jobUrl": "https://jobs.ashbyhq.com/linear/ashby-job-002",
+      "locationName": "Remote",
+      "publishedAt": "2026-05-02T00:00:00Z",
+      "descriptionHtml": "<p>Build Linear's data platform. Own analytics pipelines for product telemetry, user behaviour, and operational metrics. Python, dbt, Snowflake environment.</p>",
+      "description": ""
+    }
+  ]
+}

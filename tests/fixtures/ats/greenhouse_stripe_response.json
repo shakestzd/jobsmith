@@ -1,0 +1,29 @@
+{
+  "_comment": "[REPRESENTATIVE] Synthesized from the documented Greenhouse boards-api shape. Not a recorded live response.",
+  "jobs": [
+    {
+      "id": 6014367,
+      "title": "Senior Data Engineer, Payments Platform",
+      "absolute_url": "https://boards.greenhouse.io/stripe/jobs/6014367",
+      "location": {"name": "Remote, US"},
+      "updated_at": "2026-04-10T18:00:00Z",
+      "content": "<p>Stripe is hiring a Senior Data Engineer to own data pipelines for the payments platform. Build ETL/ELT systems on AWS, work with the data warehouse team, and deliver reliable analytics for finance and operations.</p><h3>Requirements</h3><ul><li>5+ years data engineering</li><li>Strong SQL and Python</li><li>Experience with Spark, Airflow, dbt</li></ul>"
+    },
+    {
+      "id": 6014368,
+      "title": "Staff Data Engineer, Risk Platform",
+      "absolute_url": "https://boards.greenhouse.io/stripe/jobs/6014368",
+      "location": {"name": "Remote"},
+      "updated_at": "2026-04-09T12:00:00Z",
+      "content": "<p>Build the risk data platform. Real-time fraud detection, feature stores, vector retrieval. ML/RAG infrastructure for the risk org. Fully remote within the US.</p>"
+    },
+    {
+      "id": 6014369,
+      "title": "Customer Success Manager",
+      "absolute_url": "https://boards.greenhouse.io/stripe/jobs/6014369",
+      "location": {"name": "San Francisco, CA"},
+      "updated_at": "2026-04-08T09:00:00Z",
+      "content": "<p>Customer-facing role. Manage enterprise accounts.</p>"
+    }
+  ]
+}

@@ -1,9 +1,45 @@
 // chrome.tsx — Sidebar + Topbar components for the jobsmith shell.
 
-import { Fragment } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Icon } from './shared';
 import { useApplications } from '../api/hooks';
 import type { IconName, ThemeName, ViewName } from '../types';
+
+// ── Postings badge (new-since-last-visit) ─────────────────────────────────
+const LAST_VISIT_KEY = 'jobsmith.postings.last_visit';
+const JOBSMITH_DATA_CHANGED = 'jobsmith:data-changed';
+
+function usePostingsBadge(): number {
+  const [count, setCount] = useState(0);
+  // Bump this counter to trigger a re-fetch; starts at 0 so we fetch on mount.
+  const [version, setVersion] = useState(0);
+
+  // Re-fetch whenever the app signals that data has changed (e.g. a posting was
+  // promoted/dismissed or a sourcing run completed).  This mirrors the pattern
+  // used by usePostings in hooks.ts (branch-review finding #4).
+  useEffect(() => {
+    const onChanged = () => setVersion((v) => v + 1);
+    window.addEventListener(JOBSMITH_DATA_CHANGED, onChanged);
+    return () => window.removeEventListener(JOBSMITH_DATA_CHANGED, onChanged);
+  }, []);
+
+  useEffect(() => {
+    // Compute badge by fetching sourced postings newer than last visit.
+    // We re-read from localStorage each time this hook runs so the badge
+    // reflects the count at the time the user OPENS the inbox (not now).
+    import('../api/client').then(({ getPostings }) => {
+      getPostings({ status: 'sourced' })
+        .then((postings) => {
+          const raw = localStorage.getItem(LAST_VISIT_KEY);
+          const lv = raw ? Date.parse(raw) : 0;
+          setCount(postings.filter((p) => Date.parse(p.first_seen_at) > lv).length);
+        })
+        .catch(() => setCount(0));
+    });
+  }, [version]);
+
+  return count;
+}
 
 // ── Sidebar ──────────────────────────────────────────────────────────────
 export interface SidebarProps {
@@ -37,6 +73,7 @@ function NavItem({ id, icon, label, count, view, setView }: NavItemProps) {
 
 export function Sidebar({ view, open, setView, openNew }: SidebarProps) {
   const { data: apps } = useApplications();
+  const postingsBadge = usePostingsBadge();
 
   const counts = apps
     ? {
@@ -67,6 +104,8 @@ export function Sidebar({ view, open, setView, openNew }: SidebarProps) {
       <NavItem id="dashboard" icon="home" label="Applications" count={counts?.dashboard} view={view} setView={setView} />
       <NavItem id="running" icon="bolt" label="In progress" count={counts?.running} view={view} setView={setView} />
       <NavItem id="review" icon="eye" label="Needs review" count={counts?.review} view={view} setView={setView} />
+      <NavItem id="postings" icon="inbox" label="Postings" count={postingsBadge > 0 ? postingsBadge : undefined} view={view} setView={setView} />
+      <NavItem id="funnel" icon="chart" label="Funnel" view={view} setView={setView} />
 
       <div className="nav-section">Authoring</div>
       <NavItem id="master" icon="yaml" label="Master content" view={view} setView={setView} />

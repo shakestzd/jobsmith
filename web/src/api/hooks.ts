@@ -25,7 +25,10 @@ import type {
   JobsmithConfig,
   FeedbackRecord,
   DoctorCheckResult,
+  PostingRow,
 } from './types';
+import { getPostings } from './client';
+import type { PostingsFilter } from './client';
 
 // Re-export so callers can import from one place.
 export { JobsmithApiError };
@@ -295,6 +298,64 @@ export function useConfig(): UseQueryResult<JobsmithConfig> {
 
 export function useFeedback(): UseQueryResult<FeedbackRecord[]> {
   return useFetch<FeedbackRecord[]>('/api/feedback');
+}
+
+// ── Postings ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetch postings with optional filters and a badge count of new-since-last-visit.
+ * Re-fetches on mount and on jobsmith:data-changed events.
+ */
+export function usePostings(filter: PostingsFilter = {}): UseQueryResult<PostingRow[]> {
+  const [data, setData] = useState<PostingRow[] | undefined>(undefined);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const [version, setVersion] = useState(0);
+
+  useEffect(() => {
+    const onChanged = () => setVersion((v) => v + 1);
+    window.addEventListener(JOBSMITH_DATA_CHANGED, onChanged);
+    return () => window.removeEventListener(JOBSMITH_DATA_CHANGED, onChanged);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+    getPostings(filter)
+      .then((result) => {
+        if (!cancelled) {
+          setData(result);
+          setIsLoading(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err : new Error(String(err)));
+          setIsLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, JSON.stringify(filter)]);
+
+  return { data, isLoading, error };
+}
+
+// ── Run Health (sourcing pipeline) ───────────────────────────────────────
+
+export interface RunHealthResponse {
+  state: 'ok' | 'failed' | 'degraded' | 'stale' | 'no_runs' | 'unknown';
+  last_run_id?: string | null;
+  last_run_status?: string | null;
+  finished_at?: string | null;
+  error?: string | null;
+  degraded_sources?: string[] | null;
+  age_hours?: number | null;
+}
+
+export function useRunHealth(): UseQueryResult<RunHealthResponse> {
+  return useFetch<RunHealthResponse>('/api/sourcing/run-health');
 }
 
 // ── Doctor (with refetch) ────────────────────────────────────────────────

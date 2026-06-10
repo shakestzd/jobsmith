@@ -93,6 +93,106 @@ The e2e suite:
 5. Asserts master YAMLs written and DB rows present (concrete onboard check).
 6. Tears down the server subprocess in `finally` — no test hangs.
 
+## Sourcing runbook (for agents touching the sourcing pipeline)
+
+### Key sourcing files
+
+| File | Purpose |
+|------|---------|
+| `src/jobsmith/sourcing/runner.py` | `run_crawl()` orchestrator — ATS + email ingestion, expiry, LLM rescore seam |
+| `src/jobsmith/sourcing/store.py` | `upsert_posting`, `promote_posting`, `finish_sourcing_run` — DB helpers |
+| `src/jobsmith/sourcing/config.py` | `load_sourcing_config()` — reads `sourcing.yaml` |
+| `src/jobsmith/sourcing/llm_rescore.py` | LLM rescore pass — injectable `query_fn` for tests |
+| `src/jobsmith/sourcing/adapters/` | Per-ATS adapters: greenhouse, lever, ashby, hn_whos_hiring, climatebase |
+| `src/jobsmith/sourcing/email/` | Email ingestion: gmail.py, mailapp.py, parsers.py |
+| `src/jobsmith/api/postings_routes.py` | `GET /api/postings`, `POST /api/postings/{id}/status`, `POST /api/postings/{id}/promote` |
+| `src/jobsmith/api/funnel_routes.py` | `GET /api/funnel` — stage counts, conversion rates, per-source yield |
+| `src/jobsmith/api/run_health.py` | `GET /api/sourcing/run-health` — last run state + age |
+
+### Schedule management (launchd, macOS)
+
+```bash
+# Install the daily schedule (writes ~/Library/LaunchAgents/dev.jobsmith.source.plist)
+jobsmith source install-schedule
+
+# Disable (pause) without removing
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/dev.jobsmith.source.plist
+
+# Re-enable
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.jobsmith.source.plist
+```
+
+`install-schedule` embeds the current working directory as `JOBSMITH_REPO_ROOT` in the plist.  If the repo moves, re-run `install-schedule`.
+
+### Adding a source
+
+Add an entry under `sources:` in `sourcing.yaml` (at repo root, next to `.apply-config.yaml`):
+
+```yaml
+sources:
+  - type: greenhouse   # greenhouse | lever | ashby | hn_whos_hiring | climatebase
+    slug: stripe
+    company: Stripe
+    enabled: true
+```
+
+Verify with `jobsmith source run --source greenhouse/stripe --dry-run`.
+
+### Adding an email sender
+
+```yaml
+alert_senders:
+  - type: gmail_alert           # or mailapp_alert
+    sender: jobs@linkedin.com
+    sender_slug: linkedin-alert
+    enabled: true
+```
+
+### One-off crawl commands
+
+```bash
+jobsmith source run                       # all enabled sources + email senders
+jobsmith source run --source lever/netflix  # single source
+jobsmith source run --no-llm              # skip LLM rescore (no Anthropic API call)
+jobsmith source run --dry-run             # parse only, no DB writes
+```
+
+### Reading funnel / run-health
+
+```bash
+# Via API (server must be running: jobsmith up)
+curl -s http://127.0.0.1:8000/api/funnel?window=30
+curl -s http://127.0.0.1:8000/api/sourcing/run-health
+```
+
+`run-health` states: `ok` (last run done within 25 h), `stale` (> 25 h), `degraded` (some sources errored), `failed`, `no_runs`, `unknown`.
+
+### `--no-llm` and budget caps
+
+In `sourcing.yaml`:
+
+```yaml
+rescore_n_cap: 30         # top-N by fast_score sent to LLM (default 30)
+rescore_budget_usd: 1.00  # soft USD ceiling (default $1.00)
+```
+
+Pass `no_llm=True` to `run_crawl()` in tests to skip the LLM seam entirely (uses only `fast_score`).
+
+### DB migration
+
+The postings store lives in migration 010 (`postings` + `sourcing_runs` tables).  Open the pipeline DB with `jobsmith.db.open_pipeline_db(path)` which auto-applies all migrations.
+
+### Test patterns for the sourcing pipeline
+
+- Use the `_adapter_factory_for(roles_by_key)` pattern from `tests/test_sourcing_runner.py` to inject fake adapters.
+- Pass `_run_email_alerts_fn=<mock>` to `run_crawl()` to skip real Gmail / Mail.app.
+- Pass `no_llm=True` to skip LLM rescore — no Anthropic SDK calls.
+- Patch `jobsmith.sourcing.runner._INTER_SOURCE_SLEEP` to `0.0` in tests to skip the rate-limit sleep.
+- Monkeypatch `jobsmith.api.postings_routes._get_db_path` and `jobsmith.api.funnel_routes._get_db_path` to point TestClient at a temp DB.
+- Monkeypatch `jobsmith.api.run_health._resolve_db_path` (takes a `Request` arg) for run-health tests.
+
+See `tests/e2e/test_sourcing_funnel_e2e.py` for the full fixtures-only E2E example.
+
 ## Pre-existing test failures (do not regress)
 
 The default pytest run has 9 known pre-existing failures in:
