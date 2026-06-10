@@ -28,6 +28,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { ApplicationDetail } from './application';
+import { ProposalProvider } from './proposalContext';
 
 vi.mock('../api/client', () => ({
   apiGet: vi.fn(),
@@ -44,6 +45,10 @@ vi.mock('../api/client', () => ({
 }));
 
 import { apiGet, apiGetBlob, apiGetText, postApplication } from '../api/client';
+
+function renderWithProposal(ui: React.ReactElement) {
+  return render(<ProposalProvider>{ui}</ProposalProvider>);
+}
 
 // Mock EventSource — jsdom doesn't ship one, and we don't need real SSE here.
 // `constructorCalls` lets a test assert whether (and with what URL) the
@@ -111,7 +116,7 @@ describe('ApplicationDetail anti-regression: no fabricated fixtures (feat-83d6cf
   });
 
   it('does not render any of the fabricated event-log timestamps', async () => {
-    const { container } = render(
+    const { container } = renderWithProposal(
       <ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />,
     );
     await waitFor(() => {
@@ -125,7 +130,7 @@ describe('ApplicationDetail anti-regression: no fabricated fixtures (feat-83d6cf
   });
 
   it('does not render any of the fabricated cover-draft / PDF-preview strings', async () => {
-    const { container } = render(
+    const { container } = renderWithProposal(
       <ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />,
     );
     await waitFor(() => {
@@ -152,7 +157,7 @@ describe('ApplicationDetail anti-regression: no fabricated fixtures (feat-83d6cf
     (apiGetBlob as ReturnType<typeof vi.fn>).mockResolvedValue(new Blob(['pdf'], { type: 'application/pdf' }));
     (apiGetText as ReturnType<typeof vi.fn>).mockResolvedValue('Rendered cover letter');
 
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     await waitFor(() => {
       expect(screen.getByText('documents')).toBeInTheDocument();
     });
@@ -166,7 +171,7 @@ describe('ApplicationDetail anti-regression: no fabricated fixtures (feat-83d6cf
   });
 
   it('does not render any of the fabricated anchor IDs in the anchors tab', async () => {
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     await waitFor(() => {
       expect(screen.getByText('anchors')).toBeInTheDocument();
     });
@@ -186,7 +191,7 @@ describe('ApplicationDetail anti-regression: no fabricated fixtures (feat-83d6cf
   });
 
   it('does not render any of the fabricated DB-writes row counts', async () => {
-    const { container } = render(
+    const { container } = renderWithProposal(
       <ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />,
     );
     await waitFor(() => {
@@ -199,7 +204,7 @@ describe('ApplicationDetail anti-regression: no fabricated fixtures (feat-83d6cf
   });
 
   it('does not render fabricated factcheck claims when no fact-check artifact is present', async () => {
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     await waitFor(() => {
       expect(screen.getByText('factcheck')).toBeInTheDocument();
     });
@@ -245,7 +250,7 @@ describe('ApplicationDetail positive: API artifacts surface in DOM (feat-83d6cf5
         },
       ],
     });
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     await waitFor(() => {
       expect(screen.getByText('factcheck')).toBeInTheDocument();
     });
@@ -294,7 +299,7 @@ describe('ApplicationDetail positive: API artifacts surface in DOM (feat-83d6cf5
         },
       ],
     });
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     await waitFor(() => {
       expect(screen.getByText('anchors')).toBeInTheDocument();
     });
@@ -327,7 +332,7 @@ describe('ApplicationDetail positive: API artifacts surface in DOM (feat-83d6cf5
         },
       ],
     });
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     await waitFor(() => {
       expect(screen.getByText('artifacts')).toBeInTheDocument();
     });
@@ -344,7 +349,7 @@ describe('ApplicationDetail positive: API artifacts surface in DOM (feat-83d6cf5
       ...BASE_API_DETAIL,
       artifacts: [],
     });
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     await waitFor(() => {
       expect(screen.getByText('artifacts')).toBeInTheDocument();
     });
@@ -366,7 +371,7 @@ describe('ApplicationDetail SSE auto-subscribe (roborev job 945)', () => {
       ui_phase: 'running',
       finished_at: null,
     });
-    render(<ApplicationDetail slug="still-running" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="still-running" back={() => {}} />);
     await waitFor(() => {
       expect(constructorCalls.length).toBeGreaterThan(0);
     });
@@ -379,7 +384,7 @@ describe('ApplicationDetail SSE auto-subscribe (roborev job 945)', () => {
       status: 'rendered',
       ui_phase: 'rendered',
     });
-    render(<ApplicationDetail slug="finished" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="finished" back={() => {}} />);
     await waitFor(() => {
       expect(screen.getByText('finished')).toBeInTheDocument();
     });
@@ -402,7 +407,7 @@ describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
       ...BASE_API_DETAIL,
       status: 'done',
     });
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /force re-run apply/i })).toBeInTheDocument();
     });
@@ -413,7 +418,7 @@ describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
       ...BASE_API_DETAIL,
       status: 'rendered',
     });
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /force re-run apply/i })).toBeInTheDocument();
     });
@@ -424,7 +429,7 @@ describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
       ...BASE_API_DETAIL,
       status: 'backfilled',
     });
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /force re-run apply/i })).toBeInTheDocument();
     });
@@ -436,7 +441,7 @@ describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
       status: 'failed',
       finished_at: null,
     });
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /^re-run apply$/i })).toBeInTheDocument();
     });
@@ -448,7 +453,7 @@ describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
       ...BASE_API_DETAIL,
       status: 'done',
     });
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     const btn = await screen.findByRole('button', { name: /force re-run apply/i });
     fireEvent.click(btn);
     await waitFor(() => {
@@ -465,7 +470,7 @@ describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
       ...BASE_API_DETAIL,
       status: 'failed',
     });
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     const btn = await screen.findByRole('button', { name: /^re-run apply$/i });
     fireEvent.click(btn);
     await waitFor(() => {
@@ -483,7 +488,7 @@ describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
       status: 'done',
       url: 'https://real.example.com/jobs/clay-gtm-data-analyst',
     });
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     const btn = await screen.findByRole('button', { name: /force re-run apply/i });
     fireEvent.click(btn);
     await waitFor(() => {
@@ -505,7 +510,7 @@ describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
       status: 'done',
       url: '',
     });
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     const btn = await screen.findByRole('button', { name: /force re-run apply/i });
     expect(btn).toBeDisabled();
   });
@@ -517,7 +522,7 @@ describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
     };
     void _drop;
     (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue(detailWithoutUrl);
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     const btn = await screen.findByRole('button', { name: /^re-run apply$/i });
     expect(btn).toBeDisabled();
     fireEvent.click(btn);
@@ -547,7 +552,7 @@ describe('ApplicationDetail apply_url wiring (feat-bb81c3ce)', () => {
       apply_url: 'https://example.com/jobs/123',
       url: undefined,
     });
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     const btn = await screen.findByRole('button', { name: /force re-run apply/i });
     expect(btn).not.toBeDisabled();
     fireEvent.click(btn);
@@ -567,7 +572,7 @@ describe('ApplicationDetail apply_url wiring (feat-bb81c3ce)', () => {
       apply_url: null,
       url: undefined,
     });
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     const btn = await screen.findByRole('button', { name: /force re-run apply/i });
     expect(btn).toBeDisabled();
     fireEvent.click(btn);
@@ -581,7 +586,7 @@ describe('ApplicationDetail apply_url wiring (feat-bb81c3ce)', () => {
       apply_url: 'https://new-field.example.com/jobs/456',
       url: 'https://old-field.example.com/jobs/old',
     });
-    render(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     const btn = await screen.findByRole('button', { name: /force re-run apply/i });
     fireEvent.click(btn);
     await waitFor(() => {
@@ -617,7 +622,7 @@ describe('ApplicationDetail SSE phase wiring (feat-6e148975)', () => {
       finished_at: null,
       run_id: 'run-sse-1',
     });
-    render(<ApplicationDetail slug="sse-test-slug" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="sse-test-slug" back={() => {}} />);
     // Wait until EventSource is created and the page is rendered.
     await waitFor(() => expect(lastFakeEs).not.toBeNull());
 
@@ -649,7 +654,7 @@ describe('ApplicationDetail SSE phase wiring (feat-6e148975)', () => {
       finished_at: null,
       run_id: 'run-sse-2',
     });
-    render(<ApplicationDetail slug="sse-test-slug-2" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="sse-test-slug-2" back={() => {}} />);
     await waitFor(() => expect(lastFakeEs).not.toBeNull());
 
     // gather → done
@@ -694,7 +699,7 @@ describe('ApplicationDetail SSE phase wiring (feat-6e148975)', () => {
       finished_at: null,
       run_id: 'run-sse-3',
     });
-    render(<ApplicationDetail slug="sse-test-slug-3" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="sse-test-slug-3" back={() => {}} />);
     await waitFor(() => expect(lastFakeEs).not.toBeNull());
 
     // Initially the header badge should show "running" (from apiDetail.status=running).
@@ -741,7 +746,7 @@ describe('ApplicationDetail SSE phase wiring (feat-6e148975)', () => {
       finished_at: null,
       run_id: 'run-sse-5',
     });
-    render(<ApplicationDetail slug="sse-test-slug-5" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="sse-test-slug-5" back={() => {}} />);
     await waitFor(() => expect(lastFakeEs).not.toBeNull());
 
     // Initial running badge present.
@@ -779,7 +784,7 @@ describe('ApplicationDetail SSE phase wiring (feat-6e148975)', () => {
       finished_at: null,
       run_id: 'run-sse-fail-1',
     });
-    render(<ApplicationDetail slug="sse-test-fail-1" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="sse-test-fail-1" back={() => {}} />);
     await waitFor(() => expect(lastFakeEs).not.toBeNull());
 
     // Pipeline starts with gather/running.
@@ -826,7 +831,7 @@ describe('ApplicationDetail SSE phase wiring (feat-6e148975)', () => {
       finished_at: null,
       run_id: 'run-sse-4',
     });
-    render(<ApplicationDetail slug="sse-test-slug-4" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="sse-test-slug-4" back={() => {}} />);
     await waitFor(() => expect(lastFakeEs).not.toBeNull());
 
     // The header badge should show "running" (class "badge accent").
@@ -869,7 +874,7 @@ describe('ApplicationDetail SSE phase wiring (feat-6e148975)', () => {
         transcript_ref: null,
       })),
     });
-    render(<ApplicationDetail slug="sse-test-artifact-progress" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="sse-test-artifact-progress" back={() => {}} />);
 
     await waitFor(() => {
       const phaseStatuses = document.querySelectorAll('.phase-status');
@@ -899,7 +904,7 @@ describe('ApplicationDetail SSE transcript wiring (bug-0e13706c)', () => {
       finished_at: null,
       run_id: 'run-tx-1',
     });
-    render(<ApplicationDetail slug="tx-1" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="tx-1" back={() => {}} />);
     await waitFor(() => expect(lastFakeEs).not.toBeNull());
 
     await act(async () => {
@@ -928,7 +933,7 @@ describe('ApplicationDetail SSE transcript wiring (bug-0e13706c)', () => {
       finished_at: null,
       run_id: 'run-tx-2',
     });
-    render(<ApplicationDetail slug="tx-2" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="tx-2" back={() => {}} />);
     await waitFor(() => expect(lastFakeEs).not.toBeNull());
 
     await act(async () => {
@@ -951,7 +956,7 @@ describe('ApplicationDetail SSE transcript wiring (bug-0e13706c)', () => {
       finished_at: null,
       run_id: 'run-tx-3',
     });
-    render(<ApplicationDetail slug="tx-3" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="tx-3" back={() => {}} />);
     await waitFor(() => expect(lastFakeEs).not.toBeNull());
 
     // Get baseline event-row count.
@@ -997,7 +1002,7 @@ describe('ApplicationDetail fromApi unknown-phase fix (bug-300fb9ad)', () => {
       finished_at: '2026-05-01T10:00:00Z',
       run_id: 'run-bug-300fb9ad-1',
     });
-    render(<ApplicationDetail slug="failed-unknown-phase" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="failed-unknown-phase" back={() => {}} />);
     await waitFor(() => {
       // Wait for the API data to load (loading spinner gone, page rendered)
       expect(screen.queryByText(/loading/i)).toBeNull();
@@ -1022,7 +1027,7 @@ describe('ApplicationDetail fromApi unknown-phase fix (bug-300fb9ad)', () => {
       finished_at: '2026-05-01T10:00:00Z',
       run_id: 'run-bug-300fb9ad-2',
     });
-    render(<ApplicationDetail slug="failed-gather-phase" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="failed-gather-phase" back={() => {}} />);
     await waitFor(() => {
       expect(screen.queryByText(/loading/i)).toBeNull();
     });
@@ -1046,7 +1051,7 @@ describe('ApplicationDetail fromApi unknown-phase fix (bug-300fb9ad)', () => {
       finished_at: '2026-05-01T10:00:00Z',
       run_id: 'run-bug-300fb9ad-3',
     });
-    render(<ApplicationDetail slug="failed-draft-phase" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="failed-draft-phase" back={() => {}} />);
     await waitFor(() => {
       expect(screen.queryByText(/loading/i)).toBeNull();
     });
@@ -1068,7 +1073,7 @@ describe('ApplicationDetail fromApi unknown-phase fix (bug-300fb9ad)', () => {
       finished_at: '2026-05-01T10:00:00Z',
       run_id: 'run-bug-300fb9ad-4',
     });
-    render(<ApplicationDetail slug="failed-render-phase" back={() => {}} />);
+    renderWithProposal(<ApplicationDetail slug="failed-render-phase" back={() => {}} />);
     await waitFor(() => {
       expect(screen.queryByText(/loading/i)).toBeNull();
     });
