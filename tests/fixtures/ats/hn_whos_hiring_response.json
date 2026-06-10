@@ -1,0 +1,24 @@
+{
+  "_comment": "[AUTHORED] Synthesized Algolia HN search API response for 'Ask HN: Who is Hiring?' thread. No live recording exists.",
+  "hits": [
+    {
+      "objectID": "hn-comment-111",
+      "comment_text": "<p>Acme Fintech | Senior Data Engineer | Remote | $160k-$200k<br>We are building real-time payments infrastructure. Looking for engineers with strong Python and distributed systems experience. Apply at https://acmefintech.com/jobs</p>",
+      "created_at": "2026-06-01T10:00:00Z"
+    },
+    {
+      "objectID": "hn-comment-222",
+      "comment_text": "<p>GreenEnergy AI | ML Engineer, Tax Equity | REMOTE | Full-time<br>Working on AI tools for solar ITC/PTC structuring. Elixir backend, LangGraph agents. Competitive comp. DM or email jobs@greenenergyai.com</p>",
+      "created_at": "2026-06-01T11:00:00Z"
+    },
+    {
+      "objectID": "hn-comment-333",
+      "comment_text": "<p>InOffice Corp | Office Manager | In-person only | Chicago<br>Managing the Chicago HQ. Catering, scheduling, supply orders.</p>",
+      "created_at": "2026-06-01T12:00:00Z"
+    }
+  ],
+  "nbHits": 3,
+  "page": 0,
+  "nbPages": 1,
+  "hitsPerPage": 100
+}

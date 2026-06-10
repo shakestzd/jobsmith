@@ -2358,5 +2358,117 @@ from jobsmith.reuse._cli_reuse import reuse_app  # noqa: E402
 app.add_typer(reuse_app, name="reuse")
 
 
+# ---------- source subcommand group (feat-5531c54b) ----------
+
+
+source_app = typer.Typer(
+    name="source",
+    help="Job sourcing commands — crawl ATS boards and ingest postings.",
+    no_args_is_help=True,
+)
+app.add_typer(source_app, name="source")
+
+
+@source_app.command("run")
+def source_run(
+    no_llm: bool = typer.Option(
+        False,
+        "--no-llm",
+        help="Skip LLM rescoring (seam for slice 4, feat-1602d64c; currently always a no-op).",
+    ),
+    source_filter: str | None = typer.Option(
+        None,
+        "--source",
+        help=(
+            "Only crawl a single source by key (e.g. 'greenhouse/stripe'). "
+            "Useful for testing a single adapter."
+        ),
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Fetch from sources but do not write to DB.",
+    ),
+    config_path: Path | None = typer.Option(
+        None,
+        "--sourcing-config",
+        help="Explicit path to sourcing.yaml (default: auto-discover).",
+        exists=False,
+    ),
+) -> None:
+    """Crawl enabled ATS sources and upsert postings into the pipeline DB.
+
+    Reads sourcing.yaml from the repo root (resolved via JOBSMITH_REPO_ROOT or
+    walk-up). Fast-scores each posting and writes to the postings table.
+    Auto-expires postings not re-sighted within expiry_days (default 21).
+
+    Seam for LLM rescoring (slice 4, feat-1602d64c): pass --no-llm to
+    suppress LLM scoring when that slice is integrated; currently a no-op.
+
+    Example::
+
+        jobsmith source run
+        jobsmith source run --source greenhouse/stripe
+        jobsmith source run --dry-run
+    """
+    from .sourcing.config import load_sourcing_config
+    from .sourcing.runner import run_crawl
+
+    # Resolve DB path
+    cfg_file = find_config(Path.cwd())
+    if cfg_file is None:
+        console.print(
+            f"[red]ERROR:[/red] No {CONFIG_FILENAME} found — run `jobsmith init` first."
+        )
+        raise typer.Exit(code=2)
+    config = load_config(cfg_file)
+    repo_root = repo_root_for()
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        console.print(f"[red]ERROR:[/red] Pipeline DB not found at {db_path}.")
+        raise typer.Exit(code=2)
+
+    # Load sourcing config
+    sourcing_cfg = load_sourcing_config(config_path)
+    if not sourcing_cfg.sources:
+        console.print(
+            "[yellow]No enabled sources found.[/yellow] "
+            f"Create {repo_root / 'sourcing.yaml'} with a 'sources:' list."
+        )
+        raise typer.Exit(code=0)
+
+    console.print(
+        f"[bold]jobsmith source run[/bold] — {len(sourcing_cfg.sources)} source(s)"
+        + (" [dim](dry-run)[/dim]" if dry_run else "")
+    )
+
+    try:
+        summary = run_crawl(
+            db_path=db_path,
+            sources=sourcing_cfg.sources,
+            max_per_source=sourcing_cfg.max_per_source,
+            global_timeout_sec=sourcing_cfg.global_timeout_sec,
+            expiry_days=sourcing_cfg.expiry_days,
+            dry_run=dry_run,
+            no_llm=no_llm,
+            source_filter=source_filter,
+        )
+    except Exception as exc:
+        console.print(f"[red]ERROR:[/red] crawl failed: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        f"[green]done.[/green] "
+        f"fetched={summary['roles_fetched']} "
+        f"upserted={summary['roles_upserted']} "
+        f"expired={summary['roles_expired']} "
+        f"sources={len(summary['sources_checked'])}"
+    )
+    if summary["degraded_sources"]:
+        console.print(
+            f"[yellow]degraded sources:[/yellow] {', '.join(summary['degraded_sources'])}"
+        )
+
+
 if __name__ == "__main__":
     app()
