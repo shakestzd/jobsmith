@@ -1,0 +1,18 @@
+meta:
+    id: plan-4def4798
+    track_id: trk-32e544db
+    title: 'Sourcing-to-apply funnel: crawler port, email ingestion, postings inbox, funnel dashboard'
+    description: 'Move job retrieval into jobsmith and couple it to the apply pipeline: postings table + funnel states, ported ATS adapters, Gmail/Mail.app alert parsing, LLM rescoring via agent-sdk, ranked inbox UI with one-click apply, launchd scheduling with visible run health, and a funnel conversion dashboard.'
+    created_at: "2026-06-10"
+    status: draft
+    priority: medium
+    schema_version: v3
+    version: 2
+design:
+    problem: ""
+    goals: []
+    constraints: []
+    approved: false
+    comment: ""
+slices: []
+questions: []
