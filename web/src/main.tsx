@@ -13,6 +13,7 @@ import { MasterContent, MarkAnchorsView } from './app/master';
 import { SiteView, FeedbackView, DoctorView, ConfigView } from './app/views';
 import { OnboardWizard } from './app/onboard';
 import { PostingsView } from './app/postings';
+import { FunnelView } from './app/funnel';
 import { ChatPanel } from './app/chat';
 import { ProposalProvider } from './app/proposalContext';
 
@@ -130,6 +131,7 @@ function App() {
   } else if (view === 'running')   { crumbs = ['jobsmith', 'in progress'];
   } else if (view === 'review')    { crumbs = ['jobsmith', 'needs review'];
   } else if (view === 'postings')  { crumbs = ['jobsmith', 'postings'];
+  } else if (view === 'funnel')    { crumbs = ['jobsmith', 'funnel'];
   } else if (view === 'master')    { crumbs = ['jobsmith', 'master content'];
   } else if (view === 'anchors')   { crumbs = ['jobsmith', 'mark anchors'];
   } else if (view === 'site')      { crumbs = ['jobsmith', 'listings site'];
@@ -155,6 +157,8 @@ function App() {
         onPromoted={(slug: string) => { setOpenSlug(slug); }}
       />
     );
+  } else if (view === 'funnel') {
+    body = <FunnelView />;
   } else if (view === 'master') { body = <MasterContent />;
   } else if (view === 'anchors') { body = <MarkAnchorsView />;
   } else if (view === 'site')    { body = <SiteView />;

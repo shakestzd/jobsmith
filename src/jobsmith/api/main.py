@@ -50,6 +50,7 @@ from jobsmith.api.deps import upsert_or_load_user
 from jobsmith.api.doctor import router as doctor_router
 from jobsmith.api.events import router as events_router
 from jobsmith.api.feedback import router as feedback_router
+from jobsmith.api.funnel_routes import router as funnel_router
 from jobsmith.api.jd_routes import router as jd_router
 from jobsmith.api.master import router as master_router
 from jobsmith.api.onboard_routes import router as onboard_router
@@ -309,6 +310,12 @@ def create_app() -> FastAPI:
     # feat-827071e1  /api/postings  (sourcing inbox — trk-cf0dc034 slice 5)
     app.include_router(
         postings_router,
+        prefix="/api",
+        dependencies=[Depends(current_user)],
+    )
+    # feat-28a41d1c  /api/funnel  (funnel dashboard — trk-cf0dc034 slice 7)
+    app.include_router(
+        funnel_router,
         prefix="/api",
         dependencies=[Depends(current_user)],
     )

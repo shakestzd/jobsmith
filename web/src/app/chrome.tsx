@@ -93,6 +93,7 @@ export function Sidebar({ view, open, setView, openNew }: SidebarProps) {
       <NavItem id="running" icon="bolt" label="In progress" count={counts?.running} view={view} setView={setView} />
       <NavItem id="review" icon="eye" label="Needs review" count={counts?.review} view={view} setView={setView} />
       <NavItem id="postings" icon="inbox" label="Postings" count={postingsBadge > 0 ? postingsBadge : undefined} view={view} setView={setView} />
+      <NavItem id="funnel" icon="chart" label="Funnel" view={view} setView={setView} />
 
       <div className="nav-section">Authoring</div>
       <NavItem id="master" icon="yaml" label="Master content" view={view} setView={setView} />
