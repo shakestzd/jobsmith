@@ -2470,5 +2470,91 @@ def source_run(
         )
 
 
+@source_app.command("install-schedule")
+def source_install_schedule(
+    hour: int = typer.Option(
+        11,
+        "--hour",
+        help="UTC hour for StartCalendarInterval (default: 11 → ~7 AM ET EDT).",
+    ),
+    minute: int = typer.Option(
+        13,
+        "--minute",
+        help="Minute for StartCalendarInterval (default: 13).",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Render the plist and print it without writing or loading.",
+    ),
+) -> None:
+    """Render the launchd plist and install it via launchctl.
+
+    Writes com.jobsmith.sourcing.plist to ~/Library/LaunchAgents/ and
+    loads it with ``launchctl bootstrap gui/<uid>``.
+
+    The plist hard-codes the absolute binary path (resolved via which) and
+    sets JOBSMITH_REPO_ROOT so launchd's minimal-PATH environment can
+    find your DB and sourcing.yaml.
+
+    IMPORTANT: the installed ``jobsmith`` uv tool must be up to date before
+    running this command — use ``uv tool install --reinstall jobsmith``.
+
+    Example::
+
+        jobsmith source install-schedule
+        jobsmith source install-schedule --hour 12 --minute 0
+        jobsmith source install-schedule --dry-run
+    """
+    import shutil
+
+    from .sourcing.schedule import LAUNCHD_LABEL, install_schedule, render_plist
+
+    # Resolve binary
+    binary = shutil.which("jobsmith")
+    if binary is None:
+        console.print("[red]ERROR:[/red] jobsmith binary not found on PATH.")
+        raise typer.Exit(code=1)
+
+    # Resolve repo root
+    repo_root = repo_root_for()
+
+    log_dir = repo_root / "logs"
+
+    if dry_run:
+        plist_str = render_plist(
+            binary_path=Path(binary),
+            repo_root=repo_root,
+            log_dir=log_dir,
+            hour=hour,
+            minute=minute,
+        )
+        console.print("[bold]Rendered plist (dry-run — not written):[/bold]")
+        console.print(plist_str)
+        raise typer.Exit(code=0)
+
+    try:
+        dest = install_schedule(
+            repo_root=repo_root,
+            log_dir=log_dir,
+            hour=hour,
+            minute=minute,
+        )
+        console.print(f"[green]installed:[/green] {dest}")
+        console.print(
+            f"[dim]label:[/dim] {LAUNCHD_LABEL}  "
+            f"[dim]schedule:[/dim] {hour:02d}:{minute:02d} UTC daily"
+        )
+        console.print(
+            f"[dim]test with:[/dim] launchctl kickstart -k gui/$(id -u)/{LAUNCHD_LABEL}"
+        )
+    except RuntimeError as exc:
+        console.print(f"[red]ERROR:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:
+        console.print(f"[red]ERROR:[/red] install-schedule failed: {exc}")
+        raise typer.Exit(code=1) from exc
+
+
 if __name__ == "__main__":
     app()
