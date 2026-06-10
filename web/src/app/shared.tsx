@@ -92,6 +92,11 @@ const ICON_PATHS: IconPaths = {
       <circle cx="8" cy="8" r="2" />
     </>
   ),
+  inbox: (
+    <>
+      <path d="M2 9h3l1.5 2h3L11 9h3M2 3h12v10H2z" />
+    </>
+  ),
 };
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {

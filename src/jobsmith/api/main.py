@@ -53,6 +53,7 @@ from jobsmith.api.feedback import router as feedback_router
 from jobsmith.api.jd_routes import router as jd_router
 from jobsmith.api.master import router as master_router
 from jobsmith.api.onboard_routes import router as onboard_router
+from jobsmith.api.postings_routes import router as postings_router
 from jobsmith.api.snapshots import router as snapshots_router
 from jobsmith.api.staticui import mount_static_ui
 from jobsmith.paths import repo_root_for
@@ -301,6 +302,12 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         onboard_router,
+        prefix="/api",
+        dependencies=[Depends(current_user)],
+    )
+    # feat-827071e1  /api/postings  (sourcing inbox — trk-cf0dc034 slice 5)
+    app.include_router(
+        postings_router,
         prefix="/api",
         dependencies=[Depends(current_user)],
     )

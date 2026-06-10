@@ -240,6 +240,37 @@ export interface DoctorCheckResult {
   message: string;
 }
 
+// ── Postings ─────────────────────────────────────────────────────────────
+
+/** One posting row from GET /api/postings. */
+export interface PostingRow {
+  id: number;
+  source: string;
+  external_id?: string | null;
+  url?: string | null;
+  title?: string | null;
+  company?: string | null;
+  location?: string | null;
+  comp_text?: string | null;
+  posted_date?: string | null;
+  fast_score?: number | null;
+  llm_score?: number | null;
+  specialty?: string | null;
+  rationale?: string | null;
+  status: string;
+  promoted_application_id?: string | null;
+  dedup_key: string;
+  first_seen_at: string;
+  last_seen_at: string;
+}
+
+/** Response from POST /api/postings/{id}/promote. */
+export interface PostingPromoteResponse {
+  run_id: string;
+  slug?: string | null;
+  jd_fetch_failed: boolean;
+}
+
 // ── Master validate ──────────────────────────────────────────────────────
 
 export interface MasterValidateError {
