@@ -35,6 +35,7 @@ from jobsmith.api.artifacts import _get_db_path, _row_to_envelope
 from jobsmith.api.schemas.artifacts import ArtifactEnvelope
 from jobsmith.api.supervisor import RunSupervisor, get_supervisor
 from jobsmith.apply import derive_slug
+from jobsmith.assemble import _extract_letter_body as _extract_letter_body_salutation
 from jobsmith.db import open_pipeline_db
 from jobsmith.paths import repo_root_for
 
@@ -1181,17 +1182,31 @@ def _typst_escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _build_cover_letter_qmd(body_md: str, author: dict) -> str:
+def _build_cover_letter_qmd(
+    body_md: str,
+    author: dict,
+    *,
+    job_company: str | None = None,
+    job_position: str | None = None,
+) -> str:
     """Render a self-contained ``cover-letter.qmd`` (standalone ``format: typst``).
 
     Chosen over reusing the resume's awesomecv extension because awesomecv is a
     resume-only format (no letter layout) and reusing its internals risks Typst
-    compile errors. This standalone layout pulls the contact header from
-    author.yml/_variables.yml (passed in *author*) and renders the draft body as
-    markdown paragraphs — guaranteed to compile to a professional letter.
+    compile errors. This standalone layout mirrors the awesomecv visual system
+    (Inter font, accent #262F99, name colours #131A28/#333333 — mirrored from
+    templates/extensions/_extensions/awesomecv/awesomecv/typst-template.typ)
+    and composes a proper letter: header → date → recipient block → salutation +
+    body paragraphs.
+
+    *body_md* must already be stripped to salutation-onwards (caller's
+    responsibility — use ``_extract_letter_body_salutation``).
+
+    *job_company* / *job_position*: structured application data for the
+    recipient block; both are optional and the block is omitted when absent.
     """
     name = _typst_escape(author.get("name", "") or "")
-    position = _typst_escape(author.get("position", "") or "")
+    tagline = _typst_escape(author.get("position", "") or "")
 
     contact_bits: list[str] = []
     for key in ("location", "email", "phone"):
@@ -1209,19 +1224,52 @@ def _build_cover_letter_qmd(body_md: str, author: dict) -> str:
     # Body paragraphs: blank-line-separated blocks become markdown paragraphs.
     body = body_md.strip()
 
+    # ---------------------------------------------------------------------------
+    # Typst header — styled to match the awesomecv resume visual system.
+    #
+    # Constants mirrored from awesomecv/typst-template.typ:
+    #   color-darknight  = rgb("#131A28")   (name primary colour)
+    #   color-darkgray   = rgb("#333333")   (name secondary / contact colour)
+    #   color-accent     = rgb("#262F99")   (position / tagline colour)
+    #   font             = "Inter"          (primary font, matches resume)
+    #
     # NOTE: text values are placed inside Typst STRING LITERALS (#text(...)["..."])
     # rather than raw content brackets, because characters like "@" and "." in an
     # email/url parse as Typst label/reference syntax inside content blocks and
     # break compilation. String literals are inert.
+    # ---------------------------------------------------------------------------
     header_typ = (
+        '#set text(font: ("Inter", "Source Sans 3", "Arial", "Helvetica"))\n'
         '#align(center)[\n'
-        f'  #text(size: 17pt, weight: "bold")[#"{name}"]\n'
+        f'  #text(size: 18pt, weight: "bold", fill: rgb("#131A28"))[#"{name}"]\n'
     )
-    if position:
-        header_typ += f'  #v(2pt)\n  #text(size: 9.5pt, fill: rgb("#555"))[#"{position}"]\n'
+    if tagline:
+        header_typ += (
+            f'  #v(3pt)\n'
+            f'  #text(size: 10pt, fill: rgb("#262F99"))[#"{tagline}"]\n'
+        )
     if contact_line:
-        header_typ += f'  #v(3pt)\n  #text(size: 9pt, fill: rgb("#666"))[#"{contact_line}"]\n'
-    header_typ += ']\n#v(6pt)\n#line(length: 100%, stroke: 0.5pt + rgb("#ccc"))\n#v(12pt)\n'
+        header_typ += (
+            f'  #v(4pt)\n'
+            f'  #text(size: 9pt, fill: rgb("#333333"))[#"{contact_line}"]\n'
+        )
+    header_typ += ']\n#v(6pt)\n#line(length: 100%, stroke: 0.5pt + rgb("#262F99"))\n#v(14pt)\n'
+
+    # Date line (ISO today → human-readable in Typst).
+    header_typ += '#align(right)[#text(size: 10pt, fill: rgb("#333333"))[#datetime.today().display("[month repr:long] [day], [year]")]]\n'
+    header_typ += '#v(12pt)\n'
+
+    # Recipient block — composed from structured job data, not from the draft.
+    if job_company or job_position:
+        company_esc = _typst_escape(job_company or "")
+        position_esc = _typst_escape(job_position or "")
+        header_typ += '#text(size: 10pt, fill: rgb("#333333"))[\n'
+        header_typ += '  Hiring Team\\\n'
+        if company_esc:
+            header_typ += f'  #"{company_esc}"\\\n'
+        if position_esc:
+            header_typ += f'  *Re: Application for #"{position_esc}"*\n'
+        header_typ += ']\n#v(14pt)\n'
 
     return (
         "---\n"
@@ -1257,6 +1305,12 @@ def _render_cover_letter_pdf(slug: str) -> dict:
     try:
         cl_path = _resolve_cover_letter(slug, conn)
         docs_dir = _resolve_docs_dir(slug, conn)
+        # Fetch company/position for the recipient block from structured job data.
+        job_company: str | None = None
+        job_position: str | None = None
+        run_row = _find_run_row_for_slug(conn, slug)
+        if run_row is not None:
+            job_position, job_company, _ = _extract_jd_fields(conn, run_row["run_id"])
     finally:
         conn.close()
 
@@ -1274,12 +1328,21 @@ def _render_cover_letter_pdf(slug: str) -> dict:
     if not docs_dir.exists():
         raise HTTPException(status_code=404, detail=f"No documents directory for {slug!r}")
 
-    body_md = cl_path.read_text(encoding="utf-8")
-    if not body_md.strip():
+    raw_md = cl_path.read_text(encoding="utf-8")
+    if not raw_md.strip():
         raise HTTPException(status_code=404, detail=f"Cover-letter draft for {slug!r} is empty")
 
+    # Strip any standalone draft header (H1 title, contact block, RE: line) —
+    # keep only salutation-onwards. Body-only drafts pass through unchanged.
+    body_md = _extract_letter_body_salutation(raw_md)
+
     author = _load_letter_author(docs_dir)
-    qmd_text = _build_cover_letter_qmd(body_md, author)
+    qmd_text = _build_cover_letter_qmd(
+        body_md,
+        author,
+        job_company=job_company or None,
+        job_position=job_position or None,
+    )
     qmd_path = docs_dir / _COVER_LETTER_QMD
     try:
         qmd_path.write_text(qmd_text, encoding="utf-8")
