@@ -114,3 +114,70 @@ class TestApplyCoverLetter:
             json={"new_content": "   "},
         )
         assert resp.status_code == 422
+
+    def test_salutation_dear_org_applies_without_422(
+        self, apply_client: tuple[TestClient, Path, str]
+    ) -> None:
+        """'Dear BECU Hiring Team,' in a greeting must not trigger fact-check failure.
+
+        Reproduces the live bug: greeting edits were 422-rejected because the
+        salutation phrase was treated as a hard claim. The greeting line is now
+        exempt; the body claim (42% / 3 years / Globex) is in master content.
+        """
+        client, cl_path, slug = apply_client
+        new_content = (
+            "Dear BECU Hiring Team,\n\n"
+            "At Globex I increased revenue by 42% over 3 years.\n\n"
+            "Sincerely,"
+        )
+        resp = client.post(
+            f"/api/applications/{slug}/cover-letter/apply",
+            json={"new_content": new_content},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["applied"] is True
+        assert cl_path.read_text(encoding="utf-8") == new_content
+
+    def test_salutation_hello_org_applies_without_422(
+        self, apply_client: tuple[TestClient, Path, str]
+    ) -> None:
+        """'Hello BECU,' must not be rejected — salutation is not a verifiable claim."""
+        client, cl_path, slug = apply_client
+        new_content = (
+            "Hello BECU,\n\n"
+            "At Globex I increased revenue by 42% over 3 years.\n\n"
+            "Best regards,"
+        )
+        resp = client.post(
+            f"/api/applications/{slug}/cover-letter/apply",
+            json={"new_content": new_content},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["applied"] is True
+
+    def test_fabricated_body_claim_still_rejected_with_greeting(
+        self, apply_client: tuple[TestClient, Path, str]
+    ) -> None:
+        """Greeting exemption must not weaken body-claim verification.
+
+        A draft with a valid greeting but a fabricated body dollar figure must
+        still receive HTTP 422 — the gate is not weakened.
+        """
+        client, cl_path, slug = apply_client
+        original = cl_path.read_text(encoding="utf-8")
+        new_content = (
+            "Dear BECU Hiring Team,\n\n"
+            "At InventedCorp I generated $999M in savings.\n\n"
+            "Sincerely,"
+        )
+        resp = client.post(
+            f"/api/applications/{slug}/cover-letter/apply",
+            json={"new_content": new_content},
+        )
+        assert resp.status_code == 422, resp.text
+        data = resp.json()
+        assert data["applied"] is False
+        assert data["reason"] == "fact_check_failed"
+        # File must be unchanged.
+        assert cl_path.read_text(encoding="utf-8") == original

@@ -158,3 +158,73 @@ def test_check_draft_accepts_extra_jd_sources(tmp_path: Path) -> None:
     )
 
     assert result.passed is True
+
+
+# ---------- salutation / closing exemption (bug-600b3699) ----------
+
+
+def test_salutation_dear_org_name_not_a_claim(tmp_path: Path) -> None:
+    """'Dear BECU Hiring Team,' must not generate any claims — it is not a fact."""
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "work.yml").write_text("- title: Engineer\n  details:\n    - Built data pipelines\n")
+    # BECU is in the jd context (as in the live bug), but the greeting itself
+    # must be exempt regardless — salutation lines are stripped before extraction.
+    claims = extract_hard_claims("Dear BECU Hiring Team,\n\nI am excited to apply.\n")
+    claim_texts = [c.text for c in claims]
+    # The greeting phrase and employer token must NOT be extracted as claims.
+    assert "BECU Hiring Team" not in claim_texts
+    assert "BECU" not in claim_texts
+    # check_draft must pass even without BECU in master content.
+    result = check_draft(
+        "Dear BECU Hiring Team,\n\nI am excited to apply.\n",
+        content,
+    )
+    assert result.passed is True
+
+
+def test_salutation_hello_org_name_not_a_claim(tmp_path: Path) -> None:
+    """'Hello BECU,' must not be extracted as a claim."""
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "work.yml").write_text("- title: Engineer\n  details:\n    - Built pipelines\n")
+    claims = extract_hard_claims("Hello BECU,\n\nThank you for this opportunity.\n")
+    claim_texts = [c.text for c in claims]
+    assert "BECU" not in claim_texts
+    result = check_draft(
+        "Hello BECU,\n\nThank you for this opportunity.\n",
+        content,
+    )
+    assert result.passed is True
+
+
+def test_salutation_exempt_body_claim_still_checked(tmp_path: Path) -> None:
+    """Greeting exemption must NOT weaken body verification.
+
+    A fabricated dollar figure in the body still fails even when the
+    salutation contains an unverified org name.
+    """
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "work.yml").write_text("- title: Engineer\n  details:\n    - Built pipelines\n")
+    draft = (
+        "Dear BECU Hiring Team,\n\n"
+        "I generated $999M in savings at InventedCorp.\n\n"
+        "Sincerely,"
+    )
+    result = check_draft(draft, content)
+    assert result.passed is False
+    # The fabricated dollar figure in the body must be caught.
+    assert any("$999M" in c for c in result.failed_claims)
+
+
+def test_closing_sincerely_not_a_claim(tmp_path: Path) -> None:
+    """'Sincerely,' must not be extracted as a claim."""
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "work.yml").write_text("Built pipelines.")
+    claims = extract_hard_claims(
+        "I built pipelines.\n\nSincerely,"
+    )
+    claim_texts = [c.text for c in claims]
+    assert "Sincerely" not in claim_texts

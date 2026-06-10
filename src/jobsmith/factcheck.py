@@ -95,6 +95,21 @@ _CONNECTED_CAP_RE = re.compile(
 # Connector tokens used for segment-splitting proper-noun fallback.
 _CONNECTOR_SPLIT_RE = re.compile(r"\s+(?:and|of|the|in|for|at|on|to|&)\s+|,\s*", re.IGNORECASE)
 
+# Salutation lines: "Dear BECU Hiring Team,", "Hello Hiring Manager:", etc.
+# Matched as the first non-empty line or any line that opens with a greeting word.
+_SALUTATION_RE = re.compile(
+    r"^[ \t]*(Dear|Hello|Hi|Greetings|To Whom|To the)\b[^\n]*[,:][ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Closing lines: "Sincerely,", "Best regards,", "Warm regards,", "Thank you,",
+# "Respectfully,", or a signature stub (single Capitalized word or two followed by comma).
+_CLOSING_RE = re.compile(
+    r"^[ \t]*(?:Sincerely|Regards|Best regards|Warm regards|Kind regards|"
+    r"Respectfully|Thank you|Thanks|Yours truly|Yours sincerely|Best)[,.]?[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
 # Short acronyms (2-5 all-caps chars). Stoplist filters out generic skill
 # acronyms so only claim-worthy ones (MIT, IBM, IRS) make it through.
 _ACRONYM_RE = re.compile(r"\b[A-Z]{2,5}\b")
@@ -133,13 +148,34 @@ _PROPER_NOUN_STOPLIST = {
 # ---------- public API ----------
 
 
+def _strip_salutation_lines(text: str) -> str:
+    """Return *text* with salutation and closing lines blanked out.
+
+    Salutations ("Dear BECU Hiring Team,", "Hello Hiring Manager:") and
+    closings ("Sincerely,", "Best regards,") are not factual claims — they
+    are letter conventions. Blanking them prevents proper-noun extractors
+    from treating greeting phrases as verifiable claims.
+
+    Lines are replaced with a blank line so character offsets for the
+    remaining body remain approximately correct and no claim text bleeds
+    across the removed line boundary.
+    """
+    result = _SALUTATION_RE.sub("", text)
+    result = _CLOSING_RE.sub("", result)
+    return result
+
+
 def extract_hard_claims(text: str) -> list[Claim]:
     """Pull every hard claim out of a draft.
 
     Order is deterministic — money → percent → years → counts → proper nouns —
     so tests and logs are stable. Duplicates are tolerated and dedup happens
     in `check_draft`.
+
+    Salutation and closing lines are stripped before extraction so greeting
+    phrases ("Dear BECU Hiring Team,") are never treated as factual claims.
     """
+    text = _strip_salutation_lines(text)
     out: list[Claim] = []
     for m in _MONEY_RE.finditer(text):
         out.append(Claim(text=m.group(0).strip(), kind="money", offset=m.start()))
