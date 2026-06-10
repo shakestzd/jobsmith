@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>E2E acceptance: scheduled run -&gt; inbox -&gt; one-click apply -&gt; funnel, live in Chrome</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-447088bc"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-10T19:40:26.285045"
+             data-updated="2026-06-10T21:06:31.275076" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034">
+
+        <header>
+            <h1>E2E acceptance: scheduled run -&gt; inbox -&gt; one-click apply -&gt; funnel, live in Chrome</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="6221fdfe-a33d-40e3-a12c-f7940ef5412e.html" data-relationship="implemented_in" data-since="2026-06-10T21:06:31.274967">session 6221fdfe-a33d-40e3-a12c-f7940ef5412e</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-4def4798.html" data-relationship="planned_in" data-since="2026-06-10T19:40:26.29036">plan-4def4798</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-cf0dc034.html" data-relationship="part_of" data-since="2026-06-10T19:40:26.296055">trk-cf0dc034</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-b1bd050e.html" data-relationship="blocked_by">feat-b1bd050e</a></li>
+                    <li><a href="feat-1602d64c.html" data-relationship="blocked_by">feat-1602d64c</a></li>
+                    <li><a href="feat-827071e1.html" data-relationship="blocked_by">feat-827071e1</a></li>
+                    <li><a href="feat-80affa8a.html" data-relationship="blocked_by">feat-80affa8a</a></li>
+                    <li><a href="feat-28a41d1c.html" data-relationship="blocked_by">feat-28a41d1c</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Prove the loop at the chosen acceptance bar, split by determinism: the
+AUTOMATED E2E (tests/e2e/) runs FIXTURES-ONLY — source run over fixture
+boards + the recorded alert-email corpus -> inbox -> promote -> application ->
+funnel counts, driven over the same-origin API (no live-board dependency, no
+CI flake). The MANUAL acceptance pass then verifies the live path on the real
+machine: the schedule-installed `launchctl kickstart` run lands fresh postings
+from at least one live board AND the user's real alert email; the inbox,
+promote->apply, funnel movement, and run-health surfaces are verified live in
+Chrome per house rule (screenshots + console). Update README/AGENTS with the
+sourcing runbook (enable/disable schedule, add a source, add an email sender,
+read the funnel).</p>
+        </section>
+    </article>
+</body>
+</html>
