@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Port ATS adapters &#43; deterministic crawler core (`jobsmith source run`)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-5531c54b"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-10T19:40:26.162194"
+             data-updated="2026-06-10T19:58:51.276757" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034">
+
+        <header>
+            <h1>Port ATS adapters &#43; deterministic crawler core (`jobsmith source run`)</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-cf0dc034.html" data-relationship="part_of" data-since="2026-06-10T19:40:26.181998">trk-cf0dc034</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="6221fdfe-a33d-40e3-a12c-f7940ef5412e.html" data-relationship="implemented_in" data-since="2026-06-10T19:58:51.276652">session 6221fdfe-a33d-40e3-a12c-f7940ef5412e</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-850a076a.html" data-relationship="blocked_by">feat-850a076a</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-4def4798.html" data-relationship="planned_in" data-since="2026-06-10T19:40:26.174241">plan-4def4798</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Port the proven shakestzd crawler into the package: source_jobs.py orchestration
+(run_crawl, source_jobs.py:415-526 — already deterministic with per-source
+exception isolation + circuit breaker) and sources/{base,greenhouse,lever,
+ashby,hn_whos_hiring,climatebase}.py (ATSSourceAdapter.fetch contract,
+base.py:17-66) become src/jobsmith/sourcing/{runner,adapters/*}.py. The local
+scoring deps (comp_parser, fit_scoring, red_flags from shakestzd
+private/scripts/) are bundled into src/jobsmith/sourcing/scoring.py. Declare
+rapidfuzz + beautifulsoup4 in pyproject.toml (A3 — absent today). Config: the
+package ships default sources; the USER's source list lives in their repo as
+sourcing.yaml next to .apply-config.yaml (ported from job-sources.yaml's 23
+sources), resolved via the existing repo-root machinery. New CLI `jobsmith
+source run [--no-llm] [--source X]`: fetch, normalize, dedup via slice-1
+store, fast-score, write postings + a sourcing_runs record. LIFECYCLE: the
+runner auto-expires postings not re-sighted for N days (default 21,
+configurable in sourcing.yaml). Pure Python end to end. Notion writer NOT
+ported. Fixtures: greenhouse+lever recorded fixtures port over; ashby/hn/
+climatebase fixtures are AUTHORED NEW (A4 — they don't exist in the old repo).</p>
+        </section>
+    </article>
+</body>
+</html>
