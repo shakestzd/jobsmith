@@ -10,20 +10,30 @@
 <body>
     <article id="feat-447088bc"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-10T19:40:26.285045"
-             data-updated="2026-06-10T21:06:31.275076" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034">
+             data-updated="2026-06-10T23:25:28.542026" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034">
 
         <header>
             <h1>E2E acceptance: scheduled run -&gt; inbox -&gt; one-click apply -&gt; funnel, live in Chrome</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
 
         <nav data-graph-edges>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-b1bd050e.html" data-relationship="blocked_by">feat-b1bd050e</a></li>
+                    <li><a href="feat-1602d64c.html" data-relationship="blocked_by">feat-1602d64c</a></li>
+                    <li><a href="feat-827071e1.html" data-relationship="blocked_by">feat-827071e1</a></li>
+                    <li><a href="feat-80affa8a.html" data-relationship="blocked_by">feat-80affa8a</a></li>
+                    <li><a href="feat-28a41d1c.html" data-relationship="blocked_by">feat-28a41d1c</a></li>
+                </ul>
+            </section>
             <section data-edge-type="implemented_in">
                 <h3>Implemented In:</h3>
                 <ul>
@@ -42,17 +52,14 @@
                     <li><a href="trk-cf0dc034.html" data-relationship="part_of" data-since="2026-06-10T19:40:26.296055">trk-cf0dc034</a></li>
                 </ul>
             </section>
-            <section data-edge-type="blocked_by">
-                <h3>Blocked By:</h3>
-                <ul>
-                    <li><a href="feat-b1bd050e.html" data-relationship="blocked_by">feat-b1bd050e</a></li>
-                    <li><a href="feat-1602d64c.html" data-relationship="blocked_by">feat-1602d64c</a></li>
-                    <li><a href="feat-827071e1.html" data-relationship="blocked_by">feat-827071e1</a></li>
-                    <li><a href="feat-80affa8a.html" data-relationship="blocked_by">feat-80affa8a</a></li>
-                    <li><a href="feat-28a41d1c.html" data-relationship="blocked_by">feat-28a41d1c</a></li>
-                </ul>
-            </section>
         </nav>
+
+        <section data-steps>
+            <h3>Implementation Steps</h3>
+            <ol>
+                <li data-completed="true" data-step-id="task-10" data-agent="claude-code" data-created-by-agent="claude-code">✅ Fix mailapp adapter: fetch raw HTML source, parse real LinkedIn alerts</li>
+            </ol>
+        </section>
 
         <section data-content>
             <h3>Description</h3>
@@ -66,7 +73,8 @@ from at least one live board AND the user's real alert email; the inbox,
 promote->apply, funnel movement, and run-health surfaces are verified live in
 Chrome per house rule (screenshots + console). Update README/AGENTS with the
 sourcing runbook (enable/disable schedule, add a source, add an email sender,
-read the funnel).</p>
+read the funnel).
+[2026-06-10 23:25 claude-code] accepted-advisory (provenance override): automated fixtures E2E (33 tests) + manual live acceptance completed in Chrome with screenshots</p>
         </section>
     </article>
 </body>
