@@ -185,6 +185,10 @@ def run_crawl(
     dry_run: bool = False,
     no_llm: bool = False,
     source_filter: str | None = None,
+    # LLM rescore seam (feat-1602d64c) — injectable for tests; defaults to SDK
+    _query_fn: Callable | None = None,
+    _rescore_n_cap: int = 30,
+    _rescore_budget_usd: float = 1.0,
 ) -> dict:
     """End-to-end crawl against the slice-1 postings store.
 
@@ -207,8 +211,7 @@ def run_crawl(
     dry_run:
         When True, adapters are called but no DB writes occur.
     no_llm:
-        Seam for slice 4 (feat-1602d64c). Currently a no-op — LLM rescoring
-        is NOT done in this slice regardless of this flag.
+        When True, skip the LLM triage rescore pass entirely (fast_score only).
     source_filter:
         When set, only crawl sources whose ``type/slug`` key matches this
         string (e.g. ``greenhouse/stripe``). Useful for ``--source X`` CLI.
@@ -245,6 +248,7 @@ def run_crawl(
         degraded: list[str] = []
         new_count = 0
         updated_count = 0
+        new_posting_ids: list[int] = []  # seam: track new rows for LLM rescore
 
         for spec in sources:
             if time.monotonic() > deadline:
@@ -307,11 +311,39 @@ def run_crawl(
                     ).fetchone()
                     if row and row["first_seen_at"] == row["last_seen_at"]:
                         new_count += 1
+                        new_posting_ids.append(posting_id)  # seam: track new rows
                     else:
                         updated_count += 1
                 summary["roles_upserted"] += len(fetched)
 
             time.sleep(_INTER_SOURCE_SLEEP)
+
+        # LLM triage rescore seam (feat-1602d64c)
+        if not dry_run and not no_llm and new_posting_ids:
+            from .llm_rescore import rescore_postings  # local import avoids hard dep
+
+            try:
+                rescore_results = rescore_postings(
+                    conn,
+                    posting_ids=new_posting_ids,
+                    no_llm=False,
+                    n_cap=_rescore_n_cap,
+                    budget_usd=_rescore_budget_usd,
+                    query_fn=_query_fn,
+                )
+                rescored_count = len(rescore_results)
+                fallback_count = sum(1 for r in rescore_results if r.is_fallback)
+                logger.info(
+                    "LLM rescore: %d rescored, %d fallback",
+                    rescored_count,
+                    fallback_count,
+                )
+                summary["llm_rescored"] = rescored_count
+                summary["llm_fallback"] = fallback_count
+            except Exception as exc:
+                logger.warning("LLM rescore pass failed (non-fatal): %s", exc)
+                summary["llm_rescored"] = 0
+                summary["llm_fallback"] = 0
 
         # Auto-expiry pass
         if not dry_run:
