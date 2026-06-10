@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Postings store &#43; funnel states (migration, db layer, promote linkage)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-850a076a"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-10T19:40:26.13912"
+             data-updated="2026-06-10T19:50:50.298003" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034">
+
+        <header>
+            <h1>Postings store &#43; funnel states (migration, db layer, promote linkage)</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-4def4798.html" data-relationship="planned_in" data-since="2026-06-10T19:40:26.146522">plan-4def4798</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-cf0dc034.html" data-relationship="part_of" data-since="2026-06-10T19:40:26.152497">trk-cf0dc034</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="6221fdfe-a33d-40e3-a12c-f7940ef5412e.html" data-relationship="implemented_in" data-since="2026-06-10T19:50:50.297895">session 6221fdfe-a33d-40e3-a12c-f7940ef5412e</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>New `postings` table via migration 010_postings.sql REGISTERED in the hardcoded
+_PIPELINE_MIGRATIONS list (db.py:50-59 — A2: landing the file alone silently
+does nothing): id, source (e.g. greenhouse/stripe, gmail/linkedin-alert),
+external_id, url, title, company, location, comp_text, posted_date, jd_text,
+fast_score, llm_score, specialty, rationale, evidence_json, status
+(sourced|queued|dismissed|promoted|expired), promoted_application_id (FK to
+applications), dedup_key (normalized-URL/external-id hash), first_seen_at,
+last_seen_at. Python store layer: upsert-by-dedup_key (re-sight bumps last_seen
+ONLY — dismissed/promoted/expired rows are never resurrected to sourced),
+status transitions, promote(posting_id) -> creates/links the applications row.
+Also a sourcing_runs table (run_id, started/finished, status, counts,
+degraded_sources_json, error; retention: purge beyond last 90) used by slice-6.
+Add interview/offer to the applications status vocabulary (free-text statuses
+per applications.py:323-327, so purely additive).</p>
+        </section>
+    </article>
+</body>
+</html>
