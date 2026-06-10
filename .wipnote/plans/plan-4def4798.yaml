@@ -1,18 +1,428 @@
 meta:
     id: plan-4def4798
-    track_id: trk-32e544db
     title: 'Sourcing-to-apply funnel: crawler port, email ingestion, postings inbox, funnel dashboard'
-    description: 'Move job retrieval into jobsmith and couple it to the apply pipeline: postings table + funnel states, ported ATS adapters, Gmail/Mail.app alert parsing, LLM rescoring via agent-sdk, ranked inbox UI with one-click apply, launchd scheduling with visible run health, and a funnel conversion dashboard.'
-    created_at: "2026-06-10"
+    description: |
+        Couple job retrieval to the jobsmith apply pipeline so the whole funnel is tracked
+        in one system. The shakestzd Path-B sourcing pipeline (plan-9c5e0d04: ATS crawler,
+        scoring, Notion inbox, headless-claude launchd run) proved discovery works but
+        dead-ended in Notion, ran the crawl inside a fragile headless agent (max-turns /
+        permission stalls — silently failing since early May), and is now disabled. This
+        plan ports the proven pieces INTO jobsmith: deterministic `jobsmith source run`
+        (no agent turns), ATS adapters + NEW email-alert ingestion (Gmail + Mail.app),
+        LLM rescoring only for the shortlist, a ranked Postings inbox in the web UI with
+        one-click promote-to-apply, launchd scheduling with VISIBLE run health, and a
+        funnel dashboard (sourced -> queued -> applied -> outcome with conversion).
+    created_at: ""
     status: draft
-    priority: medium
     schema_version: v3
-    version: 2
+    version: 1
 design:
-    problem: ""
-    goals: []
-    constraints: []
+    problem: |
+        Job retrieval is disconnected from application tracking. The existing sourcing
+        pipeline (shakestzd private/scripts: source_jobs.py + greenhouse/lever/ashby/
+        hn_whos_hiring/climatebase adapters, 23 sources, 1,944 roles seen) wrote to a
+        Notion inbox nobody works from, ran the crawl inside headless `claude --print`
+        (which died on max-turns and permission prompts, silently, exit 0), and never
+        ingested the user's email job alerts. Meanwhile jobsmith owns the actual apply
+        work (fit-scorer, reuse layer, UI) but every application starts by hand-pasting
+        one URL. Result: the user disabled sourcing, and there is no view of the funnel
+        from discovery to outcome.
+    goals:
+        - 'One command, no agent: deterministic `jobsmith source run` crawls boards + email alerts, dedupes, fast-scores; LLM (agent-sdk fit-scorer) rescores only the shortlist.'
+        - Postings land in a ranked inbox in the jobsmith web UI; one click promotes a posting into the apply pipeline with provenance linked.
+        - 'Whole-funnel tracking: sourced -> queued -> applied -> interview/offer/rejected with per-stage conversion and per-source yield.'
+        - Scheduled daily via launchd with VISIBLE run health (UI banner + doctor check) — a failed or empty run is noticed the same day, not after 5 weeks.
+        - Retire the Notion writer and the headless-claude morning-sourcing path.
+    constraints:
+        - Crawling is plain Python — no LLM turns in the crawl loop (the max-turns failure class must be impossible by construction).
+        - 'No LinkedIn scraping (auth-wall/ToS): LinkedIn arrives via alert-email parsing and manual paste/batch only.'
+        - 'Reuse proven code: port the shakestzd adapters/scoring rather than rewrite; reuse jobsmith''s existing apply endpoints, fit-scorer agent, and UI patterns.'
+        - Local-first single-tenant; secrets stay in .env; Gmail read-only scope.
     approved: false
     comment: ""
-slices: []
+slices:
+    - id: slice-1
+      num: 1
+      title: Postings store + funnel states (migration, db layer, promote linkage)
+      what: |
+        New `postings` table in the pipeline DB (next migration after the reuse store):
+        id, source (e.g. greenhouse/stripe, gmail/linkedin-alert), external_id, url,
+        title, company, location, comp_text, posted_date, jd_text, fast_score,
+        llm_score, specialty, rationale, evidence_json, status
+        (sourced|queued|dismissed|promoted|expired), promoted_application_id (FK to
+        applications), dedup_key (normalized url/external-id hash), first_seen_at,
+        last_seen_at. Python db layer: upsert-by-dedup_key (bump last_seen on re-sight),
+        status transitions, promote(posting_id) -> creates/links the applications row
+        and stamps promoted_application_id. Add interview/offer to the applications
+        status vocabulary if absent so outcomes are representable.
+      why: |
+        The funnel needs a first-class home for discovered-but-not-applied roles.
+        Goal 3 (whole-funnel tracking) and the promote link (Goal 2) both hang off
+        this table; separating postings from applications keeps the applications
+        view clean (hundreds of never-touched postings stay out of it).
+      files:
+        - src/jobsmith/migrations/010_postings.sql
+        - src/jobsmith/sourcing/__init__.py
+        - src/jobsmith/sourcing/store.py
+        - tests/test_sourcing_store.py
+      deps: []
+      done_when:
+        - Migration applies cleanly to an existing DB; upsert by dedup_key inserts new and bumps last_seen_at on re-sight
+        - promote(posting_id) creates the applications row, links promoted_application_id both ways, and sets status='promoted'
+        - Status transitions enforced (sourced->queued/dismissed/promoted; no resurrecting promoted rows)
+      effort: M
+      risk: Low
+      tests: |
+        Unit: TestPostingUpsertDedup — same dedup_key twice -> one row, last_seen bumped
+        Unit: TestPromoteLinksApplication — promote creates+links application row
+        Unit: TestStatusTransitions — illegal transitions rejected
+      complexity: standard
+      approved: false
+      comment: ""
+      decisions_notes: |
+        **Scope:** new postings table feeding the existing applications table via an
+        explicit promote step; applications stays the system of record for work done.
+        **Decisions:** dedup_key = normalized URL/external-id hash (re-sights bump
+        last_seen, never duplicate); funnel statuses sourced/queued/dismissed/promoted/
+        expired; outcomes live on applications (add interview/offer to vocabulary).
+        **Rejected:** sourced rows inside applications (bloats the working view);
+        JSONL-only index (no relational funnel queries, no FK to applications).
+    - id: slice-2
+      num: 2
+      title: Port ATS adapters + deterministic crawler core (`jobsmith source run`)
+      what: |
+        Port the proven shakestzd crawler into the package: source_jobs.py orchestration
+        logic and sources/{base,greenhouse,lever,ashby,hn_whos_hiring,climatebase}.py
+        become src/jobsmith/sourcing/{runner,adapters/*}.py; job-sources.yaml (23
+        sources) and the rejection-filter/fast three-specialty scoring port with their
+        calibration. New CLI `jobsmith source run [--no-llm] [--source X]`: fetch all
+        configured sources, normalize, dedup via slice-1 store, fast-score, write
+        postings + a run record. Pure Python end to end — no claude subprocess, no
+        agent turns. Notion writer is NOT ported.
+      why: |
+        The adapters and scoring are the proven 80% of the old pipeline (1,944 roles
+        processed); porting beats rewriting. Making the crawl deterministic kills the
+        max-turns/permission failure class by construction (Constraint 1).
+      files:
+        - src/jobsmith/sourcing/runner.py
+        - src/jobsmith/sourcing/adapters/base.py
+        - src/jobsmith/sourcing/adapters/greenhouse.py
+        - src/jobsmith/sourcing/adapters/lever.py
+        - src/jobsmith/sourcing/adapters/ashby.py
+        - src/jobsmith/sourcing/adapters/hn_whos_hiring.py
+        - src/jobsmith/sourcing/adapters/climatebase.py
+        - src/jobsmith/sourcing/scoring.py
+        - src/jobsmith/sourcing/sources.yaml
+        - src/jobsmith/cli.py
+        - tests/test_sourcing_runner.py
+      deps:
+        - 1
+      done_when:
+        - '`jobsmith source run --no-llm` against fixture responses ingests, dedupes, and fast-scores postings into the store with a run record'
+        - A real run against at least 2 live boards (greenhouse + lever) lands real postings
+        - A failing adapter degrades (recorded in the run record) without aborting the whole run
+      effort: L
+      risk: Med
+      tests: |
+        Unit: per-adapter fixture parsing (recorded JSON/HTML fixtures from the old repo's fixtures)
+        Integration: TestSourceRunNoLlm — full run over fixtures -> postings + run record
+        Unit: TestAdapterFailureIsolation — one adapter raising doesn't kill the run
+      complexity: standard
+      approved: false
+      comment: ""
+      decisions_notes: |
+        **Scope:** straight port of source_jobs.py + 5 adapters + fast scoring +
+        23-source config into src/jobsmith/sourcing/; new `source` CLI group.
+        **Decisions:** crawl is synchronous deterministic Python; per-adapter error
+        isolation with degraded-source recording (pattern carried from sourcing-state.yaml);
+        Notion writer dropped (slice-6 retires the old path).
+        **Rejected:** rewriting adapters from scratch (proven code exists); agentic
+        crawl orchestration (the exact failure mode that killed the old pipeline);
+        JobSpy dependency (already evaluated and rejected in the old plan's slice 3).
+    - id: slice-3
+      num: 3
+      title: 'Email-alert ingestion: Gmail + Mail.app adapters, LinkedIn paste/batch'
+      what: |
+        New adapters that turn job-alert emails into postings: (a) Gmail — read-only
+        API (creds/token via .env) searching configured alert senders (LinkedIn,
+        Indeed, Glassdoor, etc.), parsing each alert's job entries (title, company,
+        location, link) into normalized postings with source=gmail/<sender>; (b)
+        Mail.app — same parsing against the local store via the installed mail-app
+        CLI for senders not in Gmail; (c) LinkedIn manual entry — `jobsmith source
+        add <url-or-ids>` records pasted LinkedIn job IDs/URLs as postings
+        (source=manual/linkedin) for the existing batch-apply habit, fetching JD text
+        via the existing JD fetcher where reachable. Email parsing is template-based
+        per sender with a fixture corpus; unparseable alerts are recorded as degraded,
+        never crash the run. LinkedIn links from emails store the URL + metadata only
+        (no scraping) — JD text is fetched at promote time via the existing
+        httpx/Playwright fetcher.
+      why: |
+        Email is the user's highest-signal source (boards auth-wall LinkedIn/Indeed;
+        alerts are pre-filtered by saved searches) and the piece the old pipeline
+        never had. This is the core of 'not one by one'.
+      files:
+        - src/jobsmith/sourcing/adapters/gmail_alerts.py
+        - src/jobsmith/sourcing/adapters/mailapp_alerts.py
+        - src/jobsmith/sourcing/adapters/manual.py
+        - src/jobsmith/sourcing/email_parsers.py
+        - src/jobsmith/cli.py
+        - tests/test_sourcing_email.py
+        - tests/fixtures/sourcing/emails/
+      deps:
+        - 1
+      done_when:
+        - Fixture LinkedIn + Indeed alert emails parse into correct postings (title/company/url) for both Gmail and Mail.app paths
+        - '`jobsmith source add <linkedin-url-or-ids>` records postings and they appear in the inbox'
+        - An unparseable alert is logged as degraded without failing the run; Gmail scope is read-only
+      effort: L
+      risk: High
+      tests: |
+        Unit: per-sender parser fixtures (LinkedIn, Indeed alert HTML/text bodies)
+        Integration: TestGmailAdapterMocked — mocked API responses -> postings
+        Integration: TestManualAdd — paste IDs -> postings rows
+      complexity: standard
+      approved: false
+      comment: ""
+      decisions_notes: |
+        **Scope:** three adapters (gmail, mailapp, manual) sharing per-sender email
+        parsers; LinkedIn only via email links or paste — never scraped.
+        **Decisions:** template-based per-sender parsing with a fixture corpus (alert
+        formats change — fixtures make breakage visible in tests); JD text for email
+        postings fetched lazily at promote time via the existing fetcher (alerts only
+        carry snippets); Gmail credentials via .env, read-only scope (Constraint 4).
+        **Rejected:** LLM-parsing every email in the daily run (cost + the
+        determinism constraint); IMAP generic adapter (Gmail API + Mail.app CLI cover
+        the real accounts with less auth pain); LinkedIn scraping (ToS/auth-wall).
+    - id: slice-4
+      num: 4
+      title: Shortlist LLM rescoring via agent-sdk fit-scorer (budget-capped)
+      what: |
+        Port the plan-9c5e0d04 rescoring stage: after the deterministic crawl, take the
+        top-N fast-scored new postings (default 30, configurable) and rescore via the
+        existing fit-scorer agent through claude-agent-sdk, writing llm_score,
+        specialty, one-line rationale, and evidence citations onto the posting rows.
+        Budget cap + N cap from config; failures fall back to fast_score (recorded);
+        `--no-llm` skips entirely. This is the ONLY LLM involvement in the daily run.
+      why: |
+        Fast scoring ranks cheaply but the LLM rationale is what made the old inbox
+        readable ('why this role'). Capping to the shortlist keeps cost ~the old
+        $1.55/run rather than scoring hundreds.
+      files:
+        - src/jobsmith/sourcing/rescoring.py
+        - src/jobsmith/sourcing/runner.py
+        - tests/test_sourcing_rescoring.py
+      deps:
+        - 2
+      done_when:
+        - Top-N new postings get llm_score/specialty/rationale/evidence after a run; the rest keep fast_score only
+        - Budget/N caps enforced; an SDK failure falls back to fast_score and is recorded, not fatal
+        - '`--no-llm` produces a complete run with zero LLM calls'
+      effort: M
+      risk: Med
+      tests: |
+        Unit: TestShortlistSelection — top-N by fast_score among NEW postings only
+        Unit: TestRescoreFallback — SDK error -> fast_score retained, run record notes it
+        Integration: TestNoLlmFlag — run completes with rescorer never invoked
+      complexity: standard
+      approved: false
+      comment: ""
+      decisions_notes: |
+        **Scope:** one rescoring stage appended to the runner; reuses the existing
+        fit-scorer agent definition rather than a new prompt.
+        **Decisions:** rescore only NEW postings (re-sights keep prior scores);
+        default N=30 matching the old pipeline's calibration; cost ceiling from
+        config carried over from pipeline-config.yaml's pattern.
+        **Rejected:** rescoring everything (cost, latency); running rescoring inside
+        a headless claude session (the failure mode this plan exists to kill).
+    - id: slice-5
+      num: 5
+      title: Postings inbox in the web UI + one-click promote-to-apply
+      what: |
+        New 'Postings' section in the jobsmith web UI: ranked list (llm_score desc,
+        fast_score fallback) showing title/company/source/score/rationale/age, filters
+        (source, specialty, min score, status), actions: dismiss, queue, and 'start
+        application' — which calls a new POST /api/postings/{id}/promote that creates
+        the application via the existing apply machinery (URL + any cached jd_text
+        passed through, JD fetched lazily if absent), links provenance both ways, and
+        navigates to the new application detail. API: GET /api/postings (filtered),
+        POST /api/postings/{id}/status, POST /api/postings/{id}/promote. Inbox badge
+        shows new-since-last-visit count.
+      why: |
+        This replaces the Notion inbox with the surface where work actually happens —
+        the click that turns a sourced posting into a tracked application is the
+        coupling the user asked for.
+      files:
+        - src/jobsmith/api/postings.py
+        - src/jobsmith/api/main.py
+        - web/src/app/postings.tsx
+        - web/src/api/client.ts
+        - web/src/api/hooks.ts
+        - tests/test_api_postings.py
+        - web/src/app/postings.test.tsx
+      deps:
+        - 1
+        - 2
+      done_when:
+        - Inbox lists ranked postings with score/rationale/source and supports dismiss/queue/filter
+        - '''Start application'' promotes the posting, launches the apply flow with provenance linked, and navigates to the application detail'
+        - Promoted/dismissed postings leave the default inbox view; the posting shows its linked application and vice versa
+      effort: L
+      risk: Med
+      tests: |
+        Integration: TestPostingsListFilters — GET with filters/ordering
+        Integration: TestPromoteEndpoint — promote -> application created + both links set
+        Component: postings.test.tsx — render ranked list, dismiss, promote action
+      complexity: standard
+      approved: false
+      comment: ""
+      decisions_notes: |
+        **Scope:** new UI section + three API endpoints; promotion reuses the existing
+        application-creation path (same one the 'new application' modal uses).
+        **Decisions:** rank by llm_score with fast_score fallback; JD text fetched
+        lazily at promote when the posting only has a snippet (email-sourced);
+        provenance is a two-way link (posting.promoted_application_id + application
+        row referencing the posting).
+        **Rejected:** keeping a Notion mirror (double-write complexity for a surface
+        the user abandoned); auto-applying high scorers (human stays the trigger —
+        fit 0.5-ish scores are not submit-safe, per the BECU experience).
+    - id: slice-6
+      num: 6
+      title: 'Scheduling + run health: launchd, visible failure state, retire old pipeline'
+      what: |
+        Make the daily run schedulable and IMPOSSIBLE to fail silently: run records
+        (started/finished/status/counts/degraded sources/error) persisted per run;
+        `jobsmith doctor` gains a sourcing check (last successful run age, degraded
+        sources); UI shows a banner on the Postings inbox when the last run failed,
+        found 0 roles, or is older than the configured cadence. New launchd plist
+        invokes the installed `jobsmith source run` directly (no bash->claude
+        wrapper); macOS notification on run failure. RETIRE the old path: unload
+        com.shakes.morning-sourcing, mark the shakestzd scripts/prompts deprecated
+        pointing at the new command, leave Notion data untouched but stop writing.
+      why: |
+        The old pipeline failed silently for 5 weeks because launchd saw exit 0 and
+        nothing surfaced state. Visible run health is what makes scheduling
+        trustworthy enough to re-enable (Goal 4/5).
+      files:
+        - src/jobsmith/sourcing/store.py
+        - src/jobsmith/doctor.py
+        - src/jobsmith/api/postings.py
+        - web/src/app/postings.tsx
+        - scripts/launchd/com.shakes.jobsmith-sourcing.plist
+        - tests/test_sourcing_health.py
+      deps:
+        - 2
+      done_when:
+        - Run records persist status/counts/errors; `jobsmith doctor` reports last-success age and degraded sources
+        - Inbox banner appears for failed/empty/stale runs; macOS notification fires on failure
+        - New launchd plist runs the installed binary on schedule; old morning-sourcing label unloaded and old wrapper marked deprecated
+      effort: M
+      risk: Med
+      tests: |
+        Unit: TestRunRecordLifecycle — start/finish/fail transitions persisted
+        Unit: TestDoctorSourcingCheck — stale/failed run -> FAIL line with age
+        Integration: TestHealthBannerApi — API exposes last-run state the UI banner reads
+      complexity: standard
+      approved: false
+      comment: ""
+      decisions_notes: |
+        **Scope:** run-record persistence + doctor check + UI banner + notification +
+        launchd cutover; old pipeline retirement is part of THIS slice so two
+        schedulers never run concurrently.
+        **Decisions:** failure visibility is in-product (banner + doctor) with a
+        macOS notification, not email (digests were part of why Notion flow died);
+        plist invokes the installed binary directly — no shell wrapper, no claude.
+        **Rejected:** cron (launchd is the platform-native pattern already in use);
+        keeping the old wrapper as fallback (split-brain risk: two writers).
+    - id: slice-7
+      num: 7
+      title: 'Funnel dashboard: per-stage counts, conversion, per-source yield'
+      what: |
+        A funnel view in the web UI fed by a new GET /api/funnel: stage counts
+        (sourced -> queued -> promoted/applied -> interview -> offer / rejected) with
+        conversion rates between stages, a per-source breakdown (which boards/email
+        senders produce postings that become applications and interviews), and a
+        time-window filter (7/30/90 days/all). Applications gain interview/offer
+        statuses in the UI status picker (vocabulary added in slice-1) so outcomes
+        can be recorded from the application detail, closing the loop the BECU
+        rejection just exercised manually via SQL.
+      why: |
+        'Track the whole pipeline' means answering 'is sourcing working and which
+        sources are worth it' at a glance — counts + conversion + per-source yield
+        is exactly that (user's chosen funnel-view option).
+      files:
+        - src/jobsmith/api/funnel.py
+        - src/jobsmith/api/main.py
+        - web/src/app/funnel.tsx
+        - web/src/app/application.tsx
+        - web/src/api/client.ts
+        - tests/test_api_funnel.py
+      deps:
+        - 1
+        - 5
+      done_when:
+        - Funnel view shows stage counts + conversion for a chosen window, matching hand-computed SQL on the same DB
+        - Per-source table ranks sources by postings -> applications -> interviews yield
+        - Application status can be set to interview/offer/rejected from the UI and flows into the funnel
+      effort: M
+      risk: Low
+      tests: |
+        Unit: TestFunnelAggregation — fixture rows -> expected counts/conversions
+        Integration: TestFunnelApiWindow — time-window filtering
+        Component: funnel.test.tsx — renders stages + per-source table
+      complexity: standard
+      approved: false
+      comment: ""
+      decisions_notes: |
+        **Scope:** read-only aggregation endpoint + UI view + outcome-status picker on
+        application detail; no new state beyond what slices 1/5 created.
+        **Decisions:** conversion measured between adjacent stages on rows whose
+        first_seen falls in the window; per-source yield keyed on the posting's
+        source field carried through promotion.
+        **Rejected:** weekly digest email (deferred — in-product view first);
+        cohort/retention analytics (overkill for a single-user funnel).
+    - id: slice-8
+      num: 8
+      title: 'E2E acceptance: scheduled run -> inbox -> one-click apply -> funnel, live in Chrome'
+      what: |
+        Prove the loop at the chosen acceptance bar: a scheduled (or schedule-invoked)
+        `jobsmith source run` ingests real board postings AND a fixture/real alert
+        email; the Postings inbox shows them ranked with rationale; clicking 'start
+        application' on one launches the apply pipeline with provenance linked; the
+        funnel view reflects the movement; run-health surfaces are green. Verified
+        live in Chrome per house rule (screenshots + console), plus an automated E2E
+        against the same-origin API mirroring the slice flows. Update README/AGENTS
+        with the sourcing runbook (enable/disable, add a source, add an email sender).
+      why: |
+        Every prior track's browser E2E caught real defects unit tests missed (wheel
+        bundling, slug rekey, CSP, salutation gate). This plan's value claim is the
+        coupled loop — only a live pass proves it.
+      files:
+        - tests/e2e/test_sourcing_funnel.py
+        - README.md
+        - AGENTS.md
+      deps:
+        - 3
+        - 4
+        - 5
+        - 6
+        - 7
+      done_when:
+        - A schedule-invoked run lands fresh postings from at least one live board and one alert-email fixture in the inbox, ranked with rationale
+        - One-click promote launches a real apply run with the posting linked; funnel counts move accordingly
+        - Run-health is green in doctor + UI; the whole flow verified live in Chrome
+      effort: M
+      risk: Med
+      tests: |
+        E2E: TestSourceToFunnel — run -> postings -> promote -> application -> funnel counts over same-origin API
+        Manual: Chrome walkthrough with screenshots (inbox, promote, funnel, health banner states)
+      complexity: standard
+      approved: false
+      comment: ""
+      decisions_notes: |
+        **Scope:** verification + runbook docs only — no new product surface.
+        **Decisions:** acceptance = full loop including the schedule path and Chrome
+        verification (user's chosen bar); E2E drives the same-origin API like the
+        fresh-install suite does, with the browser pass for the visual surfaces.
+        **Rejected:** API-only acceptance (this track's history shows browser-only
+        bugs are the common failure mode).
 questions: []

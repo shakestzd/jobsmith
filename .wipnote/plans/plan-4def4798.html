@@ -405,6 +405,82 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <a href="#design" class="nav-link active" data-spy="design" data-initial="D">Design</a>
   <a href="#slices" class="nav-link" data-spy="slices" data-initial="S">Slices</a>
   
+  <ul class="slice-nav-list" id="slice-nav-list">
+    
+    <li>
+      <a href="#slice-1" class="slice-nav-item" data-slice-nav="1">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="1"></span>
+        <span>#1 Postings store + funnel states (migration, db layer, promote linkage)</span>
+        
+        
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-2" class="slice-nav-item" data-slice-nav="2">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="2"></span>
+        <span>#2 Port ATS adapters + deterministic crawler core (`jobsmith source run`)</span>
+        
+        
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-3" class="slice-nav-item" data-slice-nav="3">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="3"></span>
+        <span>#3 Email-alert ingestion: Gmail + Mail.app adapters, LinkedIn paste/batch</span>
+        
+        
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-4" class="slice-nav-item" data-slice-nav="4">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="4"></span>
+        <span>#4 Shortlist LLM rescoring via agent-sdk fit-scorer (budget-capped)</span>
+        
+        
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-5" class="slice-nav-item" data-slice-nav="5">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="5"></span>
+        <span>#5 Postings inbox in the web UI + one-click promote-to-apply</span>
+        
+        
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-6" class="slice-nav-item" data-slice-nav="6">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="6"></span>
+        <span>#6 Scheduling + run health: launchd, visible failure state, retire old pipeline</span>
+        
+        
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-7" class="slice-nav-item" data-slice-nav="7">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="7"></span>
+        <span>#7 Funnel dashboard: per-stage counts, conversion, per-source yield</span>
+        
+        
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-8" class="slice-nav-item" data-slice-nav="8">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="8"></span>
+        <span>#8 E2E acceptance: scheduled run -> inbox -> one-click apply -> funnel, live in Chrome</span>
+        
+        
+      </a>
+    </li>
+    
+  </ul>
+  
   <a href="#questions" class="nav-link" data-spy="questions" data-initial="Q">Decisions</a>
   <a href="#critique" class="nav-link" data-spy="critique" data-initial="C">Critique</a>
   <a href="#feedback-summary" class="nav-link" data-spy="feedback-summary" data-initial="P">Progress</a>
@@ -412,15 +488,25 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 </nav>
 <div class="plan-layout">
 <div class="plan-content">
-<article id="plan-4def4798" data-type="plan" data-plan-id="plan-4def4798" data-feature-id="trk-32e544db" data-status="draft" data-priority="medium">
+<article id="plan-4def4798" data-type="plan" data-plan-id="plan-4def4798" data-feature-id="" data-status="draft" data-priority="medium">
 
 <!-- Plan Header -->
 <header class="plan-header">
   <h1>Plan: Sourcing-to-apply funnel: crawler port, email ingestion, postings inbox, funnel dashboard</h1>
-  <p style="color:var(--text-dim)">Move job retrieval into jobsmith and couple it to the apply pipeline: postings table + funnel states, ported ATS adapters, Gmail/Mail.app alert parsing, LLM rescoring via agent-sdk, ranked inbox UI with one-click apply, launchd scheduling with visible run health, and a funnel conversion dashboard.</p>
+  <p style="color:var(--text-dim)">Couple job retrieval to the jobsmith apply pipeline so the whole funnel is tracked
+in one system. The shakestzd Path-B sourcing pipeline (plan-9c5e0d04: ATS crawler,
+scoring, Notion inbox, headless-claude launchd run) proved discovery works but
+dead-ended in Notion, ran the crawl inside a fragile headless agent (max-turns /
+permission stalls — silently failing since early May), and is now disabled. This
+plan ports the proven pieces INTO jobsmith: deterministic `jobsmith source run`
+(no agent turns), ATS adapters + NEW email-alert ingestion (Gmail + Mail.app),
+LLM rescoring only for the shortlist, a ranked Postings inbox in the web UI with
+one-click promote-to-apply, launchd scheduling with VISIBLE run health, and a
+funnel dashboard (sourced -> queued -> applied -> outcome with conversion).
+</p>
   <div class="meta">
     <span class="badge badge-pending">Draft</span>
-    <span style="font-size:.75rem;color:var(--text-muted)">v2 · 0 slices · Created 2026-06-10</span>
+    <span style="font-size:.75rem;color:var(--text-muted)">v1 · 8 slices · Created 2026-06-10</span>
   </div>
 </header>
 <button id="themeToggle" style="position:fixed;top:16px;right:16px;z-index:100;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;color:var(--text);font-family:var(--mono);font-size:0.75rem;cursor:pointer;">
@@ -440,6 +526,14 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <section class="dep-graph" data-zone="dependency-graph">
   <h2>Dependency Graph</h2>
   <div id="graph-data" style="display:none">
+    <div data-node="1" data-name="Postings store + funnel states (migration, db layer, promote linkage)" data-status="pending" data-deps="" data-files="4"></div>
+    <div data-node="2" data-name="Port ATS adapters + deterministic crawler core (`jobsmith source run`)" data-status="pending" data-deps="1" data-files="11"></div>
+    <div data-node="3" data-name="Email-alert ingestion: Gmail + Mail.app adapters, LinkedIn paste/batch" data-status="pending" data-deps="1" data-files="7"></div>
+    <div data-node="4" data-name="Shortlist LLM rescoring via agent-sdk fit-scorer (budget-capped)" data-status="pending" data-deps="2" data-files="3"></div>
+    <div data-node="5" data-name="Postings inbox in the web UI + one-click promote-to-apply" data-status="pending" data-deps="1,2" data-files="7"></div>
+    <div data-node="6" data-name="Scheduling + run health: launchd, visible failure state, retire old pipeline" data-status="pending" data-deps="2" data-files="6"></div>
+    <div data-node="7" data-name="Funnel dashboard: per-stage counts, conversion, per-source yield" data-status="pending" data-deps="1,5" data-files="6"></div>
+    <div data-node="8" data-name="E2E acceptance: scheduled run -> inbox -> one-click apply -> funnel, live in Chrome" data-status="pending" data-deps="3,4,5,6,7" data-files="3"></div>
     
     <!--PLAN_GRAPH_NODES-->
   </div>
@@ -452,17 +546,40 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <details id="design" class="section-card" open data-phase="design" data-status="pending">
   <summary><span>Design</span><span class="badge badge-pending" data-badge-for="design">Pending</span></summary>
   <div class="section-body">
-    <!--PLAN_DESIGN_CONTENT-->
-    <div class="sub-section">
-      <h4>Open Questions</h4>
-      <!--PLAN_QUESTIONS-->
-    </div>
+    <h4>Problem</h4>
+<div data-markdown>Job retrieval is disconnected from application tracking. The existing sourcing
+pipeline (shakestzd private/scripts: source_jobs.py + greenhouse/lever/ashby/
+hn_whos_hiring/climatebase adapters, 23 sources, 1,944 roles seen) wrote to a
+Notion inbox nobody works from, ran the crawl inside headless `claude --print`
+(which died on max-turns and permission prompts, silently, exit 0), and never
+ingested the user&#39;s email job alerts. Meanwhile jobsmith owns the actual apply
+work (fit-scorer, reuse layer, UI) but every application starts by hand-pasting
+one URL. Result: the user disabled sourcing, and there is no view of the funnel
+from discovery to outcome.
+</div>
+<h4>Goals</h4>
+<ol>
+<li data-markdown>One command, no agent: deterministic `jobsmith source run` crawls boards + email alerts, dedupes, fast-scores; LLM (agent-sdk fit-scorer) rescores only the shortlist.</li>
+<li data-markdown>Postings land in a ranked inbox in the jobsmith web UI; one click promotes a posting into the apply pipeline with provenance linked.</li>
+<li data-markdown>Whole-funnel tracking: sourced -&gt; queued -&gt; applied -&gt; interview/offer/rejected with per-stage conversion and per-source yield.</li>
+<li data-markdown>Scheduled daily via launchd with VISIBLE run health (UI banner + doctor check) — a failed or empty run is noticed the same day, not after 5 weeks.</li>
+<li data-markdown>Retire the Notion writer and the headless-claude morning-sourcing path.</li>
+</ol>
+<h4>Constraints</h4>
+<ul>
+<li data-markdown>Crawling is plain Python — no LLM turns in the crawl loop (the max-turns failure class must be impossible by construction).</li>
+<li data-markdown>No LinkedIn scraping (auth-wall/ToS): LinkedIn arrives via alert-email parsing and manual paste/batch only.</li>
+<li data-markdown>Reuse proven code: port the shakestzd adapters/scoring rather than rewrite; reuse jobsmith&#39;s existing apply endpoints, fit-scorer agent, and UI patterns.</li>
+<li data-markdown>Local-first single-tenant; secrets stay in .env; Gmail read-only scope.</li>
+</ul>
+
     <div class="approval-row">
       <label><input type="checkbox" data-section="design" data-action="approve"> Approve design</label>
       <textarea data-section="design" data-comment-for="design" placeholder="Comments on design decisions..."></textarea>
     </div>
   </div>
 </details>
+
 
 <!-- Structure Outline (hidden when empty) -->
 
@@ -471,7 +588,1171 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <details id="slices" class="section-card" open data-phase="slices" data-status="pending">
   <summary><span>Slices</span><span class="badge badge-pending" data-badge-for="slices">Pending</span></summary>
   <div class="section-body">
+    <details class="slice-card" id="slice-1" data-slice="1" data-slice-name="slice-1" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 1: Postings store &#43; funnel states (migration, db layer, promote linkage)">
+    <span class="slice-num">#1</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Postings store &#43; funnel states (migration, db layer, promote linkage)</span>
+      <span class="slice-preview">New postings table in the pipeline DB (next migration after the reuse store):</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-pending badge-sm">Low</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-1">Pending</span>
+          
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-1-approval" value="approved" data-section="slice-1" data-action="approve" aria-label="Approve slice 1">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-1-approval" value="changes_requested" data-section="slice-1" data-action="approve" aria-label="Request changes for slice 1">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-1-approval" value="rejected" data-section="slice-1" data-action="approve" aria-label="Reject slice 1">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
     
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-1-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>New <code>postings</code> table in the pipeline DB (next migration after the reuse store):
+id, source (e.g. greenhouse/stripe, gmail/linkedin-alert), external_id, url,
+title, company, location, comp_text, posted_date, jd_text, fast_score,
+llm_score, specialty, rationale, evidence_json, status
+(sourced|queued|dismissed|promoted|expired), promoted_application_id (FK to
+applications), dedup_key (normalized url/external-id hash), first_seen_at,
+last_seen_at. Python db layer: upsert-by-dedup_key (bump last_seen on re-sight),
+status transitions, promote(posting_id) -&gt; creates/links the applications row
+and stamps promoted_application_id. Add interview/offer to the applications
+status vocabulary if absent so outcomes are representable.</p>
+</div>
+          <label for="slice-1-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>The funnel needs a first-class home for discovered-but-not-applied roles.
+Goal 3 (whole-funnel tracking) and the promote link (Goal 2) both hang off
+this table; separating postings from applications keeps the applications
+view clean (hundreds of never-touched postings stay out of it).</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/migrations/010_postings.sql, src/jobsmith/sourcing/__init__.py, src/jobsmith/sourcing/store.py, tests/test_sourcing_store.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Migration applies cleanly to an existing DB; upsert by dedup_key inserts new and bumps last_seen_at on re-sight</li><li>promote(posting_id) creates the applications row, links promoted_application_id both ways, and sets status=&#39;promoted&#39;</li><li>Status transitions enforced (sourced-&gt;queued/dismissed/promoted; no resurrecting promoted rows)</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-1-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> new postings table feeding the existing applications table via an
+explicit promote step; applications stays the system of record for work done.
+<strong>Decisions:</strong> dedup_key = normalized URL/external-id hash (re-sights bump
+last_seen, never duplicate); funnel statuses sourced/queued/dismissed/promoted/
+expired; outcomes live on applications (add interview/offer to vocabulary).
+<strong>Rejected:</strong> sourced rows inside applications (bloats the working view);
+JSONL-only index (no relational funnel queries, no FK to applications).</p>
+</div>
+        <label for="slice-1-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 3</span>
+            <ul><li>TestPostingUpsertDedup — same dedup_key twice -&gt; one row, last_seen bumped</li><li>TestPromoteLinksApplication — promote creates&#43;links application row</li><li>TestStatusTransitions — illegal transitions rejected</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+
+    <div class="slice-deps">Dependencies: none</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-1" data-comment-for="slice-1" placeholder="Comments on slice 1..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-2" data-slice="2" data-slice-name="slice-2" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 2: Port ATS adapters &#43; deterministic crawler core (`jobsmith source run`)">
+    <span class="slice-num">#2</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Port ATS adapters &#43; deterministic crawler core (`jobsmith source run`)</span>
+      <span class="slice-preview">Port the proven shakestzd crawler into the package: sourcejobs.py orchestration</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-blocked badge-sm">L</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-2">Pending</span>
+          
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-2-approval" value="approved" data-section="slice-2" data-action="approve" aria-label="Approve slice 2">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-2-approval" value="changes_requested" data-section="slice-2" data-action="approve" aria-label="Request changes for slice 2">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-2-approval" value="rejected" data-section="slice-2" data-action="approve" aria-label="Reject slice 2">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-2-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Port the proven shakestzd crawler into the package: source_jobs.py orchestration
+logic and sources/{base,greenhouse,lever,ashby,hn_whos_hiring,climatebase}.py
+become src/jobsmith/sourcing/{runner,adapters/*}.py; job-sources.yaml (23
+sources) and the rejection-filter/fast three-specialty scoring port with their
+calibration. New CLI <code>jobsmith source run [--no-llm] [--source X]</code>: fetch all
+configured sources, normalize, dedup via slice-1 store, fast-score, write
+postings + a run record. Pure Python end to end — no claude subprocess, no
+agent turns. Notion writer is NOT ported.</p>
+</div>
+          <label for="slice-2-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>The adapters and scoring are the proven 80% of the old pipeline (1,944 roles
+processed); porting beats rewriting. Making the crawl deterministic kills the
+max-turns/permission failure class by construction (Constraint 1).</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/sourcing/runner.py, src/jobsmith/sourcing/adapters/base.py, src/jobsmith/sourcing/adapters/greenhouse.py, src/jobsmith/sourcing/adapters/lever.py, src/jobsmith/sourcing/adapters/ashby.py, src/jobsmith/sourcing/adapters/hn_whos_hiring.py, src/jobsmith/sourcing/adapters/climatebase.py, src/jobsmith/sourcing/scoring.py, src/jobsmith/sourcing/sources.yaml, src/jobsmith/cli.py, tests/test_sourcing_runner.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>`jobsmith source run --no-llm` against fixture responses ingests, dedupes, and fast-scores postings into the store with a run record</li><li>A real run against at least 2 live boards (greenhouse &#43; lever) lands real postings</li><li>A failing adapter degrades (recorded in the run record) without aborting the whole run</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-2-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> straight port of source_jobs.py + 5 adapters + fast scoring +
+23-source config into src/jobsmith/sourcing/; new <code>source</code> CLI group.
+<strong>Decisions:</strong> crawl is synchronous deterministic Python; per-adapter error
+isolation with degraded-source recording (pattern carried from sourcing-state.yaml);
+Notion writer dropped (slice-6 retires the old path).
+<strong>Rejected:</strong> rewriting adapters from scratch (proven code exists); agentic
+crawl orchestration (the exact failure mode that killed the old pipeline);
+JobSpy dependency (already evaluated and rejected in the old plan&#39;s slice 3).</p>
+</div>
+        <label for="slice-2-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 2</span>
+            <ul><li>per-adapter fixture parsing (recorded JSON/HTML fixtures from the old repo&#39;s fixtures)</li><li>TestAdapterFailureIsolation — one adapter raising doesn&#39;t kill the run</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 1</span>
+            <ul><li>TestSourceRunNoLlm — full run over fixtures -&gt; postings &#43; run record</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+
+    <div class="slice-deps">Dependencies: slices 1</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-2" data-comment-for="slice-2" placeholder="Comments on slice 2..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-3" data-slice="3" data-slice-name="slice-3" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 3: Email-alert ingestion: Gmail &#43; Mail.app adapters, LinkedIn paste/batch">
+    <span class="slice-num">#3</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Email-alert ingestion: Gmail &#43; Mail.app adapters, LinkedIn paste/batch</span>
+      <span class="slice-preview">New adapters that turn job-alert emails into postings: (a) Gmail — read-only</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-blocked badge-sm">L</span>
+          <span class="badge badge-blocked badge-sm">High</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-3">Pending</span>
+          
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-3-approval" value="approved" data-section="slice-3" data-action="approve" aria-label="Approve slice 3">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-3-approval" value="changes_requested" data-section="slice-3" data-action="approve" aria-label="Request changes for slice 3">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-3-approval" value="rejected" data-section="slice-3" data-action="approve" aria-label="Reject slice 3">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-3-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>New adapters that turn job-alert emails into postings: (a) Gmail — read-only
+API (creds/token via .env) searching configured alert senders (LinkedIn,
+Indeed, Glassdoor, etc.), parsing each alert&#39;s job entries (title, company,
+location, link) into normalized postings with source=gmail/; (b)
+Mail.app — same parsing against the local store via the installed mail-app
+CLI for senders not in Gmail; (c) LinkedIn manual entry — <code>jobsmith source add &lt;url-or-ids&gt;</code> records pasted LinkedIn job IDs/URLs as postings
+(source=manual/linkedin) for the existing batch-apply habit, fetching JD text
+via the existing JD fetcher where reachable. Email parsing is template-based
+per sender with a fixture corpus; unparseable alerts are recorded as degraded,
+never crash the run. LinkedIn links from emails store the URL + metadata only
+(no scraping) — JD text is fetched at promote time via the existing
+httpx/Playwright fetcher.</p>
+</div>
+          <label for="slice-3-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Email is the user&#39;s highest-signal source (boards auth-wall LinkedIn/Indeed;
+alerts are pre-filtered by saved searches) and the piece the old pipeline
+never had. This is the core of &#39;not one by one&#39;.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/sourcing/adapters/gmail_alerts.py, src/jobsmith/sourcing/adapters/mailapp_alerts.py, src/jobsmith/sourcing/adapters/manual.py, src/jobsmith/sourcing/email_parsers.py, src/jobsmith/cli.py, tests/test_sourcing_email.py, tests/fixtures/sourcing/emails/</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Fixture LinkedIn &#43; Indeed alert emails parse into correct postings (title/company/url) for both Gmail and Mail.app paths</li><li>`jobsmith source add &lt;linkedin-url-or-ids&gt;` records postings and they appear in the inbox</li><li>An unparseable alert is logged as degraded without failing the run; Gmail scope is read-only</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-3-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> three adapters (gmail, mailapp, manual) sharing per-sender email
+parsers; LinkedIn only via email links or paste — never scraped.
+<strong>Decisions:</strong> template-based per-sender parsing with a fixture corpus (alert
+formats change — fixtures make breakage visible in tests); JD text for email
+postings fetched lazily at promote time via the existing fetcher (alerts only
+carry snippets); Gmail credentials via .env, read-only scope (Constraint 4).
+<strong>Rejected:</strong> LLM-parsing every email in the daily run (cost + the
+determinism constraint); IMAP generic adapter (Gmail API + Mail.app CLI cover
+the real accounts with less auth pain); LinkedIn scraping (ToS/auth-wall).</p>
+</div>
+        <label for="slice-3-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>per-sender parser fixtures (LinkedIn, Indeed alert HTML/text bodies)</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 2</span>
+            <ul><li>TestGmailAdapterMocked — mocked API responses -&gt; postings</li><li>TestManualAdd — paste IDs -&gt; postings rows</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+
+    <div class="slice-deps">Dependencies: slices 1</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-3" data-comment-for="slice-3" placeholder="Comments on slice 3..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-4" data-slice="4" data-slice-name="slice-4" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 4: Shortlist LLM rescoring via agent-sdk fit-scorer (budget-capped)">
+    <span class="slice-num">#4</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Shortlist LLM rescoring via agent-sdk fit-scorer (budget-capped)</span>
+      <span class="slice-preview">Port the plan-9c5e0d04 rescoring stage: after the deterministic crawl, take the</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-4">Pending</span>
+          
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-4-approval" value="approved" data-section="slice-4" data-action="approve" aria-label="Approve slice 4">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-4-approval" value="changes_requested" data-section="slice-4" data-action="approve" aria-label="Request changes for slice 4">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-4-approval" value="rejected" data-section="slice-4" data-action="approve" aria-label="Reject slice 4">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-4-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Port the plan-9c5e0d04 rescoring stage: after the deterministic crawl, take the
+top-N fast-scored new postings (default 30, configurable) and rescore via the
+existing fit-scorer agent through claude-agent-sdk, writing llm_score,
+specialty, one-line rationale, and evidence citations onto the posting rows.
+Budget cap + N cap from config; failures fall back to fast_score (recorded);
+<code>--no-llm</code> skips entirely. This is the ONLY LLM involvement in the daily run.</p>
+</div>
+          <label for="slice-4-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Fast scoring ranks cheaply but the LLM rationale is what made the old inbox
+readable (&#39;why this role&#39;). Capping to the shortlist keeps cost ~the old
+$1.55/run rather than scoring hundreds.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/sourcing/rescoring.py, src/jobsmith/sourcing/runner.py, tests/test_sourcing_rescoring.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Top-N new postings get llm_score/specialty/rationale/evidence after a run; the rest keep fast_score only</li><li>Budget/N caps enforced; an SDK failure falls back to fast_score and is recorded, not fatal</li><li>`--no-llm` produces a complete run with zero LLM calls</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-4-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> one rescoring stage appended to the runner; reuses the existing
+fit-scorer agent definition rather than a new prompt.
+<strong>Decisions:</strong> rescore only NEW postings (re-sights keep prior scores);
+default N=30 matching the old pipeline&#39;s calibration; cost ceiling from
+config carried over from pipeline-config.yaml&#39;s pattern.
+<strong>Rejected:</strong> rescoring everything (cost, latency); running rescoring inside
+a headless claude session (the failure mode this plan exists to kill).</p>
+</div>
+        <label for="slice-4-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 2</span>
+            <ul><li>TestShortlistSelection — top-N by fast_score among NEW postings only</li><li>TestRescoreFallback — SDK error -&gt; fast_score retained, run record notes it</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 1</span>
+            <ul><li>TestNoLlmFlag — run completes with rescorer never invoked</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+
+    <div class="slice-deps">Dependencies: slices 2</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-4" data-comment-for="slice-4" placeholder="Comments on slice 4..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-5" data-slice="5" data-slice-name="slice-5" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 5: Postings inbox in the web UI &#43; one-click promote-to-apply">
+    <span class="slice-num">#5</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Postings inbox in the web UI &#43; one-click promote-to-apply</span>
+      <span class="slice-preview">New &#39;Postings&#39; section in the jobsmith web UI: ranked list (llmscore desc,</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-blocked badge-sm">L</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-5">Pending</span>
+          
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-5-approval" value="approved" data-section="slice-5" data-action="approve" aria-label="Approve slice 5">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-5-approval" value="changes_requested" data-section="slice-5" data-action="approve" aria-label="Request changes for slice 5">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-5-approval" value="rejected" data-section="slice-5" data-action="approve" aria-label="Reject slice 5">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-5-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>New &#39;Postings&#39; section in the jobsmith web UI: ranked list (llm_score desc,
+fast_score fallback) showing title/company/source/score/rationale/age, filters
+(source, specialty, min score, status), actions: dismiss, queue, and &#39;start
+application&#39; — which calls a new POST /api/postings/{id}/promote that creates
+the application via the existing apply machinery (URL + any cached jd_text
+passed through, JD fetched lazily if absent), links provenance both ways, and
+navigates to the new application detail. API: GET /api/postings (filtered),
+POST /api/postings/{id}/status, POST /api/postings/{id}/promote. Inbox badge
+shows new-since-last-visit count.</p>
+</div>
+          <label for="slice-5-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>This replaces the Notion inbox with the surface where work actually happens —
+the click that turns a sourced posting into a tracked application is the
+coupling the user asked for.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/api/postings.py, src/jobsmith/api/main.py, web/src/app/postings.tsx, web/src/api/client.ts, web/src/api/hooks.ts, tests/test_api_postings.py, web/src/app/postings.test.tsx</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Inbox lists ranked postings with score/rationale/source and supports dismiss/queue/filter</li><li>&#39;Start application&#39; promotes the posting, launches the apply flow with provenance linked, and navigates to the application detail</li><li>Promoted/dismissed postings leave the default inbox view; the posting shows its linked application and vice versa</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-5-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> new UI section + three API endpoints; promotion reuses the existing
+application-creation path (same one the &#39;new application&#39; modal uses).
+<strong>Decisions:</strong> rank by llm_score with fast_score fallback; JD text fetched
+lazily at promote when the posting only has a snippet (email-sourced);
+provenance is a two-way link (posting.promoted_application_id + application
+row referencing the posting).
+<strong>Rejected:</strong> keeping a Notion mirror (double-write complexity for a surface
+the user abandoned); auto-applying high scorers (human stays the trigger —
+fit 0.5-ish scores are not submit-safe, per the BECU experience).</p>
+</div>
+        <label for="slice-5-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 2</span>
+            <ul><li>TestPostingsListFilters — GET with filters/ordering</li><li>TestPromoteEndpoint — promote -&gt; application created &#43; both links set</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="component">
+            <span class="test-chip">COMPONENT &middot; 1</span>
+            <ul><li>postings.test.tsx — render ranked list, dismiss, promote action</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+
+    <div class="slice-deps">Dependencies: slices 1,2</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-5" data-comment-for="slice-5" placeholder="Comments on slice 5..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-6" data-slice="6" data-slice-name="slice-6" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 6: Scheduling &#43; run health: launchd, visible failure state, retire old pipeline">
+    <span class="slice-num">#6</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Scheduling &#43; run health: launchd, visible failure state, retire old pipeline</span>
+      <span class="slice-preview">Make the daily run schedulable and IMPOSSIBLE to fail silently: run records</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-6">Pending</span>
+          
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-6-approval" value="approved" data-section="slice-6" data-action="approve" aria-label="Approve slice 6">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-6-approval" value="changes_requested" data-section="slice-6" data-action="approve" aria-label="Request changes for slice 6">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-6-approval" value="rejected" data-section="slice-6" data-action="approve" aria-label="Reject slice 6">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-6-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Make the daily run schedulable and IMPOSSIBLE to fail silently: run records
+(started/finished/status/counts/degraded sources/error) persisted per run;
+<code>jobsmith doctor</code> gains a sourcing check (last successful run age, degraded
+sources); UI shows a banner on the Postings inbox when the last run failed,
+found 0 roles, or is older than the configured cadence. New launchd plist
+invokes the installed <code>jobsmith source run</code> directly (no bash-&gt;claude
+wrapper); macOS notification on run failure. RETIRE the old path: unload
+com.shakes.morning-sourcing, mark the shakestzd scripts/prompts deprecated
+pointing at the new command, leave Notion data untouched but stop writing.</p>
+</div>
+          <label for="slice-6-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>The old pipeline failed silently for 5 weeks because launchd saw exit 0 and
+nothing surfaced state. Visible run health is what makes scheduling
+trustworthy enough to re-enable (Goal 4/5).</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/sourcing/store.py, src/jobsmith/doctor.py, src/jobsmith/api/postings.py, web/src/app/postings.tsx, scripts/launchd/com.shakes.jobsmith-sourcing.plist, tests/test_sourcing_health.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Run records persist status/counts/errors; `jobsmith doctor` reports last-success age and degraded sources</li><li>Inbox banner appears for failed/empty/stale runs; macOS notification fires on failure</li><li>New launchd plist runs the installed binary on schedule; old morning-sourcing label unloaded and old wrapper marked deprecated</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-6-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> run-record persistence + doctor check + UI banner + notification +
+launchd cutover; old pipeline retirement is part of THIS slice so two
+schedulers never run concurrently.
+<strong>Decisions:</strong> failure visibility is in-product (banner + doctor) with a
+macOS notification, not email (digests were part of why Notion flow died);
+plist invokes the installed binary directly — no shell wrapper, no claude.
+<strong>Rejected:</strong> cron (launchd is the platform-native pattern already in use);
+keeping the old wrapper as fallback (split-brain risk: two writers).</p>
+</div>
+        <label for="slice-6-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 2</span>
+            <ul><li>TestRunRecordLifecycle — start/finish/fail transitions persisted</li><li>TestDoctorSourcingCheck — stale/failed run -&gt; FAIL line with age</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 1</span>
+            <ul><li>TestHealthBannerApi — API exposes last-run state the UI banner reads</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+
+    <div class="slice-deps">Dependencies: slices 2</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-6" data-comment-for="slice-6" placeholder="Comments on slice 6..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-7" data-slice="7" data-slice-name="slice-7" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 7: Funnel dashboard: per-stage counts, conversion, per-source yield">
+    <span class="slice-num">#7</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Funnel dashboard: per-stage counts, conversion, per-source yield</span>
+      <span class="slice-preview">A funnel view in the web UI fed by a new GET /api/funnel: stage counts</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-pending badge-sm">Low</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-7">Pending</span>
+          
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-7-approval" value="approved" data-section="slice-7" data-action="approve" aria-label="Approve slice 7">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-7-approval" value="changes_requested" data-section="slice-7" data-action="approve" aria-label="Request changes for slice 7">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-7-approval" value="rejected" data-section="slice-7" data-action="approve" aria-label="Reject slice 7">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-7-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>A funnel view in the web UI fed by a new GET /api/funnel: stage counts
+(sourced -&gt; queued -&gt; promoted/applied -&gt; interview -&gt; offer / rejected) with
+conversion rates between stages, a per-source breakdown (which boards/email
+senders produce postings that become applications and interviews), and a
+time-window filter (7/30/90 days/all). Applications gain interview/offer
+statuses in the UI status picker (vocabulary added in slice-1) so outcomes
+can be recorded from the application detail, closing the loop the BECU
+rejection just exercised manually via SQL.</p>
+</div>
+          <label for="slice-7-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>&#39;Track the whole pipeline&#39; means answering &#39;is sourcing working and which
+sources are worth it&#39; at a glance — counts + conversion + per-source yield
+is exactly that (user&#39;s chosen funnel-view option).</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/api/funnel.py, src/jobsmith/api/main.py, web/src/app/funnel.tsx, web/src/app/application.tsx, web/src/api/client.ts, tests/test_api_funnel.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Funnel view shows stage counts &#43; conversion for a chosen window, matching hand-computed SQL on the same DB</li><li>Per-source table ranks sources by postings -&gt; applications -&gt; interviews yield</li><li>Application status can be set to interview/offer/rejected from the UI and flows into the funnel</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-7-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> read-only aggregation endpoint + UI view + outcome-status picker on
+application detail; no new state beyond what slices 1/5 created.
+<strong>Decisions:</strong> conversion measured between adjacent stages on rows whose
+first_seen falls in the window; per-source yield keyed on the posting&#39;s
+source field carried through promotion.
+<strong>Rejected:</strong> weekly digest email (deferred — in-product view first);
+cohort/retention analytics (overkill for a single-user funnel).</p>
+</div>
+        <label for="slice-7-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>TestFunnelAggregation — fixture rows -&gt; expected counts/conversions</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 1</span>
+            <ul><li>TestFunnelApiWindow — time-window filtering</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="component">
+            <span class="test-chip">COMPONENT &middot; 1</span>
+            <ul><li>funnel.test.tsx — renders stages &#43; per-source table</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+
+    <div class="slice-deps">Dependencies: slices 1,5</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-7" data-comment-for="slice-7" placeholder="Comments on slice 7..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-8" data-slice="8" data-slice-name="slice-8" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 8: E2E acceptance: scheduled run -&gt; inbox -&gt; one-click apply -&gt; funnel, live in Chrome">
+    <span class="slice-num">#8</span>
+    <span class="slice-title-col">
+      <span class="slice-name">E2E acceptance: scheduled run -&gt; inbox -&gt; one-click apply -&gt; funnel, live in Chrome</span>
+      <span class="slice-preview">Prove the loop at the chosen acceptance bar: a scheduled (or schedule-invoked)</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-8">Pending</span>
+          
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-8-approval" value="approved" data-section="slice-8" data-action="approve" aria-label="Approve slice 8">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-8-approval" value="changes_requested" data-section="slice-8" data-action="approve" aria-label="Request changes for slice 8">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-8-approval" value="rejected" data-section="slice-8" data-action="approve" aria-label="Reject slice 8">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-8-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Prove the loop at the chosen acceptance bar: a scheduled (or schedule-invoked)
+<code>jobsmith source run</code> ingests real board postings AND a fixture/real alert
+email; the Postings inbox shows them ranked with rationale; clicking &#39;start
+application&#39; on one launches the apply pipeline with provenance linked; the
+funnel view reflects the movement; run-health surfaces are green. Verified
+live in Chrome per house rule (screenshots + console), plus an automated E2E
+against the same-origin API mirroring the slice flows. Update README/AGENTS
+with the sourcing runbook (enable/disable, add a source, add an email sender).</p>
+</div>
+          <label for="slice-8-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Every prior track&#39;s browser E2E caught real defects unit tests missed (wheel
+bundling, slug rekey, CSP, salutation gate). This plan&#39;s value claim is the
+coupled loop — only a live pass proves it.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>tests/e2e/test_sourcing_funnel.py, README.md, AGENTS.md</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>A schedule-invoked run lands fresh postings from at least one live board and one alert-email fixture in the inbox, ranked with rationale</li><li>One-click promote launches a real apply run with the posting linked; funnel counts move accordingly</li><li>Run-health is green in doctor &#43; UI; the whole flow verified live in Chrome</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-8-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> verification + runbook docs only — no new product surface.
+<strong>Decisions:</strong> acceptance = full loop including the schedule path and Chrome
+verification (user&#39;s chosen bar); E2E drives the same-origin API like the
+fresh-install suite does, with the browser pass for the visual surfaces.
+<strong>Rejected:</strong> API-only acceptance (this track&#39;s history shows browser-only
+bugs are the common failure mode).</p>
+</div>
+        <label for="slice-8-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="e2e">
+            <span class="test-chip">E2E &middot; 1</span>
+            <ul><li>TestSourceToFunnel — run -&gt; postings -&gt; promote -&gt; application -&gt; funnel counts over same-origin API</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="manual">
+            <span class="test-chip">MANUAL &middot; 1</span>
+            <ul><li>Chrome walkthrough with screenshots (inbox, promote, funnel, health banner states)</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+
+    <div class="slice-deps">Dependencies: slices 3,4,5,6,7</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-8" data-comment-for="slice-8" placeholder="Comments on slice 8..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+
     <!--PLAN_SLICE_CARDS-->
   </div>
 </details>
@@ -498,8 +1779,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <h2>Feedback Summary</h2>
   <div class="progress-stats">
     <div class="progress-stat"><strong id="approvedCount">0</strong> approved</div>
-    <div class="progress-stat"><strong id="totalSections">1</strong> sections</div>
-    <div class="progress-stat"><strong id="pendingCount">1</strong> pending</div>
+    <div class="progress-stat"><strong id="totalSections">9</strong> sections</div>
+    <div class="progress-stat"><strong id="pendingCount">9</strong> pending</div>
   </div>
   <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill" style="width:0%"></div></div>
   <div class="comments-summary">
@@ -579,7 +1860,7 @@ var planId=(function(){var a=document.querySelector('article[id]');return a?a.id
 
 (function(){
   'use strict';
-  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design"]/*END_PLAN_SECTIONS_JSON*/;
+  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design","slice-1","slice-2","slice-3","slice-4","slice-5","slice-6","slice-7","slice-8"]/*END_PLAN_SECTIONS_JSON*/;
 
   function setBadge(el,ok){
     el.className='badge badge-'+(ok?'approved':'pending');
