@@ -28,7 +28,8 @@ export type IconName =
   | 'arrow'
   | 'dot'
   | 'sun'
-  | 'eye';
+  | 'eye'
+  | 'inbox';
 
 // ── Application (sample) shape ───────────────────────────────────────────
 // Mirrors `SAMPLE_APPS` literal in `src/app/shared.tsx`. Status strings are
@@ -96,6 +97,7 @@ export type ViewName =
   | 'dashboard'
   | 'running'
   | 'review'
+  | 'postings'
   | 'master'
   | 'anchors'
   | 'site'
