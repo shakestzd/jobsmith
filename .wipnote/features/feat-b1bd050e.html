@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Email-alert ingestion: Gmail &#43; Mail.app adapters, LinkedIn paste/batch</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-b1bd050e"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-10T19:40:26.192094"
+             data-updated="2026-06-10T20:46:15.450592" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034">
+
+        <header>
+            <h1>Email-alert ingestion: Gmail &#43; Mail.app adapters, LinkedIn paste/batch</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="6221fdfe-a33d-40e3-a12c-f7940ef5412e.html" data-relationship="implemented_in" data-since="2026-06-10T20:46:15.450485">session 6221fdfe-a33d-40e3-a12c-f7940ef5412e</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-4def4798.html" data-relationship="planned_in" data-since="2026-06-10T19:40:26.19481">plan-4def4798</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-cf0dc034.html" data-relationship="part_of" data-since="2026-06-10T19:40:26.200213">trk-cf0dc034</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="feat-5531c54b.html" data-relationship="blocked_by">feat-5531c54b</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>New adapters that turn job-alert emails into postings: (a) Gmail — read-only
+API (google-api-python-client + google-auth-oauthlib, NEW deps declared in
+pyproject.toml; creds/token via .env) searching the alert senders configured
+in sourcing.yaml (LinkedIn, Indeed, Glassdoor, etc.), parsing each alert's job
+entries (title, company, location, link) into normalized postings with
+source=gmail/; (b) Mail.app — same parsers against the local store via
+the EXISTING installed mail-app CLI (external tool, already on this machine)
+for senders not in Gmail; (c) manual — `jobsmith source add `
+records pasted LinkedIn job IDs/URLs as postings (source=manual/linkedin).
+Parsing is template-based per sender over a NEW fixture corpus (none exists in
+either repo — authored from real alert emails); an unparseable alert is
+recorded as degraded, never crashes the run. Email postings carry snippets
+only; full JD text is fetched at promote time via the existing httpx/Playwright
+fetcher (no scraping in the daily run).</p>
+        </section>
+    </article>
+</body>
+</html>
