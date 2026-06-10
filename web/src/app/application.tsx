@@ -975,8 +975,8 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
             display: 'grid',
             gridTemplateColumns: '1fr 1fr',
             gap: 0,
-            maxHeight: 520,
-            overflow: 'hidden',
+            maxHeight: '65vh',
+            overflow: 'auto',
           }}>
             {/* Old (removed lines) */}
             <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -998,7 +998,7 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
                 fontFamily: 'var(--font-mono)',
                 fontSize: 12,
                 lineHeight: 1.55,
-                overflowY: 'auto',
+                overflow: 'hidden',
                 flex: 1,
               }}>
                 {lineDiff(
@@ -1041,7 +1041,7 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
                 fontFamily: 'var(--font-mono)',
                 fontSize: 12,
                 lineHeight: 1.55,
-                overflowY: 'auto',
+                overflow: 'hidden',
                 flex: 1,
               }}>
                 {lineDiff(
