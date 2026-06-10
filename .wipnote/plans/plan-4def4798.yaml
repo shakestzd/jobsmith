@@ -1,5 +1,6 @@
 meta:
     id: plan-4def4798
+    track_id: trk-cf0dc034
     title: 'Sourcing-to-apply funnel: crawler port, email ingestion, postings inbox, funnel dashboard'
     description: |
         Couple job retrieval to the jobsmith apply pipeline so the whole funnel is tracked
@@ -19,9 +20,9 @@ meta:
         expired postings from May) and are intentionally NOT migrated; Notion data is
         left in place read-only.
     created_at: ""
-    status: draft
+    status: finalized
     schema_version: v3
-    version: 1
+    version: 2
 design:
     problem: |
         Job retrieval is disconnected from application tracking. The existing sourcing
