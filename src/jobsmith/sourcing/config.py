@@ -61,6 +61,8 @@ _PACKAGE_DEFAULTS: dict = {
     "expiry_days": 21,
     "max_per_source": 100,
     "global_timeout_sec": 300,
+    "rescore_n_cap": 30,
+    "rescore_budget_usd": 1.0,
     "sources": [],
 }
 
@@ -72,6 +74,9 @@ class SourcingConfig:
     expiry_days: int = 21
     max_per_source: int = 100
     global_timeout_sec: int = 300
+    # LLM triage rescore settings (feat-1602d64c)
+    rescore_n_cap: int = 30         # top-N by fast_score to send to LLM
+    rescore_budget_usd: float = 1.0  # soft USD cap for the rescore pass
     sources: list[dict] = field(default_factory=list)
 
 
@@ -109,6 +114,10 @@ def load_sourcing_config(path: Path | None = None) -> SourcingConfig:
     global_timeout_sec = int(
         raw.get("global_timeout_sec", _PACKAGE_DEFAULTS["global_timeout_sec"])
     )
+    rescore_n_cap = int(raw.get("rescore_n_cap", _PACKAGE_DEFAULTS["rescore_n_cap"]))
+    rescore_budget_usd = float(
+        raw.get("rescore_budget_usd", _PACKAGE_DEFAULTS["rescore_budget_usd"])
+    )
     sources: list[dict] = []
     for spec in raw.get("sources") or []:
         if not isinstance(spec, dict):
@@ -121,6 +130,8 @@ def load_sourcing_config(path: Path | None = None) -> SourcingConfig:
         expiry_days=expiry_days,
         max_per_source=max_per_source,
         global_timeout_sec=global_timeout_sec,
+        rescore_n_cap=rescore_n_cap,
+        rescore_budget_usd=rescore_budget_usd,
         sources=sources,
     )
 
