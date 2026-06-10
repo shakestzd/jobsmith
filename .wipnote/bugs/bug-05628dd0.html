@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Sourcing E2E tests bind :8000 and regenerate tokens — clobbered the production server mid-queue</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="bug-05628dd0"
+             data-type="bug"
+             data-status="todo"
+             data-priority="high"
+             data-created="2026-06-10T22:39:03.12511"
+             data-updated="2026-06-10T22:39:03.138713" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8" data-created-by-cli-version="0.61.1">
+
+        <header>
+            <h1>Sourcing E2E tests bind :8000 and regenerate tokens — clobbered the production server mid-queue</h1>
+            <div class="metadata">
+                <span class="badge status-todo">Todo</span>
+                <span class="badge priority-high">High Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-cf0dc034.html" data-relationship="part_of" data-since="2026-06-10T22:39:03.138523">trk-cf0dc034</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>The trk-cf0dc034 yolo's E2E run started a jobsmith server from its worktree cwd on the DEFAULT port 8000, displacing the user's production server (shakestzd repo root) and auto-generating new private/jobsmith.token files in the jobsmith repo + worktree (CWD-relative PRIVATE_TOKEN_PATH). Live apply-queue runs against :8000 got 401s and one in-flight application run was killed. E2E servers MUST bind an ephemeral port (port 0 or a random high port), set JOBSMITH_REPO_ROOT to a scratch repo, and never write tokens outside their scratch dir. Slice-8/e2e conftest needs this hardening.</p>
+        </section>
+    </article>
+</body>
+</html>
