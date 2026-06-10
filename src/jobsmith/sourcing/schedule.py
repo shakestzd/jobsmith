@@ -78,7 +78,7 @@ _PLIST_TEMPLATE = """\
         <key>LANG</key>
         <string>en_US.UTF-8</string>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>{bin_dir}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>JOBSMITH_REPO_ROOT</key>
         <string>{repo_root}</string>
     </dict>
@@ -128,6 +128,7 @@ def render_plist(
     return _PLIST_TEMPLATE.format(
         label=_xml_escape(label),
         binary_path=_xml_escape(str(binary_path)),
+        bin_dir=_xml_escape(str(binary_path.parent)),
         repo_root=_xml_escape(str(repo_root)),
         log_dir=_xml_escape(str(log_dir)),
         hour=hour,

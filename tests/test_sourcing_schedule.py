@@ -235,6 +235,19 @@ def test_render_plist_contains_label() -> None:
     assert "/Users/testuser/DevProjects/myrepo" in plist_str
 
 
+def test_render_plist_path_includes_binary_dir() -> None:
+    """PATH in the plist includes the binary's own directory so sibling
+    tools (mail-app) resolve under launchd's minimal environment."""
+    from jobsmith.sourcing.schedule import render_plist
+
+    plist_str = render_plist(
+        binary_path=Path("/Users/testuser/.local/bin/jobsmith"),
+        repo_root=Path("/Users/testuser/DevProjects/myrepo"),
+        log_dir=Path("/tmp/logs"),
+    )
+    assert "/Users/testuser/.local/bin:/opt/homebrew/bin" in plist_str
+
+
 def test_render_plist_sets_jobsmith_repo_root() -> None:
     """JOBSMITH_REPO_ROOT env var is set in the rendered plist."""
     from jobsmith.sourcing.schedule import render_plist
