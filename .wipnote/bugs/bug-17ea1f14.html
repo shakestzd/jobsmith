@@ -13,7 +13,7 @@
              data-status="done"
              data-priority="high"
              data-created="2026-06-10T21:54:06.444346"
-             data-updated="2026-06-10T22:30:56.0147" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8" data-created-by-cli-version="0.61.1">
+             data-updated="2026-06-10T22:31:26.782424" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8" data-created-by-cli-version="0.61.1">
 
         <header>
             <h1>Cover-letter PDF renders with duplicated header &#43; raw markdown title — needs a real letter template</h1>
@@ -41,7 +41,8 @@
         <section data-content>
             <h3>Description</h3>
             <p>Generate PDF on the cover letter produces: resume-style header (name/tagline/contact) THEN a literal 'Cover Letter — ' H1 THEN name+contact AGAIN from the markdown body, Hiring Team/RE crammed inline. The draft markdown is being rendered through a generic/resume-ish path instead of a proper letter template matching the resume's typography. Needs: dedicated cover-letter Typst/Quarto template visually consistent with the resume template.
-[2026-06-10 22:30 claude-code] accepted-advisory (provenance override): implemented in commit e3de09f on branch main</p>
+[2026-06-10 22:30 claude-code] accepted-advisory (provenance override): implemented in commit e3de09f on branch main
+[2026-06-10 22:31 claude-code] accepted-advisory (provenance override): Fixed in e3de09f: pre-salutation header stripped via shared _extract_letter_body; Typst letter header mirrors awesomecv constants (Inter, #262F99/#131A28); date + structured recipient block from application row. 31 tests pass, ruff clean. Deploy deferred until apply-queue idle.</p>
         </section>
     </article>
 </body>
