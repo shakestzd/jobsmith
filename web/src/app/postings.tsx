@@ -12,6 +12,7 @@ import { usePostings } from '../api/hooks';
 import { setPostingStatus, promotePosting, JobsmithApiError } from '../api/client';
 import type { PostingRow, PostingPromoteResponse } from '../api/types';
 import { notifyDataChanged } from '../api/client';
+import SourcingHealthBanner from './SourcingHealthBanner';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -155,6 +156,9 @@ export function PostingsView({ onPromoted }: PostingsViewProps) {
 
   return (
     <div className="content">
+      {/* Sourcing health banner */}
+      <SourcingHealthBanner />
+
       {/* Header */}
       <div className="page-head">
         <div>
