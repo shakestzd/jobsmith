@@ -342,6 +342,22 @@ export function usePostings(filter: PostingsFilter = {}): UseQueryResult<Posting
   return { data, isLoading, error };
 }
 
+// ── Run Health (sourcing pipeline) ───────────────────────────────────────
+
+export interface RunHealthResponse {
+  state: 'ok' | 'failed' | 'degraded' | 'stale' | 'no_runs' | 'unknown';
+  last_run_id?: string | null;
+  last_run_status?: string | null;
+  finished_at?: string | null;
+  error?: string | null;
+  degraded_sources?: string[] | null;
+  age_hours?: number | null;
+}
+
+export function useRunHealth(): UseQueryResult<RunHealthResponse> {
+  return useFetch<RunHealthResponse>('/api/sourcing/run-health');
+}
+
 // ── Doctor (with refetch) ────────────────────────────────────────────────
 
 interface UseRefetchableQueryResult<T> extends UseQueryResult<T> {

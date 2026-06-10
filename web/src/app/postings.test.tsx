@@ -16,6 +16,7 @@ import { PostingsView } from './postings';
 // Mock the API hooks and client
 vi.mock('../api/hooks', () => ({
   usePostings: vi.fn(),
+  useRunHealth: vi.fn(),
 }));
 vi.mock('../api/client', () => ({
   setPostingStatus: vi.fn(),
@@ -29,6 +30,9 @@ vi.mock('../api/client', () => ({
       this.status = status;
     }
   },
+}));
+vi.mock('./SourcingHealthBanner', () => ({
+  default: () => <div data-testid="sourcing-health-banner" />,
 }));
 
 import { usePostings } from '../api/hooks';
@@ -155,5 +159,11 @@ describe('PostingsView', () => {
     await waitFor(() => {
       expect(screen.getByText(/JD fetch failed/i)).toBeTruthy();
     });
+  });
+
+  it('includes SourcingHealthBanner at the top', () => {
+    setupMockHook();
+    render(<PostingsView />);
+    expect(screen.getByTestId('sourcing-health-banner')).toBeInTheDocument();
   });
 });
