@@ -43,6 +43,29 @@ sources:
     slug: "data engineer"   # search query
     name: Climatebase
     enabled: true
+
+# Email alert senders (feat-b1bd050e)
+# Gmail adapter: fetches from Gmail API using configured sender addresses.
+# Each entry must have type=gmail_alert, sender (email address), sender_slug
+# (used as the parser key and for source=gmail/<sender_slug> naming).
+#
+# alert_senders:
+#   - type: gmail_alert
+#     sender: jobs-noreply@linkedin.com
+#     sender_slug: linkedin-alert
+#     enabled: true
+#
+#   - type: gmail_alert
+#     sender: jobalert@indeed.com
+#     sender_slug: indeed-alert
+#
+# Mail.app adapter: reads from the local Apple Mail store via the mail-app CLI.
+# Each entry must have type=mailapp_alert, sender_slug, account, mailbox.
+#
+#   - type: mailapp_alert
+#     sender_slug: linkedin-alert
+#     account: myemail@example.com   # Mail.app account name
+#     mailbox: Job Alerts            # mailbox name inside that account
 """
 
 from __future__ import annotations
@@ -64,6 +87,7 @@ _PACKAGE_DEFAULTS: dict = {
     "rescore_n_cap": 30,
     "rescore_budget_usd": 1.0,
     "sources": [],
+    "alert_senders": [],
 }
 
 
@@ -78,6 +102,10 @@ class SourcingConfig:
     rescore_n_cap: int = 30         # top-N by fast_score to send to LLM
     rescore_budget_usd: float = 1.0  # soft USD cap for the rescore pass
     sources: list[dict] = field(default_factory=list)
+    # Email alert senders (feat-b1bd050e) — list of alert-sender config dicts
+    # Each dict has: type (gmail_alert|mailapp_alert), sender/sender_slug,
+    # account/mailbox (mailapp only).
+    alert_senders: list[dict] = field(default_factory=list)
 
 
 def find_sourcing_config(start: Path | None = None) -> Path | None:
@@ -126,6 +154,14 @@ def load_sourcing_config(path: Path | None = None) -> SourcingConfig:
             continue
         sources.append(spec)
 
+    alert_senders: list[dict] = []
+    for spec in raw.get("alert_senders") or []:
+        if not isinstance(spec, dict):
+            continue
+        if spec.get("enabled", True) is False:
+            continue
+        alert_senders.append(spec)
+
     return SourcingConfig(
         expiry_days=expiry_days,
         max_per_source=max_per_source,
@@ -133,6 +169,7 @@ def load_sourcing_config(path: Path | None = None) -> SourcingConfig:
         rescore_n_cap=rescore_n_cap,
         rescore_budget_usd=rescore_budget_usd,
         sources=sources,
+        alert_senders=alert_senders,
     )
 
 

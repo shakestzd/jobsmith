@@ -2430,7 +2430,9 @@ def source_run(
 
     # Load sourcing config
     sourcing_cfg = load_sourcing_config(config_path)
-    if not sourcing_cfg.sources:
+
+    # Warn when no ATS sources AND no alert senders
+    if not sourcing_cfg.sources and not sourcing_cfg.alert_senders:
         console.print(
             "[yellow]No enabled sources found.[/yellow] "
             f"Create {repo_root / 'sourcing.yaml'} with a 'sources:' list."
@@ -2438,7 +2440,9 @@ def source_run(
         raise typer.Exit(code=0)
 
     console.print(
-        f"[bold]jobsmith source run[/bold] — {len(sourcing_cfg.sources)} source(s)"
+        f"[bold]jobsmith source run[/bold] — "
+        f"{len(sourcing_cfg.sources)} ATS source(s), "
+        f"{len(sourcing_cfg.alert_senders)} alert sender(s)"
         + (" [dim](dry-run)[/dim]" if dry_run else "")
     )
 
@@ -2452,6 +2456,7 @@ def source_run(
             dry_run=dry_run,
             no_llm=no_llm,
             source_filter=source_filter,
+            alert_senders=sourcing_cfg.alert_senders or None,
         )
     except Exception as exc:
         console.print(f"[red]ERROR:[/red] crawl failed: {exc}")
@@ -2468,6 +2473,114 @@ def source_run(
         console.print(
             f"[yellow]degraded sources:[/yellow] {', '.join(summary['degraded_sources'])}"
         )
+
+
+@source_app.command("add")
+def source_add(
+    identifiers: list[str] = typer.Argument(
+        ...,
+        help=(
+            "LinkedIn job IDs or URLs to record as manual postings. "
+            "Accepts numeric IDs (e.g. 3001000001) or full LinkedIn job URLs."
+        ),
+    ),
+    config_path: Path | None = typer.Option(
+        None,
+        "--sourcing-config",
+        help="Explicit path to sourcing.yaml (unused; reserved for future use).",
+        exists=False,
+    ),
+) -> None:
+    """Record pasted LinkedIn job IDs or URLs as manual postings (source=manual/linkedin).
+
+    Each identifier may be a numeric job ID or a full LinkedIn job URL.
+    Duplicates are silently ignored (dedup via upsert_posting).
+
+    Example::
+
+        jobsmith source add 3001000001 3001000002
+        jobsmith source add https://www.linkedin.com/jobs/view/3001000001/
+    """
+    import re as _re
+
+    from .sourcing.runner import role_dedup_key
+    from .sourcing.scoring import score_role_fast
+    from .sourcing.store import upsert_posting
+
+    cfg_file = find_config(Path.cwd())
+    if cfg_file is None:
+        console.print(
+            f"[red]ERROR:[/red] No {CONFIG_FILENAME} found — run `jobsmith init` first."
+        )
+        raise typer.Exit(code=2)
+    config = load_config(cfg_file)
+    repo_root = repo_root_for()
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        console.print(f"[red]ERROR:[/red] Pipeline DB not found at {db_path}.")
+        raise typer.Exit(code=2)
+
+    conn = open_pipeline_db(db_path)
+    inserted = 0
+    skipped = 0
+    try:
+        for ident in identifiers:
+            ident = ident.strip()
+            # Determine if it's a numeric ID or a URL
+            if _re.match(r"^\d+$", ident):
+                job_id = ident
+                url = f"https://www.linkedin.com/jobs/view/{job_id}/"
+            else:
+                # Parse a LinkedIn job URL to extract the ID
+                m = _re.search(r"/jobs/view/(\d+)", ident)
+                if m:
+                    job_id = m.group(1)
+                    url = ident.split("?")[0].rstrip("/") + "/"
+                else:
+                    console.print(f"[yellow]skip:[/yellow] unrecognised identifier {ident!r}")
+                    skipped += 1
+                    continue
+
+            from .sourcing.adapters.base import Role
+
+            role = Role(
+                id=job_id,
+                source="manual",
+                source_slug="linkedin",
+                company="",
+                title="",
+                location="",
+                url=url,
+                jd_text="",
+            )
+            dedup_key = role_dedup_key(role)
+            score_dict = score_role_fast("")
+            upsert_posting(
+                conn,
+                source="manual/linkedin",
+                dedup_key=dedup_key,
+                external_id=job_id,
+                url=url,
+                title="",
+                company="",
+                location="",
+                comp_text=None,
+                posted_date=None,
+                jd_text="",
+                fast_score=float(score_dict.get("score_a", 0)) / 100.0,
+                llm_score=None,
+                specialty=None,
+                rationale=None,
+                evidence_json=None,
+            )
+            inserted += 1
+        conn.commit()
+    finally:
+        conn.close()
+
+    console.print(
+        f"[green]done.[/green] recorded={inserted} skipped={skipped}"
+    )
 
 
 @source_app.command("install-schedule")
