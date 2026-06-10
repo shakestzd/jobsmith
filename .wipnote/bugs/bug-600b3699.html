@@ -13,7 +13,7 @@
              data-status="done"
              data-priority="high"
              data-created="2026-06-10T18:38:02.39559"
-             data-updated="2026-06-10T18:42:01.833718" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8" data-created-by-cli-version="0.61.1">
+             data-updated="2026-06-10T18:51:13.132007" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8" data-created-by-cli-version="0.61.1">
 
         <header>
             <h1>Cover-letter apply gate false-positives on salutations — no greeting edit can pass</h1>
@@ -24,12 +24,6 @@
         </header>
 
         <nav data-graph-edges>
-            <section data-edge-type="caused_by">
-                <h3>Caused By:</h3>
-                <ul>
-                    <li><a href="feat-fae0fda6.html" data-relationship="caused_by" data-since="2026-06-10T18:38:02.410865">feat-fae0fda6</a></li>
-                </ul>
-            </section>
             <section data-edge-type="part_of">
                 <h3>Part Of:</h3>
                 <ul>
@@ -42,12 +36,19 @@
                     <li><a href="8419646a-47b6-4091-a57b-d05f0fc3b06a.html" data-relationship="implemented_in" data-since="2026-06-10T18:38:30.238847">session 8419646a-47b6-4091-a57b-d05f0fc3b06a</a></li>
                 </ul>
             </section>
+            <section data-edge-type="caused_by">
+                <h3>Caused By:</h3>
+                <ul>
+                    <li><a href="feat-fae0fda6.html" data-relationship="caused_by" data-since="2026-06-10T18:38:02.410865">feat-fae0fda6</a></li>
+                </ul>
+            </section>
         </nav>
 
         <section data-content>
             <h3>Description</h3>
             <p>Live repro on BECU app: proposing greeting change 'Hello,' -> 'Dear BECU Hiring Team,' rejected by check_draft gate (claim 'Dear BECU Hiring Team' unverified); retry with 'Hello BECU,' ALSO rejected (claim 'Hello BECU' unverified) even though BECU alone verifies via jd-parsed.json. The gate's hard-claim extractor treats the salutation phrase as a factual claim and does verbatim phrase lookup, so any greeting change 422s and the feature's apply path is unusable for salutations. Fix in factcheck claim extraction/matching (e.g. exempt salutation lines, or verify proper-noun tokens within phrases), NOT by weakening dollar/number checks.
-[2026-06-10 18:42 claude-code] accepted-advisory (provenance override): committed as 451a5a7 — fix(factcheck): exempt salutation/closing lines from hard-claim extraction</p>
+[2026-06-10 18:42 claude-code] accepted-advisory (provenance override): committed as 451a5a7 — fix(factcheck): exempt salutation/closing lines from hard-claim extraction
+[2026-06-10 18:51 claude-code] accepted-advisory (provenance override): Fixed in 451a5a7 (salutation/closing exemption in extract_hard_claims); verified live in Chrome — 'Dear BECU Hiring Team,' apply succeeded, file written; regression tests keep fabricated body claims blocked</p>
         </section>
     </article>
 </body>
