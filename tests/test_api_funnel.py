@@ -281,3 +281,121 @@ def test_funnel_response_has_window_field(client) -> None:
     resp = client.get("/api/funnel?window=7")
     data = resp.json()
     assert data["window"] == 7
+
+
+# ---------------------------------------------------------------------------
+# Branch-review finding #1 — funnel resilience when a newer run exists
+# ---------------------------------------------------------------------------
+
+
+def _seed_newer_run_after_outcome(db_path: Path) -> None:
+    """Seed scenario: outcome recorded then a newer run created for same slug.
+
+    Steps:
+    1. Create and promote a posting → run-A (slug 'slug-resilience').
+    2. Set status='interview' on run-A.
+    3. Insert run-B for the same slug (simulates a new pipeline run started
+       after the outcome was recorded). run-B has status='in-progress'.
+    4. The posting still points to run-A via promoted_application_id.
+
+    Expected: funnel still counts the slug as interview=1 because the slug-
+    based join finds run-A's 'interview' status even though run-B exists.
+    """
+    conn = open_pipeline_db(db_path)
+    upsert_posting(
+        conn,
+        source="greenhouse/resilience",
+        dedup_key="resilience-key",
+        title="Resilient Role",
+        company="ResilienceCo",
+        specialty="backend",
+        url="https://resilience.example.com/job",
+        jd_text="jd text",
+    )
+    p_id = conn.execute(
+        "SELECT id FROM postings WHERE dedup_key = 'resilience-key'"
+    ).fetchone()["id"]
+
+    run_a = "run-resilience-A"
+    conn.execute(
+        "INSERT INTO apply_runs (run_id, slug, phase, started_at, status) "
+        "VALUES (?, ?, 'gather', ?, 'done')",
+        (run_a, "slug-resilience", _iso(2)),  # started 2 days ago
+    )
+    conn.execute(
+        "UPDATE postings SET status = 'promoted', promoted_application_id = ? "
+        "WHERE id = ?",
+        (run_a, p_id),
+    )
+    # Record outcome on run-A
+    conn.execute(
+        "UPDATE apply_runs SET status = 'interview' WHERE run_id = ?", (run_a,)
+    )
+    # Insert a newer run for the same slug (simulates re-run after outcome)
+    run_b = "run-resilience-B"
+    conn.execute(
+        "INSERT INTO apply_runs (run_id, slug, phase, started_at, status) "
+        "VALUES (?, ?, 'gather', ?, 'in-progress')",
+        (run_b, "slug-resilience", _iso(0)),  # started today
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_funnel_counts_outcome_when_newer_run_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outcome on an older run is still counted when a newer run exists for the slug."""
+    db_path = tmp_path / "jobsmith.db"
+    _seed_newer_run_after_outcome(db_path)
+    app = _make_app(db_path, monkeypatch)
+    with TestClient(app, raise_server_exceptions=True) as c:
+        resp = c.get("/api/funnel?window=all")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    # The promoted posting's slug has an 'interview' on run-A; run-B is in-progress.
+    # The funnel must report interview=1.
+    assert data["stages"]["interview"] == 1, data["stages"]
+    assert data["stages"]["offer"] == 0, data["stages"]
+
+
+def test_funnel_interview_equals_one_after_promote_and_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Classic scenario: promote → set outcome → funnel interview count == 1."""
+    db_path = tmp_path / "jobsmith.db"
+    conn = open_pipeline_db(db_path)
+    upsert_posting(
+        conn,
+        source="greenhouse/classic",
+        dedup_key="classic-key",
+        title="Classic Role",
+        company="ClassicCo",
+        specialty="backend",
+        url="https://classic.example.com/job",
+        jd_text="jd",
+    )
+    p_id = conn.execute(
+        "SELECT id FROM postings WHERE dedup_key = 'classic-key'"
+    ).fetchone()["id"]
+    run_id = "run-classic-1"
+    conn.execute(
+        "INSERT INTO apply_runs (run_id, slug, phase, started_at, status) "
+        "VALUES (?, ?, 'gather', ?, 'done')",
+        (run_id, "slug-classic", _iso()),
+    )
+    conn.execute(
+        "UPDATE postings SET status = 'promoted', promoted_application_id = ? WHERE id = ?",
+        (run_id, p_id),
+    )
+    conn.execute(
+        "UPDATE apply_runs SET status = 'interview' WHERE run_id = ?", (run_id,)
+    )
+    conn.commit()
+    conn.close()
+
+    app = _make_app(db_path, monkeypatch)
+    with TestClient(app, raise_server_exceptions=True) as c:
+        resp = c.get("/api/funnel?window=all")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["stages"]["interview"] == 1

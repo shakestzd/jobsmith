@@ -293,3 +293,142 @@ def test_promote_no_jd_text_sets_warning(client_and_ids, monkeypatch) -> None:
     data = resp.json()
     assert data["jd_fetch_failed"] is True
     assert "run_id" in data
+
+
+# ---------------------------------------------------------------------------
+# Branch-review finding #2 — GET /postings limit/offset + no jd_text
+# ---------------------------------------------------------------------------
+
+
+def test_list_postings_excludes_jd_text(client_and_ids) -> None:
+    """jd_text must not appear in GET /postings list response."""
+    client, _, _ = client_and_ids
+    resp = client.get("/api/postings")
+    assert resp.status_code == 200, resp.text
+    for row in resp.json():
+        assert "jd_text" not in row, f"jd_text leaked into list response for id={row['id']}"
+
+
+def test_list_postings_limit(client_and_ids) -> None:
+    """limit=1 returns exactly 1 row."""
+    client, _, _ = client_and_ids
+    resp = client.get("/api/postings?limit=1")
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()) == 1
+
+
+def test_list_postings_offset(client_and_ids) -> None:
+    """offset skips rows; limit+offset together page through results."""
+    client, _, _ = client_and_ids
+    # 3 rows total; limit=2 offset=0 → 2 rows; limit=2 offset=2 → 1 row
+    r1 = client.get("/api/postings?limit=2&offset=0")
+    r2 = client.get("/api/postings?limit=2&offset=2")
+    assert r1.status_code == 200 and r2.status_code == 200
+    assert len(r1.json()) == 2
+    assert len(r2.json()) == 1
+    # Ensure all IDs are distinct across pages
+    ids_page1 = {row["id"] for row in r1.json()}
+    ids_page2 = {row["id"] for row in r2.json()}
+    assert ids_page1.isdisjoint(ids_page2)
+
+
+def test_list_postings_limit_exceeds_max_returns_422(client_and_ids) -> None:
+    """limit > 1000 (the max) must be rejected with 422."""
+    client, _, _ = client_and_ids
+    resp = client.get("/api/postings?limit=9999")
+    assert resp.status_code == 422, resp.text
+
+
+# ---------------------------------------------------------------------------
+# Branch-review finding #3 — URL safety check before JD fetch
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_jd_text_skips_file_scheme(tmp_path: Path) -> None:
+    """file:// URLs must not be fetched."""
+    import asyncio
+    import jobsmith.api.postings_routes as pr_mod
+
+    result = asyncio.get_event_loop().run_until_complete(
+        pr_mod._fetch_jd_text(f"file://{tmp_path}/secret.txt")
+    )
+    assert result is None
+
+
+def test_fetch_jd_text_skips_localhost(tmp_path: Path) -> None:  # noqa: ARG001
+    """http://localhost URLs must not be fetched."""
+    import asyncio
+    import jobsmith.api.postings_routes as pr_mod
+
+    result = asyncio.get_event_loop().run_until_complete(
+        pr_mod._fetch_jd_text("http://localhost/admin")
+    )
+    assert result is None
+
+
+def test_fetch_jd_text_skips_127(tmp_path: Path) -> None:  # noqa: ARG001
+    """http://127.0.0.1 URLs must not be fetched."""
+    import asyncio
+    import jobsmith.api.postings_routes as pr_mod
+
+    result = asyncio.get_event_loop().run_until_complete(
+        pr_mod._fetch_jd_text("http://127.0.0.1:8080/internal")
+    )
+    assert result is None
+
+
+def test_promote_blocked_url_succeeds_with_warning(client_and_ids, monkeypatch) -> None:
+    """Posting whose URL is a loopback address: promote succeeds with jd_fetch_failed=True.
+
+    The safety guard returns None (not a network error) so the promote contract
+    is unchanged — no 5xx, just jd_fetch_failed=True in the response.
+    """
+    client, _, db_path = client_and_ids
+
+    # Insert a posting with a localhost URL and no jd_text
+    conn = open_pipeline_db(db_path)
+    blocked_id = upsert_posting(
+        conn,
+        source="email/internal",
+        dedup_key="key-blocked",
+        title="Internal Role",
+        company="Internal",
+        specialty="backend",
+        url="http://127.0.0.1:9999/jobs/42",
+        jd_text=None,
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.post(f"/api/postings/{blocked_id}/promote")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["jd_fetch_failed"] is True
+    assert "run_id" in data
+
+
+def test_is_safe_jd_url_rejects_private_ranges() -> None:
+    """_is_safe_jd_url blocks RFC-1918 and loopback hosts."""
+    from jobsmith.api.postings_routes import _is_safe_jd_url
+
+    blocked = [
+        "http://10.0.0.1/jobs",
+        "http://10.255.255.255/jobs",
+        "http://172.16.0.1/jobs",
+        "http://172.31.0.1/jobs",
+        "http://192.168.1.1/jobs",
+        "http://127.0.0.1/jobs",
+        "http://localhost/jobs",
+        "http://0.0.0.0/jobs",
+        "file:///etc/passwd",
+        "ftp://files.example.com/jobs",
+    ]
+    for url in blocked:
+        assert not _is_safe_jd_url(url), f"Expected {url!r} to be blocked"
+
+    allowed = [
+        "https://boards.greenhouse.io/stripe/jobs/123",
+        "http://example.com/careers",
+    ]
+    for url in allowed:
+        assert _is_safe_jd_url(url), f"Expected {url!r} to be allowed"

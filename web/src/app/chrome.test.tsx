@@ -1,12 +1,19 @@
 // chrome.test.tsx
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { Sidebar } from './chrome';
 import type { ApplicationRow } from '../api/types';
 
 // Mock the hooks module so Sidebar can use real application data without HTTP
 vi.mock('../api/hooks', () => ({
   useApplications: vi.fn(),
+}));
+
+// Mock the api/client module so the dynamic import inside usePostingsBadge
+// never hits the network.
+const mockGetPostings = vi.fn().mockResolvedValue([]);
+vi.mock('../api/client', () => ({
+  getPostings: (...args: unknown[]) => mockGetPostings(...args),
 }));
 
 import { useApplications } from '../api/hooks';
@@ -117,5 +124,49 @@ describe('Sidebar', () => {
     expect(reviewItem).toBeTruthy();
     const countSpan = reviewItem?.querySelector('.nav-count');
     expect(countSpan?.textContent).toBe('0');
+  });
+});
+
+// ── usePostingsBadge — refetches on jobsmith:data-changed (finding #4) ──────
+
+describe('usePostingsBadge via Sidebar', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetPostings.mockResolvedValue([]);
+    // Use a stable applications response so Sidebar renders without issues
+    vi.mocked(useApplications).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+    });
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it('calls getPostings again when jobsmith:data-changed fires', async () => {
+    // Reset call count
+    mockGetPostings.mockClear();
+    mockGetPostings.mockResolvedValue([]);
+
+    render(<Sidebar view="dashboard" open={true} setView={vi.fn()} openNew={vi.fn()} />);
+
+    // Wait for the initial fetch triggered by mount (version=0 effect)
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const callsAfterMount = mockGetPostings.mock.calls.length;
+    expect(callsAfterMount).toBeGreaterThanOrEqual(1);
+
+    // Fire the data-changed event
+    await act(async () => {
+      window.dispatchEvent(new Event('jobsmith:data-changed'));
+      await Promise.resolve();
+    });
+
+    // The hook should have scheduled another fetch
+    expect(mockGetPostings.mock.calls.length).toBeGreaterThan(callsAfterMount);
   });
 });

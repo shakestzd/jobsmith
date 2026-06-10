@@ -21,6 +21,7 @@ The ``_get_db_path`` helper is module-level so tests can monkeypatch it.
 from __future__ import annotations
 
 import logging
+import re as _re
 from pathlib import Path
 from typing import Annotated
 
@@ -67,16 +68,65 @@ def _get_db_path() -> Path:
 
 
 # ---------------------------------------------------------------------------
-# JD fetch helper — async, module-level so tests can monkeypatch it
+# URL allow-list for JD fetch (branch-review finding #3)
 # ---------------------------------------------------------------------------
+
+# Patterns that must NOT be fetched (loopback / private ranges / non-http).
+# This is a best-effort client-side guard; a full DNS-resolution check is out
+# of scope.  The regex matches the *host* portion of the URL.
+_BLOCKED_HOST_RE = _re.compile(
+    r"""
+    ^(?:
+        localhost                       |   # localhost
+        127(?:\.\d{1,3}){3}            |   # 127.x.x.x
+        0\.0\.0\.0                      |   # 0.0.0.0
+        ::1                             |   # IPv6 loopback
+        10(?:\.\d{1,3}){3}             |   # 10.x.x.x
+        172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}  |  # 172.16-31.x.x
+        192\.168(?:\.\d{1,3}){2}        # 192.168.x.x
+    )$
+    """,
+    _re.VERBOSE | _re.IGNORECASE,
+)
+
+
+def _is_safe_jd_url(url: str) -> bool:
+    """Return True only when *url* is safe to fetch for JD content.
+
+    Accepted: http:// or https:// scheme with a non-private, non-loopback host.
+    Rejected: any other scheme (file://, ftp://, …), localhost, loopback IPs,
+    and RFC-1918 private ranges.
+    """
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+
+    if parsed.scheme not in ("http", "https"):
+        return False
+
+    host = parsed.hostname or ""
+    if not host:
+        return False
+
+    return not _BLOCKED_HOST_RE.match(host)
 
 
 async def _fetch_jd_text(url: str) -> str | None:
     """Attempt to fetch raw JD text from *url*.
 
-    Uses httpx with a short timeout. Returns None on any error so that
-    callers can set jd_fetch_failed=True and continue.
+    Returns None (without raising) on any error so that callers can set
+    jd_fetch_failed=True and continue promoting.
+
+    Safety: URLs that fail :func:`_is_safe_jd_url` are silently skipped — the
+    caller treats None exactly the same as a network failure.
     """
+    if not _is_safe_jd_url(url):
+        logger.debug("JD fetch skipped — URL failed safety check: %s", url)
+        return None
+
     try:
         import httpx
 
@@ -99,6 +149,15 @@ async def _fetch_jd_text(url: str) -> str | None:
 # ---------------------------------------------------------------------------
 # GET /postings
 # ---------------------------------------------------------------------------
+
+
+_POSTINGS_LIST_COLUMNS = (
+    "id, source, external_id, url, title, company, location, comp_text, "
+    "posted_date, fast_score, llm_score, specialty, rationale, status, "
+    "promoted_application_id, dedup_key, first_seen_at, last_seen_at"
+)
+_POSTINGS_DEFAULT_LIMIT = 200
+_POSTINGS_MAX_LIMIT = 1000
 
 
 @router.get("/postings", response_model=list[PostingRow])
@@ -124,11 +183,26 @@ def list_postings(
             )
         ),
     ] = None,
+    limit: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=_POSTINGS_MAX_LIMIT,
+            description=f"Maximum rows to return (default {_POSTINGS_DEFAULT_LIMIT}, max {_POSTINGS_MAX_LIMIT}).",
+        ),
+    ] = _POSTINGS_DEFAULT_LIMIT,
+    offset: Annotated[
+        int,
+        Query(ge=0, description="Row offset for pagination (default 0)."),
+    ] = 0,
 ) -> list[PostingRow]:
     """Return ranked postings matching the given filters.
 
     Ranking: llm_score DESC NULLS LAST, fast_score DESC NULLS LAST,
     first_seen_at DESC (stable tie-breaker).
+
+    jd_text is excluded from the list response to keep payload sizes small.
+    Use limit/offset for pagination (default limit 200, max 1000).
     """
     db_path = _get_db_path()
     try:
@@ -162,14 +236,19 @@ def list_postings(
         if where_clauses:
             where_sql = "WHERE " + " AND ".join(where_clauses)
 
+        # jd_text is excluded — it can be tens of KB per row and is not needed
+        # for the list view.  Use the /postings/{id} detail endpoint for full text.
         sql = f"""
-            SELECT * FROM postings
+            SELECT {_POSTINGS_LIST_COLUMNS}
+            FROM postings
             {where_sql}
             ORDER BY
                 llm_score DESC NULLS LAST,
                 fast_score DESC NULLS LAST,
                 first_seen_at DESC
+            LIMIT ? OFFSET ?
         """
+        params.extend([limit, offset])
         rows = conn.execute(sql, params).fetchall()
         return [PostingRow(**dict(row)) for row in rows]
     finally:
