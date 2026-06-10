@@ -1395,6 +1395,40 @@ def apply_cover_letter(slug: str, body: dict) -> dict:
     return out
 
 
+@router.post("/applications/{slug}/outcome-status")
+def set_outcome_status(slug: str, body: dict) -> dict:
+    """Set the apply_runs outcome status for an application slug.
+
+    Accepted values: interview, offer, rejected, done, in-progress.
+    These are free-text statuses stored in apply_runs.status and are used
+    by the funnel dashboard to track post-application outcomes.
+    """
+    new_status = body.get("status", "")
+    valid_outcome = {"interview", "offer", "rejected", "done", "in-progress"}
+    if new_status not in valid_outcome:
+        raise HTTPException(
+            status_code=422,
+            detail=f"status must be one of {sorted(valid_outcome)}",
+        )
+
+    db_path = _get_db_path()
+    conn = _open_conn(db_path)
+    try:
+        run_row = _find_run_row_for_slug(conn, slug)
+        if run_row is None:
+            raise HTTPException(status_code=404, detail=f"No application found for slug {slug!r}")
+        run_id = run_row["run_id"]
+        conn.execute(
+            "UPDATE apply_runs SET status = ? WHERE run_id = ?",
+            (new_status, run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"slug": slug, "status": new_status}
+
+
 @router.post("/applications/{slug}/review-status")
 def set_review_status(slug: str, body: dict) -> dict:
     """Set review status ('approved', 'needs-revision', 'pending') in apply_state."""

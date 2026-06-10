@@ -448,6 +448,32 @@ export async function promotePosting(
   return apiPost<PostingPromoteResponse>(`/api/postings/${id}/promote`, {});
 }
 
+// ── Application outcome status ────────────────────────────────────────────
+
+export type OutcomeStatus = 'interview' | 'offer' | 'rejected' | 'done' | 'in-progress';
+
+/** POST /api/applications/{slug}/outcome-status — record interview/offer/etc outcome. */
+export async function setOutcomeStatus(
+  slug: string,
+  status: OutcomeStatus,
+): Promise<{ slug: string; status: string }> {
+  return apiPost<{ slug: string; status: string }>(
+    `/api/applications/${encodeURIComponent(slug)}/outcome-status`,
+    { status },
+  );
+}
+
+// ── Funnel API ────────────────────────────────────────────────────────────
+
+import type { FunnelResponse } from './types';
+
+export type FunnelWindow = 7 | 30 | 90 | 'all';
+
+/** GET /api/funnel — per-stage counts, conversions, per-source yield. */
+export async function getFunnel(window: FunnelWindow = 30): Promise<FunnelResponse> {
+  return apiGet<FunnelResponse>(`/api/funnel?window=${window}`);
+}
+
 /**
  * Redact secrets from any string before it lands in the DOM, clipboard, logs,
  * or any other user-visible surface. Catches:

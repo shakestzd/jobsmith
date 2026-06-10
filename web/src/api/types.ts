@@ -271,6 +271,38 @@ export interface PostingPromoteResponse {
   jd_fetch_failed: boolean;
 }
 
+// ── Funnel ────────────────────────────────────────────────────────────────
+
+export interface FunnelStages {
+  sourced: number;
+  queued: number;
+  promoted: number;
+  interview: number;
+  offer: number;
+}
+
+export interface FunnelConversions {
+  sourced_to_queued: number | null;
+  queued_to_promoted: number | null;
+  promoted_to_interview: number | null;
+  interview_to_offer: number | null;
+}
+
+export interface PerSourceRow {
+  source: string;
+  postings: number;
+  applied: number;
+  interview: number;
+  offer: number;
+}
+
+export interface FunnelResponse {
+  window: number | null;
+  stages: FunnelStages;
+  conversions: FunnelConversions;
+  per_source: PerSourceRow[];
+}
+
 // ── Master validate ──────────────────────────────────────────────────────
 
 export interface MasterValidateError {
