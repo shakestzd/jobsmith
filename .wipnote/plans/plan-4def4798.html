@@ -411,7 +411,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-1" class="slice-nav-item" data-slice-nav="1">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="1"></span>
         <span>#1 Postings store + funnel states (migration, db layer, promote linkage)</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="4 issue(s)">&#9888;4</span>
         
       </a>
     </li>
@@ -420,7 +420,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-2" class="slice-nav-item" data-slice-nav="2">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="2"></span>
         <span>#2 Port ATS adapters + deterministic crawler core (`jobsmith source run`)</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="5 issue(s)">&#9888;5</span>
         
       </a>
     </li>
@@ -429,7 +429,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-3" class="slice-nav-item" data-slice-nav="3">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="3"></span>
         <span>#3 Email-alert ingestion: Gmail + Mail.app adapters, LinkedIn paste/batch</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="3 issue(s)">&#9888;3</span>
         
       </a>
     </li>
@@ -437,8 +437,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-4" class="slice-nav-item" data-slice-nav="4">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="4"></span>
-        <span>#4 Shortlist LLM rescoring via agent-sdk fit-scorer (budget-capped)</span>
-        
+        <span>#4 Shortlist LLM rescoring via agent-sdk (budget-capped triage score)</span>
+        <span class="nav-triage-badge nav-triage-issue" title="3 issue(s)">&#9888;3</span>
         
       </a>
     </li>
@@ -447,7 +447,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-5" class="slice-nav-item" data-slice-nav="5">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="5"></span>
         <span>#5 Postings inbox in the web UI + one-click promote-to-apply</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="3 issue(s)">&#9888;3</span>
         
       </a>
     </li>
@@ -456,7 +456,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-6" class="slice-nav-item" data-slice-nav="6">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="6"></span>
         <span>#6 Scheduling + run health: launchd, visible failure state, retire old pipeline</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="4 issue(s)">&#9888;4</span>
         
       </a>
     </li>
@@ -465,7 +465,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-7" class="slice-nav-item" data-slice-nav="7">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="7"></span>
         <span>#7 Funnel dashboard: per-stage counts, conversion, per-source yield</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="2 issue(s)">&#9888;2</span>
         
       </a>
     </li>
@@ -474,7 +474,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-8" class="slice-nav-item" data-slice-nav="8">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="8"></span>
         <span>#8 E2E acceptance: scheduled run -> inbox -> one-click apply -> funnel, live in Chrome</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="2 issue(s)">&#9888;2</span>
         
       </a>
     </li>
@@ -503,6 +503,12 @@ plan ports the proven pieces INTO jobsmith: deterministic `jobsmith source run`
 LLM rescoring only for the shortlist, a ranked Postings inbox in the web UI with
 one-click promote-to-apply, launchd scheduling with VISIBLE run health, and a
 funnel dashboard (sourced -> queued -> applied -> outcome with conversion).
+NOTE for reviewers: crawling (slices 2-3) is deterministic Python; the LLM stage
+(slice 4) is post-crawl, capped to the shortlist, and skippable — the daily
+schedule cannot die on agent turns by construction. OLD DATA: we start fresh —
+the 1,944 previously-seen roles and the Notion inbox rows are stale (mostly
+expired postings from May) and are intentionally NOT migrated; Notion data is
+left in place read-only.
 </p>
   <div class="meta">
     <span class="badge badge-pending">Draft</span>
@@ -526,13 +532,13 @@ funnel dashboard (sourced -> queued -> applied -> outcome with conversion).
 <section class="dep-graph" data-zone="dependency-graph">
   <h2>Dependency Graph</h2>
   <div id="graph-data" style="display:none">
-    <div data-node="1" data-name="Postings store + funnel states (migration, db layer, promote linkage)" data-status="pending" data-deps="" data-files="4"></div>
-    <div data-node="2" data-name="Port ATS adapters + deterministic crawler core (`jobsmith source run`)" data-status="pending" data-deps="1" data-files="11"></div>
-    <div data-node="3" data-name="Email-alert ingestion: Gmail + Mail.app adapters, LinkedIn paste/batch" data-status="pending" data-deps="1" data-files="7"></div>
-    <div data-node="4" data-name="Shortlist LLM rescoring via agent-sdk fit-scorer (budget-capped)" data-status="pending" data-deps="2" data-files="3"></div>
-    <div data-node="5" data-name="Postings inbox in the web UI + one-click promote-to-apply" data-status="pending" data-deps="1,2" data-files="7"></div>
-    <div data-node="6" data-name="Scheduling + run health: launchd, visible failure state, retire old pipeline" data-status="pending" data-deps="2" data-files="6"></div>
-    <div data-node="7" data-name="Funnel dashboard: per-stage counts, conversion, per-source yield" data-status="pending" data-deps="1,5" data-files="6"></div>
+    <div data-node="1" data-name="Postings store + funnel states (migration, db layer, promote linkage)" data-status="pending" data-deps="" data-files="5"></div>
+    <div data-node="2" data-name="Port ATS adapters + deterministic crawler core (`jobsmith source run`)" data-status="pending" data-deps="1" data-files="13"></div>
+    <div data-node="3" data-name="Email-alert ingestion: Gmail + Mail.app adapters, LinkedIn paste/batch" data-status="pending" data-deps="2" data-files="8"></div>
+    <div data-node="4" data-name="Shortlist LLM rescoring via agent-sdk (budget-capped triage score)" data-status="pending" data-deps="2" data-files="4"></div>
+    <div data-node="5" data-name="Postings inbox in the web UI + one-click promote-to-apply" data-status="pending" data-deps="1,2" data-files="9"></div>
+    <div data-node="6" data-name="Scheduling + run health: launchd, visible failure state, retire old pipeline" data-status="pending" data-deps="2" data-files="7"></div>
+    <div data-node="7" data-name="Funnel dashboard: per-stage counts, conversion, per-source yield" data-status="pending" data-deps="1,5" data-files="8"></div>
     <div data-node="8" data-name="E2E acceptance: scheduled run -> inbox -> one-click apply -> funnel, live in Chrome" data-status="pending" data-deps="3,4,5,6,7" data-files="3"></div>
     
     <!--PLAN_GRAPH_NODES-->
@@ -571,6 +577,7 @@ from discovery to outcome.
 <li data-markdown>No LinkedIn scraping (auth-wall/ToS): LinkedIn arrives via alert-email parsing and manual paste/batch only.</li>
 <li data-markdown>Reuse proven code: port the shakestzd adapters/scoring rather than rewrite; reuse jobsmith&#39;s existing apply endpoints, fit-scorer agent, and UI patterns.</li>
 <li data-markdown>Local-first single-tenant; secrets stay in .env; Gmail read-only scope.</li>
+<li data-markdown>Start fresh: no migration of the old pipeline&#39;s 1,944 roles / Notion rows / sourcing-state.yaml (stale May data); explicitly out of scope.</li>
 </ul>
 
     <div class="approval-row">
@@ -593,7 +600,7 @@ from discovery to outcome.
     <span class="slice-num">#1</span>
     <span class="slice-title-col">
       <span class="slice-name">Postings store &#43; funnel states (migration, db layer, promote linkage)</span>
-      <span class="slice-preview">New postings table in the pipeline DB (next migration after the reuse store):</span>
+      <span class="slice-preview">New postings table via migration 010postings.sql REGISTERED in the hardcoded</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-revision badge-sm">M</span>
@@ -601,7 +608,7 @@ from discovery to outcome.
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-1">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="4 critic issue(s)">4 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -633,16 +640,20 @@ from discovery to outcome.
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-1-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>New <code>postings</code> table in the pipeline DB (next migration after the reuse store):
-id, source (e.g. greenhouse/stripe, gmail/linkedin-alert), external_id, url,
-title, company, location, comp_text, posted_date, jd_text, fast_score,
-llm_score, specialty, rationale, evidence_json, status
+          <div class="markdown-block reveal-content serif-prose"><p>New <code>postings</code> table via migration 010_postings.sql REGISTERED in the hardcoded
+_PIPELINE_MIGRATIONS list (db.py:50-59 — A2: landing the file alone silently
+does nothing): id, source (e.g. greenhouse/stripe, gmail/linkedin-alert),
+external_id, url, title, company, location, comp_text, posted_date, jd_text,
+fast_score, llm_score, specialty, rationale, evidence_json, status
 (sourced|queued|dismissed|promoted|expired), promoted_application_id (FK to
-applications), dedup_key (normalized url/external-id hash), first_seen_at,
-last_seen_at. Python db layer: upsert-by-dedup_key (bump last_seen on re-sight),
-status transitions, promote(posting_id) -&gt; creates/links the applications row
-and stamps promoted_application_id. Add interview/offer to the applications
-status vocabulary if absent so outcomes are representable.</p>
+applications), dedup_key (normalized-URL/external-id hash), first_seen_at,
+last_seen_at. Python store layer: upsert-by-dedup_key (re-sight bumps last_seen
+ONLY — dismissed/promoted/expired rows are never resurrected to sourced),
+status transitions, promote(posting_id) -&gt; creates/links the applications row.
+Also a sourcing_runs table (run_id, started/finished, status, counts,
+degraded_sources_json, error; retention: purge beyond last 90) used by slice-6.
+Add interview/offer to the applications status vocabulary (free-text statuses
+per applications.py:323-327, so purely additive).</p>
 </div>
           <label for="slice-1-what-reveal" class="reveal-label">Show full description</label>
           
@@ -666,13 +677,13 @@ view clean (hundreds of never-touched postings stay out of it).</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/migrations/010_postings.sql, src/jobsmith/sourcing/__init__.py, src/jobsmith/sourcing/store.py, tests/test_sourcing_store.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/migrations/010_postings.sql, src/jobsmith/db.py, src/jobsmith/sourcing/__init__.py, src/jobsmith/sourcing/store.py, tests/test_sourcing_store.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Migration applies cleanly to an existing DB; upsert by dedup_key inserts new and bumps last_seen_at on re-sight</li><li>promote(posting_id) creates the applications row, links promoted_application_id both ways, and sets status=&#39;promoted&#39;</li><li>Status transitions enforced (sourced-&gt;queued/dismissed/promoted; no resurrecting promoted rows)</li></ul>
+        <ul class="slice-done-list"><li>010_postings.sql is registered in _PIPELINE_MIGRATIONS (db.py) and a test proves open_pipeline_db() applies it to an existing 009-level DB</li><li>Upsert by dedup_key inserts new rows and bumps last_seen_at on re-sight; a NEGATIVE test proves re-sight of dismissed/promoted/expired rows does NOT change their status</li><li>promote(posting_id) creates the applications row, links promoted_application_id both ways, and sets status=&#39;promoted&#39;</li><li>sourcing_runs records persist with the defined schema and purge beyond the last 90</li></ul>
       </div>
       
     
@@ -683,13 +694,17 @@ view clean (hundreds of never-touched postings stay out of it).</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-1-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> new postings table feeding the existing applications table via an
-explicit promote step; applications stays the system of record for work done.
-<strong>Decisions:</strong> dedup_key = normalized URL/external-id hash (re-sights bump
-last_seen, never duplicate); funnel statuses sourced/queued/dismissed/promoted/
-expired; outcomes live on applications (add interview/offer to vocabulary).
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> new postings + sourcing_runs tables feeding the existing applications
+table via an explicit promote step; applications stays the system of record.
+<strong>Decisions:</strong> dedup_key = normalized URL (scheme/host lowercased, tracking
+params stripped) or source-prefixed external_id; v1 dedup is exact-key only —
+the same role arriving via greenhouse AND an email link with a different URL is
+two rows (cross-source fuzzy merge is a recorded future enhancement, rapidfuzz
+is available); re-sights NEVER resurrect terminal statuses; run-record
+retention 90 rows. Outcomes (interview/offer) live on applications.
 <strong>Rejected:</strong> sourced rows inside applications (bloats the working view);
-JSONL-only index (no relational funnel queries, no FK to applications).</p>
+JSONL-only index (no relational funnel queries); auto-discovered migrations
+(db.py&#39;s explicit list is the established mechanism — work with it).</p>
 </div>
         <label for="slice-1-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -706,8 +721,8 @@ JSONL-only index (no relational funnel queries, no FK to applications).</p>
         <div class="test-strategy">
           
           <div class="test-group" data-kind="unit">
-            <span class="test-chip">UNIT &middot; 3</span>
-            <ul><li>TestPostingUpsertDedup — same dedup_key twice -&gt; one row, last_seen bumped</li><li>TestPromoteLinksApplication — promote creates&#43;links application row</li><li>TestStatusTransitions — illegal transitions rejected</li></ul>
+            <span class="test-chip">UNIT &middot; 4</span>
+            <ul><li>TestMigrationApplies — 009-level DB -&gt; open_pipeline_db -&gt; postings &#43; sourcing_runs exist</li><li>TestPostingUpsertDedup — same dedup_key twice -&gt; one row, last_seen bumped</li><li>TestNoResurrection — dismissed/promoted/expired &#43; re-sight -&gt; status unchanged</li><li>TestPromoteLinksApplication — promote creates&#43;links application row</li></ul>
           </div>
           
         </div>
@@ -716,6 +731,37 @@ JSONL-only index (no relational funnel queries, no FK to applications).</p>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">A2: _PIPELINE_MIGRATIONS (db.py:50-59) is hardcoded — the .sql file alone never runs; db.py was missing from files — RESOLVED: db.py added &#43; registration test in done_when.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">INFO</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">Application statuses are free-text (applications.py:323-327) — interview/offer are purely additive, no schema change. Verified.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">&#39;No resurrecting&#39; was a constraint, not an observable — RESOLVED: explicit negative test (TestNoResurrection) in done_when/tests.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Run-record schema/retention were unspecified — RESOLVED: sourcing_runs schema defined here (slice-6 consumes it), purge at 90 rows.</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -743,7 +789,7 @@ JSONL-only index (no relational funnel queries, no FK to applications).</p>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-2">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="5 critic issue(s)">5 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -776,13 +822,21 @@ JSONL-only index (no relational funnel queries, no FK to applications).</p>
           
           <input type="checkbox" id="slice-2-what-reveal" class="reveal-toggle">
           <div class="markdown-block reveal-content serif-prose"><p>Port the proven shakestzd crawler into the package: source_jobs.py orchestration
-logic and sources/{base,greenhouse,lever,ashby,hn_whos_hiring,climatebase}.py
-become src/jobsmith/sourcing/{runner,adapters/*}.py; job-sources.yaml (23
-sources) and the rejection-filter/fast three-specialty scoring port with their
-calibration. New CLI <code>jobsmith source run [--no-llm] [--source X]</code>: fetch all
-configured sources, normalize, dedup via slice-1 store, fast-score, write
-postings + a run record. Pure Python end to end — no claude subprocess, no
-agent turns. Notion writer is NOT ported.</p>
+(run_crawl, source_jobs.py:415-526 — already deterministic with per-source
+exception isolation + circuit breaker) and sources/{base,greenhouse,lever,
+ashby,hn_whos_hiring,climatebase}.py (ATSSourceAdapter.fetch contract,
+base.py:17-66) become src/jobsmith/sourcing/{runner,adapters/*}.py. The local
+scoring deps (comp_parser, fit_scoring, red_flags from shakestzd
+private/scripts/) are bundled into src/jobsmith/sourcing/scoring.py. Declare
+rapidfuzz + beautifulsoup4 in pyproject.toml (A3 — absent today). Config: the
+package ships default sources; the USER&#39;s source list lives in their repo as
+sourcing.yaml next to .apply-config.yaml (ported from job-sources.yaml&#39;s 23
+sources), resolved via the existing repo-root machinery. New CLI <code>jobsmith source run [--no-llm] [--source X]</code>: fetch, normalize, dedup via slice-1
+store, fast-score, write postings + a sourcing_runs record. LIFECYCLE: the
+runner auto-expires postings not re-sighted for N days (default 21,
+configurable in sourcing.yaml). Pure Python end to end. Notion writer NOT
+ported. Fixtures: greenhouse+lever recorded fixtures port over; ashby/hn/
+climatebase fixtures are AUTHORED NEW (A4 — they don&#39;t exist in the old repo).</p>
 </div>
           <label for="slice-2-what-reveal" class="reveal-label">Show full description</label>
           
@@ -805,13 +859,13 @@ max-turns/permission failure class by construction (Constraint 1).</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/sourcing/runner.py, src/jobsmith/sourcing/adapters/base.py, src/jobsmith/sourcing/adapters/greenhouse.py, src/jobsmith/sourcing/adapters/lever.py, src/jobsmith/sourcing/adapters/ashby.py, src/jobsmith/sourcing/adapters/hn_whos_hiring.py, src/jobsmith/sourcing/adapters/climatebase.py, src/jobsmith/sourcing/scoring.py, src/jobsmith/sourcing/sources.yaml, src/jobsmith/cli.py, tests/test_sourcing_runner.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/sourcing/runner.py, src/jobsmith/sourcing/adapters/base.py, src/jobsmith/sourcing/adapters/greenhouse.py, src/jobsmith/sourcing/adapters/lever.py, src/jobsmith/sourcing/adapters/ashby.py, src/jobsmith/sourcing/adapters/hn_whos_hiring.py, src/jobsmith/sourcing/adapters/climatebase.py, src/jobsmith/sourcing/scoring.py, src/jobsmith/sourcing/default_sources.yaml, src/jobsmith/cli.py, pyproject.toml, tests/test_sourcing_runner.py, tests/fixtures/sourcing/</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>`jobsmith source run --no-llm` against fixture responses ingests, dedupes, and fast-scores postings into the store with a run record</li><li>A real run against at least 2 live boards (greenhouse &#43; lever) lands real postings</li><li>A failing adapter degrades (recorded in the run record) without aborting the whole run</li></ul>
+        <ul class="slice-done-list"><li>rapidfuzz &#43; beautifulsoup4 declared in pyproject.toml; `uv run python -c &#39;import jobsmith.sourcing.runner&#39;` works in a fresh sync</li><li>`jobsmith source run --no-llm` against fixture responses ingests, dedupes, fast-scores postings and writes a sourcing_runs record</li><li>User-repo sourcing.yaml overrides/extends the shipped defaults; the 23 old sources port into it</li><li>Postings not re-sighted for N days flip to expired during a run; a failing adapter degrades (recorded) without aborting the run</li><li>A real run against at least 2 live boards (greenhouse &#43; lever) lands real postings</li></ul>
       </div>
       
     
@@ -822,14 +876,16 @@ max-turns/permission failure class by construction (Constraint 1).</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-2-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> straight port of source_jobs.py + 5 adapters + fast scoring +
-23-source config into src/jobsmith/sourcing/; new <code>source</code> CLI group.
-<strong>Decisions:</strong> crawl is synchronous deterministic Python; per-adapter error
-isolation with degraded-source recording (pattern carried from sourcing-state.yaml);
-Notion writer dropped (slice-6 retires the old path).
-<strong>Rejected:</strong> rewriting adapters from scratch (proven code exists); agentic
-crawl orchestration (the exact failure mode that killed the old pipeline);
-JobSpy dependency (already evaluated and rejected in the old plan&#39;s slice 3).</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> straight port of source_jobs.py + 5 adapters + the three local
+scoring modules (comp_parser/fit_scoring/red_flags -&gt; scoring.py) + source
+config; new <code>source</code> CLI group; expiry lifecycle owned here.
+<strong>Decisions:</strong> config split — package ships default_sources.yaml, the user&#39;s
+live list is sourcing.yaml in THEIR repo (same resolution as .apply-config.yaml),
+which also carries email senders, shortlist N, budget cap, expiry days, cadence;
+per-adapter error isolation with degraded-source recording carried over;
+expiry default 21 days. New deps rapidfuzz + beautifulsoup4 declared (A3).
+<strong>Rejected:</strong> rewriting adapters (proven code); agentic crawl (the old failure
+mode); JobSpy (rejected in the old plan&#39;s slice 3); auto-applying anything.</p>
 </div>
         <label for="slice-2-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -846,8 +902,8 @@ JobSpy dependency (already evaluated and rejected in the old plan&#39;s slice 3)
         <div class="test-strategy">
           
           <div class="test-group" data-kind="unit">
-            <span class="test-chip">UNIT &middot; 2</span>
-            <ul><li>per-adapter fixture parsing (recorded JSON/HTML fixtures from the old repo&#39;s fixtures)</li><li>TestAdapterFailureIsolation — one adapter raising doesn&#39;t kill the run</li></ul>
+            <span class="test-chip">UNIT &middot; 3</span>
+            <ul><li>per-adapter fixture parsing — greenhouse/lever (ported fixtures) &#43; ashby/hn/climatebase (new fixtures)</li><li>TestAdapterFailureIsolation — one adapter raising doesn&#39;t kill the run</li><li>TestAutoExpiry — stale posting flips to expired at N days</li></ul>
           </div>
           
           <div class="test-group" data-kind="integration">
@@ -861,6 +917,43 @@ JobSpy dependency (already evaluated and rejected in the old plan&#39;s slice 3)
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">A3: rapidfuzz (source_jobs.py:35) &#43; beautifulsoup4 (climatebase) absent from pyproject.toml; local comp_parser/fit_scoring/red_flags imports don&#39;t exist in jobsmith — RESOLVED: pyproject.toml in files &#43; import-works done_when; scoring modules bundled into scoring.py.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">A4: only greenhouse&#43;lever fixtures exist in the old repo; ashby/hn/climatebase fixtures must be authored — RESOLVED: stated in what/tests.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">SUCCESS</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">run_crawl (source_jobs.py:415-526) verified deterministic with per-source isolation &#43; circuit breaker; ATSSourceAdapter contract (base.py:17-66) ports cleanly.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">status=&#39;expired&#39; was defined but nothing set it — RESOLVED: runner auto-expires at N days (default 21), test added.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Config surface was unspecified — RESOLVED: user-repo sourcing.yaml (senders/sources/caps/cadence/expiry) next to .apply-config.yaml; package ships defaults.</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -888,7 +981,7 @@ JobSpy dependency (already evaluated and rejected in the old plan&#39;s slice 3)
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-3">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="3 critic issue(s)">3 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -921,17 +1014,19 @@ JobSpy dependency (already evaluated and rejected in the old plan&#39;s slice 3)
           
           <input type="checkbox" id="slice-3-what-reveal" class="reveal-toggle">
           <div class="markdown-block reveal-content serif-prose"><p>New adapters that turn job-alert emails into postings: (a) Gmail — read-only
-API (creds/token via .env) searching configured alert senders (LinkedIn,
-Indeed, Glassdoor, etc.), parsing each alert&#39;s job entries (title, company,
-location, link) into normalized postings with source=gmail/; (b)
-Mail.app — same parsing against the local store via the installed mail-app
-CLI for senders not in Gmail; (c) LinkedIn manual entry — <code>jobsmith source add &lt;url-or-ids&gt;</code> records pasted LinkedIn job IDs/URLs as postings
-(source=manual/linkedin) for the existing batch-apply habit, fetching JD text
-via the existing JD fetcher where reachable. Email parsing is template-based
-per sender with a fixture corpus; unparseable alerts are recorded as degraded,
-never crash the run. LinkedIn links from emails store the URL + metadata only
-(no scraping) — JD text is fetched at promote time via the existing
-httpx/Playwright fetcher.</p>
+API (google-api-python-client + google-auth-oauthlib, NEW deps declared in
+pyproject.toml; creds/token via .env) searching the alert senders configured
+in sourcing.yaml (LinkedIn, Indeed, Glassdoor, etc.), parsing each alert&#39;s job
+entries (title, company, location, link) into normalized postings with
+source=gmail/; (b) Mail.app — same parsers against the local store via
+the EXISTING installed mail-app CLI (external tool, already on this machine)
+for senders not in Gmail; (c) manual — <code>jobsmith source add &lt;url-or-ids&gt;</code>
+records pasted LinkedIn job IDs/URLs as postings (source=manual/linkedin).
+Parsing is template-based per sender over a NEW fixture corpus (none exists in
+either repo — authored from real alert emails); an unparseable alert is
+recorded as degraded, never crashes the run. Email postings carry snippets
+only; full JD text is fetched at promote time via the existing httpx/Playwright
+fetcher (no scraping in the daily run).</p>
 </div>
           <label for="slice-3-what-reveal" class="reveal-label">Show full description</label>
           
@@ -945,7 +1040,9 @@ httpx/Playwright fetcher.</p>
           
           <div class="markdown-block serif-prose"><p>Email is the user&#39;s highest-signal source (boards auth-wall LinkedIn/Indeed;
 alerts are pre-filtered by saved searches) and the piece the old pipeline
-never had. This is the core of &#39;not one by one&#39;.</p>
+never had. This is the core of &#39;not one by one&#39;. Risk is High because alert
+HTML formats drift without notice and the fixture corpus starts from zero —
+the per-sender-template + degraded-not-fatal design contains that risk.</p>
 </div>
           
         </div>
@@ -954,13 +1051,13 @@ never had. This is the core of &#39;not one by one&#39;.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/sourcing/adapters/gmail_alerts.py, src/jobsmith/sourcing/adapters/mailapp_alerts.py, src/jobsmith/sourcing/adapters/manual.py, src/jobsmith/sourcing/email_parsers.py, src/jobsmith/cli.py, tests/test_sourcing_email.py, tests/fixtures/sourcing/emails/</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/sourcing/adapters/gmail_alerts.py, src/jobsmith/sourcing/adapters/mailapp_alerts.py, src/jobsmith/sourcing/adapters/manual.py, src/jobsmith/sourcing/email_parsers.py, src/jobsmith/cli.py, pyproject.toml, tests/test_sourcing_email.py, tests/fixtures/sourcing/emails/</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Fixture LinkedIn &#43; Indeed alert emails parse into correct postings (title/company/url) for both Gmail and Mail.app paths</li><li>`jobsmith source add &lt;linkedin-url-or-ids&gt;` records postings and they appear in the inbox</li><li>An unparseable alert is logged as degraded without failing the run; Gmail scope is read-only</li></ul>
+        <ul class="slice-done-list"><li>Gmail client deps declared in pyproject.toml; adapter authenticates read-only with .env creds</li><li>Fixture LinkedIn &#43; Indeed alert emails (newly recorded corpus) parse into correct postings for both Gmail and Mail.app paths</li><li>`jobsmith source add &lt;linkedin-url-or-ids&gt;` records postings that appear in the inbox</li><li>An unparseable/format-drifted alert is recorded as degraded without failing the run</li></ul>
       </div>
       
     
@@ -972,14 +1069,17 @@ never had. This is the core of &#39;not one by one&#39;.</p>
         
         <input type="checkbox" id="slice-3-decisions-reveal" class="reveal-toggle">
         <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> three adapters (gmail, mailapp, manual) sharing per-sender email
-parsers; LinkedIn only via email links or paste — never scraped.
-<strong>Decisions:</strong> template-based per-sender parsing with a fixture corpus (alert
-formats change — fixtures make breakage visible in tests); JD text for email
-postings fetched lazily at promote time via the existing fetcher (alerts only
-carry snippets); Gmail credentials via .env, read-only scope (Constraint 4).
-<strong>Rejected:</strong> LLM-parsing every email in the daily run (cost + the
-determinism constraint); IMAP generic adapter (Gmail API + Mail.app CLI cover
-the real accounts with less auth pain); LinkedIn scraping (ToS/auth-wall).</p>
+parsers; senders list lives in sourcing.yaml (slice-2&#39;s config surface);
+LinkedIn only via email links or paste — never scraped.
+<strong>Decisions:</strong> template-based per-sender parsing with a from-scratch fixture
+corpus (A4 — none exists; drift breaks tests, not runs); JD text for email
+postings fetched lazily at promote (alerts carry snippets); Gmail via
+google-api-python-client read-only scope, creds in .env (deps NEWLY declared);
+mail-app CLI is the existing installed external tool. High risk acknowledged:
+format volatility + new corpus, contained by degraded-not-fatal.
+<strong>Rejected:</strong> LLM-parsing every email daily (cost + determinism constraint);
+generic IMAP (more auth pain than the two real accounts need); LinkedIn
+scraping (ToS/auth-wall).</p>
 </div>
         <label for="slice-3-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -996,13 +1096,13 @@ the real accounts with less auth pain); LinkedIn scraping (ToS/auth-wall).</p>
         <div class="test-strategy">
           
           <div class="test-group" data-kind="unit">
-            <span class="test-chip">UNIT &middot; 1</span>
-            <ul><li>per-sender parser fixtures (LinkedIn, Indeed alert HTML/text bodies)</li></ul>
+            <span class="test-chip">UNIT &middot; 2</span>
+            <ul><li>per-sender parser fixtures (LinkedIn, Indeed alert bodies — recorded from real alerts)</li><li>TestDriftedAlertDegrades — unknown format -&gt; degraded record, run continues</li></ul>
           </div>
           
           <div class="test-group" data-kind="integration">
-            <span class="test-chip">INTEGRATION &middot; 2</span>
-            <ul><li>TestGmailAdapterMocked — mocked API responses -&gt; postings</li><li>TestManualAdd — paste IDs -&gt; postings rows</li></ul>
+            <span class="test-chip">INTEGRATION &middot; 3</span>
+            <ul><li>TestGmailAdapterMocked — mocked API responses -&gt; postings</li><li>TestMailappAdapterMocked — mocked CLI output -&gt; postings</li><li>TestManualAdd — paste IDs -&gt; postings rows</li></ul>
           </div>
           
         </div>
@@ -1012,10 +1112,35 @@ the real accounts with less auth pain); LinkedIn scraping (ToS/auth-wall).</p>
     
 
     
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">Gmail API client deps absent from pyproject.toml and the slice&#39;s files — RESOLVED: google-api-python-client &#43; google-auth-oauthlib added to files/done_when.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">No email fixture corpus exists in either repo — RESOLVED: corpus authored from real alerts is explicit in what/tests.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">High-risk/L-effort mismatch unexplained; mail-app CLI provenance unclear — RESOLVED: risk justified (format drift &#43; zero corpus), mail-app confirmed as existing installed tool.</span>
+        </div>
+        
+      </div>
+    </div>
+    
 
     
 
-    <div class="slice-deps">Dependencies: slices 1</div>
+    <div class="slice-deps">Dependencies: slices 2</div>
 
     <details class="comment-collapse">
       <summary class="comment-collapse-trigger">+ Leave a comment</summary>
@@ -1026,10 +1151,10 @@ the real accounts with less auth pain); LinkedIn scraping (ToS/auth-wall).</p>
   </div>
 </details>
 <details class="slice-card" id="slice-4" data-slice="4" data-slice-name="slice-4" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 4: Shortlist LLM rescoring via agent-sdk fit-scorer (budget-capped)">
+  <summary class="slice-summary" aria-label="Slice 4: Shortlist LLM rescoring via agent-sdk (budget-capped triage score)">
     <span class="slice-num">#4</span>
     <span class="slice-title-col">
-      <span class="slice-name">Shortlist LLM rescoring via agent-sdk fit-scorer (budget-capped)</span>
+      <span class="slice-name">Shortlist LLM rescoring via agent-sdk (budget-capped triage score)</span>
       <span class="slice-preview">Port the plan-9c5e0d04 rescoring stage: after the deterministic crawl, take the</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
@@ -1038,7 +1163,7 @@ the real accounts with less auth pain); LinkedIn scraping (ToS/auth-wall).</p>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-4">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="3 critic issue(s)">3 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1071,11 +1196,18 @@ the real accounts with less auth pain); LinkedIn scraping (ToS/auth-wall).</p>
           
           <input type="checkbox" id="slice-4-what-reveal" class="reveal-toggle">
           <div class="markdown-block reveal-content serif-prose"><p>Port the plan-9c5e0d04 rescoring stage: after the deterministic crawl, take the
-top-N fast-scored new postings (default 30, configurable) and rescore via the
-existing fit-scorer agent through claude-agent-sdk, writing llm_score,
-specialty, one-line rationale, and evidence citations onto the posting rows.
-Budget cap + N cap from config; failures fall back to fast_score (recorded);
-<code>--no-llm</code> skips entirely. This is the ONLY LLM involvement in the daily run.</p>
+top-N fast-scored NEW postings (default 30, configurable in sourcing.yaml) and
+rescore via claude-agent-sdk, writing llm_score, specialty, one-line rationale,
+and evidence citations onto the posting rows. PORT DECISION (A6): reuse the
+proven embedded-prompt path from llm_score.py (FIT_SCORER_SYSTEM_PROMPT
+constant + query()/ClaudeAgentOptions, llm_score.py:79-119,241-367) — the
+apply-fit-scorer.md agent file remains documentation, not the invocation path.
+Declare claude-agent-sdk in pyproject.toml (A3 — currently only in shakestzd&#39;s
+optional group). Budget cap + N cap from sourcing.yaml; SDK failure falls back
+to fast_score (recorded); <code>--no-llm</code> skips entirely. SCORE SEMANTICS: this is
+a snippet-based TRIAGE score for inbox ranking — the apply-time fit score
+(full JD + master content) remains canonical after promotion; they are
+different measurements and the UI labels this one &#39;triage&#39;.</p>
 </div>
           <label for="slice-4-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1098,13 +1230,13 @@ $1.55/run rather than scoring hundreds.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/sourcing/rescoring.py, src/jobsmith/sourcing/runner.py, tests/test_sourcing_rescoring.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/sourcing/rescoring.py, src/jobsmith/sourcing/runner.py, pyproject.toml, tests/test_sourcing_rescoring.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Top-N new postings get llm_score/specialty/rationale/evidence after a run; the rest keep fast_score only</li><li>Budget/N caps enforced; an SDK failure falls back to fast_score and is recorded, not fatal</li><li>`--no-llm` produces a complete run with zero LLM calls</li></ul>
+        <ul class="slice-done-list"><li>claude-agent-sdk declared in pyproject.toml; rescoring imports in a fresh sync</li><li>Top-N NEW postings get llm_score/specialty/rationale/evidence after a run; re-sighted postings keep prior scores; the rest keep fast_score</li><li>Budget/N caps enforced; an SDK failure falls back to fast_score and is recorded, not fatal; `--no-llm` produces a complete run with zero LLM calls</li></ul>
       </div>
       
     
@@ -1115,13 +1247,18 @@ $1.55/run rather than scoring hundreds.</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-4-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> one rescoring stage appended to the runner; reuses the existing
-fit-scorer agent definition rather than a new prompt.
-<strong>Decisions:</strong> rescore only NEW postings (re-sights keep prior scores);
-default N=30 matching the old pipeline&#39;s calibration; cost ceiling from
-config carried over from pipeline-config.yaml&#39;s pattern.
-<strong>Rejected:</strong> rescoring everything (cost, latency); running rescoring inside
-a headless claude session (the failure mode this plan exists to kill).</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> one rescoring stage appended to the runner, porting llm_score.py&#39;s
+proven SDK invocation; triage-score semantics defined here.
+<strong>Decisions:</strong> embedded-prompt path chosen over driving apply-fit-scorer.md
+(A6 — llm_score.py:28-30 says the .md is an equivalent spec kept for
+readability; the constant+query() path is what actually ran in production);
+rescore NEW postings only; N=30 default matching old calibration; cost ceiling
+in sourcing.yaml; triage score is NOT the canonical fit score (apply-time
+score wins post-promotion — funnel uses the application&#39;s score).
+<strong>Rejected:</strong> rescoring everything (cost); headless-claude rescoring (the dead
+failure mode); unifying triage and apply scores into one number (different
+inputs — snippet vs full JD + master — pretending they&#39;re comparable would
+mislead the inbox).</p>
 </div>
         <label for="slice-4-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1154,6 +1291,31 @@ a headless claude session (the failure mode this plan exists to kill).</p>
     
 
     
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">A3: claude-agent-sdk not in jobsmith&#39;s pyproject.toml (only shakestzd&#39;s optional group) — RESOLVED: declared, import-works done_when.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">A6: two possible code paths (embedded FIT_SCORER_SYSTEM_PROMPT vs apply-fit-scorer.md agent) — RESOLVED: port the proven embedded-prompt path; .md stays documentation.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Inbox-vs-apply score reconciliation undefined — RESOLVED: triage-score semantics (snippet-based, UI-labeled &#39;triage&#39;); apply-time fit score canonical after promotion.</span>
+        </div>
+        
+      </div>
+    </div>
+    
 
     
 
@@ -1180,7 +1342,7 @@ a headless claude session (the failure mode this plan exists to kill).</p>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-5">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="3 critic issue(s)">3 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1213,14 +1375,21 @@ a headless claude session (the failure mode this plan exists to kill).</p>
           
           <input type="checkbox" id="slice-5-what-reveal" class="reveal-toggle">
           <div class="markdown-block reveal-content serif-prose"><p>New &#39;Postings&#39; section in the jobsmith web UI: ranked list (llm_score desc,
-fast_score fallback) showing title/company/source/score/rationale/age, filters
-(source, specialty, min score, status), actions: dismiss, queue, and &#39;start
-application&#39; — which calls a new POST /api/postings/{id}/promote that creates
-the application via the existing apply machinery (URL + any cached jd_text
-passed through, JD fetched lazily if absent), links provenance both ways, and
-navigates to the new application detail. API: GET /api/postings (filtered),
-POST /api/postings/{id}/status, POST /api/postings/{id}/promote. Inbox badge
-shows new-since-last-visit count.</p>
+then fast_score desc, then first_seen desc as stable tie-breaker) showing
+title/company/source/triage-score/rationale/age, filters (source, specialty,
+min score, status), actions: dismiss, queue, and &#39;start application&#39; — POST
+/api/postings/{id}/promote calls the EXISTING application-creation path
+(create_application, applications.py:552-582, ApplicationCreate{url, jd_text})
+with the posting&#39;s url + cached jd_text; for email-sourced snippet-only
+postings the JD is fetched at promote via the existing fetcher — IF that fetch
+fails the promote still succeeds with jd_text empty and the response carries a
+jd_fetch_failed warning the UI surfaces (the apply pipeline&#39;s own JD handling
+takes over; promote is never blocked on a fetch). Wires the new view into the
+nav: ViewName union (web/src/types.ts:95-105) + sidebar (web/src/app/chrome.tsx)</p>
+<ul>
+<li>route switch. API: GET /api/postings (filtered), POST /api/postings/{id}/status,
+POST /api/postings/{id}/promote. Inbox badge shows new-since-last-visit count.</li>
+</ul>
 </div>
           <label for="slice-5-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1243,13 +1412,13 @@ coupling the user asked for.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/api/postings.py, src/jobsmith/api/main.py, web/src/app/postings.tsx, web/src/api/client.ts, web/src/api/hooks.ts, tests/test_api_postings.py, web/src/app/postings.test.tsx</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/api/postings.py, src/jobsmith/api/main.py, web/src/app/postings.tsx, web/src/app/chrome.tsx, web/src/types.ts, web/src/api/client.ts, web/src/api/hooks.ts, tests/test_api_postings.py, web/src/app/postings.test.tsx</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Inbox lists ranked postings with score/rationale/source and supports dismiss/queue/filter</li><li>&#39;Start application&#39; promotes the posting, launches the apply flow with provenance linked, and navigates to the application detail</li><li>Promoted/dismissed postings leave the default inbox view; the posting shows its linked application and vice versa</li></ul>
+        <ul class="slice-done-list"><li>Inbox lists ranked postings (stable tie-broken ordering) with triage score/rationale/source and supports dismiss/queue/filter; the view is reachable from the sidebar</li><li>&#39;Start application&#39; promotes the posting via the existing creation path, links provenance both ways, and navigates to the application detail</li><li>Promote on a snippet-only posting with a failing JD fetch still succeeds, surfacing a jd_fetch_failed warning</li><li>Promoted/dismissed postings leave the default inbox view; posting and application each show the link to the other</li></ul>
       </div>
       
     
@@ -1261,14 +1430,14 @@ coupling the user asked for.</p>
         
         <input type="checkbox" id="slice-5-decisions-reveal" class="reveal-toggle">
         <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> new UI section + three API endpoints; promotion reuses the existing
-application-creation path (same one the &#39;new application&#39; modal uses).
-<strong>Decisions:</strong> rank by llm_score with fast_score fallback; JD text fetched
-lazily at promote when the posting only has a snippet (email-sourced);
-provenance is a two-way link (posting.promoted_application_id + application
-row referencing the posting).
-<strong>Rejected:</strong> keeping a Notion mirror (double-write complexity for a surface
-the user abandoned); auto-applying high scorers (human stays the trigger —
-fit 0.5-ish scores are not submit-safe, per the BECU experience).</p>
+application-creation path (verified: create_application accepts url + optional
+jd_text); nav wiring (types.ts ViewName + chrome.tsx) is in scope.
+<strong>Decisions:</strong> rank llm_score desc -&gt; fast_score desc -&gt; first_seen desc
+(stable); score labeled &#39;triage&#39; (slice-4 semantics); JD fetched lazily at
+promote and a fetch failure degrades to a warning, never blocks promote.
+<strong>Rejected:</strong> Notion mirror (abandoned surface); auto-applying high scorers
+(human stays the trigger); blocking promote on JD fetch (an unreachable page
+shouldn&#39;t strand a posting outside the funnel).</p>
 </div>
         <label for="slice-5-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1285,8 +1454,8 @@ fit 0.5-ish scores are not submit-safe, per the BECU experience).</p>
         <div class="test-strategy">
           
           <div class="test-group" data-kind="integration">
-            <span class="test-chip">INTEGRATION &middot; 2</span>
-            <ul><li>TestPostingsListFilters — GET with filters/ordering</li><li>TestPromoteEndpoint — promote -&gt; application created &#43; both links set</li></ul>
+            <span class="test-chip">INTEGRATION &middot; 3</span>
+            <ul><li>TestPostingsListFilters — GET with filters/ordering (incl. tie-breaker)</li><li>TestPromoteEndpoint — promote -&gt; application created &#43; both links set</li><li>TestPromoteJdFetchFails — fetch error -&gt; promote succeeds &#43; warning</li></ul>
           </div>
           
           <div class="test-group" data-kind="component">
@@ -1300,6 +1469,31 @@ fit 0.5-ish scores are not submit-safe, per the BECU experience).</p>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">ViewName union (types.ts:95-105) &#43; chrome.tsx sidebar were missing from the file list — RESOLVED: both added; promote path verified against create_application (applications.py:552-582).</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Lazy JD-fetch failure behavior was unspecified — RESOLVED: promote succeeds with jd_fetch_failed warning; never blocks.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">INFO</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Ranking tie-breaker unstated — RESOLVED: llm -&gt; fast -&gt; first_seen stable ordering.</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1319,7 +1513,7 @@ fit 0.5-ish scores are not submit-safe, per the BECU experience).</p>
     <span class="slice-num">#6</span>
     <span class="slice-title-col">
       <span class="slice-name">Scheduling &#43; run health: launchd, visible failure state, retire old pipeline</span>
-      <span class="slice-preview">Make the daily run schedulable and IMPOSSIBLE to fail silently: run records</span>
+      <span class="slice-preview">Make the daily run schedulable and IMPOSSIBLE to fail silently.</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-revision badge-sm">M</span>
@@ -1327,7 +1521,7 @@ fit 0.5-ish scores are not submit-safe, per the BECU experience).</p>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-6">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="4 critic issue(s)">4 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1359,15 +1553,22 @@ fit 0.5-ish scores are not submit-safe, per the BECU experience).</p>
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-6-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>Make the daily run schedulable and IMPOSSIBLE to fail silently: run records
-(started/finished/status/counts/degraded sources/error) persisted per run;
-<code>jobsmith doctor</code> gains a sourcing check (last successful run age, degraded
-sources); UI shows a banner on the Postings inbox when the last run failed,
-found 0 roles, or is older than the configured cadence. New launchd plist
-invokes the installed <code>jobsmith source run</code> directly (no bash-&gt;claude
-wrapper); macOS notification on run failure. RETIRE the old path: unload
-com.shakes.morning-sourcing, mark the shakestzd scripts/prompts deprecated
-pointing at the new command, leave Notion data untouched but stop writing.</p>
+          <div class="markdown-block reveal-content serif-prose"><p>Make the daily run schedulable and IMPOSSIBLE to fail silently. Run records
+(sourcing_runs from slice-1) drive: a <code>jobsmith doctor</code> sourcing check
+(last-success age vs configured cadence, degraded sources — following the
+existing CheckResult pattern, doctor.py:36-91) and an inbox banner (API exposes
+last-run state) for failed/empty/stale runs, plus a macOS notification on
+failure. CROSS-REPO WIRING (modeled explicitly): the plist TEMPLATE lives in
+the jobsmith repo; the INSTALLED copy in ~/Library/LaunchAgents sets the
+ABSOLUTE path to the installed binary (launchd has minimal PATH) and
+JOBSMITH_REPO_ROOT= so the runner finds the user&#39;s DB +
+sourcing.yaml (the data home is shakestzd, per the repo-root design); a
+<code>jobsmith source install-schedule</code> helper renders + loads it. RETIRE the old
+path: <code>launchctl bootout</code> com.shakes.morning-sourcing, DELETE the old plist
+from ~/Library/LaunchAgents, prepend DEPRECATED headers (pointing at
+<code>jobsmith source run</code>) to the old wrapper/prompt files, stop all Notion writes
+(data left in place read-only), and note the cutover in the user repo&#39;s
+AGENTS.md so no second scheduler can coexist.</p>
 </div>
           <label for="slice-6-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1390,13 +1591,13 @@ trustworthy enough to re-enable (Goal 4/5).</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/sourcing/store.py, src/jobsmith/doctor.py, src/jobsmith/api/postings.py, web/src/app/postings.tsx, scripts/launchd/com.shakes.jobsmith-sourcing.plist, tests/test_sourcing_health.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/sourcing/store.py, src/jobsmith/doctor.py, src/jobsmith/api/postings.py, src/jobsmith/cli.py, web/src/app/postings.tsx, scripts/launchd/com.shakes.jobsmith-sourcing.plist.template, tests/test_sourcing_health.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Run records persist status/counts/errors; `jobsmith doctor` reports last-success age and degraded sources</li><li>Inbox banner appears for failed/empty/stale runs; macOS notification fires on failure</li><li>New launchd plist runs the installed binary on schedule; old morning-sourcing label unloaded and old wrapper marked deprecated</li></ul>
+        <ul class="slice-done-list"><li>`jobsmith doctor` reports last-success age &#43; degraded sources from sourcing_runs; inbox banner appears for failed/empty/stale runs; macOS notification fires on failure</li><li>`jobsmith source install-schedule` renders the plist with absolute binary path &#43; JOBSMITH_REPO_ROOT and loads it; a REAL `launchctl kickstart` cycle produces a sourcing_runs record (not just shell invocation)</li><li>Old morning-sourcing label booted out and its plist removed; old wrapper/prompts carry DEPRECATED headers; no Notion writes occur</li></ul>
       </div>
       
     
@@ -1407,14 +1608,18 @@ trustworthy enough to re-enable (Goal 4/5).</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-6-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> run-record persistence + doctor check + UI banner + notification +
-launchd cutover; old pipeline retirement is part of THIS slice so two
-schedulers never run concurrently.
-<strong>Decisions:</strong> failure visibility is in-product (banner + doctor) with a
-macOS notification, not email (digests were part of why Notion flow died);
-plist invokes the installed binary directly — no shell wrapper, no claude.
-<strong>Rejected:</strong> cron (launchd is the platform-native pattern already in use);
-keeping the old wrapper as fallback (split-brain risk: two writers).</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> run-health surfaces + schedule installer + old-pipeline retirement
+in ONE slice so two schedulers never coexist.
+<strong>Decisions:</strong> plist is a TEMPLATE in the jobsmith repo, rendered at install
+with absolute binary path + JOBSMITH_REPO_ROOT (cross-repo dependency made
+explicit — config/DB live in the user repo per project memory); real
+launchctl kickstart is the acceptance, because shell-works-launchd-fails is
+exactly how the old pipeline died; old plist DELETED not just unloaded;
+failure visibility in-product (banner + doctor) + macOS notification, not
+email digests.
+<strong>Rejected:</strong> cron (launchd is platform-native and already in use); keeping
+the old wrapper as fallback (split-brain: two writers); deprecate-only for
+the old plist (re-enableable by accident).</p>
 </div>
         <label for="slice-6-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1440,12 +1645,48 @@ keeping the old wrapper as fallback (split-brain risk: two writers).</p>
             <ul><li>TestHealthBannerApi — API exposes last-run state the UI banner reads</li></ul>
           </div>
           
+          <div class="test-group" data-kind="manual">
+            <span class="test-chip">MANUAL &middot; 1</span>
+            <ul><li>launchctl load &#43; kickstart cycle on the real machine -&gt; run record (acceptance)</li></ul>
+          </div>
+          
         </div>
         
       </div>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">Cross-repo path dependency unmodeled (plist in jobsmith repo, data/config in shakestzd; launchd minimal PATH) — RESOLVED: template &#43; install-schedule renders absolute binary path &#43; JOBSMITH_REPO_ROOT.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">SUCCESS</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">morning-sourcing confirmed loaded (launchctl list) with bash-wrapper plist (plist:29-33); doctor CheckResult pattern (doctor.py:36-91) extends cleanly.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Launchd validation was deferred to slice-8 — RESOLVED: real launchctl load&#43;kickstart producing a run record is now THIS slice&#39;s acceptance.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Old-pipeline retirement was vague (deprecate where?) — RESOLVED: bootout &#43; delete plist, DEPRECATED headers on wrapper/prompts, cutover note in user-repo AGENTS.md.</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1473,7 +1714,7 @@ keeping the old wrapper as fallback (split-brain risk: two writers).</p>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-7">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="2 critic issue(s)">2 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1507,12 +1748,14 @@ keeping the old wrapper as fallback (split-brain risk: two writers).</p>
           <input type="checkbox" id="slice-7-what-reveal" class="reveal-toggle">
           <div class="markdown-block reveal-content serif-prose"><p>A funnel view in the web UI fed by a new GET /api/funnel: stage counts
 (sourced -&gt; queued -&gt; promoted/applied -&gt; interview -&gt; offer / rejected) with
-conversion rates between stages, a per-source breakdown (which boards/email
-senders produce postings that become applications and interviews), and a
-time-window filter (7/30/90 days/all). Applications gain interview/offer
-statuses in the UI status picker (vocabulary added in slice-1) so outcomes
-can be recorded from the application detail, closing the loop the BECU
-rejection just exercised manually via SQL.</p>
+conversion rates between adjacent stages, a per-source breakdown (which boards/
+email senders produce postings that become applications and interviews), and a
+time-window filter (7/30/90 days/all; cohort = posting first_seen in window).
+Applications gain interview/offer in the UI status picker (vocabulary added in
+slice-1) so outcomes are recorded from the application detail — closing the
+loop the BECU rejection exercised manually via SQL. Funnel uses the
+APPLICATION&#39;s fit score post-promotion (triage score is pre-funnel ranking
+only). Nav wiring: ViewName (types.ts) + chrome.tsx sidebar, same as slice-5.</p>
 </div>
           <label for="slice-7-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1535,13 +1778,13 @@ is exactly that (user&#39;s chosen funnel-view option).</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/api/funnel.py, src/jobsmith/api/main.py, web/src/app/funnel.tsx, web/src/app/application.tsx, web/src/api/client.ts, tests/test_api_funnel.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/api/funnel.py, src/jobsmith/api/main.py, web/src/app/funnel.tsx, web/src/app/chrome.tsx, web/src/types.ts, web/src/app/application.tsx, web/src/api/client.ts, tests/test_api_funnel.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Funnel view shows stage counts &#43; conversion for a chosen window, matching hand-computed SQL on the same DB</li><li>Per-source table ranks sources by postings -&gt; applications -&gt; interviews yield</li><li>Application status can be set to interview/offer/rejected from the UI and flows into the funnel</li></ul>
+        <ul class="slice-done-list"><li>Funnel view shows stage counts &#43; conversion for a chosen window, matching hand-computed SQL on the same DB</li><li>Per-source table ranks sources by postings -&gt; applications -&gt; interviews yield</li><li>The application detail&#39;s status picker includes interview/offer/rejected, settable from the UI, and the funnel reflects the change</li></ul>
       </div>
       
     
@@ -1553,12 +1796,13 @@ is exactly that (user&#39;s chosen funnel-view option).</p>
         
         <input type="checkbox" id="slice-7-decisions-reveal" class="reveal-toggle">
         <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> read-only aggregation endpoint + UI view + outcome-status picker on
-application detail; no new state beyond what slices 1/5 created.
-<strong>Decisions:</strong> conversion measured between adjacent stages on rows whose
-first_seen falls in the window; per-source yield keyed on the posting&#39;s
-source field carried through promotion.
-<strong>Rejected:</strong> weekly digest email (deferred — in-product view first);
-cohort/retention analytics (overkill for a single-user funnel).</p>
+application detail; nav wiring (types.ts/chrome.tsx) in scope; no new state
+beyond slices 1/5.
+<strong>Decisions:</strong> conversion measured between adjacent stages on first_seen-in-
+window cohorts; per-source yield keyed on the posting&#39;s source carried through
+promotion; funnel score column = application fit score (canonical), not triage.
+<strong>Rejected:</strong> weekly digest email (deferred — in-product first); cohort/
+retention analytics (overkill for a single-user funnel).</p>
 </div>
         <label for="slice-7-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1581,12 +1825,12 @@ cohort/retention analytics (overkill for a single-user funnel).</p>
           
           <div class="test-group" data-kind="integration">
             <span class="test-chip">INTEGRATION &middot; 1</span>
-            <ul><li>TestFunnelApiWindow — time-window filtering</li></ul>
+            <ul><li>TestFunnelApiWindow — time-window filtering (first_seen cohort)</li></ul>
           </div>
           
           <div class="test-group" data-kind="component">
             <span class="test-chip">COMPONENT &middot; 1</span>
-            <ul><li>funnel.test.tsx — renders stages &#43; per-source table</li></ul>
+            <ul><li>funnel.test.tsx — renders stages &#43; per-source table; status picker includes outcomes</li></ul>
           </div>
           
         </div>
@@ -1595,6 +1839,25 @@ cohort/retention analytics (overkill for a single-user funnel).</p>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">ViewName/chrome.tsx missing from file list (same gap as slice-5) — RESOLVED: added; router registration pattern (api/main.py:42-56) confirmed.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">INFO</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Status-picker dependency on slice-1 vocabulary made explicit — done_when now verifies interview/offer settable from the UI.</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1614,7 +1877,7 @@ cohort/retention analytics (overkill for a single-user funnel).</p>
     <span class="slice-num">#8</span>
     <span class="slice-title-col">
       <span class="slice-name">E2E acceptance: scheduled run -&gt; inbox -&gt; one-click apply -&gt; funnel, live in Chrome</span>
-      <span class="slice-preview">Prove the loop at the chosen acceptance bar: a scheduled (or schedule-invoked)</span>
+      <span class="slice-preview">Prove the loop at the chosen acceptance bar, split by determinism: the</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-revision badge-sm">M</span>
@@ -1622,7 +1885,7 @@ cohort/retention analytics (overkill for a single-user funnel).</p>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-8">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="2 critic issue(s)">2 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1654,14 +1917,17 @@ cohort/retention analytics (overkill for a single-user funnel).</p>
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-8-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>Prove the loop at the chosen acceptance bar: a scheduled (or schedule-invoked)
-<code>jobsmith source run</code> ingests real board postings AND a fixture/real alert
-email; the Postings inbox shows them ranked with rationale; clicking &#39;start
-application&#39; on one launches the apply pipeline with provenance linked; the
-funnel view reflects the movement; run-health surfaces are green. Verified
-live in Chrome per house rule (screenshots + console), plus an automated E2E
-against the same-origin API mirroring the slice flows. Update README/AGENTS
-with the sourcing runbook (enable/disable, add a source, add an email sender).</p>
+          <div class="markdown-block reveal-content serif-prose"><p>Prove the loop at the chosen acceptance bar, split by determinism: the
+AUTOMATED E2E (tests/e2e/) runs FIXTURES-ONLY — source run over fixture
+boards + the recorded alert-email corpus -&gt; inbox -&gt; promote -&gt; application -&gt;
+funnel counts, driven over the same-origin API (no live-board dependency, no
+CI flake). The MANUAL acceptance pass then verifies the live path on the real
+machine: the schedule-installed <code>launchctl kickstart</code> run lands fresh postings
+from at least one live board AND the user&#39;s real alert email; the inbox,
+promote-&gt;apply, funnel movement, and run-health surfaces are verified live in
+Chrome per house rule (screenshots + console). Update README/AGENTS with the
+sourcing runbook (enable/disable schedule, add a source, add an email sender,
+read the funnel).</p>
 </div>
           <label for="slice-8-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1675,7 +1941,8 @@ with the sourcing runbook (enable/disable, add a source, add an email sender).</
           
           <div class="markdown-block serif-prose"><p>Every prior track&#39;s browser E2E caught real defects unit tests missed (wheel
 bundling, slug rekey, CSP, salutation gate). This plan&#39;s value claim is the
-coupled loop — only a live pass proves it.</p>
+coupled loop — only a live pass proves it; splitting fixtures/live keeps CI
+deterministic while still verifying reality.</p>
 </div>
           
         </div>
@@ -1690,7 +1957,7 @@ coupled loop — only a live pass proves it.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>A schedule-invoked run lands fresh postings from at least one live board and one alert-email fixture in the inbox, ranked with rationale</li><li>One-click promote launches a real apply run with the posting linked; funnel counts move accordingly</li><li>Run-health is green in doctor &#43; UI; the whole flow verified live in Chrome</li></ul>
+        <ul class="slice-done-list"><li>Automated fixtures-only E2E passes in CI: run -&gt; postings -&gt; promote -&gt; application -&gt; funnel counts over the same-origin API</li><li>Manual live pass: schedule-invoked (launchctl kickstart) run lands fresh postings from &gt;=1 live board &#43; the real alert email; promote launches a real apply with provenance linked; funnel &#43; run-health verified live in Chrome with screenshots</li><li>README/AGENTS document the sourcing runbook</li></ul>
       </div>
       
     
@@ -1702,11 +1969,12 @@ coupled loop — only a live pass proves it.</p>
         
         <input type="checkbox" id="slice-8-decisions-reveal" class="reveal-toggle">
         <div class="markdown-block reveal-content serif-prose"><p><strong>Scope:</strong> verification + runbook docs only — no new product surface.
-<strong>Decisions:</strong> acceptance = full loop including the schedule path and Chrome
-verification (user&#39;s chosen bar); E2E drives the same-origin API like the
-fresh-install suite does, with the browser pass for the visual surfaces.
-<strong>Rejected:</strong> API-only acceptance (this track&#39;s history shows browser-only
-bugs are the common failure mode).</p>
+<strong>Decisions:</strong> CI E2E is fixtures-only (live boards are flaky/non-deterministic);
+the live-board + real-email + real-schedule verification is the manual Chrome
+acceptance pass — both are required, serving different purposes.
+<strong>Rejected:</strong> live-board calls in CI (schema drift/outages fail correct code);
+API-only acceptance (this track&#39;s history shows browser-only bugs are the
+common failure mode).</p>
 </div>
         <label for="slice-8-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1720,24 +1988,33 @@ bugs are the common failure mode).</p>
       <div class="slice-field-value">
         
         
-        <div class="test-strategy">
-          
-          <div class="test-group" data-kind="e2e">
-            <span class="test-chip">E2E &middot; 1</span>
-            <ul><li>TestSourceToFunnel — run -&gt; postings -&gt; promote -&gt; application -&gt; funnel counts over same-origin API</li></ul>
-          </div>
-          
-          <div class="test-group" data-kind="manual">
-            <span class="test-chip">MANUAL &middot; 1</span>
-            <ul><li>Chrome walkthrough with screenshots (inbox, promote, funnel, health banner states)</li></ul>
-          </div>
-          
-        </div>
+        <div class="markdown-block slice-tests"><p>E2E (CI, fixtures-only): TestSourceToFunnel — run -&gt; postings -&gt; promote -&gt; application -&gt; funnel counts
+Manual (acceptance): Chrome walkthrough with screenshots (inbox, promote, funnel, health banner states) on the real schedule</p>
+</div>
         
       </div>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Live-board dependency made CI flaky as written — RESOLVED: automated E2E is fixtures-only; live board/email/schedule verification is the manual Chrome pass.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">&#39;Real alert email&#39; ambiguity — RESOLVED: fixtures (recorded corpus) in CI; the user&#39;s actual alert email in the manual pass.</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1758,17 +2035,7 @@ bugs are the common failure mode).</p>
 </details>
 
 <!-- Design Decisions (hidden for v2 plans — slice cards carry their own questions) -->
-<details id="questions" class="section-card" data-phase="questions" data-status="pending">
-  <summary><span>Design Decisions</span><span class="badge badge-pending" data-badge-for="questions">Pending</span></summary>
-  <div class="section-body">
-    <table class="q-table">
-      <thead><tr><th>Question</th><th>Selected</th><th>Status</th></tr></thead>
-      <tbody id="questionsRecap">
-        <!--PLAN_QUESTIONS_RECAP-->
-      </tbody>
-    </table>
-  </div>
-</details>
+
 
 
 

@@ -12,6 +12,12 @@ meta:
         LLM rescoring only for the shortlist, a ranked Postings inbox in the web UI with
         one-click promote-to-apply, launchd scheduling with VISIBLE run health, and a
         funnel dashboard (sourced -> queued -> applied -> outcome with conversion).
+        NOTE for reviewers: crawling (slices 2-3) is deterministic Python; the LLM stage
+        (slice 4) is post-crawl, capped to the shortlist, and skippable — the daily
+        schedule cannot die on agent turns by construction. OLD DATA: we start fresh —
+        the 1,944 previously-seen roles and the Notion inbox rows are stale (mostly
+        expired postings from May) and are intentionally NOT migrated; Notion data is
+        left in place read-only.
     created_at: ""
     status: draft
     schema_version: v3
@@ -38,6 +44,7 @@ design:
         - 'No LinkedIn scraping (auth-wall/ToS): LinkedIn arrives via alert-email parsing and manual paste/batch only.'
         - 'Reuse proven code: port the shakestzd adapters/scoring rather than rewrite; reuse jobsmith''s existing apply endpoints, fit-scorer agent, and UI patterns.'
         - Local-first single-tenant; secrets stay in .env; Gmail read-only scope.
+        - 'Start fresh: no migration of the old pipeline''s 1,944 roles / Notion rows / sourcing-state.yaml (stale May data); explicitly out of scope.'
     approved: false
     comment: ""
 slices:
@@ -45,16 +52,20 @@ slices:
       num: 1
       title: Postings store + funnel states (migration, db layer, promote linkage)
       what: |
-        New `postings` table in the pipeline DB (next migration after the reuse store):
-        id, source (e.g. greenhouse/stripe, gmail/linkedin-alert), external_id, url,
-        title, company, location, comp_text, posted_date, jd_text, fast_score,
-        llm_score, specialty, rationale, evidence_json, status
+        New `postings` table via migration 010_postings.sql REGISTERED in the hardcoded
+        _PIPELINE_MIGRATIONS list (db.py:50-59 — A2: landing the file alone silently
+        does nothing): id, source (e.g. greenhouse/stripe, gmail/linkedin-alert),
+        external_id, url, title, company, location, comp_text, posted_date, jd_text,
+        fast_score, llm_score, specialty, rationale, evidence_json, status
         (sourced|queued|dismissed|promoted|expired), promoted_application_id (FK to
-        applications), dedup_key (normalized url/external-id hash), first_seen_at,
-        last_seen_at. Python db layer: upsert-by-dedup_key (bump last_seen on re-sight),
-        status transitions, promote(posting_id) -> creates/links the applications row
-        and stamps promoted_application_id. Add interview/offer to the applications
-        status vocabulary if absent so outcomes are representable.
+        applications), dedup_key (normalized-URL/external-id hash), first_seen_at,
+        last_seen_at. Python store layer: upsert-by-dedup_key (re-sight bumps last_seen
+        ONLY — dismissed/promoted/expired rows are never resurrected to sourced),
+        status transitions, promote(posting_id) -> creates/links the applications row.
+        Also a sourcing_runs table (run_id, started/finished, status, counts,
+        degraded_sources_json, error; retention: purge beyond last 90) used by slice-6.
+        Add interview/offer to the applications status vocabulary (free-text statuses
+        per applications.py:323-327, so purely additive).
       why: |
         The funnel needs a first-class home for discovered-but-not-applied roles.
         Goal 3 (whole-funnel tracking) and the promote link (Goal 2) both hang off
@@ -62,43 +73,72 @@ slices:
         view clean (hundreds of never-touched postings stay out of it).
       files:
         - src/jobsmith/migrations/010_postings.sql
+        - src/jobsmith/db.py
         - src/jobsmith/sourcing/__init__.py
         - src/jobsmith/sourcing/store.py
         - tests/test_sourcing_store.py
       deps: []
       done_when:
-        - Migration applies cleanly to an existing DB; upsert by dedup_key inserts new and bumps last_seen_at on re-sight
+        - 010_postings.sql is registered in _PIPELINE_MIGRATIONS (db.py) and a test proves open_pipeline_db() applies it to an existing 009-level DB
+        - Upsert by dedup_key inserts new rows and bumps last_seen_at on re-sight; a NEGATIVE test proves re-sight of dismissed/promoted/expired rows does NOT change their status
         - promote(posting_id) creates the applications row, links promoted_application_id both ways, and sets status='promoted'
-        - Status transitions enforced (sourced->queued/dismissed/promoted; no resurrecting promoted rows)
+        - sourcing_runs records persist with the defined schema and purge beyond the last 90
       effort: M
       risk: Low
       tests: |
+        Unit: TestMigrationApplies — 009-level DB -> open_pipeline_db -> postings + sourcing_runs exist
         Unit: TestPostingUpsertDedup — same dedup_key twice -> one row, last_seen bumped
+        Unit: TestNoResurrection — dismissed/promoted/expired + re-sight -> status unchanged
         Unit: TestPromoteLinksApplication — promote creates+links application row
-        Unit: TestStatusTransitions — illegal transitions rejected
       complexity: standard
       approved: false
       comment: ""
+      critic_revisions:
+        - source: sonnet
+          severity: DANGER
+          summary: 'A2: _PIPELINE_MIGRATIONS (db.py:50-59) is hardcoded — the .sql file alone never runs; db.py was missing from files — RESOLVED: db.py added + registration test in done_when.'
+        - source: sonnet
+          severity: INFO
+          summary: Application statuses are free-text (applications.py:323-327) — interview/offer are purely additive, no schema change. Verified.
+        - source: haiku
+          severity: WARN
+          summary: '''No resurrecting'' was a constraint, not an observable — RESOLVED: explicit negative test (TestNoResurrection) in done_when/tests.'
+        - source: haiku
+          severity: WARN
+          summary: 'Run-record schema/retention were unspecified — RESOLVED: sourcing_runs schema defined here (slice-6 consumes it), purge at 90 rows.'
       decisions_notes: |
-        **Scope:** new postings table feeding the existing applications table via an
-        explicit promote step; applications stays the system of record for work done.
-        **Decisions:** dedup_key = normalized URL/external-id hash (re-sights bump
-        last_seen, never duplicate); funnel statuses sourced/queued/dismissed/promoted/
-        expired; outcomes live on applications (add interview/offer to vocabulary).
+        **Scope:** new postings + sourcing_runs tables feeding the existing applications
+        table via an explicit promote step; applications stays the system of record.
+        **Decisions:** dedup_key = normalized URL (scheme/host lowercased, tracking
+        params stripped) or source-prefixed external_id; v1 dedup is exact-key only —
+        the same role arriving via greenhouse AND an email link with a different URL is
+        two rows (cross-source fuzzy merge is a recorded future enhancement, rapidfuzz
+        is available); re-sights NEVER resurrect terminal statuses; run-record
+        retention 90 rows. Outcomes (interview/offer) live on applications.
         **Rejected:** sourced rows inside applications (bloats the working view);
-        JSONL-only index (no relational funnel queries, no FK to applications).
+        JSONL-only index (no relational funnel queries); auto-discovered migrations
+        (db.py's explicit list is the established mechanism — work with it).
     - id: slice-2
       num: 2
       title: Port ATS adapters + deterministic crawler core (`jobsmith source run`)
       what: |
         Port the proven shakestzd crawler into the package: source_jobs.py orchestration
-        logic and sources/{base,greenhouse,lever,ashby,hn_whos_hiring,climatebase}.py
-        become src/jobsmith/sourcing/{runner,adapters/*}.py; job-sources.yaml (23
-        sources) and the rejection-filter/fast three-specialty scoring port with their
-        calibration. New CLI `jobsmith source run [--no-llm] [--source X]`: fetch all
-        configured sources, normalize, dedup via slice-1 store, fast-score, write
-        postings + a run record. Pure Python end to end — no claude subprocess, no
-        agent turns. Notion writer is NOT ported.
+        (run_crawl, source_jobs.py:415-526 — already deterministic with per-source
+        exception isolation + circuit breaker) and sources/{base,greenhouse,lever,
+        ashby,hn_whos_hiring,climatebase}.py (ATSSourceAdapter.fetch contract,
+        base.py:17-66) become src/jobsmith/sourcing/{runner,adapters/*}.py. The local
+        scoring deps (comp_parser, fit_scoring, red_flags from shakestzd
+        private/scripts/) are bundled into src/jobsmith/sourcing/scoring.py. Declare
+        rapidfuzz + beautifulsoup4 in pyproject.toml (A3 — absent today). Config: the
+        package ships default sources; the USER's source list lives in their repo as
+        sourcing.yaml next to .apply-config.yaml (ported from job-sources.yaml's 23
+        sources), resolved via the existing repo-root machinery. New CLI `jobsmith
+        source run [--no-llm] [--source X]`: fetch, normalize, dedup via slice-1
+        store, fast-score, write postings + a sourcing_runs record. LIFECYCLE: the
+        runner auto-expires postings not re-sighted for N days (default 21,
+        configurable in sourcing.yaml). Pure Python end to end. Notion writer NOT
+        ported. Fixtures: greenhouse+lever recorded fixtures port over; ashby/hn/
+        climatebase fixtures are AUTHORED NEW (A4 — they don't exist in the old repo).
       why: |
         The adapters and scoring are the proven 80% of the old pipeline (1,944 roles
         processed); porting beats rewriting. Making the crawl deterministic kills the
@@ -112,97 +152,147 @@ slices:
         - src/jobsmith/sourcing/adapters/hn_whos_hiring.py
         - src/jobsmith/sourcing/adapters/climatebase.py
         - src/jobsmith/sourcing/scoring.py
-        - src/jobsmith/sourcing/sources.yaml
+        - src/jobsmith/sourcing/default_sources.yaml
         - src/jobsmith/cli.py
+        - pyproject.toml
         - tests/test_sourcing_runner.py
+        - tests/fixtures/sourcing/
       deps:
         - 1
       done_when:
-        - '`jobsmith source run --no-llm` against fixture responses ingests, dedupes, and fast-scores postings into the store with a run record'
+        - rapidfuzz + beautifulsoup4 declared in pyproject.toml; `uv run python -c 'import jobsmith.sourcing.runner'` works in a fresh sync
+        - '`jobsmith source run --no-llm` against fixture responses ingests, dedupes, fast-scores postings and writes a sourcing_runs record'
+        - User-repo sourcing.yaml overrides/extends the shipped defaults; the 23 old sources port into it
+        - Postings not re-sighted for N days flip to expired during a run; a failing adapter degrades (recorded) without aborting the run
         - A real run against at least 2 live boards (greenhouse + lever) lands real postings
-        - A failing adapter degrades (recorded in the run record) without aborting the whole run
       effort: L
       risk: Med
       tests: |
-        Unit: per-adapter fixture parsing (recorded JSON/HTML fixtures from the old repo's fixtures)
+        Unit: per-adapter fixture parsing — greenhouse/lever (ported fixtures) + ashby/hn/climatebase (new fixtures)
         Integration: TestSourceRunNoLlm — full run over fixtures -> postings + run record
         Unit: TestAdapterFailureIsolation — one adapter raising doesn't kill the run
+        Unit: TestAutoExpiry — stale posting flips to expired at N days
       complexity: standard
       approved: false
       comment: ""
+      critic_revisions:
+        - source: sonnet
+          severity: DANGER
+          summary: 'A3: rapidfuzz (source_jobs.py:35) + beautifulsoup4 (climatebase) absent from pyproject.toml; local comp_parser/fit_scoring/red_flags imports don''t exist in jobsmith — RESOLVED: pyproject.toml in files + import-works done_when; scoring modules bundled into scoring.py.'
+        - source: sonnet
+          severity: WARN
+          summary: 'A4: only greenhouse+lever fixtures exist in the old repo; ashby/hn/climatebase fixtures must be authored — RESOLVED: stated in what/tests.'
+        - source: sonnet
+          severity: SUCCESS
+          summary: run_crawl (source_jobs.py:415-526) verified deterministic with per-source isolation + circuit breaker; ATSSourceAdapter contract (base.py:17-66) ports cleanly.
+        - source: haiku
+          severity: DANGER
+          summary: 'status=''expired'' was defined but nothing set it — RESOLVED: runner auto-expires at N days (default 21), test added.'
+        - source: haiku
+          severity: WARN
+          summary: 'Config surface was unspecified — RESOLVED: user-repo sourcing.yaml (senders/sources/caps/cadence/expiry) next to .apply-config.yaml; package ships defaults.'
       decisions_notes: |
-        **Scope:** straight port of source_jobs.py + 5 adapters + fast scoring +
-        23-source config into src/jobsmith/sourcing/; new `source` CLI group.
-        **Decisions:** crawl is synchronous deterministic Python; per-adapter error
-        isolation with degraded-source recording (pattern carried from sourcing-state.yaml);
-        Notion writer dropped (slice-6 retires the old path).
-        **Rejected:** rewriting adapters from scratch (proven code exists); agentic
-        crawl orchestration (the exact failure mode that killed the old pipeline);
-        JobSpy dependency (already evaluated and rejected in the old plan's slice 3).
+        **Scope:** straight port of source_jobs.py + 5 adapters + the three local
+        scoring modules (comp_parser/fit_scoring/red_flags -> scoring.py) + source
+        config; new `source` CLI group; expiry lifecycle owned here.
+        **Decisions:** config split — package ships default_sources.yaml, the user's
+        live list is sourcing.yaml in THEIR repo (same resolution as .apply-config.yaml),
+        which also carries email senders, shortlist N, budget cap, expiry days, cadence;
+        per-adapter error isolation with degraded-source recording carried over;
+        expiry default 21 days. New deps rapidfuzz + beautifulsoup4 declared (A3).
+        **Rejected:** rewriting adapters (proven code); agentic crawl (the old failure
+        mode); JobSpy (rejected in the old plan's slice 3); auto-applying anything.
     - id: slice-3
       num: 3
       title: 'Email-alert ingestion: Gmail + Mail.app adapters, LinkedIn paste/batch'
       what: |
         New adapters that turn job-alert emails into postings: (a) Gmail — read-only
-        API (creds/token via .env) searching configured alert senders (LinkedIn,
-        Indeed, Glassdoor, etc.), parsing each alert's job entries (title, company,
-        location, link) into normalized postings with source=gmail/<sender>; (b)
-        Mail.app — same parsing against the local store via the installed mail-app
-        CLI for senders not in Gmail; (c) LinkedIn manual entry — `jobsmith source
-        add <url-or-ids>` records pasted LinkedIn job IDs/URLs as postings
-        (source=manual/linkedin) for the existing batch-apply habit, fetching JD text
-        via the existing JD fetcher where reachable. Email parsing is template-based
-        per sender with a fixture corpus; unparseable alerts are recorded as degraded,
-        never crash the run. LinkedIn links from emails store the URL + metadata only
-        (no scraping) — JD text is fetched at promote time via the existing
-        httpx/Playwright fetcher.
+        API (google-api-python-client + google-auth-oauthlib, NEW deps declared in
+        pyproject.toml; creds/token via .env) searching the alert senders configured
+        in sourcing.yaml (LinkedIn, Indeed, Glassdoor, etc.), parsing each alert's job
+        entries (title, company, location, link) into normalized postings with
+        source=gmail/<sender>; (b) Mail.app — same parsers against the local store via
+        the EXISTING installed mail-app CLI (external tool, already on this machine)
+        for senders not in Gmail; (c) manual — `jobsmith source add <url-or-ids>`
+        records pasted LinkedIn job IDs/URLs as postings (source=manual/linkedin).
+        Parsing is template-based per sender over a NEW fixture corpus (none exists in
+        either repo — authored from real alert emails); an unparseable alert is
+        recorded as degraded, never crashes the run. Email postings carry snippets
+        only; full JD text is fetched at promote time via the existing httpx/Playwright
+        fetcher (no scraping in the daily run).
       why: |
         Email is the user's highest-signal source (boards auth-wall LinkedIn/Indeed;
         alerts are pre-filtered by saved searches) and the piece the old pipeline
-        never had. This is the core of 'not one by one'.
+        never had. This is the core of 'not one by one'. Risk is High because alert
+        HTML formats drift without notice and the fixture corpus starts from zero —
+        the per-sender-template + degraded-not-fatal design contains that risk.
       files:
         - src/jobsmith/sourcing/adapters/gmail_alerts.py
         - src/jobsmith/sourcing/adapters/mailapp_alerts.py
         - src/jobsmith/sourcing/adapters/manual.py
         - src/jobsmith/sourcing/email_parsers.py
         - src/jobsmith/cli.py
+        - pyproject.toml
         - tests/test_sourcing_email.py
         - tests/fixtures/sourcing/emails/
       deps:
-        - 1
+        - 2
       done_when:
-        - Fixture LinkedIn + Indeed alert emails parse into correct postings (title/company/url) for both Gmail and Mail.app paths
-        - '`jobsmith source add <linkedin-url-or-ids>` records postings and they appear in the inbox'
-        - An unparseable alert is logged as degraded without failing the run; Gmail scope is read-only
+        - Gmail client deps declared in pyproject.toml; adapter authenticates read-only with .env creds
+        - Fixture LinkedIn + Indeed alert emails (newly recorded corpus) parse into correct postings for both Gmail and Mail.app paths
+        - '`jobsmith source add <linkedin-url-or-ids>` records postings that appear in the inbox'
+        - An unparseable/format-drifted alert is recorded as degraded without failing the run
       effort: L
       risk: High
       tests: |
-        Unit: per-sender parser fixtures (LinkedIn, Indeed alert HTML/text bodies)
+        Unit: per-sender parser fixtures (LinkedIn, Indeed alert bodies — recorded from real alerts)
         Integration: TestGmailAdapterMocked — mocked API responses -> postings
+        Integration: TestMailappAdapterMocked — mocked CLI output -> postings
         Integration: TestManualAdd — paste IDs -> postings rows
+        Unit: TestDriftedAlertDegrades — unknown format -> degraded record, run continues
       complexity: standard
       approved: false
       comment: ""
+      critic_revisions:
+        - source: sonnet
+          severity: DANGER
+          summary: 'Gmail API client deps absent from pyproject.toml and the slice''s files — RESOLVED: google-api-python-client + google-auth-oauthlib added to files/done_when.'
+        - source: sonnet
+          severity: WARN
+          summary: 'No email fixture corpus exists in either repo — RESOLVED: corpus authored from real alerts is explicit in what/tests.'
+        - source: haiku
+          severity: WARN
+          summary: 'High-risk/L-effort mismatch unexplained; mail-app CLI provenance unclear — RESOLVED: risk justified (format drift + zero corpus), mail-app confirmed as existing installed tool.'
       decisions_notes: |
         **Scope:** three adapters (gmail, mailapp, manual) sharing per-sender email
-        parsers; LinkedIn only via email links or paste — never scraped.
-        **Decisions:** template-based per-sender parsing with a fixture corpus (alert
-        formats change — fixtures make breakage visible in tests); JD text for email
-        postings fetched lazily at promote time via the existing fetcher (alerts only
-        carry snippets); Gmail credentials via .env, read-only scope (Constraint 4).
-        **Rejected:** LLM-parsing every email in the daily run (cost + the
-        determinism constraint); IMAP generic adapter (Gmail API + Mail.app CLI cover
-        the real accounts with less auth pain); LinkedIn scraping (ToS/auth-wall).
+        parsers; senders list lives in sourcing.yaml (slice-2's config surface);
+        LinkedIn only via email links or paste — never scraped.
+        **Decisions:** template-based per-sender parsing with a from-scratch fixture
+        corpus (A4 — none exists; drift breaks tests, not runs); JD text for email
+        postings fetched lazily at promote (alerts carry snippets); Gmail via
+        google-api-python-client read-only scope, creds in .env (deps NEWLY declared);
+        mail-app CLI is the existing installed external tool. High risk acknowledged:
+        format volatility + new corpus, contained by degraded-not-fatal.
+        **Rejected:** LLM-parsing every email daily (cost + determinism constraint);
+        generic IMAP (more auth pain than the two real accounts need); LinkedIn
+        scraping (ToS/auth-wall).
     - id: slice-4
       num: 4
-      title: Shortlist LLM rescoring via agent-sdk fit-scorer (budget-capped)
+      title: Shortlist LLM rescoring via agent-sdk (budget-capped triage score)
       what: |
         Port the plan-9c5e0d04 rescoring stage: after the deterministic crawl, take the
-        top-N fast-scored new postings (default 30, configurable) and rescore via the
-        existing fit-scorer agent through claude-agent-sdk, writing llm_score,
-        specialty, one-line rationale, and evidence citations onto the posting rows.
-        Budget cap + N cap from config; failures fall back to fast_score (recorded);
-        `--no-llm` skips entirely. This is the ONLY LLM involvement in the daily run.
+        top-N fast-scored NEW postings (default 30, configurable in sourcing.yaml) and
+        rescore via claude-agent-sdk, writing llm_score, specialty, one-line rationale,
+        and evidence citations onto the posting rows. PORT DECISION (A6): reuse the
+        proven embedded-prompt path from llm_score.py (FIT_SCORER_SYSTEM_PROMPT
+        constant + query()/ClaudeAgentOptions, llm_score.py:79-119,241-367) — the
+        apply-fit-scorer.md agent file remains documentation, not the invocation path.
+        Declare claude-agent-sdk in pyproject.toml (A3 — currently only in shakestzd's
+        optional group). Budget cap + N cap from sourcing.yaml; SDK failure falls back
+        to fast_score (recorded); `--no-llm` skips entirely. SCORE SEMANTICS: this is
+        a snippet-based TRIAGE score for inbox ranking — the apply-time fit score
+        (full JD + master content) remains canonical after promotion; they are
+        different measurements and the UI labels this one 'triage'.
       why: |
         Fast scoring ranks cheaply but the LLM rationale is what made the old inbox
         readable ('why this role'). Capping to the shortlist keeps cost ~the old
@@ -210,13 +300,14 @@ slices:
       files:
         - src/jobsmith/sourcing/rescoring.py
         - src/jobsmith/sourcing/runner.py
+        - pyproject.toml
         - tests/test_sourcing_rescoring.py
       deps:
         - 2
       done_when:
-        - Top-N new postings get llm_score/specialty/rationale/evidence after a run; the rest keep fast_score only
-        - Budget/N caps enforced; an SDK failure falls back to fast_score and is recorded, not fatal
-        - '`--no-llm` produces a complete run with zero LLM calls'
+        - claude-agent-sdk declared in pyproject.toml; rescoring imports in a fresh sync
+        - Top-N NEW postings get llm_score/specialty/rationale/evidence after a run; re-sighted postings keep prior scores; the rest keep fast_score
+        - Budget/N caps enforced; an SDK failure falls back to fast_score and is recorded, not fatal; `--no-llm` produces a complete run with zero LLM calls
       effort: M
       risk: Med
       tests: |
@@ -226,27 +317,47 @@ slices:
       complexity: standard
       approved: false
       comment: ""
+      critic_revisions:
+        - source: sonnet
+          severity: DANGER
+          summary: 'A3: claude-agent-sdk not in jobsmith''s pyproject.toml (only shakestzd''s optional group) — RESOLVED: declared, import-works done_when.'
+        - source: sonnet
+          severity: WARN
+          summary: 'A6: two possible code paths (embedded FIT_SCORER_SYSTEM_PROMPT vs apply-fit-scorer.md agent) — RESOLVED: port the proven embedded-prompt path; .md stays documentation.'
+        - source: haiku
+          severity: DANGER
+          summary: 'Inbox-vs-apply score reconciliation undefined — RESOLVED: triage-score semantics (snippet-based, UI-labeled ''triage''); apply-time fit score canonical after promotion.'
       decisions_notes: |
-        **Scope:** one rescoring stage appended to the runner; reuses the existing
-        fit-scorer agent definition rather than a new prompt.
-        **Decisions:** rescore only NEW postings (re-sights keep prior scores);
-        default N=30 matching the old pipeline's calibration; cost ceiling from
-        config carried over from pipeline-config.yaml's pattern.
-        **Rejected:** rescoring everything (cost, latency); running rescoring inside
-        a headless claude session (the failure mode this plan exists to kill).
+        **Scope:** one rescoring stage appended to the runner, porting llm_score.py's
+        proven SDK invocation; triage-score semantics defined here.
+        **Decisions:** embedded-prompt path chosen over driving apply-fit-scorer.md
+        (A6 — llm_score.py:28-30 says the .md is an equivalent spec kept for
+        readability; the constant+query() path is what actually ran in production);
+        rescore NEW postings only; N=30 default matching old calibration; cost ceiling
+        in sourcing.yaml; triage score is NOT the canonical fit score (apply-time
+        score wins post-promotion — funnel uses the application's score).
+        **Rejected:** rescoring everything (cost); headless-claude rescoring (the dead
+        failure mode); unifying triage and apply scores into one number (different
+        inputs — snippet vs full JD + master — pretending they're comparable would
+        mislead the inbox).
     - id: slice-5
       num: 5
       title: Postings inbox in the web UI + one-click promote-to-apply
       what: |
         New 'Postings' section in the jobsmith web UI: ranked list (llm_score desc,
-        fast_score fallback) showing title/company/source/score/rationale/age, filters
-        (source, specialty, min score, status), actions: dismiss, queue, and 'start
-        application' — which calls a new POST /api/postings/{id}/promote that creates
-        the application via the existing apply machinery (URL + any cached jd_text
-        passed through, JD fetched lazily if absent), links provenance both ways, and
-        navigates to the new application detail. API: GET /api/postings (filtered),
-        POST /api/postings/{id}/status, POST /api/postings/{id}/promote. Inbox badge
-        shows new-since-last-visit count.
+        then fast_score desc, then first_seen desc as stable tie-breaker) showing
+        title/company/source/triage-score/rationale/age, filters (source, specialty,
+        min score, status), actions: dismiss, queue, and 'start application' — POST
+        /api/postings/{id}/promote calls the EXISTING application-creation path
+        (create_application, applications.py:552-582, ApplicationCreate{url, jd_text})
+        with the posting's url + cached jd_text; for email-sourced snippet-only
+        postings the JD is fetched at promote via the existing fetcher — IF that fetch
+        fails the promote still succeeds with jd_text empty and the response carries a
+        jd_fetch_failed warning the UI surfaces (the apply pipeline's own JD handling
+        takes over; promote is never blocked on a fetch). Wires the new view into the
+        nav: ViewName union (web/src/types.ts:95-105) + sidebar (web/src/app/chrome.tsx)
+        + route switch. API: GET /api/postings (filtered), POST /api/postings/{id}/status,
+        POST /api/postings/{id}/promote. Inbox badge shows new-since-last-visit count.
       why: |
         This replaces the Notion inbox with the surface where work actually happens —
         the click that turns a sourced posting into a tracked application is the
@@ -255,6 +366,8 @@ slices:
         - src/jobsmith/api/postings.py
         - src/jobsmith/api/main.py
         - web/src/app/postings.tsx
+        - web/src/app/chrome.tsx
+        - web/src/types.ts
         - web/src/api/client.ts
         - web/src/api/hooks.ts
         - tests/test_api_postings.py
@@ -263,41 +376,60 @@ slices:
         - 1
         - 2
       done_when:
-        - Inbox lists ranked postings with score/rationale/source and supports dismiss/queue/filter
-        - '''Start application'' promotes the posting, launches the apply flow with provenance linked, and navigates to the application detail'
-        - Promoted/dismissed postings leave the default inbox view; the posting shows its linked application and vice versa
+        - Inbox lists ranked postings (stable tie-broken ordering) with triage score/rationale/source and supports dismiss/queue/filter; the view is reachable from the sidebar
+        - '''Start application'' promotes the posting via the existing creation path, links provenance both ways, and navigates to the application detail'
+        - Promote on a snippet-only posting with a failing JD fetch still succeeds, surfacing a jd_fetch_failed warning
+        - Promoted/dismissed postings leave the default inbox view; posting and application each show the link to the other
       effort: L
       risk: Med
       tests: |
-        Integration: TestPostingsListFilters — GET with filters/ordering
+        Integration: TestPostingsListFilters — GET with filters/ordering (incl. tie-breaker)
         Integration: TestPromoteEndpoint — promote -> application created + both links set
+        Integration: TestPromoteJdFetchFails — fetch error -> promote succeeds + warning
         Component: postings.test.tsx — render ranked list, dismiss, promote action
       complexity: standard
       approved: false
       comment: ""
+      critic_revisions:
+        - source: sonnet
+          severity: WARN
+          summary: 'ViewName union (types.ts:95-105) + chrome.tsx sidebar were missing from the file list — RESOLVED: both added; promote path verified against create_application (applications.py:552-582).'
+        - source: haiku
+          severity: WARN
+          summary: 'Lazy JD-fetch failure behavior was unspecified — RESOLVED: promote succeeds with jd_fetch_failed warning; never blocks.'
+        - source: haiku
+          severity: INFO
+          summary: 'Ranking tie-breaker unstated — RESOLVED: llm -> fast -> first_seen stable ordering.'
       decisions_notes: |
         **Scope:** new UI section + three API endpoints; promotion reuses the existing
-        application-creation path (same one the 'new application' modal uses).
-        **Decisions:** rank by llm_score with fast_score fallback; JD text fetched
-        lazily at promote when the posting only has a snippet (email-sourced);
-        provenance is a two-way link (posting.promoted_application_id + application
-        row referencing the posting).
-        **Rejected:** keeping a Notion mirror (double-write complexity for a surface
-        the user abandoned); auto-applying high scorers (human stays the trigger —
-        fit 0.5-ish scores are not submit-safe, per the BECU experience).
+        application-creation path (verified: create_application accepts url + optional
+        jd_text); nav wiring (types.ts ViewName + chrome.tsx) is in scope.
+        **Decisions:** rank llm_score desc -> fast_score desc -> first_seen desc
+        (stable); score labeled 'triage' (slice-4 semantics); JD fetched lazily at
+        promote and a fetch failure degrades to a warning, never blocks promote.
+        **Rejected:** Notion mirror (abandoned surface); auto-applying high scorers
+        (human stays the trigger); blocking promote on JD fetch (an unreachable page
+        shouldn't strand a posting outside the funnel).
     - id: slice-6
       num: 6
       title: 'Scheduling + run health: launchd, visible failure state, retire old pipeline'
       what: |
-        Make the daily run schedulable and IMPOSSIBLE to fail silently: run records
-        (started/finished/status/counts/degraded sources/error) persisted per run;
-        `jobsmith doctor` gains a sourcing check (last successful run age, degraded
-        sources); UI shows a banner on the Postings inbox when the last run failed,
-        found 0 roles, or is older than the configured cadence. New launchd plist
-        invokes the installed `jobsmith source run` directly (no bash->claude
-        wrapper); macOS notification on run failure. RETIRE the old path: unload
-        com.shakes.morning-sourcing, mark the shakestzd scripts/prompts deprecated
-        pointing at the new command, leave Notion data untouched but stop writing.
+        Make the daily run schedulable and IMPOSSIBLE to fail silently. Run records
+        (sourcing_runs from slice-1) drive: a `jobsmith doctor` sourcing check
+        (last-success age vs configured cadence, degraded sources — following the
+        existing CheckResult pattern, doctor.py:36-91) and an inbox banner (API exposes
+        last-run state) for failed/empty/stale runs, plus a macOS notification on
+        failure. CROSS-REPO WIRING (modeled explicitly): the plist TEMPLATE lives in
+        the jobsmith repo; the INSTALLED copy in ~/Library/LaunchAgents sets the
+        ABSOLUTE path to the installed binary (launchd has minimal PATH) and
+        JOBSMITH_REPO_ROOT=<user repo> so the runner finds the user's DB +
+        sourcing.yaml (the data home is shakestzd, per the repo-root design); a
+        `jobsmith source install-schedule` helper renders + loads it. RETIRE the old
+        path: `launchctl bootout` com.shakes.morning-sourcing, DELETE the old plist
+        from ~/Library/LaunchAgents, prepend DEPRECATED headers (pointing at
+        `jobsmith source run`) to the old wrapper/prompt files, stop all Notion writes
+        (data left in place read-only), and note the cutover in the user repo's
+        AGENTS.md so no second scheduler can coexist.
       why: |
         The old pipeline failed silently for 5 weeks because launchd saw exit 0 and
         nothing surfaced state. Visible run health is what makes scheduling
@@ -306,45 +438,66 @@ slices:
         - src/jobsmith/sourcing/store.py
         - src/jobsmith/doctor.py
         - src/jobsmith/api/postings.py
+        - src/jobsmith/cli.py
         - web/src/app/postings.tsx
-        - scripts/launchd/com.shakes.jobsmith-sourcing.plist
+        - scripts/launchd/com.shakes.jobsmith-sourcing.plist.template
         - tests/test_sourcing_health.py
       deps:
         - 2
       done_when:
-        - Run records persist status/counts/errors; `jobsmith doctor` reports last-success age and degraded sources
-        - Inbox banner appears for failed/empty/stale runs; macOS notification fires on failure
-        - New launchd plist runs the installed binary on schedule; old morning-sourcing label unloaded and old wrapper marked deprecated
+        - '`jobsmith doctor` reports last-success age + degraded sources from sourcing_runs; inbox banner appears for failed/empty/stale runs; macOS notification fires on failure'
+        - '`jobsmith source install-schedule` renders the plist with absolute binary path + JOBSMITH_REPO_ROOT and loads it; a REAL `launchctl kickstart` cycle produces a sourcing_runs record (not just shell invocation)'
+        - Old morning-sourcing label booted out and its plist removed; old wrapper/prompts carry DEPRECATED headers; no Notion writes occur
       effort: M
       risk: Med
       tests: |
         Unit: TestRunRecordLifecycle — start/finish/fail transitions persisted
         Unit: TestDoctorSourcingCheck — stale/failed run -> FAIL line with age
         Integration: TestHealthBannerApi — API exposes last-run state the UI banner reads
+        Manual: launchctl load + kickstart cycle on the real machine -> run record (acceptance)
       complexity: standard
       approved: false
       comment: ""
+      critic_revisions:
+        - source: sonnet
+          severity: DANGER
+          summary: 'Cross-repo path dependency unmodeled (plist in jobsmith repo, data/config in shakestzd; launchd minimal PATH) — RESOLVED: template + install-schedule renders absolute binary path + JOBSMITH_REPO_ROOT.'
+        - source: sonnet
+          severity: SUCCESS
+          summary: morning-sourcing confirmed loaded (launchctl list) with bash-wrapper plist (plist:29-33); doctor CheckResult pattern (doctor.py:36-91) extends cleanly.
+        - source: haiku
+          severity: DANGER
+          summary: 'Launchd validation was deferred to slice-8 — RESOLVED: real launchctl load+kickstart producing a run record is now THIS slice''s acceptance.'
+        - source: haiku
+          severity: WARN
+          summary: 'Old-pipeline retirement was vague (deprecate where?) — RESOLVED: bootout + delete plist, DEPRECATED headers on wrapper/prompts, cutover note in user-repo AGENTS.md.'
       decisions_notes: |
-        **Scope:** run-record persistence + doctor check + UI banner + notification +
-        launchd cutover; old pipeline retirement is part of THIS slice so two
-        schedulers never run concurrently.
-        **Decisions:** failure visibility is in-product (banner + doctor) with a
-        macOS notification, not email (digests were part of why Notion flow died);
-        plist invokes the installed binary directly — no shell wrapper, no claude.
-        **Rejected:** cron (launchd is the platform-native pattern already in use);
-        keeping the old wrapper as fallback (split-brain risk: two writers).
+        **Scope:** run-health surfaces + schedule installer + old-pipeline retirement
+        in ONE slice so two schedulers never coexist.
+        **Decisions:** plist is a TEMPLATE in the jobsmith repo, rendered at install
+        with absolute binary path + JOBSMITH_REPO_ROOT (cross-repo dependency made
+        explicit — config/DB live in the user repo per project memory); real
+        launchctl kickstart is the acceptance, because shell-works-launchd-fails is
+        exactly how the old pipeline died; old plist DELETED not just unloaded;
+        failure visibility in-product (banner + doctor) + macOS notification, not
+        email digests.
+        **Rejected:** cron (launchd is platform-native and already in use); keeping
+        the old wrapper as fallback (split-brain: two writers); deprecate-only for
+        the old plist (re-enableable by accident).
     - id: slice-7
       num: 7
       title: 'Funnel dashboard: per-stage counts, conversion, per-source yield'
       what: |
         A funnel view in the web UI fed by a new GET /api/funnel: stage counts
         (sourced -> queued -> promoted/applied -> interview -> offer / rejected) with
-        conversion rates between stages, a per-source breakdown (which boards/email
-        senders produce postings that become applications and interviews), and a
-        time-window filter (7/30/90 days/all). Applications gain interview/offer
-        statuses in the UI status picker (vocabulary added in slice-1) so outcomes
-        can be recorded from the application detail, closing the loop the BECU
-        rejection just exercised manually via SQL.
+        conversion rates between adjacent stages, a per-source breakdown (which boards/
+        email senders produce postings that become applications and interviews), and a
+        time-window filter (7/30/90 days/all; cohort = posting first_seen in window).
+        Applications gain interview/offer in the UI status picker (vocabulary added in
+        slice-1) so outcomes are recorded from the application detail — closing the
+        loop the BECU rejection exercised manually via SQL. Funnel uses the
+        APPLICATION's fit score post-promotion (triage score is pre-funnel ranking
+        only). Nav wiring: ViewName (types.ts) + chrome.tsx sidebar, same as slice-5.
       why: |
         'Track the whole pipeline' means answering 'is sourcing working and which
         sources are worth it' at a glance — counts + conversion + per-source yield
@@ -353,6 +506,8 @@ slices:
         - src/jobsmith/api/funnel.py
         - src/jobsmith/api/main.py
         - web/src/app/funnel.tsx
+        - web/src/app/chrome.tsx
+        - web/src/types.ts
         - web/src/app/application.tsx
         - web/src/api/client.ts
         - tests/test_api_funnel.py
@@ -362,40 +517,52 @@ slices:
       done_when:
         - Funnel view shows stage counts + conversion for a chosen window, matching hand-computed SQL on the same DB
         - Per-source table ranks sources by postings -> applications -> interviews yield
-        - Application status can be set to interview/offer/rejected from the UI and flows into the funnel
+        - The application detail's status picker includes interview/offer/rejected, settable from the UI, and the funnel reflects the change
       effort: M
       risk: Low
       tests: |
         Unit: TestFunnelAggregation — fixture rows -> expected counts/conversions
-        Integration: TestFunnelApiWindow — time-window filtering
-        Component: funnel.test.tsx — renders stages + per-source table
+        Integration: TestFunnelApiWindow — time-window filtering (first_seen cohort)
+        Component: funnel.test.tsx — renders stages + per-source table; status picker includes outcomes
       complexity: standard
       approved: false
       comment: ""
+      critic_revisions:
+        - source: sonnet
+          severity: WARN
+          summary: 'ViewName/chrome.tsx missing from file list (same gap as slice-5) — RESOLVED: added; router registration pattern (api/main.py:42-56) confirmed.'
+        - source: haiku
+          severity: INFO
+          summary: Status-picker dependency on slice-1 vocabulary made explicit — done_when now verifies interview/offer settable from the UI.
       decisions_notes: |
         **Scope:** read-only aggregation endpoint + UI view + outcome-status picker on
-        application detail; no new state beyond what slices 1/5 created.
-        **Decisions:** conversion measured between adjacent stages on rows whose
-        first_seen falls in the window; per-source yield keyed on the posting's
-        source field carried through promotion.
-        **Rejected:** weekly digest email (deferred — in-product view first);
-        cohort/retention analytics (overkill for a single-user funnel).
+        application detail; nav wiring (types.ts/chrome.tsx) in scope; no new state
+        beyond slices 1/5.
+        **Decisions:** conversion measured between adjacent stages on first_seen-in-
+        window cohorts; per-source yield keyed on the posting's source carried through
+        promotion; funnel score column = application fit score (canonical), not triage.
+        **Rejected:** weekly digest email (deferred — in-product first); cohort/
+        retention analytics (overkill for a single-user funnel).
     - id: slice-8
       num: 8
       title: 'E2E acceptance: scheduled run -> inbox -> one-click apply -> funnel, live in Chrome'
       what: |
-        Prove the loop at the chosen acceptance bar: a scheduled (or schedule-invoked)
-        `jobsmith source run` ingests real board postings AND a fixture/real alert
-        email; the Postings inbox shows them ranked with rationale; clicking 'start
-        application' on one launches the apply pipeline with provenance linked; the
-        funnel view reflects the movement; run-health surfaces are green. Verified
-        live in Chrome per house rule (screenshots + console), plus an automated E2E
-        against the same-origin API mirroring the slice flows. Update README/AGENTS
-        with the sourcing runbook (enable/disable, add a source, add an email sender).
+        Prove the loop at the chosen acceptance bar, split by determinism: the
+        AUTOMATED E2E (tests/e2e/) runs FIXTURES-ONLY — source run over fixture
+        boards + the recorded alert-email corpus -> inbox -> promote -> application ->
+        funnel counts, driven over the same-origin API (no live-board dependency, no
+        CI flake). The MANUAL acceptance pass then verifies the live path on the real
+        machine: the schedule-installed `launchctl kickstart` run lands fresh postings
+        from at least one live board AND the user's real alert email; the inbox,
+        promote->apply, funnel movement, and run-health surfaces are verified live in
+        Chrome per house rule (screenshots + console). Update README/AGENTS with the
+        sourcing runbook (enable/disable schedule, add a source, add an email sender,
+        read the funnel).
       why: |
         Every prior track's browser E2E caught real defects unit tests missed (wheel
         bundling, slug rekey, CSP, salutation gate). This plan's value claim is the
-        coupled loop — only a live pass proves it.
+        coupled loop — only a live pass proves it; splitting fixtures/live keeps CI
+        deterministic while still verifying reality.
       files:
         - tests/e2e/test_sourcing_funnel.py
         - README.md
@@ -407,22 +574,102 @@ slices:
         - 6
         - 7
       done_when:
-        - A schedule-invoked run lands fresh postings from at least one live board and one alert-email fixture in the inbox, ranked with rationale
-        - One-click promote launches a real apply run with the posting linked; funnel counts move accordingly
-        - Run-health is green in doctor + UI; the whole flow verified live in Chrome
+        - 'Automated fixtures-only E2E passes in CI: run -> postings -> promote -> application -> funnel counts over the same-origin API'
+        - 'Manual live pass: schedule-invoked (launchctl kickstart) run lands fresh postings from >=1 live board + the real alert email; promote launches a real apply with provenance linked; funnel + run-health verified live in Chrome with screenshots'
+        - README/AGENTS document the sourcing runbook
       effort: M
       risk: Med
       tests: |
-        E2E: TestSourceToFunnel — run -> postings -> promote -> application -> funnel counts over same-origin API
-        Manual: Chrome walkthrough with screenshots (inbox, promote, funnel, health banner states)
+        E2E (CI, fixtures-only): TestSourceToFunnel — run -> postings -> promote -> application -> funnel counts
+        Manual (acceptance): Chrome walkthrough with screenshots (inbox, promote, funnel, health banner states) on the real schedule
       complexity: standard
       approved: false
       comment: ""
+      critic_revisions:
+        - source: haiku
+          severity: DANGER
+          summary: 'Live-board dependency made CI flaky as written — RESOLVED: automated E2E is fixtures-only; live board/email/schedule verification is the manual Chrome pass.'
+        - source: haiku
+          severity: WARN
+          summary: '''Real alert email'' ambiguity — RESOLVED: fixtures (recorded corpus) in CI; the user''s actual alert email in the manual pass.'
       decisions_notes: |
         **Scope:** verification + runbook docs only — no new product surface.
-        **Decisions:** acceptance = full loop including the schedule path and Chrome
-        verification (user's chosen bar); E2E drives the same-origin API like the
-        fresh-install suite does, with the browser pass for the visual surfaces.
-        **Rejected:** API-only acceptance (this track's history shows browser-only
-        bugs are the common failure mode).
+        **Decisions:** CI E2E is fixtures-only (live boards are flaky/non-deterministic);
+        the live-board + real-email + real-schedule verification is the manual Chrome
+        acceptance pass — both are required, serving different purposes.
+        **Rejected:** live-board calls in CI (schema drift/outages fail correct code);
+        API-only acceptance (this track's history shows browser-only bugs are the
+        common failure mode).
 questions: []
+critique:
+    reviewed_at: "2026-06-10"
+    reviewers:
+        - Haiku (design)
+        - Sonnet (feasibility)
+    assumptions:
+        - id: A1
+          status: verified
+          text: Migration slot 010 is free and the shakestzd source files exist as claimed.
+          evidence: migrations/ ends at 009_reuse_store.sql; source_jobs.py + all 5 adapters confirmed (base.py:17-66 Role dataclass + ATSSourceAdapter.fetch); run_crawl (source_jobs.py:415-526) is deterministic with per-source isolation.
+        - id: A2
+          status: falsified
+          text: Migrations apply automatically when the .sql file lands on disk.
+          evidence: db.py:50-59 _PIPELINE_MIGRATIONS is a hardcoded list — 010 must be registered there or it silently never runs; db.py was missing from slice-1 files.
+        - id: A3
+          status: falsified
+          text: jobsmith's declared deps cover the ported code.
+          evidence: pyproject.toml:38-66 lacks rapidfuzz (source_jobs.py:35), beautifulsoup4 (climatebase), google-api-python-client/google-auth (Gmail), and claude-agent-sdk (llm_score.py:241 — declared only in shakestzd's optional job-pipeline group). No slice listed pyproject.toml.
+        - id: A4
+          status: questionable
+          text: '''Recorded fixtures from the old repo'' cover all adapters.'
+          evidence: Only greenhouse_stripe_response.json + lever_response.json exist (shakestzd tests/fixtures/ats/); ashby/hn/climatebase fixtures and the ENTIRE email corpus must be authored new.
+        - id: A5
+          status: verified
+          text: Promote can reuse the existing application-creation path.
+          evidence: create_application (applications.py:552-582) accepts ApplicationCreate{url required, jd_text optional} (schemas/applications.py:42-55); application statuses are free-text (applications.py:323-327) so interview/offer are additive.
+        - id: A6
+          status: questionable
+          text: The rescoring port has one obvious code path.
+          evidence: 'llm_score.py:79-119 embeds FIT_SCORER_SYSTEM_PROMPT as a constant; apply-fit-scorer.md is ''an equivalent spec kept for readability'' (llm_score.py:28-30) — two possible paths, plan must pick one (resolved: port the proven embedded-prompt path).'
+        - id: A7
+          status: verified
+          text: com.shakes.morning-sourcing is loaded and the old plist uses a bash wrapper with shakestzd env.
+          evidence: launchctl list shows the label; plist:29-33 invokes /bin/bash wrapper with WorkingDirectory + REPO_ROOT env — the new plist must set absolute binary path + JOBSMITH_REPO_ROOT itself (launchd has minimal PATH).
+    critics: []
+    risks:
+        - risk: 'Import-time failure: four runtime deps absent from pyproject.toml across slices 2/3/4.'
+          severity: High
+          mitigation: pyproject.toml added to slice 2 (rapidfuzz, beautifulsoup4), slice 3 (google-api-python-client + google-auth-oauthlib), slice 4 (claude-agent-sdk) file lists + done_when entries; uv lock refreshed per slice.
+        - risk: 'Silently-unapplied migration: _PIPELINE_MIGRATIONS (db.py:50-59) is hardcoded.'
+          severity: High
+          mitigation: slice-1 files + done_when now include registering 010 in db.py and a test that open_pipeline_db applies it.
+        - risk: 'Cross-repo path dependency: plist lives in jobsmith repo but data/config live in shakestzd (JOBSMITH_REPO_ROOT).'
+          severity: High
+          mitigation: 'slice-6 now models it explicitly: plist template in jobsmith repo, installed copy sets absolute binary path + JOBSMITH_REPO_ROOT=<user repo>; sourcing config (sources/senders/caps/cadence) lives in the USER repo as sourcing.yaml next to .apply-config.yaml, package ships defaults.'
+        - risk: 'Re-learning the silent-failure lesson: launchd validated only at the end.'
+          severity: High
+          mitigation: slice-6 done_when now requires a real `launchctl load` + `kickstart` cycle producing a run record — not just shell invocation; slice-8 re-verifies on schedule.
+        - risk: 'Score confusion: inbox triage score vs apply-time fit score diverge.'
+          severity: Medium
+          mitigation: 'Resolved by definition (slices 4/5/7): sourcing llm_score is a snippet-based TRIAGE score, labeled ''triage'' in the UI; the apply-time fit score (full JD + master) is canonical after promotion; funnel uses the application''s score once promoted.'
+        - risk: 'Posting lifecycle holes: nothing set status=''expired''; dismissed-resurrection undefined.'
+          severity: Medium
+          mitigation: slice-2 runner now auto-expires postings not re-sighted for N days (default 21, configurable); re-sight of dismissed/promoted NEVER resurrects (bump last_seen only) — negative tests added to slice-1.
+        - risk: E2E flakiness from live boards; email-alert format drift.
+          severity: Medium
+          mitigation: slice-8 automated E2E runs fixtures-only; live board + real schedule are the manual Chrome pass. Email parsers are per-sender templates with fixture corpus so drift breaks tests, not the run (degraded, never fatal).
+    synthesis: |
+        Architecture is sound and the port targets are real (A1, A5, A7 verified), but the
+        draft had two classes of danger. (1) Implementation-contract gaps the feasibility
+        critic proved against code: missing deps in pyproject.toml across slices 2/3/4 (A3),
+        the hardcoded migration registry (A2), only 2 of 5 adapter fixture sets existing
+        (A4), the dual rescoring code path (A6), and ViewName/chrome.tsx missing from the
+        UI slices' file lists — all now folded into files/done_when. (2) Design holes:
+        old-data backfill (resolved: start fresh, explicitly out of scope), expiry
+        lifecycle (resolved: runner auto-expires at N days), triage-vs-apply score
+        semantics (resolved: triage label, apply score canonical), the cross-repo
+        launchd/config split (resolved: config lives in the user repo, plist sets
+        JOBSMITH_REPO_ROOT + absolute paths), and launchd validation deferred to the end
+        (resolved: real load+kickstart in slice-6 acceptance). Reviewer should focus on
+        slice 3 (highest genuine risk — email format volatility, new fixture corpus) and
+        the slice-6 cross-repo wiring; slices 1/2/5/7 are now low-surprise ports/CRUD.
