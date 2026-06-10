@@ -347,8 +347,43 @@ def run_crawl(
                     status="failed",
                     error=str(exc),
                 )
+        _notify_failure(str(exc))
         raise
     finally:
         conn.close()
 
+    # Notify on degraded (non-fatal failure)
+    if not dry_run and summary["degraded_sources"]:
+        _notify_failure(
+            f"{len(summary['degraded_sources'])} source(s) degraded: "
+            + ", ".join(summary["degraded_sources"])
+        )
+
     return summary
+
+
+def _notify_failure(message: str) -> None:
+    """Fire a macOS notification on sourcing failure (best-effort, non-fatal).
+
+    Uses osascript to display a Notification Center alert.  Silently no-ops
+    on non-macOS platforms or when osascript is unavailable.
+    """
+    import platform
+    import subprocess as _sp
+
+    if platform.system() != "Darwin":
+        return
+    try:
+        script = (
+            'display notification '
+            f'"{message[:200]}" '
+            'with title "jobsmith sourcing" '
+            'subtitle "run failed or degraded"'
+        )
+        _sp.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            timeout=5,
+        )
+    except Exception as notify_exc:
+        logger.debug("macOS notification failed (non-fatal): %s", notify_exc)

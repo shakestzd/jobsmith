@@ -53,6 +53,7 @@ from jobsmith.api.feedback import router as feedback_router
 from jobsmith.api.jd_routes import router as jd_router
 from jobsmith.api.master import router as master_router
 from jobsmith.api.onboard_routes import router as onboard_router
+from jobsmith.api.run_health import router as run_health_router
 from jobsmith.api.snapshots import router as snapshots_router
 from jobsmith.api.staticui import mount_static_ui
 from jobsmith.paths import repo_root_for
@@ -301,6 +302,12 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         onboard_router,
+        prefix="/api",
+        dependencies=[Depends(current_user)],
+    )
+    # feat-80affa8a: sourcing run-health endpoint (own module, additive)
+    app.include_router(
+        run_health_router,
         prefix="/api",
         dependencies=[Depends(current_user)],
     )

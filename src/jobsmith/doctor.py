@@ -383,6 +383,152 @@ def check_python_version(min_major: int = 3, min_minor: int = 10) -> CheckResult
     )
 
 
+def check_sourcing_health(
+    db_path: Path | None = None,
+    *,
+    stale_hours: int = 25,
+) -> CheckResult:
+    """Check sourcing run health from the sourcing_runs table.
+
+    Logic:
+    - No DB / no runs: PASS (skip — sourcing not yet configured).
+    - Last run status='failed': FAIL with error message.
+    - Last run status='degraded': FAIL listing degraded sources.
+    - Last successful run older than stale_hours: FAIL (stale/overdue).
+    - Otherwise: PASS with last run age.
+
+    Parameters
+    ----------
+    db_path:
+        Explicit path to jobsmith.db. Auto-resolved from JOBSMITH_REPO_ROOT /
+        .apply-config.yaml when None.
+    stale_hours:
+        Hours after which a missing successful run is considered overdue
+        (default: 25 — gives a 1-hour grace beyond a daily cadence).
+    """
+    import json
+    from datetime import datetime, timedelta, timezone
+
+    resolved_path = db_path
+    if resolved_path is None:
+        # Best-effort auto-resolve from config
+        try:
+            from ._sourcing_config import _resolve_repo_root_best_effort
+            from .config import find_config, load_config
+
+            root = _resolve_repo_root_best_effort()
+            if root is None:
+                root = Path.cwd()
+            config_path = find_config(root)
+            if config_path is not None:
+                config = load_config(config_path)
+                resolved_path = (config_path.parent / config.output.jobsmith_db).resolve()
+        except Exception:
+            pass
+
+    if resolved_path is None or not resolved_path.exists():
+        return CheckResult(
+            name="sourcing_health",
+            ok=True,
+            message="sourcing_health: no DB found — skip (sourcing not yet configured)",
+        )
+
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(str(resolved_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT run_id, status, finished_at, degraded_sources_json, error "
+                "FROM sourcing_runs ORDER BY started_at DESC LIMIT 1"
+            ).fetchone()
+        finally:
+            conn.close()
+    except Exception as exc:
+        return CheckResult(
+            name="sourcing_health",
+            ok=True,
+            message=f"sourcing_health: could not query sourcing_runs ({exc}) — skip",
+        )
+
+    if row is None:
+        return CheckResult(
+            name="sourcing_health",
+            ok=True,
+            message="sourcing_health: no runs recorded — skip (run `jobsmith source run` first)",
+        )
+
+    status = row["status"]
+    error = row["error"]
+    degraded_json = row["degraded_sources_json"]
+    finished_at_str = row["finished_at"]
+
+    if status == "failed":
+        return CheckResult(
+            name="sourcing_health",
+            ok=False,
+            message=f"sourcing_health: last run failed — {error or 'unknown error'}",
+            remediation="run `jobsmith source run` to retry; check logs for details",
+        )
+
+    if status == "degraded":
+        degraded: list[str] = []
+        if degraded_json:
+            try:
+                degraded = json.loads(degraded_json)
+            except Exception:
+                degraded = [degraded_json]
+        return CheckResult(
+            name="sourcing_health",
+            ok=False,
+            message=(
+                f"sourcing_health: last run degraded — "
+                f"{len(degraded)} source(s) errored: {', '.join(degraded)}"
+            ),
+            remediation=(
+                "check adapter connectivity or run `jobsmith source run --source <key>` "
+                "to test the degraded source individually"
+            ),
+        )
+
+    # For 'running' or 'done': check freshness
+    if finished_at_str:
+        try:
+            finished_at = datetime.fromisoformat(finished_at_str)
+            if finished_at.tzinfo is None:
+                finished_at = finished_at.replace(tzinfo=timezone.utc)
+            age = datetime.now(tz=timezone.utc) - finished_at
+            if age > timedelta(hours=stale_hours):
+                hours_ago = int(age.total_seconds() / 3600)
+                return CheckResult(
+                    name="sourcing_health",
+                    ok=False,
+                    message=(
+                        f"sourcing_health: last successful run is stale "
+                        f"({hours_ago}h ago — overdue by >{stale_hours}h cadence)"
+                    ),
+                    remediation=(
+                        "run `jobsmith source run` manually or check the launchd schedule "
+                        "with `launchctl print gui/$UID/com.jobsmith.sourcing`"
+                    ),
+                )
+            hours_ago = max(0, int(age.total_seconds() / 3600))
+            return CheckResult(
+                name="sourcing_health",
+                ok=True,
+                message=f"sourcing_health: last run ok ({hours_ago}h ago, status={status})",
+            )
+        except Exception:
+            pass
+
+    return CheckResult(
+        name="sourcing_health",
+        ok=True,
+        message=f"sourcing_health: last run status={status}",
+    )
+
+
 def check_plugin_dir_resolves() -> CheckResult:
     """Verify jobsmith's embedded plugin directory is present and valid."""
     import jobsmith
@@ -422,12 +568,37 @@ def check_plugin_dir_resolves() -> CheckResult:
 # Aggregate helpers
 # ---------------------------------------------------------------------------
 
-def run_all_checks(cwd: Path | None = None) -> list[CheckResult]:
-    """Run every preflight check and return results in a stable order."""
+def run_all_checks(
+    cwd: Path | None = None,
+    db_path: Path | None = None,
+) -> list[CheckResult]:
+    """Run every preflight check and return results in a stable order.
+
+    Parameters
+    ----------
+    cwd:
+        Working directory for config resolution (default: Path.cwd()).
+    db_path:
+        Explicit path to jobsmith.db for the sourcing_health check.
+        Auto-resolved from config when None.
+    """
     from .config import find_config
 
     directory = cwd or Path.cwd()
     config_path = find_config(directory)
+
+    # Auto-resolve db_path from config when not provided
+    resolved_db = db_path
+    if resolved_db is None and config_path is not None:
+        try:
+            from .config import load_config
+
+            config = load_config(config_path)
+            candidate = (config_path.parent / config.output.jobsmith_db).resolve()
+            if candidate.exists():
+                resolved_db = candidate
+        except Exception:
+            pass
 
     return [
         check_python_version(),
@@ -439,6 +610,7 @@ def run_all_checks(cwd: Path | None = None) -> list[CheckResult]:
         check_master_yaml(cwd),
         check_benchmarks(config_path=config_path, cwd=cwd),
         check_contracts_frozen(),
+        check_sourcing_health(db_path=resolved_db),
     ]
 
 
@@ -473,6 +645,7 @@ __all__ = [
     "check_master_yaml",
     "check_plugin_dir_resolves",
     "check_python_version",
+    "check_sourcing_health",
     "check_ui_bundled",
     "preflight",
     "run_all_checks",
