@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Cover-letter apply gate false-positives on salutations — no greeting edit can pass</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="bug-600b3699"
+             data-type="bug"
+             data-status="todo"
+             data-priority="high"
+             data-created="2026-06-10T18:38:02.39559"
+             data-updated="2026-06-10T18:38:02.4166" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8" data-created-by-cli-version="0.61.1">
+
+        <header>
+            <h1>Cover-letter apply gate false-positives on salutations — no greeting edit can pass</h1>
+            <div class="metadata">
+                <span class="badge status-todo">Todo</span>
+                <span class="badge priority-high">High Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="caused_by">
+                <h3>Caused By:</h3>
+                <ul>
+                    <li><a href="feat-fae0fda6.html" data-relationship="caused_by" data-since="2026-06-10T18:38:02.410865">feat-fae0fda6</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-5d3b688f.html" data-relationship="part_of" data-since="2026-06-10T18:38:02.416408">trk-5d3b688f</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Live repro on BECU app: proposing greeting change 'Hello,' -> 'Dear BECU Hiring Team,' rejected by check_draft gate (claim 'Dear BECU Hiring Team' unverified); retry with 'Hello BECU,' ALSO rejected (claim 'Hello BECU' unverified) even though BECU alone verifies via jd-parsed.json. The gate's hard-claim extractor treats the salutation phrase as a factual claim and does verbatim phrase lookup, so any greeting change 422s and the feature's apply path is unusable for salutations. Fix in factcheck claim extraction/matching (e.g. exempt salutation lines, or verify proper-noun tokens within phrases), NOT by weakening dollar/number checks.</p>
+        </section>
+    </article>
+</body>
+</html>
