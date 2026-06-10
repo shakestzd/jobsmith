@@ -10,15 +10,15 @@
 <body>
     <article id="feat-b1bd050e"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-10T19:40:26.192094"
-             data-updated="2026-06-10T21:39:21.685916" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034">
+             data-updated="2026-06-10T23:25:27.646582" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034">
 
         <header>
             <h1>Email-alert ingestion: Gmail &#43; Mail.app adapters, LinkedIn paste/batch</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
@@ -53,8 +53,8 @@
         <section data-steps>
             <h3>Implementation Steps</h3>
             <ol>
-                <li data-completed="false" data-step-id="task-11" data-agent="claude-code" data-created-by-agent="claude-code">⏳ Review fixes A: runner degraded-state, email dedup/rescore, schedule &#43; notify hardening</li>
-                <li data-completed="false" data-step-id="task-12" data-agent="claude-code" data-created-by-agent="claude-code">⏳ Review fixes B: funnel outcome join, postings API pagination/SSRF, badge refresh</li>
+                <li data-completed="true" data-step-id="task-11" data-agent="claude-code" data-created-by-agent="claude-code">✅ Review fixes A: runner degraded-state, email dedup/rescore, schedule &#43; notify hardening</li>
+                <li data-completed="true" data-step-id="task-12" data-agent="claude-code" data-created-by-agent="claude-code">✅ Review fixes B: funnel outcome join, postings API pagination/SSRF, badge refresh</li>
             </ol>
         </section>
 
@@ -73,7 +73,8 @@ Parsing is template-based per sender over a NEW fixture corpus (none exists in
 either repo — authored from real alert emails); an unparseable alert is
 recorded as degraded, never crashes the run. Email postings carry snippets
 only; full JD text is fetched at promote time via the existing httpx/Playwright
-fetcher (no scraping in the daily run).</p>
+fetcher (no scraping in the daily run).
+[2026-06-10 23:25 claude-code] accepted-advisory (provenance override): plan-approved slice: adapters + parsers + fixture corpus + live-acceptance MIME fix; suite green (1766)</p>
         </section>
     </article>
 </body>
