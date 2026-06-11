@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Event stream displays receipt/replay time instead of transcript timestamps</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="bug-9218a37d"
+             data-type="bug"
+             data-status="todo"
+             data-priority="high"
+             data-created="2026-06-11T21:05:19.320384"
+             data-updated="2026-06-11T21:05:19.340134" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f" data-created-by-agent="claude-code" data-created-by-model="claude-fable-5[1m]" data-created-by-role="codex" data-created-by-cli-version="0.61.2">
+
+        <header>
+            <h1>Event stream displays receipt/replay time instead of transcript timestamps</h1>
+            <div class="metadata">
+                <span class="badge status-todo">Todo</span>
+                <span class="badge priority-high">High Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-5d3b688f.html" data-relationship="part_of" data-since="2026-06-11T21:05:19.339975">trk-5d3b688f</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>The application event log flattens history because transcriptToLogEvent uses now() for phase_boundary, tool_call, tool_result, and text rows even though ApplyRenderer persists payload.ts and the transcript endpoint returns that stored payload. Live phase/specialist/log handlers also stamp rows with receipt time instead of started_at, finished_at, timestamp, or payload.ts. Durable fix: store canonical event_time on LogEvent from payload.ts/log.timestamp/phase timestamps/specialist finished_at, format only at render time, and add tests with historical transcript rows proving replay keeps original times.</p>
+        </section>
+    </article>
+</body>
+</html>
