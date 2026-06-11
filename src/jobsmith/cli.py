@@ -431,15 +431,35 @@ def apply(
         "--no-reuse",
         help="Bypass the reuse-planner entirely; regenerate all phases (legacy behavior).",
     ),
+    cover_letter: bool | None = typer.Option(
+        None,
+        "--cover-letter/--no-cover-letter",
+        help=(
+            "Generate a cover letter (default: follow cover_letter.framework in .apply-config.yaml)."
+            " --no-cover-letter skips apply-company-research and apply-cover-letter-writer."
+            " framework: none in config disables by default."
+        ),
+    ),
 ) -> None:
     """Run the three-phase apply pipeline against a JD URL."""
     from .apply import run_apply
+
+    # Resolve cover_letter: explicit flag wins; None falls back to config.
+    resolved_cover_letter: bool | None = cover_letter
+    if resolved_cover_letter is None:
+        try:
+            _cfg_path = find_config(Path.cwd())
+            if _cfg_path is not None:
+                _cfg = load_config(_cfg_path)
+                resolved_cover_letter = _cfg.cover_letter.cover_letter_enabled()
+        except Exception:  # noqa: BLE001 — default to enabled on any config error
+            resolved_cover_letter = None
 
     resolved_jd_text: str | None = jd_text_file.read_text(encoding="utf-8") if jd_text_file is not None else jd_text
     raise typer.Exit(
         run_apply(url, skip_confirm=yes, force=force, verbosity=verbose,
                   jd_text=resolved_jd_text, slug=slug, run_id=run_id,
-                  no_reuse=no_reuse)
+                  no_reuse=no_reuse, cover_letter=resolved_cover_letter)
     )
 
 

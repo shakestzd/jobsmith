@@ -917,6 +917,11 @@ def core_run_apply(
     # When set to "gather", "draft", or "render", treat all earlier phases as
     # done and force-run from the named phase, bypassing the all-done early exit.
     start_from_phase: str | None = None,
+    # When False, apply-company-research and apply-cover-letter-writer are
+    # skipped (synthetic ok/skipped invocations injected into the manifest).
+    # When None, the config default (cover_letter.framework != "none") is used.
+    # When True, cover letter is always generated regardless of config.
+    cover_letter: bool | None = None,
 ) -> int:
     """Orchestrate the three-phase apply pipeline — business-logic entry point.
 
@@ -1066,6 +1071,29 @@ def core_run_apply(
                 finally:
                     _conn.close()
 
+    # Resolve cover_letter flag → skip_specialists list.
+    # When cover_letter is None, fall back to config (framework != "none").
+    # When cover_letter is True/False, the explicit flag wins.
+    _cl_enabled: bool
+    if cover_letter is None:
+        try:
+            from jobsmith.config import find_config as _find_cfg
+            from jobsmith.config import load_config as _load_cfg
+
+            _cfg_path = _find_cfg(resolved_cwd)
+            _cl_enabled = _load_cfg(_cfg_path).cover_letter.cover_letter_enabled() if _cfg_path else True
+        except Exception:  # noqa: BLE001 — default to enabled on any config error
+            _cl_enabled = True
+    else:
+        _cl_enabled = cover_letter
+
+    # The two cover-letter-exclusive specialists (feat-bd7c2d23).
+    _cl_only_specialists: list[str] = [
+        "apply-company-research",
+        "apply-cover-letter-writer",
+    ]
+    skip_specialists: list[str] = [] if _cl_enabled else _cl_only_specialists
+
     phase_done: dict[str, bool] = {
         name: phase_completed(manifest, name) for name, _ in _PHASES
     }
@@ -1140,6 +1168,7 @@ def core_run_apply(
             db_status_ref=db_status_ref,
             jd_text_file=jd_text_file,
             start_from_phase=start_from_phase,
+            skip_specialists=skip_specialists,
         )
         if rc != 0:
             db_final_status = "failed"

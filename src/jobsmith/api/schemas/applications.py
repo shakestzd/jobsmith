@@ -57,6 +57,10 @@ class ApplicationCreate(BaseModel):
     # complete and run only from the named phase onward. Lets callers re-run
     # a single phase without --force resetting the whole pipeline.
     start_from_phase: str | None = None
+    # When False, skip apply-company-research and apply-cover-letter-writer.
+    # When None (default), the server resolves via config (cover_letter.framework).
+    # When True, generate the cover letter regardless of config.
+    cover_letter: bool | None = None
 
 
 class ApplicationCreated(BaseModel):

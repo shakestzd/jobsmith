@@ -713,6 +713,7 @@ def _run_apply_phases(
     cancel_event: threading.Event | None = None,
     no_reuse: bool = False,
     jd_text: str | None = None,
+    skip_specialists: list[str] | None = None,
 ) -> int:
     """Phase-loop body extracted so the surrounding ``run_apply`` can wrap it
     with the apply_runs DB lifecycle (insert before, UPDATE after, with the
@@ -995,6 +996,41 @@ def _run_apply_phases(
         # after the phase succeeds, before the user can edit anything.
         _snapshot_phase_drafts(phase_name, slug, resolved_cwd)
 
+        # Step 3f-cl-skip (feat-bd7c2d23): inject synthetic ok/skipped manifest
+        # entries for any specialists that were bypassed for this phase.  This
+        # ensures phase_completed() returns True on the next manifest load
+        # without those specialists having actually been dispatched.
+        if skip_specialists:
+            from jobsmith.core.manifest import inject_skipped_specialists as _inject_skipped
+
+            _state_dir_for_skip = _apply_state_dir(slug, resolved_cwd)
+            if _state_dir_for_skip is not None:
+                _manifest_path = _state_dir_for_skip / "manifest.json"
+                try:
+                    import json as _json_skip
+
+                    if _manifest_path.exists():
+                        _mdata = _json_skip.loads(_manifest_path.read_text(encoding="utf-8"))
+                    else:
+                        _mdata = {"invocations": []}
+                    _mdata = _inject_skipped(_mdata, skip_specialists)
+                    _manifest_path.write_text(
+                        _json_skip.dumps(_mdata, indent=2), encoding="utf-8"
+                    )
+                    # Mirror to DB as well (best-effort).
+                    if db_conn is not None:
+                        from jobsmith.db import put_state as _put_state_skip
+
+                        with contextlib.suppress(Exception):
+                            _put_state_skip(
+                                db_conn,
+                                slug=slug,
+                                kind="manifest",
+                                content_blob=_json_skip.dumps(_mdata),
+                            )
+                except Exception as exc:  # noqa: BLE001 — skip injection must never abort
+                    logger.warning("cl-skip: manifest injection failed: %s", exc)
+
         # Step 3f-dual-write (feat-e3d87579): mirror FS artifacts to the DB.
         # Phase 1 dual-write — FS remains authoritative; PUT failures log a
         # WARNING but never fail the phase. Skipped when JOBSMITH_DUAL_WRITE=0.
@@ -1247,6 +1283,7 @@ def run_apply(
     cancel_event: threading.Event | None = None,
     start_from_phase: str | None = None,
     no_reuse: bool = False,
+    cover_letter: bool | None = None,
 ) -> int:
     """Run the three-phase apply pipeline.
 
@@ -1309,6 +1346,7 @@ def run_apply(
         db_status_ref: list,
         jd_text_file,
         start_from_phase: str | None = None,
+        skip_specialists: list[str] | None = None,
     ) -> int:
         """CLI-coupled phase runner: constructs session_id, prints banners,
         delegates to _run_apply_phases with the Rich renderer.
@@ -1378,6 +1416,7 @@ def run_apply(
                 cancel_event=cancel_event,
                 no_reuse=no_reuse,  # captured from outer run_apply closure
                 jd_text=jd_text,  # captured from outer run_apply closure
+                skip_specialists=skip_specialists,  # cover-letter gate (feat-bd7c2d23)
             )
         finally:
             if no_reuse:
@@ -1404,4 +1443,5 @@ def run_apply(
         phase_runner=_phase_runner,
         bootstrap=_bootstrap_fn,
         start_from_phase=start_from_phase,
+        cover_letter=cover_letter,
     )

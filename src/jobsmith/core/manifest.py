@@ -94,6 +94,49 @@ def load_manifest(app_dir: Path, cwd: Path) -> dict | None:
 # ---------------------------------------------------------------------------
 
 
+def inject_skipped_specialists(
+    manifest: dict,
+    specialists: list[str],
+) -> dict:
+    """Append synthetic ``status=ok, action=skipped`` invocations to *manifest*.
+
+    Used by the pipeline orchestrator when cover-letter generation is disabled:
+    the two CL-only specialists (``apply-company-research``,
+    ``apply-cover-letter-writer``) are never dispatched, but the manifest still
+    needs ``status=ok`` entries for them so :func:`phase_completed` returns
+    ``True`` and the phase loop does not try to re-run them.
+
+    Idempotent — if an entry for a specialist already exists in
+    ``invocations``, no duplicate is added.
+
+    Parameters
+    ----------
+    manifest:
+        The manifest dict to mutate/augment.  If it has no ``"invocations"``
+        key one is created.
+    specialists:
+        Names of the specialists to inject skipped entries for.
+
+    Returns
+    -------
+    dict
+        The same *manifest* dict with the new invocations appended.
+    """
+    if "invocations" not in manifest or not isinstance(manifest.get("invocations"), list):
+        manifest["invocations"] = []
+    existing = {
+        inv.get("specialist")
+        for inv in manifest["invocations"]
+        if isinstance(inv, dict) and inv.get("status") == "ok"
+    }
+    for name in specialists:
+        if name not in existing:
+            manifest["invocations"].append(
+                {"specialist": name, "status": "ok", "action": "skipped"}
+            )
+    return manifest
+
+
 def phase_completed(manifest: dict | None, phase_name: str) -> bool:
     """Return True iff every required specialist for *phase_name* is done.
 
