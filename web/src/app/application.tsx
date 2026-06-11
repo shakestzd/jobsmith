@@ -2137,9 +2137,11 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     setRunning(true);
 
     try {
-      // Pass force=true when re-running an already-complete slug. Without it
-      // the apply pipeline silently aborts after the supervisor returns 201.
-      await postApplication(app.url, slug, { force: isComplete });
+      // Always pass force=true: re-run is an explicit relaunch. Gating on
+      // isComplete dead-ended failed-status apps whose on-disk artifacts
+      // were complete — the pipeline aborted "already complete" on every
+      // retry and the status never left failed (bug-1d1f7cb2).
+      await postApplication(app.url, slug, { force: true });
       subscribeToEvents(slug);
     } catch (err) {
       setRunning(false);

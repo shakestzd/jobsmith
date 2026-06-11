@@ -20,8 +20,9 @@
 // - For an already-complete slug (status=done/rendered/backfilled), the
 //   re-run button is labelled "force re-run apply" and the click invokes
 //   postApplication with `{ force: true }`.
-// - For an in-flight or failed slug, the button is labelled "re-run apply"
-//   and postApplication is invoked WITHOUT force (or with force=false).
+// - For an in-flight or failed slug, the button is labelled "re-run apply";
+//   force=true is ALWAYS sent (bug-1d1f7cb2: failed apps with complete
+//   artifacts dead-ended without it).
 // - The button is DISABLED entirely when the API has no `url` field for the
 //   slug — protects against destructive force-restart with a placeholder URL.
 
@@ -465,7 +466,11 @@ describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
     });
   });
 
-  it('clicking the plain re-run button invokes postApplication with force=false', async () => {
+  it('clicking the plain re-run button ALSO passes force=true (bug-1d1f7cb2)', async () => {
+    // A failed-status app can still have complete on-disk artifacts (e.g.
+    // an earlier successful run); without force the pipeline aborts
+    // "already complete" on every retry and the status never leaves
+    // failed. Re-run is an explicit relaunch — always force.
     (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...BASE_API_DETAIL,
       status: 'failed',
@@ -477,7 +482,7 @@ describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
       expect(postApplication).toHaveBeenCalledWith(
         expect.any(String),
         'acme-eng-2026-04',
-        { force: false },
+        { force: true },
       );
     });
   });
