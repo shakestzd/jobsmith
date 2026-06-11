@@ -198,8 +198,43 @@ export function pickPayloadTime(p: Record<string, unknown>): string {
   return formatEventTime(typeof p.ts === 'string' ? p.ts : null);
 }
 
-function phaseDuration(n: number): string {
-  return (['1.4s', '3.8s', '12.1s'] as const)[n - 1] ?? '—';
+/**
+ * Parse an ISO-8601 string into a Date, returning null if absent or invalid.
+ * Centralises date parsing so callers never construct `new Date` directly
+ * from user-supplied strings (avoids silent NaN propagation).
+ */
+export function parseIso(isoOrNull: string | null | undefined): Date | null {
+  if (!isoOrNull) return null;
+  const d = new Date(isoOrNull);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Format the elapsed time between two ISO timestamps as a human-readable
+ * duration string.
+ *
+ * Examples: "2.5s", "47s", "3m 10s"
+ *
+ * Returns "—" (em dash) when either timestamp is absent/invalid — never
+ * a fabricated constant.
+ */
+export function formatPhaseDuration(
+  startedAt: string | null | undefined,
+  finishedAt: string | null | undefined,
+): string {
+  const start = parseIso(startedAt);
+  const end = parseIso(finishedAt);
+  if (!start || !end) return '—';
+  const ms = end.getTime() - start.getTime();
+  if (ms < 0) return '—';
+  const totalSeconds = ms / 1000;
+  if (totalSeconds < 60) {
+    // Show one decimal place for sub-minute runs (e.g. "2.5s", "47.0s").
+    return `${totalSeconds.toFixed(1)}s`;
+  }
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = Math.round(totalSeconds % 60);
+  return `${mins}m ${secs}s`;
 }
 
 // The event log starts empty — entries are appended ONLY from the real SSE
@@ -215,6 +250,15 @@ const TAB_ORDER: TabName[] = ['pipeline', 'review', 'documents', 'artifacts', 'f
 // ── Progress map type ────────────────────────────────────────────────────────
 
 type ProgressMap = Record<1 | 2 | 3, number>;
+
+// ── Phase timing map ─────────────────────────────────────────────────────────
+
+interface PhaseTime {
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+type PhaseTimeMap = Record<1 | 2 | 3, PhaseTime>;
 
 // ── Progress derivation helper ───────────────────────────────────────────────
 
@@ -1893,6 +1937,14 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     initialFailedPhaseNum,
   );
   const [specialistStatuses, setSpecialistStatuses] = useState<SpecialistStatusMap>({});
+  // Per-phase timestamps recorded from SSE phase events. Used to compute real
+  // elapsed durations on completed PhaseCards instead of fabricated constants.
+  const emptyPhaseTimes = (): PhaseTimeMap => ({
+    1: { startedAt: null, finishedAt: null },
+    2: { startedAt: null, finishedAt: null },
+    3: { startedAt: null, finishedAt: null },
+  });
+  const [phaseTimes, setPhaseTimes] = useState<PhaseTimeMap>(emptyPhaseTimes);
   // Outcome status (interview, offer, rejected, etc.) — updated via the picker.
   const [outcomeStatus, setOutcomeStatus_] = useState<string>(app.status ?? 'in-progress');
 
@@ -1966,6 +2018,16 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
       try {
         const data = JSON.parse(e.data as string) as SsePhaseEvent;
         const phaseNum = ssePhaseToNum(data.phase);
+        // Record per-phase timestamps for duration display on completed cards.
+        if (data.phase === 'gather' || data.phase === 'draft' || data.phase === 'render') {
+          setPhaseTimes(prev => ({
+            ...prev,
+            [phaseNum]: {
+              startedAt: data.started_at ?? prev[phaseNum as 1 | 2 | 3].startedAt,
+              finishedAt: data.finished_at ?? prev[phaseNum as 1 | 2 | 3].finishedAt,
+            },
+          }));
+        }
         if (data.status === 'done' || data.status === 'backfilled') {
           setProgress(p => ({ ...p, [phaseNum]: 100 }));
           // Only mark the whole run done when the last phase (render=3) completes.
@@ -2152,6 +2214,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     setSseStatus(null);
     setFailedPhaseNum(null);
     setSpecialistStatuses({});
+    setPhaseTimes(emptyPhaseTimes());
     setEvents([{ ts: now(), lvl: 'info', msg: `<span class="dim">apply</span> start <span class="dim">slug=</span>${slug}` }]);
     setRunning(true);
 
@@ -2187,6 +2250,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     setSseStatus(null);
     setFailedPhaseNum(null);
     setSpecialistStatuses({});
+    setPhaseTimes(emptyPhaseTimes());
     setEvents([{ ts: now(), lvl: 'info', msg: `<span class="dim">apply</span> render <span class="dim">slug=</span>${slug}` }]);
     setRunning(true);
     try {
@@ -2445,7 +2509,12 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
               meta={[
                 { v: p.specs.length, k: 'specialists' },
                 {
-                  v: pr >= 100 ? phaseDuration(p.num) : (status === 'running' ? 'live' : '—'),
+                  v: pr >= 100
+                    ? formatPhaseDuration(
+                        phaseTimes[p.num].startedAt,
+                        phaseTimes[p.num].finishedAt,
+                      )
+                    : (status === 'running' ? 'live' : '—'),
                   k: status === 'running' ? '' : 'duration',
                 },
               ]}
