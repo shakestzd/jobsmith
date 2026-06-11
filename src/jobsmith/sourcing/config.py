@@ -88,6 +88,10 @@ _PACKAGE_DEFAULTS: dict = {
     "rescore_budget_usd": 1.0,
     "sources": [],
     "alert_senders": [],
+    # Title filter defaults (feat-e32cde37) — no filtering unless configured.
+    "title_exclude_patterns": [],
+    "title_include_patterns": [],
+    "min_fast_score": 0.0,
 }
 
 
@@ -106,6 +110,13 @@ class SourcingConfig:
     # Each dict has: type (gmail_alert|mailapp_alert), sender/sender_slug,
     # account/mailbox (mailapp only).
     alert_senders: list[dict] = field(default_factory=list)
+    # Title filters (feat-e32cde37) — applied after fast-score, before upsert.
+    # Exclude: substring match, case-insensitive. Include: allowlist mode (if
+    # non-empty, title MUST match at least one). min_fast_score: skip postings
+    # below this threshold (0.0 = disabled).
+    title_exclude_patterns: list[str] = field(default_factory=list)
+    title_include_patterns: list[str] = field(default_factory=list)
+    min_fast_score: float = 0.0
 
 
 def find_sourcing_config(start: Path | None = None) -> Path | None:
@@ -162,6 +173,16 @@ def load_sourcing_config(path: Path | None = None) -> SourcingConfig:
             continue
         alert_senders.append(spec)
 
+    # Title filters (feat-e32cde37)
+    title_filters_raw = raw.get("title_filters") or {}
+    title_exclude_patterns: list[str] = [
+        str(p) for p in (title_filters_raw.get("exclude_patterns") or [])
+    ]
+    title_include_patterns: list[str] = [
+        str(p) for p in (title_filters_raw.get("include_patterns") or [])
+    ]
+    min_fast_score = float(raw.get("min_fast_score", 0.0))
+
     return SourcingConfig(
         expiry_days=expiry_days,
         max_per_source=max_per_source,
@@ -170,6 +191,9 @@ def load_sourcing_config(path: Path | None = None) -> SourcingConfig:
         rescore_budget_usd=rescore_budget_usd,
         sources=sources,
         alert_senders=alert_senders,
+        title_exclude_patterns=title_exclude_patterns,
+        title_include_patterns=title_include_patterns,
+        min_fast_score=min_fast_score,
     )
 
 

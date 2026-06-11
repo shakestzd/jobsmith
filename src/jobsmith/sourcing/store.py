@@ -254,6 +254,7 @@ def finish_sourcing_run(
     new_count: int = 0,
     updated_count: int = 0,
     skipped_count: int = 0,
+    filtered_count: int = 0,
     degraded_sources: list[str] | None = None,
     error: str | None = None,
 ) -> None:
@@ -268,6 +269,7 @@ def finish_sourcing_run(
             new_count = ?,
             updated_count = ?,
             skipped_count = ?,
+            filtered_count = ?,
             degraded_sources_json = ?,
             error = ?
         WHERE run_id = ?
@@ -278,6 +280,7 @@ def finish_sourcing_run(
             new_count,
             updated_count,
             skipped_count,
+            filtered_count,
             degraded_json,
             error,
             run_id,
