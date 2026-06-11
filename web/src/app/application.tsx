@@ -110,7 +110,7 @@ interface LogEvent {
  * unknown event types are still rendered (as kind=log) so future renderer
  * additions show up automatically.
  */
-interface SseTranscriptEvent {
+export interface SseTranscriptEvent {
   run_id: string;
   payload: {
     ts?: string;
@@ -126,12 +126,12 @@ interface SseTranscriptEvent {
 }
 
 /** Convert a transcript SSE payload into a LogEvent for the event stream. */
-function transcriptToLogEvent(t: SseTranscriptEvent): LogEvent | null {
+export function transcriptToLogEvent(t: SseTranscriptEvent): LogEvent | null {
   const p = t.payload;
   // Phase-boundary marker (rendered as a header row).
   if (typeof p._phase_boundary === 'string') {
     return {
-      ts: now(),
+      ts: pickPayloadTime(p),
       lvl: 'phase',
       msg: `── phase: ${p._phase_boundary} ──`,
       kind: 'phase_boundary',
@@ -142,7 +142,7 @@ function transcriptToLogEvent(t: SseTranscriptEvent): LogEvent | null {
     const tname = String(p.tool_name ?? '?');
     const preview = String(p.tool_input_truncated ?? '').slice(0, 80);
     return {
-      ts: now(),
+      ts: pickPayloadTime(p),
       lvl: 'tool',
       msg: preview ? `${tname}(${preview})` : `${tname}()`,
       kind: 'tool_call',
@@ -154,7 +154,7 @@ function transcriptToLogEvent(t: SseTranscriptEvent): LogEvent | null {
   if (p.type === 'tool_result') {
     const summary = String(p.result_truncated ?? '').slice(0, 80);
     return {
-      ts: now(),
+      ts: pickPayloadTime(p),
       lvl: 'result',
       msg: summary || '✓',
       kind: 'tool_result',
@@ -165,7 +165,7 @@ function transcriptToLogEvent(t: SseTranscriptEvent): LogEvent | null {
     const txt = String(p.text_truncated ?? '').slice(0, 200);
     if (!txt) return null;
     return {
-      ts: now(),
+      ts: pickPayloadTime(p),
       lvl: 'agent',
       msg: txt,
       kind: 'agent_text',
@@ -177,6 +177,25 @@ function transcriptToLogEvent(t: SseTranscriptEvent): LogEvent | null {
 
 function now(): string {
   return new Date().toTimeString().slice(0, 8);
+}
+
+/**
+ * Format a stored ISO timestamp to HH:MM:SS for display.
+ * Falls back to receipt time when the input is absent or unparseable.
+ */
+export function formatEventTime(isoOrNull: string | null | undefined): string {
+  if (!isoOrNull) return now();
+  const d = new Date(isoOrNull);
+  if (Number.isNaN(d.getTime())) return now();
+  return d.toTimeString().slice(0, 8);
+}
+
+/**
+ * Extract the best timestamp from a transcript payload.
+ * Priority: payload.ts → receipt time.
+ */
+export function pickPayloadTime(p: Record<string, unknown>): string {
+  return formatEventTime(typeof p.ts === 'string' ? p.ts : null);
 }
 
 function phaseDuration(n: number): string {
@@ -1990,7 +2009,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
               break;
             }
           }
-          return [...ev, { ts: now(), lvl: 'done', msg }];
+          return [...ev, { ts: formatEventTime(data.finished_at ?? data.started_at), lvl: 'done', msg }];
         });
       } catch { /* ignore malformed event */ }
     });
@@ -2001,7 +2020,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         const specialist = redactSensitive(String(data.specialist ?? ''));
         const kindLabel = redactSensitive(String(data.kind_label ?? ''));
         const msg = `<span class="dim">specialist=</span>${specialist} <span class="dim">kind=</span>${kindLabel}`;
-        setEvents(ev => ev.length > 400 ? ev : [...ev, { ts: now(), lvl: 'spec', msg }]);
+        setEvents(ev => ev.length > 400 ? ev : [...ev, { ts: formatEventTime(data.finished_at), lvl: 'spec', msg }]);
         if (specialist) {
           setSpecialistStatuses(prev => ({
             ...prev,
@@ -2052,7 +2071,7 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
         const safe = redactSensitive(data.line);
         const line = safe.replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const lvl = data.stream === 'stderr' ? 'warn' : 'info';
-        setEvents(ev => ev.length > 400 ? ev : [...ev, { ts: now(), lvl, msg: line, kind: 'log' }]);
+        setEvents(ev => ev.length > 400 ? ev : [...ev, { ts: formatEventTime(data.timestamp), lvl, msg: line, kind: 'log' }]);
       } catch { /* ignore malformed event */ }
     });
 
