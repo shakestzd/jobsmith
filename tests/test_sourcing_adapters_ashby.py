@@ -44,9 +44,13 @@ def test_parse_payload_uses_job_url() -> None:
 
 
 def test_parse_payload_extracts_location() -> None:
+    """Location is captured from the `location` field (updated fixture, feat-e0aa9c3a)."""
     payload = json.loads(FIXTURE.read_text())
     roles = list(parse_ashby_payload(payload, source_slug="linear"))
-    assert all(r.location == "Remote" for r in roles)
+    locations = {r.location for r in roles}
+    # First job: "Remote"; second job: "North America; Europe" (secondaryLocations joined)
+    assert all(r.location for r in roles), "All roles must have non-empty location"
+    assert "Remote" in locations
 
 
 def test_parse_payload_company_from_slug() -> None:
