@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Apply state CLI and SSE poller churn SQLite connections and migrations per tiny event</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="bug-0f48f080"
+             data-type="bug"
+             data-status="todo"
+             data-priority="medium"
+             data-created="2026-06-11T21:05:20.152814"
+             data-updated="2026-06-11T21:05:20.166063" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f" data-created-by-agent="claude-code" data-created-by-model="claude-fable-5[1m]" data-created-by-role="codex" data-created-by-cli-version="0.61.2">
+
+        <header>
+            <h1>Apply state CLI and SSE poller churn SQLite connections and migrations per tiny event</h1>
+            <div class="metadata">
+                <span class="badge status-todo">Todo</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-5d3b688f.html" data-relationship="part_of" data-since="2026-06-11T21:05:20.165908">trk-5d3b688f</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Agentic phases issue many separate jobsmith db put-state/get-state/list-state commands, and each CLI command opens the pipeline DB and runs migration checks. The SSE poller also calls open_pipeline_db every 250ms per subscriber via _db_poll_once. This is avoidable overhead during exactly the slow, chatty apply path. Durable fix: add a transaction/batch state API for specialists, add a read-only no-migration poll connection or per-stream connection after app startup migration, and update prompts to batch spec/result writes; test command count or migration-open count for a representative gather run.</p>
+        </section>
+    </article>
+</body>
+</html>
