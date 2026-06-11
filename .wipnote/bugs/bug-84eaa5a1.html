@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Supervisor and SSE stream stay keyed to the starting slug after canonical slug rekey</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="bug-84eaa5a1"
+             data-type="bug"
+             data-status="todo"
+             data-priority="high"
+             data-created="2026-06-11T21:05:19.745268"
+             data-updated="2026-06-11T21:05:19.758375" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f" data-created-by-agent="claude-code" data-created-by-model="claude-fable-5[1m]" data-created-by-role="codex" data-created-by-cli-version="0.61.2">
+
+        <header>
+            <h1>Supervisor and SSE stream stay keyed to the starting slug after canonical slug rekey</h1>
+            <div class="metadata">
+                <span class="badge status-todo">Todo</span>
+                <span class="badge priority-high">High Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-5d3b688f.html" data-relationship="part_of" data-since="2026-06-11T21:05:19.758239">trk-5d3b688f</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>POST /api/applications registers the supervisor under the URL-derived starting slug. Gather may reconcile to a canonical slug and _cli_apply updates apply_runs.slug, but RunSupervisor has no update_slug path and the events route validates only the requested slug directory. If the EventSource reconnects after the starting directory is renamed, it can 404 or miss the active run; duplicate-run conflict checks can also miss the canonical slug. Durable fix: add a run_id-centered or supervisor.update_slug(old,new,run_id) contract, emit/handle slug_changed in the API path, let events resolve stale-to-canonical slugs, and test reconnect plus duplicate launch across rekey.</p>
+        </section>
+    </article>
+</body>
+</html>
