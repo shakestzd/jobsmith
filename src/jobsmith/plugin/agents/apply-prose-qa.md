@@ -25,7 +25,19 @@ Read your spec from the DB (trk-60217f9f Pass 3):
 
 1. Invoke resume-tell-fixer on the prose draft. The orchestrator may pass you the path; if not, dispatch via the spec.json convention. Capture its `ai-tell-report.json`.
 2. Read the report. Count `blocking_findings` (word list, em-dash density). Advisory findings (parallel-sentence rhythm, label closers under stylistic threshold) do not block.
-3. Decide:
+3. **Run bullet style checks** (named checks — each failing check adds one entry to `blocking_findings`):
+
+   For every bullet line in `prose-draft.md` (lines starting with `- `):
+
+   - **check:bullet_word_count** — flag any bullet whose word count exceeds 25. Report: `"bullet_too_long: {word_count} words — '{first_8_words}...'"`.
+   - **check:metric_cluster_count** — flag any bullet containing 3 or more independent numeric tokens (digits not part of the same quantity). A baseline pair like "5 hours → 30 minutes" or a unit clarifier like "($4.25B)" each count as ONE cluster, not two. Report: `"too_many_metrics: {count} independent numbers in '{first_8_words}...'"`.
+   - **check:parenthetical_tech_list** — flag any bullet containing a parenthetical with 2+ comma-separated technology names, e.g. `(Python, DLT, DuckDB)`. Report: `"parenthetical_tech_list: '{parenthetical}'"`.
+   - **check:em_dash** — flag any bullet containing an em dash (—). Report: `"em_dash_in_bullet: '{span}'"`.
+   - **check:stock_phrases** — flag any bullet containing: leveraged, cutting-edge, cross-functionally, spearheaded, synergies. Report: `"stock_phrase: '{phrase}'"`.
+
+   All five are **blocking** (same severity as word-list and em-dash density from resume-tell-fixer).
+
+4. Decide:
    - `blocking_findings == 0` → `decision = pass`. Done.
    - `blocking_findings > 0` AND `iteration < 3` → `decision = revise`. Pass the report back; orchestrator re-dispatches prose-writer with the findings as constraints.
    - `iteration == 3` AND `blocking_findings > 0` → `decision = halt`. Surface unresolved patterns to the user for manual review.
@@ -39,6 +51,13 @@ Write `.apply-state/ai-tell-report.json`:
   "decision": "pass|revise|halt",
   "blocking_findings": [{"category": "...", "span": "...", "suggestion": "..."}],
   "advisory_findings": [{"category": "...", "span": "...", "note": "..."}],
+  "bullet_style_checks": {
+    "bullet_word_count":        {"violations": <int>, "details": [...]},
+    "metric_cluster_count":     {"violations": <int>, "details": [...]},
+    "parenthetical_tech_list":  {"violations": <int>, "details": [...]},
+    "em_dash":                  {"violations": <int>, "details": [...]},
+    "stock_phrases":            {"violations": <int>, "details": [...]}
+  },
   "words_unchanged": [...],
   "calibration_metrics": {"false_positive_estimate": <float>}
 }
@@ -52,6 +71,7 @@ Persist your result envelope to the DB (trk-60217f9f Pass 3):
 
 ## Hard rules
 - Hybrid blocking: word-list and em-dash density are blocking. Parallel-sentence rhythm is advisory unless it appears in 4+ consecutive bullets.
+- Bullet style checks (check:bullet_word_count, check:metric_cluster_count, check:parenthetical_tech_list, check:em_dash, check:stock_phrases) are ALL blocking — a single violation prevents PASS.
 - Never edit prose-draft.md yourself. resume-tell-fixer surfaces edits; prose-writer applies them on the next iteration.
 - Iteration counter is sacred — do not silently loop past 3.
 

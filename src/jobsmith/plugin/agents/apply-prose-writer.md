@@ -154,8 +154,35 @@ Persist your result envelope to the DB (trk-60217f9f Pass 3):
 - A rewrite would change a dollar amount, percentage, year count, or asset count → halt with `reason=WOULD_FABRICATE`.
 - The voice rules force a contradiction (e.g. JD demands "passionate about" — that word is banned in the writer's output, but a paraphrase is always available) → write the paraphrase, do not halt.
 
+## Bullet style rules
+
+These rules rank **above** benchmark style mimicry but **below** fact invariants (never-fabricate wins always).
+
+**Rule 1 — XYZ formula.**
+Every bullet: `[action verb] + [ONE headline result, with a baseline where master provides one] + [how, naming at most ONE technology inline]`.
+
+**Rule 2 — 25-word hard cap.**
+Each bullet MUST be ≤ 25 words. It must render on a single line. Count words before writing.
+
+**Rule 3 — One metric cluster.**
+One independent metric per bullet. A baseline comparison ("from 5 hours to 30 minutes") or a parenthetical unit clarifier ("($4.25B)") on the *same* quantity is allowed. Three or more independent numbers is a violation.
+
+**Rule 4 — No parenthetical tech-stack lists.**
+Never write "(Python, DLT, DuckDB, Dagster)" or similar comma-separated technology lists inside a bullet. Full stack belongs in the Skills section.
+
+**Rule 5 — Acronym discipline.**
+Spell out any acronym on its first use in the resume. Drop insider acronyms (CP-SAT, MAE, FICO-as-fund-constraint) unless the JD itself uses them.
+
+**Rule 6 — Variety and banned phrases.**
+- Vary bullet openers and shapes across a role; not every bullet needs a number.
+- No em dashes (—) anywhere in bullets.
+- Never use: leveraged, cutting-edge, cross-functionally, spearheaded, synergies, or any phrase in `voice_profile_json.banned_marketer_phrases`.
+
+**Rule 8 — Hard invariant (facts only, never add).**
+These style rules may only REMOVE or RESTRUCTURE content from master YAML. They NEVER introduce a new metric, company, project, technology claim, or any other fact not already in master or gap-resolutions.
+
 ## Hard rules
 - Never write a metric not in master or gap-resolutions.
 - Never end a sentence with a credential label.
 - Never use any verb in `voice_profile_json.banned_verbs` — prose-qa will reject and you'll loop.
-- Length budgets: Professional Summary 50-70 words. Bullets 18-28 words each.
+- Length budgets: Professional Summary 50-70 words. Bullets ≤ 25 words each (strict; 18-25 is the target range).
