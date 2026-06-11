@@ -58,7 +58,40 @@ _INTER_SOURCE_SLEEP = 1.0
 
 # ---------------------------------------------------------------------------
 # Title + score filter (feat-e32cde37)
+# Location filter (feat-e0aa9c3a)
 # ---------------------------------------------------------------------------
+
+
+def location_passes(
+    location: str | None,
+    *,
+    allowed_patterns: list[str],
+    unknown: str = "keep",
+) -> bool:
+    """Return True when *location* passes the location allowlist check.
+
+    Parameters
+    ----------
+    location:
+        Raw location string (may be None or empty).
+    allowed_patterns:
+        Lower-cased substring patterns.  When non-empty the location MUST
+        match at least one pattern.  Empty list = filter disabled (always True).
+    unknown:
+        What to do with empty/None location: ``"keep"`` passes through,
+        ``"dismiss"`` rejects.
+    """
+    # Filter disabled when no patterns configured
+    if not allowed_patterns:
+        return True
+
+    loc = (location or "").strip()
+    # Empty/unknown location
+    if not loc:
+        return unknown == "keep"
+
+    loc_l = loc.lower()
+    return any(p in loc_l for p in allowed_patterns)
 
 
 def title_passes(
@@ -92,8 +125,10 @@ def apply_title_filters(
     include_patterns: list[str],
     min_fast_score: float,
     scored_roles: dict[str, float] | None,
+    location_allowed_patterns: list[str] | None = None,
+    location_unknown: str = "keep",
 ) -> tuple[list[Role], int]:
-    """Filter *roles* by title patterns and/or fast_score.
+    """Filter *roles* by title patterns, fast_score, and/or location allowlist.
 
     Parameters
     ----------
@@ -111,11 +146,19 @@ def apply_title_filters(
     scored_roles:
         Mapping of ``role.id`` → fast_score (float in [0, 1]).  When None,
         score gating is skipped entirely.
+    location_allowed_patterns:
+        Substring allowlist for location (case-insensitive).  Empty list or
+        None = filter disabled.
+    location_unknown:
+        What to do with empty/None location: ``"keep"`` (default) or
+        ``"dismiss"``.
 
     Returns
     -------
     (kept, filtered_count)
     """
+    _loc_patterns = [p.lower() for p in (location_allowed_patterns or [])]
+
     kept: list[Role] = []
     filtered = 0
 
@@ -143,6 +186,21 @@ def apply_title_filters(
                 )
                 filtered += 1
                 continue
+
+        # 4. Location allowlist check (feat-e0aa9c3a)
+        if not location_passes(
+            role.location,
+            allowed_patterns=_loc_patterns,
+            unknown=location_unknown,
+        ):
+            logger.debug(
+                "location-filter: %s — %s (location=%r)",
+                role.company,
+                role.title,
+                role.location,
+            )
+            filtered += 1
+            continue
 
         kept.append(role)
 
@@ -427,6 +485,9 @@ def run_crawl(
     title_exclude_patterns: list[str] | None = None,
     title_include_patterns: list[str] | None = None,
     min_fast_score: float = 0.0,
+    # Location filters (feat-e0aa9c3a) — applied alongside title filters.
+    location_allowed_patterns: list[str] | None = None,
+    location_unknown: str = "keep",
     # Email alert ingestion (feat-b1bd050e) — list of alert-sender config dicts
     alert_senders: list[dict] | None = None,
     # Injectable for tests — replaces the entire run_email_alerts call
@@ -471,6 +532,7 @@ def run_crawl(
     """
     _exclude = [p.lower() for p in (title_exclude_patterns or [])]
     _include = [p.lower() for p in (title_include_patterns or [])]
+    _loc_patterns = [p.lower() for p in (location_allowed_patterns or [])]
 
     run_id = str(uuid.uuid4())
     summary: dict = {
@@ -544,13 +606,16 @@ def run_crawl(
                 score_dicts[role.id] = sd
                 scored[role.id] = float(sd.get("score_a", 0)) / 100.0
 
-            # Apply title + score filters before upsert (issue #6: runs in dry-run too)
+            # Apply title + score + location filters before upsert
+            # (issue #6: runs in dry-run too)
             filtered_roles, n_filtered = apply_title_filters(
                 fetched,
                 exclude_patterns=_exclude,
                 include_patterns=_include,
                 min_fast_score=min_fast_score,
                 scored_roles=scored if min_fast_score > 0.0 else None,
+                location_allowed_patterns=_loc_patterns,
+                location_unknown=location_unknown,
             )
             summary["roles_filtered"] += n_filtered
 
@@ -610,8 +675,8 @@ def run_crawl(
                     dry_run=dry_run,
                     max_per_sender=max_per_source,
                 )
-                # Apply title filters to email postings (feat-e32cde37).
-                # Email postings have no JD text; we filter purely by title.
+                # Apply title + location filters to email postings (feat-e32cde37 / feat-e0aa9c3a).
+                # Email postings have no JD text; we filter by title and location.
                 # min_fast_score is intentionally NOT applied here — email
                 # postings are upserted with fast_score≈0 (no JD text), so
                 # gating on score would silently kill the entire channel.
@@ -619,24 +684,34 @@ def run_crawl(
                 # remove their IDs from new_posting_ids so the LLM pass
                 # doesn't bother with them.
                 email_filtered = 0
-                if not dry_run and (_exclude or _include):
+                _has_email_filters = _exclude or _include or _loc_patterns
+                if not dry_run and _has_email_filters:
                     filtered_email_ids: list[int] = []
                     kept_email_new_ids: list[int] = []
                     for pid in email_new_ids:
                         row = conn.execute(
-                            "SELECT title FROM postings WHERE id = ?", (pid,)
+                            "SELECT title, location FROM postings WHERE id = ?", (pid,)
                         ).fetchone()
                         if row is None:
                             kept_email_new_ids.append(pid)
                             continue
+                        # Title check
                         if not title_passes(
                             row["title"] or "",
                             exclude_patterns=_exclude,
                             include_patterns=_include,
                         ):
                             filtered_email_ids.append(pid)
-                        else:
-                            kept_email_new_ids.append(pid)
+                            continue
+                        # Location check
+                        if not location_passes(
+                            row["location"],
+                            allowed_patterns=_loc_patterns,
+                            unknown=location_unknown,
+                        ):
+                            filtered_email_ids.append(pid)
+                            continue
+                        kept_email_new_ids.append(pid)
 
                     if filtered_email_ids:
                         from .store import set_posting_status as _set_status
