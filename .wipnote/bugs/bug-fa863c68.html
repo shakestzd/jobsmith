@@ -10,20 +10,26 @@
 <body>
     <article id="bug-fa863c68"
              data-type="bug"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-11T07:52:58.7573"
-             data-updated="2026-06-11T07:53:04.385571" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034" data-created-by-agent="claude-code" data-created-by-model="claude-fable-5[1m]" data-created-by-cli-version="0.61.2">
+             data-updated="2026-06-11T08:22:28.285821" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034" data-created-by-agent="claude-code" data-created-by-model="claude-fable-5[1m]" data-created-by-cli-version="0.61.2">
 
         <header>
             <h1>Promote creates application but never launches the apply run</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
 
         <nav data-graph-edges>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="6221fdfe-a33d-40e3-a12c-f7940ef5412e.html" data-relationship="implemented_in" data-since="2026-06-11T07:53:04.385427">session 6221fdfe-a33d-40e3-a12c-f7940ef5412e</a></li>
+                </ul>
+            </section>
             <section data-edge-type="caused_by">
                 <h3>Caused By:</h3>
                 <ul>
@@ -36,17 +42,12 @@
                     <li><a href="trk-cf0dc034.html" data-relationship="part_of" data-since="2026-06-11T07:52:58.778021">trk-cf0dc034</a></li>
                 </ul>
             </section>
-            <section data-edge-type="implemented_in">
-                <h3>Implemented In:</h3>
-                <ul>
-                    <li><a href="6221fdfe-a33d-40e3-a12c-f7940ef5412e.html" data-relationship="implemented_in" data-since="2026-06-11T07:53:04.385427">session 6221fdfe-a33d-40e3-a12c-f7940ef5412e</a></li>
-                </ul>
-            </section>
         </nav>
 
         <section data-content>
             <h3>Description</h3>
-            <p>POST /api/postings/id/promote calls store promote_posting only; plan specified routing through create_application supervisor launch. Promoted applications sit at queued with 0 events until a manual re-run.</p>
+            <p>POST /api/postings/id/promote calls store promote_posting only; plan specified routing through create_application supervisor launch. Promoted applications sit at queued with 0 events until a manual re-run.
+[2026-06-11 08:22 claude-code] accepted-advisory (provenance override): fix verified: 1823 tests green incl. 3 new launch tests; merged to main, redeployed; stuck application relaunched via CLI</p>
         </section>
     </article>
 </body>
