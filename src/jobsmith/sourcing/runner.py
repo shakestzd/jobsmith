@@ -38,6 +38,7 @@ from ..sourcing.scoring import score_role_fast
 from ..sourcing.store import (
     finish_sourcing_run,
     set_posting_status,
+    touch_posting_by_dedup_key,
     upsert_posting,
     upsert_sourcing_run,
 )
@@ -58,6 +59,30 @@ _INTER_SOURCE_SLEEP = 1.0
 # ---------------------------------------------------------------------------
 # Title + score filter (feat-e32cde37)
 # ---------------------------------------------------------------------------
+
+
+def title_passes(
+    title: str,
+    *,
+    exclude_patterns: list[str],
+    include_patterns: list[str],
+) -> bool:
+    """Return True when *title* survives the exclude/include pattern checks.
+
+    Parameters
+    ----------
+    title:
+        Raw title string (case-insensitive matching is applied internally).
+    exclude_patterns:
+        Lower-cased substring patterns.  A match causes immediate rejection.
+    include_patterns:
+        Lower-cased allowlist patterns.  When non-empty the title must match
+        at least one to be accepted.
+    """
+    title_l = (title or "").lower()
+    if exclude_patterns and any(p in title_l for p in exclude_patterns):
+        return False
+    return not (include_patterns and not any(p in title_l for p in include_patterns))
 
 
 def apply_title_filters(
@@ -95,17 +120,13 @@ def apply_title_filters(
     filtered = 0
 
     for role in roles:
-        title_l = (role.title or "").lower()
-
-        # 1. Exclude check (highest priority)
-        if exclude_patterns and any(p in title_l for p in exclude_patterns):
-            logger.debug("title-exclude: %s — %s", role.company, role.title)
-            filtered += 1
-            continue
-
-        # 2. Include allowlist check
-        if include_patterns and not any(p in title_l for p in include_patterns):
-            logger.debug("title-include-miss: %s — %s", role.company, role.title)
+        # 1 & 2. Exclude / include title checks (shared predicate)
+        if not title_passes(
+            role.title or "",
+            exclude_patterns=exclude_patterns,
+            include_patterns=include_patterns,
+        ):
+            logger.debug("title-filter: %s — %s", role.company, role.title)
             filtered += 1
             continue
 
@@ -514,24 +535,35 @@ def run_crawl(
             summary["sources_checked"].append(key)
             summary["roles_fetched"] += len(fetched)
 
-            if not dry_run:
-                # Score all roles first so min_fast_score can apply
-                scored: dict[str, float] = {}
-                score_dicts: dict[str, dict] = {}
-                for role in fetched:
-                    sd = score_role_fast(role.jd_text or "")
-                    score_dicts[role.id] = sd
-                    scored[role.id] = float(sd.get("score_a", 0)) / 100.0
+            # Score all roles (needed for filtering; done even in dry-run so
+            # summary["roles_filtered"] predicts what a real run would do).
+            scored: dict[str, float] = {}
+            score_dicts: dict[str, dict] = {}
+            for role in fetched:
+                sd = score_role_fast(role.jd_text or "")
+                score_dicts[role.id] = sd
+                scored[role.id] = float(sd.get("score_a", 0)) / 100.0
 
-                # Apply title + score filters before upsert
-                filtered_roles, n_filtered = apply_title_filters(
-                    fetched,
-                    exclude_patterns=_exclude,
-                    include_patterns=_include,
-                    min_fast_score=min_fast_score,
-                    scored_roles=scored if min_fast_score > 0.0 else None,
-                )
-                summary["roles_filtered"] += n_filtered
+            # Apply title + score filters before upsert (issue #6: runs in dry-run too)
+            filtered_roles, n_filtered = apply_title_filters(
+                fetched,
+                exclude_patterns=_exclude,
+                include_patterns=_include,
+                min_fast_score=min_fast_score,
+                scored_roles=scored if min_fast_score > 0.0 else None,
+            )
+            summary["roles_filtered"] += n_filtered
+
+            if not dry_run:
+                # Re-sight filtered roles that already exist with a non-sourced
+                # status (e.g. queued) so expire_stale_postings won't expire
+                # them while the live job is still visible (issue #2).
+                filtered_set = {r.id for r in filtered_roles}
+                for role in fetched:
+                    if role.id in filtered_set:
+                        continue  # will be upserted below
+                    dedup_key = role_dedup_key(role)
+                    touch_posting_by_dedup_key(conn, dedup_key=dedup_key)
 
                 for role in filtered_roles:
                     dedup_key = role_dedup_key(role)
@@ -580,36 +612,31 @@ def run_crawl(
                 )
                 # Apply title filters to email postings (feat-e32cde37).
                 # Email postings have no JD text; we filter purely by title.
+                # min_fast_score is intentionally NOT applied here — email
+                # postings are upserted with fast_score≈0 (no JD text), so
+                # gating on score would silently kill the entire channel.
                 # We prune matching rows from the DB (dismiss them) and
                 # remove their IDs from new_posting_ids so the LLM pass
                 # doesn't bother with them.
                 email_filtered = 0
-                if not dry_run and ((_exclude or _include) or min_fast_score > 0.0):
+                if not dry_run and (_exclude or _include):
                     filtered_email_ids: list[int] = []
                     kept_email_new_ids: list[int] = []
                     for pid in email_new_ids:
                         row = conn.execute(
-                            "SELECT title, fast_score FROM postings WHERE id = ?", (pid,)
+                            "SELECT title FROM postings WHERE id = ?", (pid,)
                         ).fetchone()
                         if row is None:
                             kept_email_new_ids.append(pid)
                             continue
-                        title_l = (row["title"] or "").lower()
-                        # Exclude check
-                        if _exclude and any(p in title_l for p in _exclude):
+                        if not title_passes(
+                            row["title"] or "",
+                            exclude_patterns=_exclude,
+                            include_patterns=_include,
+                        ):
                             filtered_email_ids.append(pid)
-                            continue
-                        # Include allowlist check
-                        if _include and not any(p in title_l for p in _include):
-                            filtered_email_ids.append(pid)
-                            continue
-                        # min_fast_score check for email postings
-                        if min_fast_score > 0.0:
-                            score = row["fast_score"] or 0.0
-                            if score < min_fast_score:
-                                filtered_email_ids.append(pid)
-                                continue
-                        kept_email_new_ids.append(pid)
+                        else:
+                            kept_email_new_ids.append(pid)
 
                     if filtered_email_ids:
                         from .store import set_posting_status as _set_status

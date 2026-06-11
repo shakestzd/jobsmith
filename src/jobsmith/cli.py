@@ -2716,6 +2716,8 @@ def source_prune(
         console.print(f"[red]ERROR:[/red] Pipeline DB not found at {db_path}.")
         raise typer.Exit(code=2)
 
+    from .sourcing.runner import title_passes
+
     sourcing_cfg = load_sourcing_config(config_path)
     exclude_pats = [p.lower() for p in (sourcing_cfg.title_exclude_patterns or [])]
     include_pats = [p.lower() for p in (sourcing_cfg.title_include_patterns or [])]
@@ -2724,48 +2726,50 @@ def source_prune(
     conn = open_pipeline_db(db_path)
     try:
         rows = conn.execute(
-            "SELECT id, title, company, fast_score FROM postings WHERE status = 'sourced'"
+            "SELECT id, title, company, fast_score, source FROM postings WHERE status = 'sourced'"
         ).fetchall()
 
-        to_dismiss: list[int] = []
+        to_dismiss: list[dict] = []
         for row in rows:
-            title_l = (row["title"] or "").lower()
-
-            # Exclude check
-            if exclude_pats and any(p in title_l for p in exclude_pats):
-                to_dismiss.append(row["id"])
+            # Title check (shared predicate — issue #4)
+            if not title_passes(
+                row["title"] or "",
+                exclude_patterns=exclude_pats,
+                include_patterns=include_pats,
+            ):
+                to_dismiss.append(dict(row))
                 continue
 
-            # Include allowlist check
-            if include_pats and not any(p in title_l for p in include_pats):
-                to_dismiss.append(row["id"])
-                continue
-
-            # min_fast_score check
+            # min_fast_score check.  Email-origin postings (no JD text →
+            # fast_score≈0) are identified by source prefix; the score gate
+            # does not apply to them — consistent with the runner email block
+            # (issue #1 / #3).
             if min_score > 0.0:
-                score = row["fast_score"] or 0.0
-                if score < min_score:
-                    to_dismiss.append(row["id"])
-                    continue
+                src = row["source"] or ""
+                is_email = src.startswith(("mailapp/", "gmail/", "manual/"))
+                if not is_email:
+                    score = row["fast_score"]  # may be NULL → None
+                    # NULL score: unknown, pass through (consistent with
+                    # apply_title_filters which passes unscored roles through)
+                    if score is not None and score < min_score:
+                        to_dismiss.append(dict(row))
+                        continue
 
         if dry_run:
             console.print(
                 f"[bold]source prune --dry-run[/bold] "
                 f"— {len(to_dismiss)} of {len(rows)} sourced posting(s) would be dismissed"
             )
-            for pid in to_dismiss:
-                row = conn.execute(
-                    "SELECT title, company FROM postings WHERE id = ?", (pid,)
-                ).fetchone()
-                if row:
-                    console.print(
-                        f"  [dim]would dismiss:[/dim] {row['company'] or ''} — {row['title'] or ''}"
-                    )
+            for entry in to_dismiss:
+                # Data already fetched — no N+1 re-query (issue #5)
+                console.print(
+                    f"  [dim]would dismiss:[/dim] {entry.get('company') or ''} — {entry.get('title') or ''}"
+                )
         else:
             from .sourcing.store import set_posting_status
 
-            for pid in to_dismiss:
-                set_posting_status(conn, posting_id=pid, status="dismissed")
+            for entry in to_dismiss:
+                set_posting_status(conn, posting_id=entry["id"], status="dismissed")
 
             console.print(
                 f"[green]source prune done.[/green] "

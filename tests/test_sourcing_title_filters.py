@@ -618,3 +618,235 @@ def test_prune_reports_counts(minimal_repo: Path) -> None:
     assert result.exit_code == 0, result.output
     # Output should mention 1 dismissed
     assert "1" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Branch-review regression tests (feat-e32cde37 review)
+# ---------------------------------------------------------------------------
+
+
+def test_email_posting_with_min_fast_score_survives_when_title_passes(
+    db_path: Path,
+) -> None:
+    """Email postings must NOT be dismissed by min_fast_score (issue #1).
+
+    Email postings are upserted with fast_score≈0 (no JD text).  If
+    min_fast_score > 0 were applied to the email channel, every email posting
+    would be dismissed regardless of title.  This regression test ensures that
+    an email posting whose title passes the filters is kept even when
+    min_fast_score > 0.
+    """
+    from jobsmith.sourcing.runner import run_crawl
+
+    def _mock_email_fn(conn, senders, *, dry_run, max_per_sender):
+        from jobsmith.sourcing.adapters.base import Role as _Role
+        from jobsmith.sourcing.runner import role_dedup_key
+        from jobsmith.sourcing.store import upsert_posting
+
+        if dry_run:
+            return 0, [], []
+
+        r = _Role(
+            id="e1",
+            source="mailapp",
+            source_slug="li",
+            company="Co",
+            title="Data Engineer",
+            location="",
+            url="https://co.com/1",
+            jd_text="",
+        )
+        dk = role_dedup_key(r)
+        pid = upsert_posting(
+            conn,
+            source="mailapp/li",
+            dedup_key=dk,
+            external_id="e1",
+            url="https://co.com/1",
+            title="Data Engineer",
+            company="Co",
+            location="",
+            fast_score=0.0,  # email posts have no JD → score≈0
+        )
+        return 1, [pid], []
+
+    summary = run_crawl(
+        db_path=db_path,
+        sources=[],
+        alert_senders=[{"type": "mailapp_alert", "sender_slug": "li"}],
+        title_exclude_patterns=[],
+        title_include_patterns=[],
+        min_fast_score=0.5,  # would kill any email posting if mis-applied
+        no_llm=True,
+        _rescore_n_cap=0,
+        _run_email_alerts_fn=_mock_email_fn,
+    )
+
+    conn = jobsmith_db.open_pipeline_db(db_path)
+    try:
+        rows = conn.execute("SELECT title, status FROM postings").fetchall()
+        status_by_title = {r["title"]: r["status"] for r in rows}
+    finally:
+        conn.close()
+
+    assert status_by_title.get("Data Engineer") == "sourced", (
+        "Email posting with passing title must survive min_fast_score gate"
+    )
+    assert summary["roles_filtered"] == 0
+
+
+def test_email_include_patterns_filters_non_matching_title(db_path: Path) -> None:
+    """include_patterns applies to the email channel — non-matching title is dismissed."""
+    from jobsmith.sourcing.runner import run_crawl
+
+    def _mock_email_fn(conn, senders, *, dry_run, max_per_sender):
+        from jobsmith.sourcing.adapters.base import Role as _Role
+        from jobsmith.sourcing.runner import role_dedup_key
+        from jobsmith.sourcing.store import upsert_posting
+
+        if dry_run:
+            return 0, [], []
+
+        entries = [
+            ("e1", "Data Engineer", "https://co.com/1"),
+            ("e2", "Sales Manager", "https://co.com/2"),
+        ]
+        upserted, new_ids = 0, []
+        for eid, title, url in entries:
+            r = _Role(
+                id=eid,
+                source="mailapp",
+                source_slug="li",
+                company="Co",
+                title=title,
+                location="",
+                url=url,
+                jd_text="",
+            )
+            dk = role_dedup_key(r)
+            pid = upsert_posting(
+                conn,
+                source="mailapp/li",
+                dedup_key=dk,
+                external_id=eid,
+                url=url,
+                title=title,
+                company="Co",
+                location="",
+                fast_score=0.0,
+            )
+            new_ids.append(pid)
+            upserted += 1
+        return upserted, new_ids, []
+
+    run_crawl(
+        db_path=db_path,
+        sources=[],
+        alert_senders=[{"type": "mailapp_alert", "sender_slug": "li"}],
+        title_exclude_patterns=[],
+        title_include_patterns=["data engineer", "ml engineer"],
+        min_fast_score=0.0,
+        no_llm=True,
+        _rescore_n_cap=0,
+        _run_email_alerts_fn=_mock_email_fn,
+    )
+
+    conn = jobsmith_db.open_pipeline_db(db_path)
+    try:
+        rows = conn.execute("SELECT title, status FROM postings").fetchall()
+        status_by_title = {r["title"]: r["status"] for r in rows}
+    finally:
+        conn.close()
+
+    assert status_by_title.get("Data Engineer") == "sourced"
+    assert status_by_title.get("Sales Manager") == "dismissed"
+
+
+def test_queued_posting_last_seen_bumped_when_title_newly_filtered(
+    db_path: Path,
+) -> None:
+    """QUEUED posting whose title now matches a filter still gets last_seen_at bumped.
+
+    When a title pattern is added that matches an existing QUEUED posting, the
+    ATS adapter will still return that role on the next crawl.  The role is
+    filtered (not upserted), but last_seen_at must still be bumped so that
+    expire_stale_postings does not expire the queued posting while the job is
+    still live (issue #2).
+    """
+    from jobsmith.sourcing.adapters.base import Role as _Role
+    from jobsmith.sourcing.runner import expire_stale_postings, role_dedup_key, run_crawl
+    from jobsmith.sourcing.store import set_posting_status, upsert_posting
+
+    # Define the exact_role first so we can compute its dedup_key for seeding.
+    exact_role = _Role(
+        id="testco:q1",
+        source="greenhouse",
+        source_slug="testco",
+        company="testco",
+        title="sales manager",
+        location="",
+        url="https://co.com/q1",
+        jd_text="",
+    )
+    dk = role_dedup_key(exact_role)
+
+    conn = jobsmith_db.open_pipeline_db(db_path)
+
+    # Seed the QUEUED posting using the same dedup_key the crawler computes
+    pid = upsert_posting(
+        conn,
+        source="greenhouse/testco",
+        dedup_key=dk,
+        external_id="testco:q1",
+        url="https://co.com/q1",
+        title="Sales Manager",
+        company="testco",
+        location="Remote",
+        fast_score=0.7,
+    )
+    set_posting_status(conn, posting_id=pid, status="queued")
+    # Force last_seen_at to look 30 days old (beyond default expiry of 21)
+    conn.execute(
+        "UPDATE postings SET last_seen_at = datetime('now', '-30 days') WHERE id = ?",
+        (pid,),
+    )
+    conn.commit()
+    conn.close()
+
+    def _factory(spec):
+        from jobsmith.sourcing.adapters.base import ATSSourceAdapter
+
+        class _FA(ATSSourceAdapter):
+            name = "fake"
+
+            def fetch(self, slug):
+                return [exact_role]
+
+        return _FA()
+
+    run_crawl(
+        db_path=db_path,
+        sources=[{"type": "greenhouse", "slug": "testco"}],
+        adapter_factory=_factory,
+        title_exclude_patterns=["sales manager"],
+        title_include_patterns=[],
+        min_fast_score=0.0,
+        no_llm=True,
+        _rescore_n_cap=0,
+    )
+
+    # expire_stale_postings with expiry_days=1 should NOT expire the queued posting
+    # because last_seen_at was just bumped by the crawl.
+    conn = jobsmith_db.open_pipeline_db(db_path)
+    try:
+        expire_stale_postings(conn, expiry_days=1)
+        row = conn.execute(
+            "SELECT status FROM postings WHERE id = ?", (pid,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None
+    assert row["status"] == "queued", (
+        "Queued posting must NOT be expired when last_seen_at was bumped by crawl"
+    )
