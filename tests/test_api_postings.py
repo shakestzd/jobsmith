@@ -40,6 +40,15 @@ def _make_app(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setattr(
         "jobsmith.api.postings_routes._get_db_path", lambda: db_path
     )
+
+    # Never launch a real apply run from tests — individual tests re-patch
+    # with recorders to assert launch behavior (bug-fa863c68).
+    async def _noop_launch(request, *, slug, url, jd_text):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(
+        "jobsmith.api.postings_routes._launch_apply_run", _noop_launch
+    )
     app = FastAPI()
     app.include_router(postings_router, prefix="/api")
     return app
@@ -293,6 +302,77 @@ def test_promote_no_jd_text_sets_warning(client_and_ids, monkeypatch) -> None:
     data = resp.json()
     assert data["jd_fetch_failed"] is True
     assert "run_id" in data
+
+
+# ---------------------------------------------------------------------------
+# bug-fa863c68 — promote must launch the apply run, not just create the row
+# ---------------------------------------------------------------------------
+
+
+def test_promote_launches_apply_run(client_and_ids, monkeypatch) -> None:
+    """Promote launches the supervisor apply run for the new application."""
+    client, ids, _ = client_and_ids
+    import jobsmith.api.postings_routes as pr_mod
+
+    calls: list[tuple] = []
+
+    async def _fake_launch(request, *, slug, url, jd_text):  # noqa: ARG001
+        calls.append((slug, url, jd_text))
+
+    monkeypatch.setattr(pr_mod, "_launch_apply_run", _fake_launch)
+
+    resp = client.post(f"/api/postings/{ids[0]}/promote")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["launched"] is True
+    assert len(calls) == 1
+    slug, url, jd_text = calls[0]
+    assert slug
+    assert url
+    assert jd_text  # ids[0] has cached jd_text
+
+
+def test_promote_second_call_does_not_relaunch(client_and_ids, monkeypatch) -> None:
+    """Idempotent promote: an already-promoted posting does not relaunch."""
+    client, ids, _ = client_and_ids
+    import jobsmith.api.postings_routes as pr_mod
+
+    calls: list[tuple] = []
+
+    async def _fake_launch(request, *, slug, url, jd_text):  # noqa: ARG001
+        calls.append((slug, url, jd_text))
+
+    monkeypatch.setattr(pr_mod, "_launch_apply_run", _fake_launch)
+
+    r1 = client.post(f"/api/postings/{ids[0]}/promote")
+    r2 = client.post(f"/api/postings/{ids[0]}/promote")
+    assert r1.status_code == 200 and r2.status_code == 200
+    assert len(calls) == 1
+    assert r1.json()["launched"] is True
+    assert r2.json()["launched"] is False
+
+
+def test_promote_launch_failure_does_not_block(client_and_ids, monkeypatch) -> None:
+    """A launch error never fails the promote — row is created, launched=False."""
+    client, ids, db_path = client_and_ids
+    import jobsmith.api.postings_routes as pr_mod
+
+    async def _boom(request, *, slug, url, jd_text):  # noqa: ARG001
+        raise RuntimeError("supervisor unavailable")
+
+    monkeypatch.setattr(pr_mod, "_launch_apply_run", _boom)
+
+    resp = client.post(f"/api/postings/{ids[0]}/promote")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["launched"] is False
+    assert "run_id" in data
+
+    conn = open_pipeline_db(db_path)
+    row = conn.execute(
+        "SELECT * FROM apply_runs WHERE run_id = ?", (data["run_id"],)
+    ).fetchone()
+    conn.close()
+    assert row is not None
 
 
 # ---------------------------------------------------------------------------

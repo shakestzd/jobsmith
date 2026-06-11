@@ -222,6 +222,15 @@ def e2e_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr("jobsmith.api.postings_routes._get_db_path", lambda: db_path)
     monkeypatch.setattr("jobsmith.api.funnel_routes._get_db_path", lambda: db_path)
 
+    # Never launch a real apply pipeline from the e2e suite (bug-fa863c68:
+    # promote now launches the supervisor run in production).
+    async def _noop_launch(request, *, slug, url, jd_text):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(
+        "jobsmith.api.postings_routes._launch_apply_run", _noop_launch
+    )
+
     app.include_router(postings_router, prefix="/api")
     app.include_router(funnel_router, prefix="/api")
     app.include_router(run_health_router, prefix="/api")

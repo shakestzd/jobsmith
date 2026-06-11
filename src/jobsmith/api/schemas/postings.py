@@ -44,6 +44,9 @@ class PostingPromoteResponse(BaseModel):
     run_id: str
     slug: str | None = None
     jd_fetch_failed: bool = False
+    # True when the apply pipeline was launched by this promote
+    # (bug-fa863c68); False on repeat promotes or launch failure.
+    launched: bool = False
 
 
 __all__ = ["PostingRow", "PostingStatusUpdate", "PostingPromoteResponse"]

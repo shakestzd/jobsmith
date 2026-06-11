@@ -25,7 +25,7 @@ import re as _re
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from jobsmith.config import find_config, load_config
 from jobsmith.db import open_pipeline_db
@@ -42,6 +42,23 @@ from .schemas.postings import PostingPromoteResponse, PostingRow, PostingStatusU
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["postings"])
+
+
+async def _launch_apply_run(request: Request, *, slug: str, url: str, jd_text: str | None):
+    """Launch the in-process apply pipeline for a freshly promoted posting.
+
+    Routes through the same supervisor path as POST /api/applications
+    (bug-fa863c68: promote previously only created the apply_runs row, so
+    the pipeline never started). Module-level so tests can monkeypatch.
+    Skips silently when a run for the slug is already active.
+    """
+    from jobsmith.api.applications import _launch_run, _resolve_supervisor
+
+    supervisor = _resolve_supervisor(request)
+    if supervisor.get_active_for_slug(slug) is not None:
+        logger.info("promote: run already active for %s — not relaunching", slug)
+        return
+    await _launch_run(supervisor, slug, url, repo_root_for(), jd_text=jd_text or None)
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +324,7 @@ def update_posting_status(
 @router.post("/postings/{posting_id}/promote", response_model=PostingPromoteResponse)
 async def promote(
     posting_id: int,
+    request: Request,
 ) -> PostingPromoteResponse:
     """Promote a posting to the apply pipeline.
 
@@ -316,7 +334,9 @@ async def promote(
     2. If jd_text is absent, attempts a quick httpx fetch from the posting URL.
        Fetch failure never blocks promote; sets jd_fetch_failed=True in the response.
     3. Calls promote_posting() (idempotent) to create / link the apply_runs row.
-    4. Returns {run_id, slug, jd_fetch_failed}.
+    4. Launches the apply pipeline via the supervisor (bug-fa863c68) on first
+       promote — launch failure never blocks promote; sets launched=False.
+    5. Returns {run_id, slug, jd_fetch_failed, launched}.
     """
     db_path = _get_db_path()
     try:
@@ -332,7 +352,9 @@ async def promote(
                 detail=f"Posting id={posting_id} not found.",
             )
 
+        already_promoted = row["status"] == "promoted"
         jd_fetch_failed = False
+        jd_text_val = row["jd_text"]
 
         # If no jd_text and URL is available, attempt a background fetch before
         # creating the apply_runs row so the run has context.
@@ -344,6 +366,7 @@ async def promote(
                     (fetched, posting_id),
                 )
                 conn.commit()
+                jd_text_val = fetched
             else:
                 jd_fetch_failed = True
 
@@ -355,10 +378,28 @@ async def promote(
         ).fetchone()
         slug = run_row["slug"] if run_row else None
 
+        # Launch the pipeline on first promote (bug-fa863c68). A repeat
+        # promote of an already-promoted posting never relaunches.
+        launched = False
+        if slug and row["url"] and not already_promoted:
+            try:
+                await _launch_apply_run(
+                    request, slug=slug, url=row["url"], jd_text=jd_text_val
+                )
+                launched = True
+            except Exception:
+                logger.warning(
+                    "promote: apply-run launch failed for %s — application row "
+                    "created; use re-run apply to start the pipeline",
+                    slug,
+                    exc_info=True,
+                )
+
         return PostingPromoteResponse(
             run_id=run_id,
             slug=slug,
             jd_fetch_failed=jd_fetch_failed,
+            launched=launched,
         )
     finally:
         conn.close()
