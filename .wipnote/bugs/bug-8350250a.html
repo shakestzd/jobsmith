@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Canonical slug reconciliation still depends on legacy disk .apply-state files</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="bug-8350250a"
+             data-type="bug"
+             data-status="todo"
+             data-priority="high"
+             data-created="2026-06-11T21:05:19.950631"
+             data-updated="2026-06-11T21:05:19.963562" data-agent-assigned="claude-code" data-track-id="trk-5d3b688f" data-created-by-agent="claude-code" data-created-by-model="claude-fable-5[1m]" data-created-by-role="codex" data-created-by-cli-version="0.61.2">
+
+        <header>
+            <h1>Canonical slug reconciliation still depends on legacy disk .apply-state files</h1>
+            <div class="metadata">
+                <span class="badge status-todo">Todo</span>
+                <span class="badge priority-high">High Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-5d3b688f.html" data-relationship="part_of" data-since="2026-06-11T21:05:19.963434">trk-5d3b688f</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>The DB is documented as the source of truth for apply_state, but reconcile_canonical_slug only reads applications/*/.apply-state/jd-parsed.json. Prompts therefore still require specialists to mirror DB state to disk, producing extra tool work and Write-before-Read failures in agent transcripts, and creating a second state source at the most important boundary. Durable fix: make slug reconciliation DB-first using apply_state rows scoped by run/start time or run_id, keep any filesystem mirror as derived compatibility output, then update gather/JD-parser prompts and tests so a DB-only jd-parsed row can rekey successfully.</p>
+        </section>
+    </article>
+</body>
+</html>
