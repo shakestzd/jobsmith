@@ -870,6 +870,78 @@ def _run_apply_phases(
         # for draft/render, slug may have changed from the URL-derived value).
         phase_paths = _build_paths(slug, resolved_cwd, plugin_directory)
 
+        # Step 3c-cl-skip (feat-bd7c2d23 fix — findings 1 & 2): BEFORE building
+        # the prompt, inject synthetic ok/skipped manifest entries for any
+        # specialists that are disabled for this phase.  This is the only
+        # correct injection point: the agent's "skip already-ok specialists"
+        # rule fires from the manifest, so the entries MUST exist in the DB
+        # before the phase prompt is dispatched.
+        #
+        # Read-modify-write order: DB (authoritative) → FS mirror only.
+        # Never FS→DB — that would clobber real invocations the agent wrote.
+        if skip_specialists:
+            from jobsmith.core.manifest import (
+                PHASE_REQUIRED_SPECIALISTS as _PHASE_REQ,
+            )
+            from jobsmith.core.manifest import (
+                inject_skipped_specialists as _inject_skipped,
+            )
+
+            # Filter to only the specialists that this phase owns (fix finding 6).
+            _phase_skip = [
+                s for s in skip_specialists
+                if s in _PHASE_REQ.get(phase_name, ())
+            ]
+            if _phase_skip:
+                # Primary path: DB read-modify-write.
+                import json as _json_skip
+
+                if db_conn is not None:
+                    try:
+                        from jobsmith.db import get_state as _get_state_skip
+                        from jobsmith.db import put_state as _put_state_skip
+
+                        _blob = _get_state_skip(db_conn, slug=slug, kind="manifest")
+                        _mdata: dict = _json_skip.loads(_blob) if _blob else {"invocations": []}
+                        _mdata = _inject_skipped(_mdata, _phase_skip)
+                        _put_state_skip(
+                            db_conn,
+                            slug=slug,
+                            kind="manifest",
+                            content_blob=_json_skip.dumps(_mdata),
+                        )
+                        # Mirror to FS for any legacy readers (never the reverse).
+                        _state_dir_skip = _apply_state_dir(slug, resolved_cwd)
+                        if _state_dir_skip is not None:
+                            _mp = _state_dir_skip / "manifest.json"
+                            with contextlib.suppress(OSError):  # FS mirror is best-effort
+                                _mp.write_text(
+                                    _json_skip.dumps(_mdata, indent=2), encoding="utf-8"
+                                )
+                    except Exception as _skip_exc:  # noqa: BLE001
+                        logger.warning("cl-skip pre-phase injection failed: %s", _skip_exc)
+                else:
+                    # No DB connection — fall back to FS only.
+                    import json as _json_skip
+
+                    _state_dir_skip = _apply_state_dir(slug, resolved_cwd)
+                    if _state_dir_skip is not None:
+                        _mp = _state_dir_skip / "manifest.json"
+                        try:
+                            _mdata = (
+                                _json_skip.loads(_mp.read_text(encoding="utf-8"))
+                                if _mp.exists()
+                                else {"invocations": []}
+                            )
+                            _mdata = _inject_skipped(_mdata, _phase_skip)
+                            _mp.write_text(
+                                _json_skip.dumps(_mdata, indent=2), encoding="utf-8"
+                            )
+                        except Exception as _skip_exc:  # noqa: BLE001
+                            logger.warning(
+                                "cl-skip pre-phase FS injection failed: %s", _skip_exc
+                            )
+
         # Step 3d: build prompt text. jd_text_file is gather-only; pass
         # None for other phases so the kwarg propagates cleanly.
         prompt_text = build_phase_prompt(
@@ -879,6 +951,27 @@ def _run_apply_phases(
             paths=phase_paths,
             jd_text_file=jd_text_file if phase_name == "gather" else None,
         )
+
+        # Step 3d-cl-skip-directive (feat-bd7c2d23 fix — finding 1b): defense
+        # in depth — append an explicit do-not-dispatch directive to the prompt
+        # so the orchestrator agent never calls the skipped specialists, even
+        # if the manifest-based skip rule is missed.
+        if skip_specialists:
+            from jobsmith.core.manifest import PHASE_REQUIRED_SPECIALISTS as _PHASE_REQ2
+
+            _phase_skip2 = [
+                s for s in skip_specialists
+                if s in _PHASE_REQ2.get(phase_name, ())
+            ]
+            if _phase_skip2:
+                _names_str = ", ".join(_phase_skip2)
+                prompt_text = (
+                    prompt_text
+                    + f"\n\n[SYSTEM OVERRIDE — cover-letter skip] "
+                    f"Do NOT dispatch the following specialists for this phase; "
+                    f"they are disabled for this run: {_names_str}. "
+                    f"Treat them as already completed (status=ok)."
+                )
 
         # Step 3d-warmstart (bug-88fcc597 fix #1 HIGH): when the reuse plan
         # says warm-start for the draft phase, append the delta/anchor context
@@ -995,41 +1088,6 @@ def _run_apply_phases(
         # has a stable baseline to diff user edits against. Done immediately
         # after the phase succeeds, before the user can edit anything.
         _snapshot_phase_drafts(phase_name, slug, resolved_cwd)
-
-        # Step 3f-cl-skip (feat-bd7c2d23): inject synthetic ok/skipped manifest
-        # entries for any specialists that were bypassed for this phase.  This
-        # ensures phase_completed() returns True on the next manifest load
-        # without those specialists having actually been dispatched.
-        if skip_specialists:
-            from jobsmith.core.manifest import inject_skipped_specialists as _inject_skipped
-
-            _state_dir_for_skip = _apply_state_dir(slug, resolved_cwd)
-            if _state_dir_for_skip is not None:
-                _manifest_path = _state_dir_for_skip / "manifest.json"
-                try:
-                    import json as _json_skip
-
-                    if _manifest_path.exists():
-                        _mdata = _json_skip.loads(_manifest_path.read_text(encoding="utf-8"))
-                    else:
-                        _mdata = {"invocations": []}
-                    _mdata = _inject_skipped(_mdata, skip_specialists)
-                    _manifest_path.write_text(
-                        _json_skip.dumps(_mdata, indent=2), encoding="utf-8"
-                    )
-                    # Mirror to DB as well (best-effort).
-                    if db_conn is not None:
-                        from jobsmith.db import put_state as _put_state_skip
-
-                        with contextlib.suppress(Exception):
-                            _put_state_skip(
-                                db_conn,
-                                slug=slug,
-                                kind="manifest",
-                                content_blob=_json_skip.dumps(_mdata),
-                            )
-                except Exception as exc:  # noqa: BLE001 — skip injection must never abort
-                    logger.warning("cl-skip: manifest injection failed: %s", exc)
 
         # Step 3f-dual-write (feat-e3d87579): mirror FS artifacts to the DB.
         # Phase 1 dual-write — FS remains authoritative; PUT failures log a

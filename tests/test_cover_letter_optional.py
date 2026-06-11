@@ -301,33 +301,282 @@ class TestCoverLetterSkipPipeline:
             f"skip_specialists should be empty when cover_letter=True, got: {skip_specs}"
         )
 
-    def test_manifest_injection_in_run_apply_phases(self, tmp_path: Path) -> None:
-        """After a phase completes in _run_apply_phases, skipped specialists appear in manifest."""
-        from jobsmith.core.manifest import inject_skipped_specialists, phase_completed
+    # ------------------------------------------------------------------
+    # Integration tests: drive _run_apply_phases via run_apply with a
+    # stubbed headless.run_phase (finding 3 fix).
+    # ------------------------------------------------------------------
 
-        # Simulate what happens in _run_apply_phases when skip_specialists is set:
-        # the manifest on disk gains synthetic ok/skipped entries.
-        state_dir = tmp_path / ".apply-state"
-        state_dir.mkdir()
+    def _make_repo(self, tmp_path: Path) -> Path:
+        """Minimal repo layout that run_apply needs."""
+        cfg = tmp_path / ".apply-config.yaml"
+        cfg.write_text(
+            "master:\n"
+            "  work_yml: assets/content/work.yml\n"
+            "  skill_yml: assets/content/skill.yml\n"
+            "  education_yml: assets/content/education.yml\n"
+            "  author_yml: assets/content/author.yml\n"
+            "output:\n"
+            "  applications_dir: private/applications\n"
+            "  jobsmith_db: private/jobsmith.db\n",
+            encoding="utf-8",
+        )
+        content = tmp_path / "assets" / "content"
+        content.mkdir(parents=True)
+        for name in ("work.yml", "skill.yml", "education.yml", "author.yml"):
+            (content / name).write_text("# stub\n")
+        (tmp_path / "private" / "applications").mkdir(parents=True)
+        return tmp_path
 
-        # Build a manifest with all gather specialists EXCEPT company-research
-        from jobsmith.core.manifest import PHASE_REQUIRED_SPECIALISTS
+    def _mock_plugin_dir(self, tmp_path: Path) -> Path:
+        from jobsmith.apply import _PHASES
 
-        other_gather = [
-            s for s in PHASE_REQUIRED_SPECIALISTS["gather"] if s != "apply-company-research"
-        ]
-        manifest = {"invocations": [{"specialist": s, "status": "ok"} for s in other_gather]}
-        manifest_path = state_dir / "manifest.json"
-        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        pdir = tmp_path / "plugin"
+        sp_dir = pdir / "system-prompts"
+        sp_dir.mkdir(parents=True)
+        for phase_name, phase_num in _PHASES:
+            (sp_dir / f"phase-{phase_num}-{phase_name}.md").write_text(
+                f"# {phase_name}\n"
+            )
+        return pdir
 
-        # Simulate the inject step
-        mdata = json.loads(manifest_path.read_text(encoding="utf-8"))
-        mdata = inject_skipped_specialists(mdata, ["apply-company-research"])
-        manifest_path.write_text(json.dumps(mdata, indent=2), encoding="utf-8")
+    def test_skipped_entries_in_db_before_phase_sees_prompt(self, tmp_path: Path) -> None:
+        """(finding 1a) DB manifest gains skipped entries BEFORE the stub receives the prompt."""
+        import io
 
-        # Verify phase_completed returns True now
-        final = json.loads(manifest_path.read_text(encoding="utf-8"))
-        assert phase_completed(final, "gather") is True
+        from rich.console import Console
+
+        from jobsmith.apply import derive_slug, run_apply
+        from jobsmith.db import get_state, open_pipeline_db
+        from jobsmith.headless import Event
+        from jobsmith.render import ApplyRenderer
+
+        repo = self._make_repo(tmp_path)
+        plugin_dir = self._mock_plugin_dir(tmp_path)
+        url = "https://example.com/jobs/cl-skip-db-test"
+        slug = derive_slug(url)
+
+        # DB state seen when each phase prompt is dispatched.
+        db_state_at_prompt: dict[str, dict | None] = {}
+
+        def fake_run_phase(*args, **kwargs):
+            phase = kwargs.get("phase") or args[0]
+            # Read the DB manifest state at prompt dispatch time.
+            db_path = repo / "private" / "jobsmith.db"
+            if db_path.exists():
+                conn = open_pipeline_db(db_path)
+                try:
+                    blob = get_state(conn, slug=slug, kind="manifest")
+                    db_state_at_prompt[phase] = json.loads(blob) if blob else None
+                finally:
+                    conn.close()
+            yield Event(type="phase_complete", name=phase)
+
+        rdr = ApplyRenderer(
+            yes=True,
+            verbosity=0,
+            console=Console(file=io.StringIO(), force_terminal=False),
+        )
+
+        with (
+            patch("jobsmith.apply.headless.run_phase", fake_run_phase),
+            patch("jobsmith.apply.headless.session_exists", return_value=False),
+            patch("jobsmith.apply.get_plugin_dir", return_value=plugin_dir),
+            patch("jobsmith.apply._build_paths", return_value={}),
+            patch("jobsmith.apply._reconcile_canonical_slug", return_value=(slug, False)),
+            patch("jobsmith.apply._run_step45_orchestration", return_value=0),
+            patch("jobsmith.apply.ensure_bootstrap"),
+        ):
+            rc = run_apply(
+                url,
+                cwd=repo,
+                skip_confirm=True,
+                force=True,
+                renderer=rdr,
+                cover_letter=False,
+            )
+
+        assert rc == 0, f"run_apply returned {rc}"
+
+        # gather and render phases should have seen the skipped entries in the
+        # DB manifest BEFORE the phase ran (i.e. at prompt dispatch time).
+        for phase_name, skipped_specialist in [
+            ("gather", "apply-company-research"),
+            ("render", "apply-cover-letter-writer"),
+        ]:
+            phase_manifest = db_state_at_prompt.get(phase_name)
+            assert phase_manifest is not None, (
+                f"DB manifest was None when {phase_name} phase prompt was dispatched"
+            )
+            invocations = phase_manifest.get("invocations", [])
+            specialists_with_ok = {
+                inv["specialist"]
+                for inv in invocations
+                if isinstance(inv, dict) and inv.get("status") == "ok"
+            }
+            assert skipped_specialist in specialists_with_ok, (
+                f"{skipped_specialist} not in DB manifest before {phase_name} phase. "
+                f"Got specialists: {specialists_with_ok}"
+            )
+
+    def test_phase_prompt_contains_do_not_dispatch_directive(self, tmp_path: Path) -> None:
+        """(finding 1b) Phase prompt contains the do-not-dispatch directive for skipped specialists."""
+        import io
+
+        from rich.console import Console
+
+        from jobsmith.apply import derive_slug, run_apply
+        from jobsmith.headless import Event
+        from jobsmith.render import ApplyRenderer
+
+        repo = self._make_repo(tmp_path)
+        plugin_dir = self._mock_plugin_dir(tmp_path)
+        url = "https://example.com/jobs/cl-skip-directive-test"
+
+        captured_prompts: dict[str, str] = {}
+
+        def fake_run_phase(*args, **kwargs):
+            phase = kwargs.get("phase") or args[0]
+            captured_prompts[phase] = kwargs.get("prompt", "")
+            yield Event(type="phase_complete", name=phase)
+
+        rdr = ApplyRenderer(
+            yes=True,
+            verbosity=0,
+            console=Console(file=io.StringIO(), force_terminal=False),
+        )
+
+        with (
+            patch("jobsmith.apply.headless.run_phase", fake_run_phase),
+            patch("jobsmith.apply.headless.session_exists", return_value=False),
+            patch("jobsmith.apply.get_plugin_dir", return_value=plugin_dir),
+            patch("jobsmith.apply._build_paths", return_value={}),
+            patch("jobsmith.apply._reconcile_canonical_slug", return_value=(derive_slug(url), False)),
+            patch("jobsmith.apply._run_step45_orchestration", return_value=0),
+            patch("jobsmith.apply.ensure_bootstrap"),
+        ):
+            rc = run_apply(
+                url,
+                cwd=repo,
+                skip_confirm=True,
+                force=True,
+                renderer=rdr,
+                cover_letter=False,
+            )
+
+        assert rc == 0, f"run_apply returned {rc}"
+
+        # gather prompt must contain directive for apply-company-research
+        gather_prompt = captured_prompts.get("gather", "")
+        assert "apply-company-research" in gather_prompt, (
+            f"gather prompt missing do-not-dispatch directive for apply-company-research.\n"
+            f"prompt tail: {gather_prompt[-400:]!r}"
+        )
+        assert "SYSTEM OVERRIDE" in gather_prompt or "Do NOT dispatch" in gather_prompt, (
+            f"gather prompt missing the skip override marker.\nprompt tail: {gather_prompt[-400:]!r}"
+        )
+
+        # render prompt must contain directive for apply-cover-letter-writer
+        render_prompt = captured_prompts.get("render", "")
+        assert "apply-cover-letter-writer" in render_prompt, (
+            f"render prompt missing do-not-dispatch directive for apply-cover-letter-writer.\n"
+            f"prompt tail: {render_prompt[-400:]!r}"
+        )
+
+    def test_real_db_invocations_not_clobbered(self, tmp_path: Path) -> None:
+        """(finding 2) Real DB invocations written by the stub are NOT clobbered by skip injection.
+
+        Strategy: pre-seed a DB manifest with a sentinel invocation that has
+        extra fields (run_id, notes) matching what a real agent would write.
+        Then run_apply with cover_letter=False and force=False (so no DB reset).
+        The sentinel invocation must survive in the DB after the run.
+        """
+        import io
+
+        from rich.console import Console
+
+        from jobsmith.apply import derive_slug, run_apply
+        from jobsmith.db import get_state, open_pipeline_db, put_state
+        from jobsmith.headless import Event
+        from jobsmith.render import ApplyRenderer
+
+        repo = self._make_repo(tmp_path)
+        plugin_dir = self._mock_plugin_dir(tmp_path)
+        url = "https://example.com/jobs/cl-skip-clobber-test"
+        slug = derive_slug(url)
+
+        # Pre-seed a DB manifest with a real invocation that must survive.
+        # Use force=False so the pipeline does NOT reset DB state before running.
+        db_path = repo / "private" / "jobsmith.db"
+        conn = open_pipeline_db(db_path)
+        try:
+            sentinel_invocation = {
+                "specialist": "apply-jd-parser",
+                "status": "ok",
+                "run_id": "sentinel-run-123",
+                "notes": "seeded by test",
+            }
+            put_state(
+                conn,
+                slug=slug,
+                kind="manifest",
+                content_blob=json.dumps({"invocations": [sentinel_invocation]}),
+            )
+        finally:
+            conn.close()
+
+        def fake_run_phase(*args, **kwargs):
+            phase = kwargs.get("phase") or args[0]
+            yield Event(type="phase_complete", name=phase)
+
+        rdr = ApplyRenderer(
+            yes=True,
+            verbosity=0,
+            console=Console(file=io.StringIO(), force_terminal=False),
+        )
+
+        # force=False: the pipeline must NOT reset DB state.  The sentinel
+        # invocation only has apply-jd-parser ok → phase_done["gather"]=False →
+        # all phases run, firing skip injection for each.
+        with (
+            patch("jobsmith.apply.headless.run_phase", fake_run_phase),
+            patch("jobsmith.apply.headless.session_exists", return_value=False),
+            patch("jobsmith.apply.get_plugin_dir", return_value=plugin_dir),
+            patch("jobsmith.apply._build_paths", return_value={}),
+            patch("jobsmith.apply._reconcile_canonical_slug", return_value=(slug, False)),
+            patch("jobsmith.apply._run_step45_orchestration", return_value=0),
+            patch("jobsmith.apply.ensure_bootstrap"),
+            patch("jobsmith.core.pipeline.resolve_starting_slug", return_value=(slug, False)),
+        ):
+            rc = run_apply(
+                url,
+                cwd=repo,
+                skip_confirm=True,
+                force=False,
+                renderer=rdr,
+                cover_letter=False,
+            )
+
+        assert rc == 0, f"run_apply returned {rc}"
+
+        # The sentinel invocation from the real DB write must still be present.
+        conn2 = open_pipeline_db(db_path)
+        try:
+            blob = get_state(conn2, slug=slug, kind="manifest")
+        finally:
+            conn2.close()
+
+        assert blob is not None, "DB manifest missing after run"
+        final_manifest = json.loads(blob)
+        invocations = final_manifest.get("invocations", [])
+        sentinel_still_present = any(
+            inv.get("specialist") == "apply-jd-parser"
+            and inv.get("run_id") == "sentinel-run-123"
+            for inv in invocations
+        )
+        assert sentinel_still_present, (
+            f"Sentinel invocation (run_id=sentinel-run-123) was clobbered by skip injection.\n"
+            f"Final invocations: {invocations}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -452,13 +701,17 @@ class TestCoverLetterPrecedence:
 
         assert captured.get("cover_letter") is True
 
-    def test_config_none_without_flag_disables_cl(self, tmp_path: Path) -> None:
-        """When no CLI flag given and config has framework=none, cover_letter=False."""
+    def test_config_none_without_flag_passes_none_to_run_apply(self, tmp_path: Path) -> None:
+        """When no CLI flag is given, cover_letter=None is passed to run_apply.
+
+        Config resolution (framework=none → disabled) is the responsibility of
+        core_run_apply, not the CLI layer (finding 5 fix).  The CLI passes
+        None and lets the pipeline own the fallback.
+        """
         from typer.testing import CliRunner
 
         from jobsmith import apply as apply_mod
         from jobsmith.cli import app
-        from jobsmith.config import CoverLetterSettings, JobsmithConfig
 
         runner = CliRunner()
         captured: dict = {}
@@ -467,17 +720,19 @@ class TestCoverLetterPrecedence:
             captured.update(kwargs)
             return 0
 
-        fake_config = JobsmithConfig()
-        fake_config.cover_letter = CoverLetterSettings(framework="none")
-
         with (
             patch.object(apply_mod, "run_apply", new=fake_run_apply),
-            patch("jobsmith.cli.find_config", return_value=tmp_path / ".apply-config.yaml"),
-            patch("jobsmith.cli.load_config", return_value=fake_config),
         ):
             runner.invoke(app, ["apply", "https://example.com/job"])
 
-        assert captured.get("cover_letter") is False
+        # CLI must pass cover_letter=None — config resolution belongs in core_run_apply.
+        assert "cover_letter" in captured, (
+            f"cover_letter kwarg not passed to run_apply: {captured!r}"
+        )
+        assert captured.get("cover_letter") is None, (
+            f"Expected cover_letter=None (config resolution deferred to core_run_apply), "
+            f"got: {captured['cover_letter']!r}"
+        )
 
 
 # ---------------------------------------------------------------------------

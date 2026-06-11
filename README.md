@@ -150,8 +150,9 @@ cover_letter:
 ```
 
 When disabled, the two cover-letter-only specialists (`apply-company-research`,
-`apply-cover-letter-writer`) are not dispatched and the phase summary shows them
-as skipped.  All resume-only steps run unchanged.
+`apply-cover-letter-writer`) are not dispatched; synthetic `status=ok` entries
+are injected into the manifest before each phase runs so the pipeline treats
+those specialists as already complete.  All resume-only steps run unchanged.
 
 ## CLI — feedback loop
 
