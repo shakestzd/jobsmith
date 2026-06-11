@@ -10,26 +10,20 @@
 <body>
     <article id="bug-1d1f7cb2"
              data-type="bug"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-11T13:00:54.786042"
-             data-updated="2026-06-11T13:01:03.750131" data-agent-assigned="claude-code" data-track-id="trk-32e544db" data-created-by-agent="claude-code" data-created-by-model="claude-fable-5[1m]" data-created-by-cli-version="0.61.2">
+             data-updated="2026-06-11T13:03:10.994366" data-agent-assigned="claude-code" data-track-id="trk-32e544db" data-created-by-agent="claude-code" data-created-by-model="claude-fable-5[1m]" data-created-by-cli-version="0.61.2">
 
         <header>
             <h1>UI re-run apply dead-ends on failed-status apps with complete artifacts</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
 
         <nav data-graph-edges>
-            <section data-edge-type="part_of">
-                <h3>Part Of:</h3>
-                <ul>
-                    <li><a href="trk-32e544db.html" data-relationship="part_of" data-since="2026-06-11T13:00:54.811883">trk-32e544db</a></li>
-                </ul>
-            </section>
             <section data-edge-type="implemented_in">
                 <h3>Implemented In:</h3>
                 <ul>
@@ -42,11 +36,18 @@
                     <li><a href="feat-827071e1.html" data-relationship="caused_by" data-since="2026-06-11T13:00:54.804658">feat-827071e1</a></li>
                 </ul>
             </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="trk-32e544db.html" data-relationship="part_of" data-since="2026-06-11T13:00:54.811883">trk-32e544db</a></li>
+                </ul>
+            </section>
         </nav>
 
         <section data-content>
             <h3>Description</h3>
-            <p>handleReRun sends force only when isComplete; a failed-status app with complete on-disk artifacts aborts with already-complete on every re-run and can never recover via UI. Re-run button should always pass force=true.</p>
+            <p>handleReRun sends force only when isComplete; a failed-status app with complete on-disk artifacts aborts with already-complete on every re-run and can never recover via UI. Re-run button should always pass force=true.
+[2026-06-11 13:03 claude-code] accepted-advisory (provenance override): one-line UI fix + regression test; 246 web tests green; merged + redeployed</p>
         </section>
     </article>
 </body>
