@@ -118,11 +118,26 @@ def upsert_posting(
         ),
     )
 
-    # Re-sight: bump last_seen_at regardless of whether the INSERT fired
-    conn.execute(
-        "UPDATE postings SET last_seen_at = ? WHERE dedup_key = ?",
-        (now, dedup_key),
-    )
+    # Re-sight: bump last_seen_at regardless of whether the INSERT fired.
+    # Also backfill location when the stored value is NULL/empty and the
+    # incoming one is non-empty (feat-e0aa9c3a: heals ashby rows that were
+    # stored without location before the adapter fix).  Only location is
+    # updated — status and all other columns remain untouched.
+    if location:
+        conn.execute(
+            """
+            UPDATE postings
+            SET last_seen_at = ?,
+                location = CASE WHEN (location IS NULL OR location = '') THEN ? ELSE location END
+            WHERE dedup_key = ?
+            """,
+            (now, location, dedup_key),
+        )
+    else:
+        conn.execute(
+            "UPDATE postings SET last_seen_at = ? WHERE dedup_key = ?",
+            (now, dedup_key),
+        )
     conn.commit()
 
     row = conn.execute(
