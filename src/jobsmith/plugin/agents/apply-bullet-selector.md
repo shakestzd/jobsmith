@@ -91,7 +91,7 @@ When in doubt, KEEP the anchor. Re-rank it lower if the JD doesn't reward it, bu
 3. Read `gap-resolutions.md` if it exists — the user's answers from a prior inquiry cycle constrain selection.
 4. For each position in master work.yml, build a selection (skipping requirements already resolved in step 0):
    - Max 3 positions for single-page fit.
-   - Max 3 bullets per position; 2 for the oldest. Match INGU template density.
+   - **Bullet count per role (Rule 7):** 3-5 bullets per role. Weight toward the most recent role: most recent role gets up to 5; older roles get 3 (or 2 for the oldest when 3+ roles are on the resume). Match INGU template density.
    - Every retained bullet must contain a metric ($, %, count, time).
    - Anchor bullets first, then JD-keyword-aligned non-anchors, then fillers.
 5. For bullets you keep but rephrase: the rephrasing may swap surrounding words to match JD vocabulary, but DOLLAR AMOUNTS, PERCENTAGES, AND ASSET COUNTS ARE IMMUTABLE. If a rephrase changes a number, you've fabricated — stop.

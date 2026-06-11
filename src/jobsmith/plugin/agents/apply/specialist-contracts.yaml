@@ -24,7 +24,7 @@
 # the reverse.
 
 version: 1
-frozen_at: '2026-05-07'  # RESET: re-freeze when adopting jobsmith in your repo
+frozen_at: '2026-06-11'  # RESET: re-freeze when adopting jobsmith in your repo
 
 # ----------------------------------------------------------------------------
 # State directory layout (.apply-state/) — single source of truth between specialists
@@ -271,6 +271,10 @@ specialists:
       bullet-decisions.json. Selector NEVER fabricates — it only
       selects, reorders, and writes JD-keyword-aware phrasing. Master is
       read-only.
+    bullet_count_rule: |
+      Rule 7: 3-5 bullets per role, recency-weighted. Most recent role gets
+      up to 5; older roles get 3; oldest gets 2 when 3+ roles are on resume.
+      See agents/apply-bullet-selector.md step 4 for full rule.
     inputs:
       from_orchestrator:
         - jd_parsed: ".apply-state/jd-parsed.json"
@@ -417,6 +421,12 @@ specialists:
       bullets that apply-bullet-selector marked as needing JD-keyword
       phrasing. Voice: explorer not marketer, thesis not product,
       specific not sweeping, no labels, generous credit.
+    bullet_style_contract: |
+      See agents/apply-prose-writer.md "Bullet style rules" section for
+      the full rule set. Summary: XYZ formula (action+result+how); ≤25 words;
+      one metric cluster; no parenthetical tech lists; acronym discipline;
+      varied openers, no em dashes, no stock phrases. Rules rank above
+      benchmark mimicry and below fact invariants.
     inputs:
       from_orchestrator:
         - jd_parsed: ".apply-state/jd-parsed.json"
@@ -470,8 +480,15 @@ specialists:
       against prose-draft.md and the Selected Projects section of
       resume.qmd. Decides PASS / REVISE / HALT based on detected
       patterns and iteration count. Blocking on hard patterns
-      (word list, em-dash density). Advisory on stylistic judgment
-      (sentence rhythm).
+      (word list, em-dash density, bullet style checks). Advisory on
+      stylistic judgment (sentence rhythm).
+    bullet_style_checks: |
+      Five named blocking checks run against every bullet in prose-draft.md.
+      See agents/apply-prose-qa.md step 3 for check definitions.
+      check:bullet_word_count, check:metric_cluster_count,
+      check:parenthetical_tech_list, check:em_dash, check:stock_phrases.
+      All violations are written to ai-tell-report.json under
+      bullet_style_checks and to blocking_findings.
     inputs:
       from_orchestrator:
         - prose_draft: ".apply-state/prose-draft.md"
@@ -486,6 +503,11 @@ specialists:
             decision: "pass | revise | halt"
             blocking_findings: "list[{category, span, suggestion}]"
             advisory_findings: "list[{category, span, note}]"
+            bullet_style_checks: |
+              dict of five named check results, each {violations: int, details: list}.
+              Keys: bullet_word_count, metric_cluster_count,
+              parenthetical_tech_list, em_dash, stock_phrases.
+              Any check with violations > 0 contributes entries to blocking_findings.
             words_unchanged: "list[string]"
             calibration_metrics: "{false_positive_estimate}"
             iterations: |

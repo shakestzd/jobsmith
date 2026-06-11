@@ -262,6 +262,82 @@ def test_apply_visual_layout_reviewer_md_documents_restoration() -> None:
     assert "RESTORATION_LIMIT" in md, "Hard cap halt reason must be documented"
 
 
+# ---------- Bullet style rules: contract enforcement (feat-e5fa07a0) ----------
+
+
+def test_apply_prose_writer_md_has_bullet_style_rules() -> None:
+    """apply-prose-writer.md must contain the Bullet style rules section (Rules 1-6 + 8)."""
+    from pathlib import Path as _Path
+
+    md = (_Path(__file__).parent.parent / "src/jobsmith/plugin/agents/apply-prose-writer.md").read_text()
+    assert "Bullet style rules" in md, "Must have a 'Bullet style rules' section"
+    # Rule 1 — XYZ formula
+    assert "XYZ formula" in md or "action verb" in md.lower()
+    # Rule 2 — 25-word cap
+    assert "25" in md and "word" in md.lower()
+    # Rule 3 — one metric cluster
+    assert "One metric" in md or "one metric" in md.lower() or "metric cluster" in md.lower()
+    # Rule 4 — no parenthetical tech lists
+    assert "parenthetical" in md.lower()
+    # Rule 5 — acronym discipline
+    assert "Acronym" in md or "acronym" in md
+    # Rule 6 — em dash banned
+    assert "em dash" in md.lower() or "em-dash" in md.lower()
+    # Rule 6 — stock phrases
+    assert "spearheaded" in md and "leveraged" in md
+    # Rule 8 — hard invariant kept
+    assert "REMOVE" in md or "RESTRUCTURE" in md or "remove" in md.lower()
+
+
+def test_apply_bullet_selector_md_has_recency_weighted_bullet_count() -> None:
+    """apply-bullet-selector.md must document the 3-5 bullet recency-weighting rule (Rule 7)."""
+    from pathlib import Path as _Path
+
+    md = (_Path(__file__).parent.parent / "src/jobsmith/plugin/agents/apply-bullet-selector.md").read_text()
+    assert "3-5" in md, "Must state 3-5 bullets per role"
+    assert "recen" in md.lower(), "Must mention recency weighting"
+
+
+def test_apply_prose_qa_md_has_named_bullet_style_checks() -> None:
+    """apply-prose-qa.md must define the five named blocking bullet style checks."""
+    from pathlib import Path as _Path
+
+    md = (_Path(__file__).parent.parent / "src/jobsmith/plugin/agents/apply-prose-qa.md").read_text()
+    assert "check:bullet_word_count" in md
+    assert "check:metric_cluster_count" in md
+    assert "check:parenthetical_tech_list" in md
+    assert "check:em_dash" in md
+    assert "check:stock_phrases" in md
+    assert "bullet_style_checks" in md, "Output schema must include bullet_style_checks key"
+
+
+def test_specialist_contracts_yaml_references_bullet_style() -> None:
+    """specialist-contracts.yaml must reference bullet style in prose-writer and prose-qa entries."""
+    from pathlib import Path as _Path
+
+    import yaml as _yaml
+
+    contracts = _yaml.safe_load(
+        (_Path(__file__).parent.parent / "src/jobsmith/plugin/agents/apply/specialist-contracts.yaml").read_text()
+    )
+    specialists_by_name = {s["name"]: s for s in contracts["specialists"]}
+
+    # prose-writer must declare bullet_style_contract
+    pw = specialists_by_name["apply-prose-writer"]
+    assert "bullet_style_contract" in pw, "apply-prose-writer contract must include bullet_style_contract key"
+
+    # prose-qa must declare bullet_style_checks
+    pq = specialists_by_name["apply-prose-qa"]
+    assert "bullet_style_checks" in pq, "apply-prose-qa contract must include bullet_style_checks key"
+
+    # bullet-selector must declare bullet_count_rule
+    bs = specialists_by_name["apply-bullet-selector"]
+    assert "bullet_count_rule" in bs, "apply-bullet-selector contract must include bullet_count_rule key"
+
+    # frozen_at must be non-null
+    assert contracts.get("frozen_at") is not None, "specialist-contracts.yaml must have a non-null frozen_at"
+
+
 # ---------- Roborev fix: URL normalization (job 917 finding 3) ----------
 
 
