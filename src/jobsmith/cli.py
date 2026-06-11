@@ -2457,6 +2457,9 @@ def source_run(
             no_llm=no_llm,
             source_filter=source_filter,
             alert_senders=sourcing_cfg.alert_senders or None,
+            title_exclude_patterns=sourcing_cfg.title_exclude_patterns or None,
+            title_include_patterns=sourcing_cfg.title_include_patterns or None,
+            min_fast_score=sourcing_cfg.min_fast_score,
         )
     except Exception as exc:
         console.print(f"[red]ERROR:[/red] crawl failed: {exc}")
@@ -2466,6 +2469,7 @@ def source_run(
         f"[green]done.[/green] "
         f"fetched={summary['roles_fetched']} "
         f"upserted={summary['roles_upserted']} "
+        f"filtered={summary['roles_filtered']} "
         f"expired={summary['roles_expired']} "
         f"sources={len(summary['sources_checked'])}"
     )
@@ -2667,6 +2671,112 @@ def source_install_schedule(
     except Exception as exc:
         console.print(f"[red]ERROR:[/red] install-schedule failed: {exc}")
         raise typer.Exit(code=1) from exc
+
+
+@source_app.command("prune")
+def source_prune(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show what would be dismissed without writing to DB.",
+    ),
+    config_path: Path | None = typer.Option(
+        None,
+        "--sourcing-config",
+        help="Explicit path to sourcing.yaml (default: auto-discover).",
+        exists=False,
+    ),
+) -> None:
+    """Retroactively dismiss sourced postings that match current title filters.
+
+    Applies the CURRENT sourcing.yaml title_filters + min_fast_score to all
+    postings with status='sourced'. Matching postings are set to 'dismissed'.
+    Only status='sourced' is touched — queued/promoted/dismissed/expired
+    postings are never modified.
+
+    Use --dry-run to preview what would be dismissed without writing.
+
+    Example::
+
+        jobsmith source prune --dry-run
+        jobsmith source prune
+    """
+    from .sourcing.config import load_sourcing_config
+
+    cfg_file = find_config(Path.cwd())
+    if cfg_file is None:
+        console.print(
+            f"[red]ERROR:[/red] No {CONFIG_FILENAME} found — run `jobsmith init` first."
+        )
+        raise typer.Exit(code=2)
+    config = load_config(cfg_file)
+    repo_root = repo_root_for()
+    db_path = (repo_root / config.output.jobsmith_db).resolve()
+    if not db_path.exists():
+        console.print(f"[red]ERROR:[/red] Pipeline DB not found at {db_path}.")
+        raise typer.Exit(code=2)
+
+    from .sourcing.runner import title_passes
+
+    sourcing_cfg = load_sourcing_config(config_path)
+    exclude_pats = [p.lower() for p in (sourcing_cfg.title_exclude_patterns or [])]
+    include_pats = [p.lower() for p in (sourcing_cfg.title_include_patterns or [])]
+    min_score = sourcing_cfg.min_fast_score
+
+    conn = open_pipeline_db(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT id, title, company, fast_score, source FROM postings WHERE status = 'sourced'"
+        ).fetchall()
+
+        to_dismiss: list[dict] = []
+        for row in rows:
+            # Title check (shared predicate — issue #4)
+            if not title_passes(
+                row["title"] or "",
+                exclude_patterns=exclude_pats,
+                include_patterns=include_pats,
+            ):
+                to_dismiss.append(dict(row))
+                continue
+
+            # min_fast_score check.  Email-origin postings (no JD text →
+            # fast_score≈0) are identified by source prefix; the score gate
+            # does not apply to them — consistent with the runner email block
+            # (issue #1 / #3).
+            if min_score > 0.0:
+                src = row["source"] or ""
+                is_email = src.startswith(("mailapp/", "gmail/", "manual/"))
+                if not is_email:
+                    score = row["fast_score"]  # may be NULL → None
+                    # NULL score: unknown, pass through (consistent with
+                    # apply_title_filters which passes unscored roles through)
+                    if score is not None and score < min_score:
+                        to_dismiss.append(dict(row))
+                        continue
+
+        if dry_run:
+            console.print(
+                f"[bold]source prune --dry-run[/bold] "
+                f"— {len(to_dismiss)} of {len(rows)} sourced posting(s) would be dismissed"
+            )
+            for entry in to_dismiss:
+                # Data already fetched — no N+1 re-query (issue #5)
+                console.print(
+                    f"  [dim]would dismiss:[/dim] {entry.get('company') or ''} — {entry.get('title') or ''}"
+                )
+        else:
+            from .sourcing.store import set_posting_status
+
+            for entry in to_dismiss:
+                set_posting_status(conn, posting_id=entry["id"], status="dismissed")
+
+            console.print(
+                f"[green]source prune done.[/green] "
+                f"dismissed={len(to_dismiss)} of {len(rows)} sourced posting(s)"
+            )
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

@@ -150,6 +150,34 @@ def get_posting_by_dedup_key(
 
 
 # ---------------------------------------------------------------------------
+# postings — re-sight without insert
+# ---------------------------------------------------------------------------
+
+
+def touch_posting_by_dedup_key(
+    conn: sqlite3.Connection,
+    *,
+    dedup_key: str,
+) -> bool:
+    """Bump last_seen_at for an existing posting without changing any other column.
+
+    Used to re-sight a posting that was filtered (not upserted) so that
+    expire_stale_postings does not expire it while the live job is still
+    visible.  Only updates rows that already exist; does nothing if the
+    dedup_key is not found.
+
+    Returns True if the row was found and updated, False otherwise.
+    """
+    now = _now_iso()
+    cursor = conn.execute(
+        "UPDATE postings SET last_seen_at = ? WHERE dedup_key = ?",
+        (now, dedup_key),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
 # postings — status transitions
 # ---------------------------------------------------------------------------
 
@@ -254,6 +282,7 @@ def finish_sourcing_run(
     new_count: int = 0,
     updated_count: int = 0,
     skipped_count: int = 0,
+    filtered_count: int = 0,
     degraded_sources: list[str] | None = None,
     error: str | None = None,
 ) -> None:
@@ -268,6 +297,7 @@ def finish_sourcing_run(
             new_count = ?,
             updated_count = ?,
             skipped_count = ?,
+            filtered_count = ?,
             degraded_sources_json = ?,
             error = ?
         WHERE run_id = ?
@@ -278,6 +308,7 @@ def finish_sourcing_run(
             new_count,
             updated_count,
             skipped_count,
+            filtered_count,
             degraded_json,
             error,
             run_id,
