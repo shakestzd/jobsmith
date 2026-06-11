@@ -92,6 +92,9 @@ _PACKAGE_DEFAULTS: dict = {
     "title_exclude_patterns": [],
     "title_include_patterns": [],
     "min_fast_score": 0.0,
+    # Location filter defaults (feat-e0aa9c3a) — no filtering unless configured.
+    "location_allowed_patterns": [],
+    "location_unknown": "keep",
 }
 
 
@@ -117,6 +120,11 @@ class SourcingConfig:
     title_exclude_patterns: list[str] = field(default_factory=list)
     title_include_patterns: list[str] = field(default_factory=list)
     min_fast_score: float = 0.0
+    # Location filters (feat-e0aa9c3a) — applied alongside title filters.
+    # allowed_patterns: substring allowlist, case-insensitive; empty = disabled.
+    # location_unknown: what to do with empty/None location: "keep" | "dismiss".
+    location_allowed_patterns: list[str] = field(default_factory=list)
+    location_unknown: str = "keep"
 
 
 def find_sourcing_config(start: Path | None = None) -> Path | None:
@@ -183,6 +191,15 @@ def load_sourcing_config(path: Path | None = None) -> SourcingConfig:
     ]
     min_fast_score = float(raw.get("min_fast_score", 0.0))
 
+    # Location filters (feat-e0aa9c3a)
+    location_filters_raw = raw.get("location_filters") or {}
+    location_allowed_patterns: list[str] = [
+        str(p) for p in (location_filters_raw.get("allowed_patterns") or [])
+    ]
+    location_unknown: str = str(
+        location_filters_raw.get("unknown", _PACKAGE_DEFAULTS["location_unknown"])
+    )
+
     return SourcingConfig(
         expiry_days=expiry_days,
         max_per_source=max_per_source,
@@ -194,6 +211,8 @@ def load_sourcing_config(path: Path | None = None) -> SourcingConfig:
         title_exclude_patterns=title_exclude_patterns,
         title_include_patterns=title_include_patterns,
         min_fast_score=min_fast_score,
+        location_allowed_patterns=location_allowed_patterns,
+        location_unknown=location_unknown,
     )
 
 

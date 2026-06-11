@@ -43,7 +43,19 @@ def parse_ashby_payload(
             job_id = str(j.get("id", ""))
             title = (j.get("title") or "").strip()
             url = (j.get("jobUrl") or j.get("applyUrl") or "").strip()
-            location = (j.get("locationName") or "").strip()
+            # Ashby live API uses `location` (string) as the primary field;
+            # `locationName` is present in some board responses as a fallback.
+            primary_loc = (j.get("location") or j.get("locationName") or "").strip()
+            # secondaryLocations is a list of dicts like {"location": "Europe", ...}
+            secondary: list[str] = [
+                str(sec.get("location") or sec.get("locationName") or "").strip()
+                for sec in (j.get("secondaryLocations") or [])
+                if isinstance(sec, dict) and (sec.get("location") or sec.get("locationName"))
+            ]
+            if secondary:
+                location = "; ".join([primary_loc] + secondary) if primary_loc else "; ".join(secondary)
+            else:
+                location = primary_loc
             jd_text = _strip_html(j.get("descriptionHtml") or j.get("description") or "")
             posted = (j.get("publishedAt") or "")[:10]
             yield Role(

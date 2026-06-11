@@ -2460,6 +2460,8 @@ def source_run(
             title_exclude_patterns=sourcing_cfg.title_exclude_patterns or None,
             title_include_patterns=sourcing_cfg.title_include_patterns or None,
             min_fast_score=sourcing_cfg.min_fast_score,
+            location_allowed_patterns=sourcing_cfg.location_allowed_patterns or None,
+            location_unknown=sourcing_cfg.location_unknown,
         )
     except Exception as exc:
         console.print(f"[red]ERROR:[/red] crawl failed: {exc}")
@@ -2716,17 +2718,19 @@ def source_prune(
         console.print(f"[red]ERROR:[/red] Pipeline DB not found at {db_path}.")
         raise typer.Exit(code=2)
 
-    from .sourcing.runner import title_passes
+    from .sourcing.runner import location_passes, title_passes
 
     sourcing_cfg = load_sourcing_config(config_path)
     exclude_pats = [p.lower() for p in (sourcing_cfg.title_exclude_patterns or [])]
     include_pats = [p.lower() for p in (sourcing_cfg.title_include_patterns or [])]
     min_score = sourcing_cfg.min_fast_score
+    loc_patterns = [p.lower() for p in (sourcing_cfg.location_allowed_patterns or [])]
+    loc_unknown = sourcing_cfg.location_unknown
 
     conn = open_pipeline_db(db_path)
     try:
         rows = conn.execute(
-            "SELECT id, title, company, fast_score, source FROM postings WHERE status = 'sourced'"
+            "SELECT id, title, company, fast_score, source, location FROM postings WHERE status = 'sourced'"
         ).fetchall()
 
         to_dismiss: list[dict] = []
@@ -2754,6 +2758,15 @@ def source_prune(
                     if score is not None and score < min_score:
                         to_dismiss.append(dict(row))
                         continue
+
+            # Location filter (feat-e0aa9c3a)
+            if not location_passes(
+                row["location"],
+                allowed_patterns=loc_patterns,
+                unknown=loc_unknown,
+            ):
+                to_dismiss.append(dict(row))
+                continue
 
         if dry_run:
             console.print(
