@@ -10,15 +10,15 @@
 <body>
     <article id="feat-bd7c2d23"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-11T09:15:30.672294"
-             data-updated="2026-06-11T09:41:18.255558" data-agent-assigned="claude-code" data-track-id="trk-32e544db" data-created-by-agent="claude-code" data-created-by-model="claude-fable-5[1m]" data-created-by-cli-version="0.61.2">
+             data-updated="2026-06-11T09:53:14.619462" data-agent-assigned="claude-code" data-track-id="trk-32e544db" data-created-by-agent="claude-code" data-created-by-model="claude-fable-5[1m]" data-created-by-cli-version="0.61.2">
 
         <header>
             <h1>Optional cover letter: skip CL-only specialists via config &#43; CLI flag</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
@@ -40,7 +40,8 @@
 
         <section data-content>
             <h3>Description</h3>
-            <p>Wire the existing-but-unwired cover_letter.framework=none config plus a per-run --no-cover-letter CLI flag to skip the two CL-exclusive specialists (apply-company-research, apply-cover-letter-writer) with skipped-invocation manifest records; all downstream consumers already degrade gracefully</p>
+            <p>Wire the existing-but-unwired cover_letter.framework=none config plus a per-run --no-cover-letter CLI flag to skip the two CL-exclusive specialists (apply-company-research, apply-cover-letter-writer) with skipped-invocation manifest records; all downstream consumers already degrade gracefully
+[2026-06-11 09:53 claude-code] accepted-advisory (provenance override): review high findings fixed (pre-dispatch enforcement, DB-authoritative manifest); 1855 tests green; merged + redeployed; --no-cover-letter live on installed CLI</p>
         </section>
     </article>
 </body>
