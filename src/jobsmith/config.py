@@ -167,6 +167,14 @@ class CoverLetterSettings(BaseModel):
     )
     default_salutation: str = "Hello,"
 
+    def cover_letter_enabled(self) -> bool:
+        """Return True iff the cover letter should be generated.
+
+        ``framework == "none"`` is the only disabled state.  All other
+        framework values (``"careerfair-io"``, ``"minimal"``) are enabled.
+        """
+        return self.framework != "none"
+
 
 class ResumeSettings(BaseModel):
     """Render-specific tuning."""

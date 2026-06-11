@@ -398,6 +398,7 @@ async def _launch_run(
     force: bool = False,
     jd_text: str | None = None,
     start_from_phase: str | None = None,
+    cover_letter: bool | None = None,
 ) -> str:
     """Register an in-process apply run and launch it. Returns run_id.
 
@@ -460,6 +461,7 @@ async def _launch_run(
                 renderer=rdr,
                 cancel_event=cancel_event,
                 start_from_phase=start_from_phase,
+                cover_letter=cover_letter,
             )
         except Exception:  # noqa: BLE001 — task must not propagate unhandled
             logger.exception(
@@ -578,6 +580,7 @@ async def create_application(
         supervisor, slug, body.url, cwd,
         force=body.force, jd_text=body.jd_text,
         start_from_phase=body.start_from_phase,
+        cover_letter=body.cover_letter,
     )
 
     return ApplicationCreated(slug=slug, run_id=run_id)
