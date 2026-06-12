@@ -4,9 +4,9 @@ meta:
     title: 'Postings coverage filter: score postings against existing master bullets'
     description: ""
     created_at: ""
-    status: draft
+    status: finalized
     schema_version: v3
-    version: 1
+    version: 2
 design:
     problem: |
         Apply runs cost real money and ~7 minutes, then halt on UNCOVERED_MUST_HAVE
@@ -30,6 +30,7 @@ design:
     comment: ""
 slices:
     - id: slice-1
+      feature_id: feat-6ec8c30a
       num: 1
       title: Master-bullets digest builder
       what: |
@@ -59,8 +60,9 @@ slices:
         bullets, respects cap, deterministic ordering; empty-DB case returns the
         empty marker.
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       critic_revisions:
         - source: sonnet
           severity: LOW
@@ -75,6 +77,7 @@ slices:
         **Rejected:** cached digest (invalidation complexity); importing apply's
         bullet-selector representation (cross-module coupling).
     - id: slice-2
+      feature_id: feat-a73173a1
       num: 2
       title: Coverage scoring in LLM rescore
       what: |
@@ -118,8 +121,9 @@ slices:
         determinism, plus one recorded-real-output fixture). Extend the existing
         tests/test_sourcing_llm_rescore.py.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       questions:
         - id: q-llm-omits
           text: What happens when the LLM omits or fabricates coverage fields?
@@ -166,6 +170,7 @@ slices:
         (new dependency); relaxing additionalProperties (schema enforcement is
         the malformed-output guard).
     - id: slice-3
+      feature_id: feat-d20ff292
       num: 3
       title: Known-gaps harvest and matcher
       what: |
@@ -212,8 +217,9 @@ slices:
         hit/miss fixtures including the 'claims' false-positive guard case.
         Integration: run_crawl fixture writes gap_hits_json for an old posting.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       questions:
         - id: q-overmatch
           text: How is keyword over-matching prevented (e.g. 'claims' badging insurance JDs that are legitimately relevant)?
@@ -251,6 +257,7 @@ slices:
         LLM-judged gaps (only covers top-30; this mechanism must cover all
         postings with JD text).
     - id: slice-4
+      feature_id: feat-d10d8969
       num: 4
       title: Postings API exposes coverage and gap hits
       what: |
@@ -283,8 +290,9 @@ slices:
         fields; legacy row serializes nulls; malformed uncovered_json serializes
         null without erroring.
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       critic_revisions:
         - source: sonnet
           severity: LOW
@@ -300,6 +308,7 @@ slices:
         **Rejected:** separate /api/postings/coverage endpoint (extra round-trip
         for the inbox table render).
     - id: slice-5
+      feature_id: feat-e3c24156
       num: 5
       title: 'Inbox UI: coverage column, gap badges, min-coverage filter'
       what: |
@@ -332,8 +341,9 @@ slices:
         behavior including null passthrough, badge render on scored and
         null-coverage rows, apply button enabled on a gap-flagged row.
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
+      execution_status: promoted
       critic_revisions:
         - source: sonnet
           severity: LOW
