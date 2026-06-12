@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Master-bullets digest builder</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-6ec8c30a"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-12T16:44:09.870267"
+             data-updated="2026-06-12T16:47:10.478913" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034">
+
+        <header>
+            <h1>Master-bullets digest builder</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-cf0dc034.html" data-relationship="part_of" data-since="2026-06-12T16:44:09.884223">trk-cf0dc034</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-2434601a.html" data-relationship="planned_in" data-since="2026-06-12T16:44:09.877123">plan-2434601a</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/a2249514-64c5-442d-b15a-7b05450b9c37.html" data-relationship="implemented_in" data-since="2026-06-12T16:47:10.478771">session a2249514-64c5-442d-b15a-7b05450b9c37</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>New src/jobsmith/sourcing/coverage.py with build_master_digest(conn) -&gt; str:
+reads the master_content table directly (schema in
+migrations/004_master_content.sql; same data the `jobsmith db dump-master`
+command at cli.py:1563 reads via ensure_master_loaded), compresses
+bullets + skills into a digest hard-capped at ~500 tokens (~2000 chars),
+grouped by section. Pure function over a DB connection; no LLM calls.
+Built once per rescore_postings() invocation and shared across all N
+postings in the run.</p>
+        </section>
+    </article>
+</body>
+</html>
