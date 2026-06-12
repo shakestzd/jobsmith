@@ -1,0 +1,18 @@
+meta:
+    id: plan-2434601a
+    track_id: trk-cf0dc034
+    title: 'Postings coverage filter: score postings against existing master bullets'
+    description: 'Surface a bullet-coverage signal on the postings inbox so likely UNCOVERED_MUST_HAVE halts are visible before an apply run is spent. Two mechanisms: (1) inject a digest of actual DB master bullets into the LLM triage rescore and emit coverage + likely-uncovered must-haves; (2) match postings against accumulated halt-envelope known gaps.'
+    created_at: "2026-06-12"
+    status: draft
+    priority: medium
+    schema_version: v3
+    version: 2
+design:
+    problem: ""
+    goals: []
+    constraints: []
+    approved: false
+    comment: ""
+slices: []
+questions: []
