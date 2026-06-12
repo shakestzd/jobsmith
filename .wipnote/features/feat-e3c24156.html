@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Inbox UI: coverage column, gap badges, min-coverage filter</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-e3c24156"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-12T16:44:09.982715"
+             data-updated="2026-06-12T17:40:58.945025" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034">
+
+        <header>
+            <h1>Inbox UI: coverage column, gap badges, min-coverage filter</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-2434601a.html" data-relationship="planned_in" data-since="2026-06-12T16:44:09.98876">plan-2434601a</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-cf0dc034.html" data-relationship="part_of" data-since="2026-06-12T16:44:09.993917">trk-cf0dc034</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="../features/feat-d10d8969.html" data-relationship="blocked_by">feat-d10d8969</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/a2249514-64c5-442d-b15a-7b05450b9c37.html" data-relationship="implemented_in" data-since="2026-06-12T17:40:58.9449">session a2249514-64c5-442d-b15a-7b05450b9c37</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>In web/src/app/postings.tsx: add a sortable coverage column (em dash for
+null, nulls sort last; tooltip on the em dash: &#39;not rescored&#39;), red gap
+badges per gap_hits entry (e.g. &#39;gap: DBT&#39;) with the matched term in the
+tooltip, and a min-coverage numeric filter input styled after the
+existing &#39;min score&#39; filter. The filter never excludes null-coverage
+rows (gap badges remain visible on them regardless). Extend the
+PostingRow TypeScript type in web/src/api/types.ts with the three new
+fields. Badges and column are advisory only - the apply button is never
+disabled by coverage (constraint 4).</p>
+        </section>
+    </article>
+</body>
+</html>
