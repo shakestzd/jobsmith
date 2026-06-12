@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Coverage scoring in LLM rescore</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-a73173a1"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-12T16:44:09.897352"
+             data-updated="2026-06-12T16:59:53.606299" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034">
+
+        <header>
+            <h1>Coverage scoring in LLM rescore</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="../features/feat-6ec8c30a.html" data-relationship="blocked_by">feat-6ec8c30a</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/a2249514-64c5-442d-b15a-7b05450b9c37.html" data-relationship="implemented_in" data-since="2026-06-12T16:59:53.606169">session a2249514-64c5-442d-b15a-7b05450b9c37</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-2434601a.html" data-relationship="planned_in" data-since="2026-06-12T16:44:09.904057">plan-2434601a</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-cf0dc034.html" data-relationship="part_of" data-since="2026-06-12T16:44:09.909788">trk-cf0dc034</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Extend the rescore contract in src/jobsmith/sourcing/llm_rescore.py:
+inject the slice-1 digest into FIT_SCORER_SYSTEM_PROMPT as the
+authoritative bullet inventory (specialty framing stays), add
+coverage: int 0-100 and uncovered_must_haves: string[] (max 5, &lt;80 chars,
+halt-envelope vocabulary) to BOTH the ReasoningResult dataclass
+(llm_rescore.py:126-136) AND _OUTPUT_SCHEMA properties
+(llm_rescore.py:236 - it sets additionalProperties:False, so unlisted
+fields are rejected; extend the schema, do not relax the constraint).
+New migration migrations/012_posting_coverage.sql adds
+postings.coverage_score REAL NULL + postings.uncovered_json TEXT NULL,
+registered in db.py&#39;s hardcoded _PIPELINE_MIGRATIONS list. Extend
+update_posting_llm_score() (llm_rescore.py:144-168) with the two new
+kwargs and update its caller in rescore_postings() (~line 486-494).
+Postings outside the rescored top-N keep NULL (no signal).</p>
+        </section>
+    </article>
+</body>
+</html>
