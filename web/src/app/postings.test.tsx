@@ -8,6 +8,11 @@
 //  - promote button calls promotePosting and shows success message
 //  - promote with jd_fetch_failed shows warning in success message
 //  - filter tabs visible
+//  - coverage column: renders value for scored row, em dash for null with tooltip
+//  - coverage column: sorts with nulls last in both directions
+//  - min-coverage filter: excludes below-threshold rows, keeps null-coverage rows
+//  - gap badges: render from gap_hits on scored rows, on null-coverage rows too
+//  - apply button: remains enabled on gap-flagged row
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
@@ -37,8 +42,9 @@ vi.mock('./SourcingHealthBanner', () => ({
 
 import { usePostings } from '../api/hooks';
 import { setPostingStatus, promotePosting } from '../api/client';
+import type { PostingRow } from '../api/types';
 
-const POSTING_FIXTURE = {
+const POSTING_FIXTURE: PostingRow = {
   id: 1,
   source: 'greenhouse/stripe',
   title: 'Senior Engineer',
@@ -53,6 +59,29 @@ const POSTING_FIXTURE = {
   first_seen_at: '2026-06-01T10:00:00Z',
   last_seen_at: '2026-06-01T10:00:00Z',
   url: 'https://stripe.com/jobs/1',
+  coverage_score: null,
+  uncovered: null,
+  gap_hits: null,
+};
+
+const POSTING_WITH_COVERAGE: PostingRow = {
+  ...POSTING_FIXTURE,
+  id: 2,
+  title: 'Data Engineer',
+  company: 'Databricks',
+  coverage_score: 0.75,
+  uncovered: ['dbt'],
+  gap_hits: [{ gap: 'DBT', term: 'dbt' }],
+};
+
+const POSTING_NULL_COVERAGE_WITH_GAPS: PostingRow = {
+  ...POSTING_FIXTURE,
+  id: 3,
+  title: 'ML Engineer',
+  company: 'OpenAI',
+  coverage_score: null,
+  uncovered: null,
+  gap_hits: [{ gap: 'Spark', term: 'spark' }],
 };
 
 function setupMockHook(postings = [POSTING_FIXTURE]) {
@@ -165,5 +194,115 @@ describe('PostingsView', () => {
     setupMockHook();
     render(<PostingsView />);
     expect(screen.getByTestId('sourcing-health-banner')).toBeInTheDocument();
+  });
+
+  // ── Coverage column tests ──────────────────────────────────────────────────
+
+  it('renders coverage column header', () => {
+    setupMockHook([POSTING_WITH_COVERAGE]);
+    render(<PostingsView />);
+    expect(screen.getByText(/coverage/i)).toBeTruthy();
+  });
+
+  it('renders numeric coverage value for scored row', () => {
+    setupMockHook([POSTING_WITH_COVERAGE]);
+    render(<PostingsView />);
+    // coverage_score=0.75 → "75"
+    expect(screen.getByText('75')).toBeTruthy();
+  });
+
+  it('renders em dash for null coverage with not-rescored tooltip', () => {
+    setupMockHook([POSTING_FIXTURE]);
+    render(<PostingsView />);
+    // Should find an element with title "not rescored" that contains em dash
+    const emDashEl = screen.getByTitle('not rescored');
+    expect(emDashEl).toBeTruthy();
+    expect(emDashEl.textContent).toBe('—');
+  });
+
+  it('sorts coverage column: nulls last when ascending', () => {
+    const low: PostingRow = { ...POSTING_FIXTURE, id: 10, title: 'Low Score', coverage_score: 0.3, gap_hits: null, uncovered: null };
+    const high: PostingRow = { ...POSTING_FIXTURE, id: 11, title: 'High Score', coverage_score: 0.9, gap_hits: null, uncovered: null };
+    const nullCov: PostingRow = { ...POSTING_FIXTURE, id: 12, title: 'Null Coverage', coverage_score: null, gap_hits: null, uncovered: null };
+    setupMockHook([low, high, nullCov]);
+    render(<PostingsView />);
+    const coverageHeader = screen.getByRole('columnheader', { name: /^coverage/i });
+    fireEvent.click(coverageHeader);
+    const rows = screen.getAllByRole('row');
+    // Skip header row; find data rows by title text order
+    const titles = rows.slice(1).map((r) => r.textContent ?? '').filter((t) => t.includes('Score') || t.includes('Coverage'));
+    expect(titles[titles.length - 1]).toContain('Null Coverage');
+  });
+
+  it('sorts coverage column: nulls last when descending', () => {
+    const low: PostingRow = { ...POSTING_FIXTURE, id: 10, title: 'Low Score', coverage_score: 0.3, gap_hits: null, uncovered: null };
+    const high: PostingRow = { ...POSTING_FIXTURE, id: 11, title: 'High Score', coverage_score: 0.9, gap_hits: null, uncovered: null };
+    const nullCov: PostingRow = { ...POSTING_FIXTURE, id: 12, title: 'Null Coverage', coverage_score: null, gap_hits: null, uncovered: null };
+    setupMockHook([low, high, nullCov]);
+    render(<PostingsView />);
+    const coverageHeader = screen.getByRole('columnheader', { name: /^coverage/i });
+    fireEvent.click(coverageHeader); // asc
+    fireEvent.click(coverageHeader); // desc
+    const rows = screen.getAllByRole('row');
+    const titles = rows.slice(1).map((r) => r.textContent ?? '').filter((t) => t.includes('Score') || t.includes('Coverage'));
+    expect(titles[titles.length - 1]).toContain('Null Coverage');
+  });
+
+  // ── Min-coverage filter tests ──────────────────────────────────────────────
+
+  it('min-coverage filter excludes below-threshold rows', () => {
+    const low: PostingRow = { ...POSTING_FIXTURE, id: 10, title: 'Low Coverage Row', coverage_score: 0.3, gap_hits: null, uncovered: null };
+    const high: PostingRow = { ...POSTING_FIXTURE, id: 11, title: 'High Coverage Row', coverage_score: 0.9, gap_hits: null, uncovered: null };
+    setupMockHook([low, high]);
+    render(<PostingsView />);
+    const minCovInput = screen.getByPlaceholderText(/min coverage/i);
+    fireEvent.change(minCovInput, { target: { value: '50' } });
+    expect(screen.queryByText('Low Coverage Row')).toBeNull();
+    expect(screen.getByText('High Coverage Row')).toBeTruthy();
+  });
+
+  it('min-coverage filter passes through null-coverage rows', () => {
+    const nullCov: PostingRow = { ...POSTING_FIXTURE, id: 12, title: 'Null Coverage Row', coverage_score: null, gap_hits: null, uncovered: null };
+    const low: PostingRow = { ...POSTING_FIXTURE, id: 10, title: 'Low Coverage Row', coverage_score: 0.2, gap_hits: null, uncovered: null };
+    setupMockHook([nullCov, low]);
+    render(<PostingsView />);
+    const minCovInput = screen.getByPlaceholderText(/min coverage/i);
+    fireEvent.change(minCovInput, { target: { value: '50' } });
+    // null-coverage row always passes through
+    expect(screen.getByText('Null Coverage Row')).toBeTruthy();
+    // low-coverage row excluded
+    expect(screen.queryByText('Low Coverage Row')).toBeNull();
+  });
+
+  // ── Gap badge tests ────────────────────────────────────────────────────────
+
+  it('renders gap badge from gap_hits on scored row', () => {
+    setupMockHook([POSTING_WITH_COVERAGE]);
+    render(<PostingsView />);
+    // Badge should show gap label "DBT"
+    expect(screen.getByText('DBT')).toBeTruthy();
+  });
+
+  it('gap badge has matched term in tooltip', () => {
+    setupMockHook([POSTING_WITH_COVERAGE]);
+    render(<PostingsView />);
+    const badge = screen.getByTitle('matched: dbt');
+    expect(badge).toBeTruthy();
+    expect(badge.textContent).toBe('DBT');
+  });
+
+  it('renders gap badge on null-coverage row', () => {
+    setupMockHook([POSTING_NULL_COVERAGE_WITH_GAPS]);
+    render(<PostingsView />);
+    expect(screen.getByText('Spark')).toBeTruthy();
+  });
+
+  // ── Apply button not disabled by coverage ─────────────────────────────────
+
+  it('apply button is enabled on gap-flagged row', () => {
+    setupMockHook([POSTING_WITH_COVERAGE]);
+    render(<PostingsView />);
+    const applyBtn = screen.getByText('apply');
+    expect((applyBtn as HTMLButtonElement).disabled).toBe(false);
   });
 });
