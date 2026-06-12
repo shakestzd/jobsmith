@@ -7,11 +7,22 @@ meta:
     status: draft
     priority: medium
     schema_version: v3
-    version: 2
+    version: 3
 design:
-    problem: ""
-    goals: []
-    constraints: []
+    problem: 'Apply runs cost real money and ~7 minutes, then halt on UNCOVERED_MUST_HAVE gaps that were knowable upfront from master content (2/2 live test runs halted: GitLab on zero AI/LLM bullets, Arcadia on DBT + healthcare-data). Equally, triage fit scores ignore the actual bullet inventory (hardcoded profile summary in FIT_SCORER_SYSTEM_PROMPT), so ranking quality itself suffers - both halt-prediction and ranking are facets of the same missing coverage signal.'
+    goals:
+        - |-
+          Coverage estimate + likely-uncovered must-haves emitted by the LLM rescore using a digest of actual DB master bullets
+          Known-gaps matching: badge postings whose JD text hits accumulated UNCOVERED_MUST_HAVE halt envelope gaps
+          Postings inbox UI: sortable coverage column + filter alongside existing triage score
+          Fewer halted apply runs on knowable gaps; better-ordered inbox
+    constraints:
+        - Stay inside existing rescore budget cap (no new LLM passes; top-N=30 only; empty-JD postings show no signal
+        - |-
+          never a fake one)
+          No new runtime dependencies
+          Additive DB schema only (existing postings rows keep working without re-sourcing)
+          Coverage is advisory - never blocks apply
     approved: false
     comment: ""
 slices: []

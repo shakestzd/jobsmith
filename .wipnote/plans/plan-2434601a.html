@@ -420,7 +420,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <p style="color:var(--text-dim)">Surface a bullet-coverage signal on the postings inbox so likely UNCOVERED_MUST_HAVE halts are visible before an apply run is spent. Two mechanisms: (1) inject a digest of actual DB master bullets into the LLM triage rescore and emit coverage + likely-uncovered must-haves; (2) match postings against accumulated halt-envelope known gaps.</p>
   <div class="meta">
     <span class="badge badge-pending">Draft</span>
-    <span style="font-size:.75rem;color:var(--text-muted)">v2 · 0 slices · Created 2026-06-12</span>
+    <span style="font-size:.75rem;color:var(--text-muted)">v3 · 0 slices · Created 2026-06-12</span>
   </div>
 </header>
 <button id="themeToggle" style="position:fixed;top:16px;right:16px;z-index:100;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;color:var(--text);font-family:var(--mono);font-size:0.75rem;cursor:pointer;">
@@ -452,17 +452,31 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <details id="design" class="section-card" open data-phase="design" data-status="pending">
   <summary><span>Design</span><span class="badge badge-pending" data-badge-for="design">Pending</span></summary>
   <div class="section-body">
-    <!--PLAN_DESIGN_CONTENT-->
-    <div class="sub-section">
-      <h4>Open Questions</h4>
-      <!--PLAN_QUESTIONS-->
-    </div>
+    <h4>Problem</h4>
+<div data-markdown>Apply runs cost real money and ~7 minutes, then halt on UNCOVERED_MUST_HAVE gaps that were knowable upfront from master content (2/2 live test runs halted: GitLab on zero AI/LLM bullets, Arcadia on DBT + healthcare-data). Equally, triage fit scores ignore the actual bullet inventory (hardcoded profile summary in FIT_SCORER_SYSTEM_PROMPT), so ranking quality itself suffers - both halt-prediction and ranking are facets of the same missing coverage signal.</div>
+<h4>Goals</h4>
+<ol>
+<li data-markdown>Coverage estimate + likely-uncovered must-haves emitted by the LLM rescore using a digest of actual DB master bullets
+Known-gaps matching: badge postings whose JD text hits accumulated UNCOVERED_MUST_HAVE halt envelope gaps
+Postings inbox UI: sortable coverage column + filter alongside existing triage score
+Fewer halted apply runs on knowable gaps; better-ordered inbox</li>
+</ol>
+<h4>Constraints</h4>
+<ul>
+<li data-markdown>Stay inside existing rescore budget cap (no new LLM passes; top-N=30 only; empty-JD postings show no signal</li>
+<li data-markdown>never a fake one)
+No new runtime dependencies
+Additive DB schema only (existing postings rows keep working without re-sourcing)
+Coverage is advisory - never blocks apply</li>
+</ul>
+
     <div class="approval-row">
       <label><input type="checkbox" data-section="design" data-action="approve"> Approve design</label>
       <textarea data-section="design" data-comment-for="design" placeholder="Comments on design decisions..."></textarea>
     </div>
   </div>
 </details>
+
 
 <!-- Structure Outline (hidden when empty) -->
 
