@@ -90,18 +90,19 @@ def reconcile_canonical_slug(
 
     Strategy
     --------
-    1. Try ``applications/{active_slug}/.apply-state/jd-parsed.json``.
-    2. Fallback: glob ``applications/*/.apply-state/jd-parsed.json`` and pick
+    1. Try DB (apply_state table): read jd-parsed for active_slug.
+    2. Fallback (FS): check ``applications/{active_slug}/.apply-state/jd-parsed.json``.
+    3. Fallback (FS): glob ``applications/*/.apply-state/jd-parsed.json`` and pick
        the most recently modified candidate **whose mtime is >= started_at**
        (produced during this run).  Stale prior-run artifacts are skipped to
        prevent picking up an unrelated job's slug.
-    3. Compute canonical = ``_slugify_part(company) + "-" + _slugify_part(position)``.
-    4. If the *owning* directory's name differs from canonical, rename it.
+    4. Compute canonical = ``_slugify_part(company) + "-" + _slugify_part(position)``.
+    5. If the *owning* directory's name differs from canonical, rename it.
        If the canonical directory already exists and is non-empty, halt with
        a controlled error and return ``(active_slug, False)`` — the user
        must resolve the collision manually, and the index must NOT be
        updated to point at the active (non-canonical) slug.
-    5. Return ``(canonical, True)``.
+    6. Return ``(canonical, True)``.
 
     When no qualifying ``jd-parsed.json`` is found, returns
     ``(active_slug, False)`` and logs a warning.
@@ -120,36 +121,71 @@ def reconcile_canonical_slug(
     repo_root = config_path.parent
     apps_dir = resolve(config.output.applications_dir, repo_root)
 
-    # 1. Primary: check the active slug's apply-state
-    primary = apps_dir / active_slug / ".apply-state" / "jd-parsed.json"
-    if primary.exists():
-        jd_path = primary
-        owning_dir = apps_dir / active_slug
-    else:
-        # 2. Fallback: candidates produced during this run only
-        # (mtime >= started_at, with a 1s buffer for filesystem clock drift).
-        threshold = started_at - 1.0
-        candidates = [
-            p
-            for p in apps_dir.glob("*/.apply-state/jd-parsed.json")
-            if p.stat().st_mtime >= threshold
-        ]
-        if not candidates:
-            logger.warning(
-                "reconcile: no jd-parsed.json produced in this run — cannot derive canonical slug."
-            )
-            return active_slug, False
-        jd_path = max(candidates, key=lambda p: p.stat().st_mtime)
-        owning_dir = jd_path.parent.parent  # strip "/.apply-state/jd-parsed.json"
+    jd_data = None
+    owning_dir = None
 
-    # 3. Derive canonical slug from company + position fields
+    # 1. Primary: try DB for active_slug
     try:
-        jd_data = json.loads(jd_path.read_text())
-        company = jd_data.get("company", "")
-        position = jd_data.get("position", "")
+        from jobsmith.core.paths import pipeline_db_path
+        from jobsmith.db import get_state, open_pipeline_db_fast
+
+        db_path = pipeline_db_path(cwd)
+        if db_path is not None and db_path.exists():
+            conn = open_pipeline_db_fast(db_path)
+            try:
+                jd_blob = get_state(conn, slug=active_slug, kind="jd-parsed")
+                if jd_blob is not None:
+                    jd_data = json.loads(jd_blob)
+                    owning_dir = apps_dir / active_slug
+                    logger.debug("reconcile: loaded jd-parsed from DB for slug %r", active_slug)
+            finally:
+                conn.close()
     except Exception as exc:
-        logger.warning("reconcile: failed to parse jd-parsed.json (%s) — skipping.", exc)
+        logger.debug("reconcile: DB lookup failed (degrading to FS): %s", exc)
+
+    # If DB read succeeded, use it; otherwise fall back to FS
+    if jd_data is None:
+        # 2. Fallback: check the active slug's apply-state directory
+        primary = apps_dir / active_slug / ".apply-state" / "jd-parsed.json"
+        if primary.exists():
+            try:
+                jd_data = json.loads(primary.read_text())
+                owning_dir = apps_dir / active_slug
+                logger.debug("reconcile: loaded jd-parsed from FS (active_slug) for %r", active_slug)
+            except Exception as exc:
+                logger.warning("reconcile: failed to parse jd-parsed.json (%s) — skipping.", exc)
+                return active_slug, False
+        else:
+            # 3. Fallback: glob candidates produced during this run only
+            # (mtime >= started_at, with a 1s buffer for filesystem clock drift).
+            threshold = started_at - 1.0
+            candidates = [
+                p
+                for p in apps_dir.glob("*/.apply-state/jd-parsed.json")
+                if p.stat().st_mtime >= threshold
+            ]
+            if not candidates:
+                logger.warning(
+                    "reconcile: no jd-parsed.json found (DB or FS) — cannot derive canonical slug."
+                )
+                return active_slug, False
+            jd_path = max(candidates, key=lambda p: p.stat().st_mtime)
+            owning_dir = jd_path.parent.parent  # strip "/.apply-state/jd-parsed.json"
+            try:
+                jd_data = json.loads(jd_path.read_text())
+                logger.debug("reconcile: loaded jd-parsed from FS (glob) for %r", owning_dir.name)
+            except Exception as exc:
+                logger.warning("reconcile: failed to parse jd-parsed.json (%s) — skipping.", exc)
+                return active_slug, False
+
+    # If jd_data is still None, we exhausted all fallbacks
+    if jd_data is None:
+        logger.warning("reconcile: jd-parsed.json missing from all sources — skipping.")
         return active_slug, False
+
+    # 4. Derive canonical slug from company + position fields
+    company = jd_data.get("company", "")
+    position = jd_data.get("position", "")
 
     if not company or not position:
         logger.warning("reconcile: jd-parsed.json missing company or position — skipping.")
@@ -157,7 +193,10 @@ def reconcile_canonical_slug(
 
     canonical = f"{_slugify_part(company)}-{_slugify_part(position)}"
 
-    # 4. Rename owning dir if it doesn't already have the canonical name.
+    # owning_dir should be set by now from either DB or FS path
+    assert owning_dir is not None, "owning_dir not set after jd_data lookup"
+
+    # 5. Rename owning dir if it doesn't already have the canonical name.
     # shutil.move into an existing directory NESTS the source inside the
     # target rather than renaming, which would leave phase 2/3 reading stale
     # canonical artifacts. Detect collisions and refuse to merge.

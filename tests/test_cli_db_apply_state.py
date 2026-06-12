@@ -373,3 +373,145 @@ class TestRekeySlug:
             assert get_state(conn, slug="from-slug", kind="manifest") is None
         finally:
             conn.close()
+
+
+# ---------------------------------------------------------------------------
+# bug-8350250a: reconcile_canonical_slug reads apply_state from DB first
+# ---------------------------------------------------------------------------
+
+
+class TestReconcileCanonicalSlugDBFirst:
+    def test_reconcile_from_db_only(self, tmp_path: Path) -> None:
+        """Verify reconcile_canonical_slug reads jd-parsed from DB when FS file missing.
+
+        This is the primary fix: when the specialist writes to DB via 'jobsmith db put-state',
+        reconciliation should succeed without requiring the disk file (which eliminates
+        the Write-before-Read failure pattern described in bug-8350250a).
+        """
+        import json
+        import time
+
+        from jobsmith.core.slug import reconcile_canonical_slug
+        from jobsmith.db import put_state
+
+        db_path = _seed_project(tmp_path)
+
+        # Write jd-parsed to DB (DB-only, no FS file)
+        conn = open_pipeline_db(db_path)
+        try:
+            jd_blob = json.dumps({"company": "Test Corp", "position": "Senior Engineer"})
+            put_state(conn, slug="initial-slug", kind="jd-parsed", content_blob=jd_blob)
+        finally:
+            conn.close()
+
+        # Create minimal app dir structure (no jd-parsed.json file on FS)
+        apps_dir = tmp_path / "private" / "applications" / "initial-slug"
+        apps_dir.mkdir(parents=True, exist_ok=True)
+        state_dir = apps_dir / ".apply-state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        # Verify jd-parsed.json does NOT exist on FS
+        jd_fs_path = state_dir / "jd-parsed.json"
+        assert not jd_fs_path.exists()
+
+        # Call reconcile_canonical_slug — should read from DB
+        started_at = time.time()
+        canonical, reconciled = reconcile_canonical_slug("initial-slug", tmp_path, started_at)
+
+        # Assertions
+        assert reconciled, "Should successfully reconcile from DB"
+        assert canonical == "test-corp-senior-engineer"
+
+        # Verify directory was renamed
+        new_app_dir = tmp_path / "private" / "applications" / canonical
+        assert new_app_dir.exists()
+        assert not apps_dir.exists()
+
+    def test_reconcile_from_fs_fallback(self, tmp_path: Path) -> None:
+        """Verify FS fallback still works when DB has no jd-parsed (backward compat).
+
+        Legacy runs that wrote .apply-state/jd-parsed.json directly to disk
+        (before DB migration) continue to reconcile correctly.
+        """
+        import json
+        import time
+
+        from jobsmith.core.slug import reconcile_canonical_slug
+
+        db_path = _seed_project(tmp_path)
+
+        # Initialize DB but don't write jd-parsed
+        conn = open_pipeline_db(db_path)
+        conn.close()
+
+        # Create app dir with jd-parsed.json on FS only
+        apps_dir = tmp_path / "private" / "applications" / "url-slug"
+        apps_dir.mkdir(parents=True, exist_ok=True)
+        state_dir = apps_dir / ".apply-state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        jd_parsed_path = state_dir / "jd-parsed.json"
+        jd_parsed_path.write_text(
+            json.dumps({"company": "FS Company", "position": "Lead Dev"}),
+            encoding="utf-8",
+        )
+
+        # Call reconcile_canonical_slug — should read from FS
+        started_at = time.time()
+        canonical, reconciled = reconcile_canonical_slug("url-slug", tmp_path, started_at)
+
+        # Assertions
+        assert reconciled, "Should successfully reconcile from FS"
+        assert canonical == "fs-company-lead-dev"
+
+        # Verify directory was renamed
+        new_app_dir = tmp_path / "private" / "applications" / canonical
+        assert new_app_dir.exists()
+        assert not apps_dir.exists()
+
+    def test_reconcile_db_preferred_over_fs(self, tmp_path: Path) -> None:
+        """Verify DB is preferred when both DB and FS have jd-parsed.
+
+        Ensures DB is the source of truth: if both exist, we use DB and ignore FS
+        (fixing the "second state source" problem described in the bug).
+        """
+        import json
+        import time
+
+        from jobsmith.core.slug import reconcile_canonical_slug
+        from jobsmith.db import put_state
+
+        db_path = _seed_project(tmp_path)
+
+        # Write DIFFERENT jd-parsed to DB vs FS
+        conn = open_pipeline_db(db_path)
+        try:
+            # DB has "DB Corp" / "DB Engineer"
+            jd_blob = json.dumps({"company": "DB Corp", "position": "DB Engineer"})
+            put_state(conn, slug="slug1", kind="jd-parsed", content_blob=jd_blob)
+        finally:
+            conn.close()
+
+        # Create app dir with DIFFERENT jd-parsed.json on FS
+        apps_dir = tmp_path / "private" / "applications" / "slug1"
+        apps_dir.mkdir(parents=True, exist_ok=True)
+        state_dir = apps_dir / ".apply-state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        jd_parsed_path = state_dir / "jd-parsed.json"
+        # FS has "FS Corp" / "FS Engineer"
+        jd_parsed_path.write_text(
+            json.dumps({"company": "FS Corp", "position": "FS Engineer"}),
+            encoding="utf-8",
+        )
+
+        # Call reconcile_canonical_slug — should prefer DB
+        started_at = time.time()
+        canonical, reconciled = reconcile_canonical_slug("slug1", tmp_path, started_at)
+
+        # Should use DB value, not FS value
+        assert reconciled, "Should successfully reconcile"
+        # DB Corp → db-corp; FS Corp → fs-corp
+        assert canonical == "db-corp-db-engineer", (
+            f"Expected 'db-corp-db-engineer' (DB should win), got '{canonical}'"
+        )
