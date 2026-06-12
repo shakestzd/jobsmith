@@ -1167,8 +1167,8 @@ describe('ApplicationDetail fromApi unknown-phase fix (bug-300fb9ad)', () => {
     // a phase event with timestamps, but in this test we only emit the
     // transcript event. The important fix (bug-26db7047) is that the card shows
     // 'failed' instead of 'queued'.
-    const phaseDurations = document.querySelectorAll('.phase .sub');
-    const firstDurationText = phaseDurations[0]?.textContent ?? '';
-    expect(firstDurationText).toMatch(/—/);
+    const phaseMetas = document.querySelectorAll('.phase-meta');
+    const firstMetaText = phaseMetas[0]?.textContent ?? '';
+    expect(firstMetaText).toMatch(/—/);
   });
 });
