@@ -262,6 +262,12 @@ export interface PostingRow {
   dedup_key: string;
   first_seen_at: string;
   last_seen_at: string;
+  /** Coverage score from gap analysis (0–1). Null when JD not rescored. */
+  coverage_score?: number | null;
+  /** Terms from the benchmark that the JD did not cover. Null when not rescored. */
+  uncovered?: string[] | null;
+  /** Gap hits: each entry is a gap label + matched term from the JD. */
+  gap_hits?: { gap: string; term: string }[] | null;
 }
 
 /** Response from POST /api/postings/{id}/promote. */
