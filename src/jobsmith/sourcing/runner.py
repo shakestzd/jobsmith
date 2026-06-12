@@ -24,6 +24,7 @@ Design notes
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import time
 import uuid
@@ -733,6 +734,37 @@ def run_crawl(
             except Exception as exc:
                 logger.warning("email alert ingestion failed (non-fatal): %s", exc)
                 degraded.append("email_alerts")
+
+        # Known-gaps badge pass (feat-d20ff292) — runs against ALL postings with JD text,
+        # not just new_posting_ids, so historical postings get backfilled on first crawl.
+        if not dry_run:
+            try:
+                from .gaps import harvest_known_gaps, match_posting  # local import
+
+                known_gaps = harvest_known_gaps(conn)
+                # Query all postings with non-empty JD text for gap matching
+                jd_rows = conn.execute(
+                    "SELECT id, jd_text FROM postings WHERE jd_text IS NOT NULL AND jd_text != ''"
+                ).fetchall()
+                gap_match_count = 0
+                for jd_row in jd_rows:
+                    posting_id_gm = jd_row["id"] if hasattr(jd_row, "keys") else jd_row[0]
+                    jd_text_gm = jd_row["jd_text"] if hasattr(jd_row, "keys") else jd_row[1]
+                    hits = match_posting(jd_text_gm, known_gaps)
+                    conn.execute(
+                        "UPDATE postings SET gap_hits_json = ? WHERE id = ?",
+                        (json.dumps(hits), posting_id_gm),
+                    )
+                    if hits:
+                        gap_match_count += 1
+                conn.commit()
+                logger.info(
+                    "Gap matching: %d/%d JD postings matched known gaps",
+                    gap_match_count,
+                    len(jd_rows),
+                )
+            except Exception as exc:
+                logger.warning("Gap matching pass failed (non-fatal): %s", exc)
 
         # LLM triage rescore seam (feat-1602d64c)
         if not dry_run and not no_llm and new_posting_ids:
