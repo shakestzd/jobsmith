@@ -2055,6 +2055,14 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
           // ``phase_failed`` event with a real phase name. Only update
           // when the SSE payload names a real phase.
           if (data.phase === 'gather' || data.phase === 'draft' || data.phase === 'render') {
+            // bug-26db7047: mark the failed phase's progress as done (100%) so the
+            // phase card status logic correctly shows 'failed' instead of 'queued'.
+            // The card status is determined by: if progress >= 100 → 'done',
+            // else if isStuckPhase (failed) → 'failed', else → 'queued'.
+            // When a phase halts without completing, progress stays < 100 and the
+            // card incorrectly falls through to 'queued'. Setting progress to 100
+            // here ensures the card shows the failed state.
+            setProgress(p => ({ ...p, [phaseNum]: 100 }));
             setFailedPhaseNum(phaseNum as 1 | 2 | 3);
           }
         }
@@ -2302,9 +2310,20 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
   // (e.g. user clicks force re-run, server returns a new run_id) drops the
   // stale stream and resubscribes; cleanup runs on slug change or unmount.
   // Roborev job 945 fix.
+  // bug-404f66e2: subscribe as soon as apiRunId arrives and the run is in an
+  // active state (queued/gather/draft/render/running), not just when
+  // apiStatus === 'running'. This fixes the case where a user clicks "apply"
+  // on a posting and is redirected to the detail page: the run is registered
+  // immediately but may be in 'queued' state, and the SSE stream should open
+  // right away before any events arrive. If the run hasn't started yet, the
+  // endpoint will return a 404, but buildEventsUrl requires a valid run_id
+  // and we poll for it; once the run's status advances and the run_id is
+  // persisted in the DB, the SSE connection succeeds.
   useEffect(() => {
-    if (apiStatus !== 'running') return;
     if (!apiRunId) return;
+    // Only subscribe if the run is active (any phase state other than 'done',
+    // 'rendered', or 'failed' which we handle separately via polling).
+    if (apiStatus === 'done' || apiStatus === 'rendered' || apiStatus === 'failed') return;
     subscribeToEvents(slug);
     setRunning(true);
     return () => {
