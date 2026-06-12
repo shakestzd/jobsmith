@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Postings API exposes coverage and gap hits</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-d10d8969"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-12T16:44:09.95894"
+             data-updated="2026-06-12T17:28:20.456424" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034">
+
+        <header>
+            <h1>Postings API exposes coverage and gap hits</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/a2249514-64c5-442d-b15a-7b05450b9c37.html" data-relationship="implemented_in" data-since="2026-06-12T17:28:20.456322">session a2249514-64c5-442d-b15a-7b05450b9c37</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-2434601a.html" data-relationship="planned_in" data-since="2026-06-12T16:44:09.964881">plan-2434601a</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-cf0dc034.html" data-relationship="part_of" data-since="2026-06-12T16:44:09.970912">trk-cf0dc034</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="../features/feat-a73173a1.html" data-relationship="blocked_by">feat-a73173a1</a></li>
+                    <li><a href="../features/feat-d20ff292.html" data-relationship="blocked_by">feat-d20ff292</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Extend the postings list/detail payload: add coverage_score,
+uncovered_json, gap_hits_json to the hardcoded _POSTINGS_LIST_COLUMNS
+string (src/jobsmith/api/postings_routes.py:171-175) and add
+coverage_score (float|null), uncovered (string[]|null), gap_hits
+(object[]|null) to the PostingRow schema
+(src/jobsmith/api/schemas/postings.py:8-33). JSON columns are parsed
+server-side; a malformed JSON value serializes as null (never a 500,
+never an invented value).</p>
+        </section>
+    </article>
+</body>
+</html>
