@@ -199,6 +199,76 @@ class TestMigrationApplied:
         assert "apply_state" in tables
         assert "apply_state_log" in tables
 
+    def test_fast_open_skips_migration_checks(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify open_pipeline_db_fast skips migration checks (counters prove it)."""
+        from jobsmith.db import _run_migrations, open_pipeline_db_fast
+
+        # Initialize DB with full migrations.
+        db_path = tmp_path / "test.db"
+        conn = open_pipeline_db(db_path)
+        conn.close()
+
+        # Monkeypatch _run_migrations to count calls.
+        migration_count = [0]
+        original_run_migrations = _run_migrations
+
+        def counted_run_migrations(*args: object, **kwargs: object) -> None:
+            migration_count[0] += 1
+            return original_run_migrations(*args, **kwargs)
+
+        monkeypatch.setattr("jobsmith.db._run_migrations", counted_run_migrations)
+
+        # Multiple fast opens should NOT call _run_migrations.
+        for _ in range(3):
+            conn = open_pipeline_db_fast(db_path)
+            conn.close()
+
+        assert migration_count[0] == 0, f"Fast open called migrations {migration_count[0]} times"
+
+    def test_cli_state_commands_use_fast_open(
+        self, tmp_path: Path, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify CLI state commands don't re-run migrations after DB init."""
+        from jobsmith.db import _run_migrations
+
+        migration_count = [0]
+        original_run_migrations = _run_migrations
+
+        def counted_run_migrations(*args: object, **kwargs: object) -> None:
+            migration_count[0] += 1
+            return original_run_migrations(*args, **kwargs)
+
+        monkeypatch.setattr("jobsmith.db._run_migrations", counted_run_migrations)
+
+        # Seed after patching so we count the init migration.
+        _seed_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        # After _seed_project (which calls open_pipeline_db once),
+        # migration_count[0] == 1. Now run multiple state commands.
+        init_count = migration_count[0]
+        assert init_count == 1, f"Expected init to run migrations once, got {init_count}"
+
+        runner.invoke(
+            cli_app, ["db", "put-state", "--slug", "s1", "--kind", "test"],
+            input='{"v":1}',
+        )
+        runner.invoke(
+            cli_app, ["db", "get-state", "--slug", "s1", "--kind", "test"],
+        )
+        runner.invoke(
+            cli_app, ["db", "list-state", "--slug", "s1"],
+        )
+
+        # If fast open is used, migrations should not be called again.
+        # (If full open_pipeline_db is used, migration_count[0] would be 4.)
+        assert migration_count[0] == 1, (
+            f"Expected only 1 migration run (from init), "
+            f"but got {migration_count[0]} (fast open not used)"
+        )
+
 
 # ---------------------------------------------------------------------------
 # trk-60217f9f post-merge fix — rekey_slug

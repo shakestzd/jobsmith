@@ -116,6 +116,25 @@ def open_pipeline_db(db_path: Path) -> sqlite3.Connection:
     return _open_db(db_path, _PIPELINE_MIGRATIONS, foreign_keys=True)
 
 
+def open_pipeline_db_fast(db_path: Path) -> sqlite3.Connection:
+    """Open pipeline DB without running migrations (assumes schema is initialized).
+
+    Use when the DB is known to exist and be up-to-date (e.g., after the
+    first ``open_pipeline_db()`` call). Skips the schema_migrations table
+    check, making repeated opens much faster.
+
+    For read-only SSE poll operations and CLI state commands that run many
+    times per apply, this avoids redundant migration overhead.
+    """
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path), timeout=_BUSY_TIMEOUT_S)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    # Skip _run_migrations() entirely — assume schema is current.
+    return conn
+
+
 def open_review_db(slug: str, review_dir: Path) -> sqlite3.Connection:
     """Open the per-slug review DB at ``review_dir/<slug>.db``."""
     return _open_db(review_dir / f"{slug}.db", _REVIEW_MIGRATIONS)
@@ -495,6 +514,7 @@ def insert_chat_message(
 __all__ = [
     # Connection helpers
     "open_pipeline_db",
+    "open_pipeline_db_fast",
     "open_review_db",
     # Pipeline DB writers
     "get_apply_run_by_slug",

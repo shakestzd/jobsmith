@@ -32,7 +32,7 @@ from . import __version__
 from .api.server import resolve_host, up_serve
 from .assemble import PACKAGE_ROOT, assemble_all, assemble_application
 from .config import CONFIG_FILENAME, find_config, load_config
-from .db import open_pipeline_db
+from .db import open_pipeline_db, open_pipeline_db_fast
 from .db_ingest import backfill_all, backfill_slug, iter_backfillable_slugs
 from .factcheck import check_draft, load_db_master_content, load_jd_context_for_draft
 from .guard import check_anchors, render_diff_md
@@ -1662,7 +1662,7 @@ def db_get_state(
         typer.echo(f"ERROR: Pipeline DB not found at {db_path}.", err=True)
         raise typer.Exit(code=2)
 
-    conn = open_pipeline_db(db_path)
+    conn = open_pipeline_db_fast(db_path)
     try:
         row = conn.execute(
             "SELECT content_blob FROM apply_state WHERE slug = ? AND kind = ?",
@@ -1707,7 +1707,7 @@ def db_put_state(
 
     from datetime import datetime, timezone
 
-    conn = open_pipeline_db(db_path)
+    conn = open_pipeline_db_fast(db_path)
     try:
         conn.execute(
             "INSERT OR REPLACE INTO apply_state (slug, kind, content_blob, updated_at) "
@@ -1740,7 +1740,7 @@ def db_list_state(
         typer.echo(f"ERROR: Pipeline DB not found at {db_path}.", err=True)
         raise typer.Exit(code=2)
 
-    conn = open_pipeline_db(db_path)
+    conn = open_pipeline_db_fast(db_path)
     try:
         rows = conn.execute(
             "SELECT kind, updated_at FROM apply_state WHERE slug = ? ORDER BY kind",
@@ -1774,7 +1774,7 @@ def db_reset_state(
         typer.echo(f"ERROR: Pipeline DB not found at {db_path}.", err=True)
         raise typer.Exit(code=2)
 
-    conn = open_pipeline_db(db_path)
+    conn = open_pipeline_db_fast(db_path)
     try:
         n_state = conn.execute(
             "SELECT COUNT(*) FROM apply_state WHERE slug = ?", (slug,)

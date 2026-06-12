@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from jobsmith.db import open_pipeline_db
+from jobsmith.db import open_pipeline_db_fast
 
 
 def _max_rowid(conn: sqlite3.Connection, table: str) -> int:
@@ -97,10 +97,13 @@ def _db_poll_once(
     is touched from multiple thread-pool workers (default ``check_same_thread=True``
     rejects this).
 
+    Uses ``open_pipeline_db_fast()`` (no migrations) since the SSE stream
+    is long-lived; migrations run once at app startup, not on every poll tick.
+
     Returns: (new_runs, new_specialists, current_run_snapshot,
               max_run_rowid, max_specialist_rowid).
     """
-    conn = open_pipeline_db(db_path)
+    conn = open_pipeline_db_fast(db_path)
     try:
         if after_run_rowid < 0:
             after_run_rowid = _max_rowid(conn, "apply_runs")
