@@ -34,11 +34,13 @@ slices:
       title: Master-bullets digest builder
       what: |
         New src/jobsmith/sourcing/coverage.py with build_master_digest(conn) -> str:
-        reads master content from the pipeline DB (same read path as the
-        `jobsmith db dump-master` command in cli.py:1563), compresses bullets +
-        skills into a digest hard-capped at ~500 tokens (~2000 chars), grouped by
-        section. Pure function over a DB connection; no LLM calls. Built once per
-        rescore_postings() invocation and shared across all N postings in the run.
+        reads the master_content table directly (schema in
+        migrations/004_master_content.sql; same data the `jobsmith db dump-master`
+        command at cli.py:1563 reads via ensure_master_loaded), compresses
+        bullets + skills into a digest hard-capped at ~500 tokens (~2000 chars),
+        grouped by section. Pure function over a DB connection; no LLM calls.
+        Built once per rescore_postings() invocation and shared across all N
+        postings in the run.
       why: |
         The rescore prompt currently embeds a hardcoded profile summary; the
         digest is the bridge that lets triage see the user's actual, current
@@ -59,12 +61,16 @@ slices:
       complexity: standard
       approved: false
       comment: ""
+      critic_revisions:
+        - source: sonnet
+          severity: LOW
+          summary: Cite master_content table explicitly; read it directly, not via CLI (cli.py:1563 ensure_master_loaded path confirmed).
       decisions_notes: |
         **Trigger:** called once per rescore_postings() run, not per posting.
-        **State:** none persisted - digest is derived per run from DB master
-        content (chosen over cached-digest-with-hash: staleness logic not worth
-        one cheap query per run; chosen over reusing bullet-selector's view:
-        avoids coupling sourcing to apply internals).
+        **State:** none persisted - digest is derived per run from the
+        master_content table (chosen over cached-digest-with-hash: staleness
+        logic not worth one cheap query per run; chosen over reusing
+        bullet-selector's view: avoids coupling sourcing to apply internals).
         **Payload:** plain-text digest, ~500 token cap, section-grouped.
         **Rejected:** cached digest (invalidation complexity); importing apply's
         bullet-selector representation (cross-module coupling).
@@ -73,14 +79,19 @@ slices:
       title: Coverage scoring in LLM rescore
       what: |
         Extend the rescore contract in src/jobsmith/sourcing/llm_rescore.py:
-        inject the slice-1 digest into FIT_SCORER_SYSTEM_PROMPT (replacing the
-        role of the hardcoded specialty evidence as bullet inventory - keep the
-        specialty framing), and extend ReasoningResult parsing with
-        coverage: int 0-100 and uncovered_must_haves: string[] (max 5 items,
-        <80 chars each, same vocabulary as apply's halt envelopes). Additive
-        migration adds postings.coverage_score REAL NULL and
-        postings.uncovered_json TEXT NULL; extend update_posting_llm_score() to
-        write them. Postings outside the rescored top-N keep NULL (no signal).
+        inject the slice-1 digest into FIT_SCORER_SYSTEM_PROMPT as the
+        authoritative bullet inventory (specialty framing stays), add
+        coverage: int 0-100 and uncovered_must_haves: string[] (max 5, <80 chars,
+        halt-envelope vocabulary) to BOTH the ReasoningResult dataclass
+        (llm_rescore.py:126-136) AND _OUTPUT_SCHEMA properties
+        (llm_rescore.py:236 - it sets additionalProperties:False, so unlisted
+        fields are rejected; extend the schema, do not relax the constraint).
+        New migration migrations/012_posting_coverage.sql adds
+        postings.coverage_score REAL NULL + postings.uncovered_json TEXT NULL,
+        registered in db.py's hardcoded _PIPELINE_MIGRATIONS list. Extend
+        update_posting_llm_score() (llm_rescore.py:144-168) with the two new
+        kwargs and update its caller in rescore_postings() (~line 486-494).
+        Postings outside the rescored top-N keep NULL (no signal).
       why: |
         This is the core mechanism: the same budget-capped LLM pass that already
         reads each JD can judge coverage against real bullets for free, making
@@ -88,23 +99,24 @@ slices:
       files:
         - src/jobsmith/sourcing/llm_rescore.py
         - src/jobsmith/db.py
-        - src/jobsmith/migrations/
-        - tests/test_llm_rescore.py
+        - src/jobsmith/migrations/012_posting_coverage.sql
+        - tests/test_sourcing_llm_rescore.py
       deps:
         - 1
       done_when:
         - Rescore writes coverage_score and uncovered_json for scored postings; unscored/empty-JD postings stay NULL
         - 'Backtest: the GitLab Senior AI Engineer and Arcadia Lead Analytics Engineer JDs score low coverage and list gaps matching their actual halt envelopes (AI/LLM bullets; DBT, healthcare claims)'
-        - Malformed/absent coverage fields in LLM output degrade to NULL with a rationale marker - never a fabricated score
+        - Malformed/absent coverage fields in LLM output degrade to NULL with a rationale marker - never a fabricated score; mid-run timeout leaves remaining postings NULL
         - Measured prompt token growth from the digest stays within the existing per-call timeout and budget semantics
       effort: M
       risk: Med
       tests: |
-        Unit: parser handles coverage fields present/absent/malformed; digest
-        injection point renders into the prompt. Integration: rescore against the
-        two halted-run JD fixtures asserts low coverage + expected gap strings
-        (mocked SDK responses for determinism, plus one recorded-real-output
-        fixture).
+        Unit: parser handles coverage fields present/absent/malformed; extended
+        _OUTPUT_SCHEMA accepts the new fields; digest injection renders into the
+        prompt. Integration: rescore against the two halted-run JD fixtures
+        asserts low coverage + expected gap strings (mocked SDK responses for
+        determinism, plus one recorded-real-output fixture). Extend the existing
+        tests/test_sourcing_llm_rescore.py.
       complexity: complex
       approved: false
       comment: ""
@@ -115,34 +127,65 @@ slices:
         - id: q-prompt-role
           text: Does the digest replace or supplement the hardcoded specialty profile in the prompt?
           answer: 'Supplement: specialties stay as fit-scoring context; the digest is added as the authoritative bullet inventory for the coverage judgment only. Replacing the profile would change fit-score semantics, which is out of scope.'
+      critic_revisions:
+        - source: sonnet
+          severity: HIGH
+          summary: _OUTPUT_SCHEMA has additionalProperties:False (llm_rescore.py:236) - new fields must be added to schema properties or SDK rejects output. Baked into what/tests.
+        - source: sonnet
+          severity: HIGH
+          summary: Migrations are a hardcoded list in db.py (ends at 011); slice must add 012 file AND register it. Files list now names 012_posting_coverage.sql.
+        - source: sonnet
+          severity: HIGH
+          summary: update_posting_llm_score() caller in rescore_postings() (~486-494) also needs updating - edit surface wider than first drafted; acknowledged in what.
+        - source: haiku
+          severity: HIGH
+          summary: Coverage staleness on master-content change was undefined - now an explicit point-in-time decision with documented limitation (see Staleness in decisions_notes).
+        - source: haiku
+          severity: LOW
+          summary: 'Mid-run LLM timeout semantics now defined: remaining postings stay NULL (done_when 3).'
       decisions_notes: |
         **Trigger:** existing rescore_postings() pass after fast-scoring upsert -
         no new LLM pass (constraint 1).
         **State:** additive postings columns coverage_score REAL NULL +
-        uncovered_json TEXT NULL, written via the update_posting_llm_score()
-        pattern (chosen over separate coverage table: no history requirement,
-        avoids joins on the inbox hot path; over computed-on-read: LLM output
-        must persist).
+        uncovered_json TEXT NULL via migration 012 (registered in db.py's
+        hardcoded _PIPELINE_MIGRATIONS - the list is not auto-discovered).
+        Written via the update_posting_llm_score() pattern (chosen over separate
+        coverage table: no history requirement, avoids joins on the inbox hot
+        path; over computed-on-read: LLM output must persist).
+        **Staleness (explicit decision):** coverage is point-in-time - recomputed
+        only when a posting is rescored under existing rescore semantics (new
+        postings, top-N). Master-content edits do NOT retroactively re-score;
+        accepted limitation, surfaced as em dash/tooltip in the UI. A bulk
+        re-score trigger is out of scope (YAGNI) and can be a follow-up if the
+        limitation bites.
         **Payload:** coverage 0-100 int + uncovered_must_haves string[] mirroring
         halt-envelope vocabulary so gaps read consistently across triage and
-        apply (chosen over tier-only: loses sortability; over
-        +matched-bullets: token cost without a consumer).
+        apply (chosen over tier-only: loses sortability; over +matched-bullets:
+        token cost without a consumer).
         **Rejected:** separate LLM coverage pass (budget); embedding similarity
-        (new dependency).
+        (new dependency); relaxing additionalProperties (schema enforcement is
+        the malformed-output guard).
     - id: slice-3
       num: 3
       title: Known-gaps harvest and matcher
       what: |
         New src/jobsmith/sourcing/gaps.py: harvest_known_gaps(conn) reads
         apply_state rows whose JSON payload has status=halt across all slugs
-        (reuse get_state/list-state read helpers; read-only, open_pipeline_db_fast),
-        extracting must_have + additional_uncovered_must_haves strings.
-        extract_gap_terms(gap) derives 1-3 distinctive lowercase terms per gap
-        (min length 3, curated stoplist for generic words like 'data',
-        'experience'). match_posting(jd_text, gaps) returns conservative
-        case-insensitive hits. Integrate in runner.run_crawl after the upsert
-        loop; persist hits to additive postings.gap_hits_json TEXT NULL.
-        Re-evaluated on each crawl so newly-accumulated halts apply to old rows.
+        (read-only via open_pipeline_db_fast/get_state), extracting must_have
+        plus additional_uncovered_must_haves WHEN PRESENT - the two real
+        envelopes differ: Arcadia has the field, GitLab carries extra gaps only
+        in its summary string; handle both shapes defensively and fall back to
+        must_have alone. Harvest-time revalidation: drop any gap whose extracted
+        terms now appear in the current master digest (slice-1 builder) - fixed
+        gaps expire automatically. extract_gap_terms(gap) derives 1-3 distinctive
+        lowercase terms per gap (min length 3, curated stoplist for generic words
+        like 'data', 'experience'). match_posting(jd_text, gaps) returns
+        conservative case-insensitive hits. Integrate in runner.run_crawl after
+        the upsert loop (~line 664, before the rescore block at ~737): match
+        against ALL postings with non-empty jd_text (dedicated query - NOT just
+        new_posting_ids), so newly-accumulated halts apply to old rows. Persist
+        to additive postings.gap_hits_json TEXT NULL via migration
+        migrations/013_posting_gap_hits.sql registered in db.py.
       why: |
         Halt envelopes already record exactly which must-haves the master content
         cannot cover; matching them against new postings is nearly free,
@@ -151,35 +194,58 @@ slices:
         - src/jobsmith/sourcing/gaps.py
         - src/jobsmith/sourcing/runner.py
         - src/jobsmith/db.py
-        - src/jobsmith/migrations/
+        - src/jobsmith/migrations/013_posting_gap_hits.sql
         - tests/test_sourcing_gaps.py
-      deps: []
+      deps:
+        - 1
       done_when:
-        - harvest_known_gaps returns the two existing halt envelopes' gaps (AI/LLM bullets; DBT; healthcare claims) from the real DB schema fixtures
-        - 'Backtest: GitLab and Arcadia JD texts match their own gap terms; a tax-equity fixture JD matches none (over-match guard)'
-        - Crawl integration writes gap_hits_json additively; postings with empty JD text get no hits, not false negatives presented as clean
+        - harvest_known_gaps returns gaps from both real envelope shapes (Arcadia with additional_uncovered_must_haves, GitLab without) against schema fixtures
+        - 'Backtest positive AND negative: GitLab JD matches its AI/LLM gap terms, Arcadia JD matches DBT/healthcare terms, and a tax-equity fixture JD matches none'
+        - A gap whose terms appear in current master content is dropped at harvest (fixed-gap expiry)
+        - Crawl integration writes gap_hits_json for all postings with JD text (not only new ones); empty-JD postings get no hits, not false negatives presented as clean
       effort: M
       risk: Low
       tests: |
         Unit: extract_gap_terms on the three real gap strings produces expected
-        terms and drops stoplist words; match_posting hit/miss fixtures including
-        the 'claims' false-positive guard case. Integration: run_crawl fixture
-        writes gap_hits_json.
+        terms and drops stoplist words; both envelope shapes parse; revalidation
+        drops a gap once fixture master content contains its term; match_posting
+        hit/miss fixtures including the 'claims' false-positive guard case.
+        Integration: run_crawl fixture writes gap_hits_json for an old posting.
       complexity: complex
       approved: false
       comment: ""
       questions:
         - id: q-overmatch
           text: How is keyword over-matching prevented (e.g. 'claims' badging insurance JDs that are legitimately relevant)?
-          answer: 'Conservative extraction: only distinctive multi-word or domain terms (''dbt'', ''healthcare claims'', ''ehr''), min token length 3, curated stoplist, and badges are advisory UI hints - never filters applied by default. The backtest includes a must-not-match fixture.'
+          answer: 'Conservative extraction: only distinctive multi-word or domain terms (''dbt'', ''healthcare claims'', ''ehr''), min token length 3, curated stoplist, and badges are advisory UI hints - never filters applied by default. The backtest includes both must-match and must-not-match fixtures.'
+      critic_revisions:
+        - source: sonnet
+          severity: HIGH
+          summary: 'Real envelopes are asymmetric: GitLab halt lacks additional_uncovered_must_haves (Arcadia has it). Defensive parsing baked into what + done_when 1.'
+        - source: sonnet
+          severity: LOW
+          summary: Re-evaluating old rows needs a dedicated all-postings-with-jd_text query - new_posting_ids only tracks new rows (runner.py upsert ends ~664). Baked in.
+        - source: haiku
+          severity: HIGH
+          summary: 'Gap lifecycle was undefined (fixed gaps badged forever). Now: harvest-time revalidation against master digest expires fixed gaps.'
+        - source: haiku
+          severity: HIGH
+          summary: 'Backfill story now explicit: first crawl after merge badges the existing backlog (all-postings query). LLM coverage backfill stays out of scope.'
+        - source: haiku
+          severity: LOW
+          summary: Backtest was negative-only; done_when 2 now requires positive matches for both halted runs plus the must-not-match fixture.
       decisions_notes: |
         **Trigger:** sourcing-time (run_crawl after upsert), re-evaluated each
-        crawl (chosen over halt-time persistence to a dedicated table: would
-        touch the apply path and miss the two existing halts without backfill;
-        over manual gaps file: does not compound automatically).
-        **State:** additive postings.gap_hits_json TEXT NULL; gaps themselves
-        stay in their halt envelopes - apply_state remains the single source of
-        truth (consistent with arch card apply-run-identity-db-first).
+        crawl over ALL postings with JD text via a dedicated query (chosen over
+        halt-time persistence to a dedicated table: would touch the apply path
+        and miss the two existing halts without backfill; over manual gaps file:
+        does not compound automatically). This is also the backfill story: the
+        first crawl after merge badges the existing ~443-posting backlog.
+        **Gap lifecycle (explicit decision):** gaps live in their halt envelopes
+        (apply_state stays the single source of truth, consistent with arch card
+        apply-run-identity-db-first) and are revalidated against the master
+        digest at every harvest - when the user adds the missing bullet, the gap
+        stops matching and its badges disappear on the next crawl.
         **Payload:** gap_hits_json = [{gap: <short label>, term: <matched term>}].
         **Rejected:** embedding similarity (new dependency, constraint 2);
         LLM-judged gaps (only covers top-30; this mechanism must cover all
@@ -188,36 +254,49 @@ slices:
       num: 4
       title: Postings API exposes coverage and gap hits
       what: |
-        Extend the postings list/detail payload in
-        src/jobsmith/api/postings_routes.py with coverage_score (float|null),
-        uncovered (parsed list|null) and gap_hits (parsed list|null) from the new
-        columns. NULL columns serialize as null - the API never invents a value.
+        Extend the postings list/detail payload: add coverage_score,
+        uncovered_json, gap_hits_json to the hardcoded _POSTINGS_LIST_COLUMNS
+        string (src/jobsmith/api/postings_routes.py:171-175) and add
+        coverage_score (float|null), uncovered (string[]|null), gap_hits
+        (object[]|null) to the PostingRow schema
+        (src/jobsmith/api/schemas/postings.py:8-33). JSON columns are parsed
+        server-side; a malformed JSON value serializes as null (never a 500,
+        never an invented value).
       why: |
         The inbox UI (slice-5) needs the signal on the wire; keeping parsing
         server-side means the web app gets typed JSON, consistent with how
         rationale/evidence_json are exposed today.
       files:
         - src/jobsmith/api/postings_routes.py
+        - src/jobsmith/api/schemas/postings.py
         - tests/test_api_postings.py
       deps:
         - 2
         - 3
       done_when:
-        - GET /api/postings rows carry coverage_score, uncovered, gap_hits; nulls for unscored rows
+        - GET /api/postings rows carry coverage_score, uncovered, gap_hits; nulls for unscored rows and for malformed stored JSON
         - Existing postings API tests stay green (additive change only)
       effort: S
       risk: Low
       tests: |
         Extend test_api_postings.py: scored fixture row round-trips all three
-        fields; legacy row (pre-migration values) serializes nulls.
+        fields; legacy row serializes nulls; malformed uncovered_json serializes
+        null without erroring.
       complexity: standard
       approved: false
       comment: ""
+      critic_revisions:
+        - source: sonnet
+          severity: LOW
+          summary: schemas/postings.py (PostingRow, lines 8-33) was missing from files; _POSTINGS_LIST_COLUMNS is a hardcoded string at postings_routes.py:171-175. Both added.
+        - source: haiku
+          severity: LOW
+          summary: Malformed-JSON parse handling now explicit in what/done_when/tests (degrades to null, never 500).
       decisions_notes: |
         **Trigger:** existing postings endpoints, no new routes.
         **State:** none - pass-through of slice-2/3 columns.
         **Payload:** coverage_score: number|null, uncovered: string[]|null,
-        gap_hits: {gap,term}[]|null.
+        gap_hits: {gap,term}[]|null; malformed stored JSON degrades to null.
         **Rejected:** separate /api/postings/coverage endpoint (extra round-trip
         for the inbox table render).
     - id: slice-5
@@ -225,37 +304,83 @@ slices:
       title: 'Inbox UI: coverage column, gap badges, min-coverage filter'
       what: |
         In web/src/app/postings.tsx: add a sortable coverage column (em dash for
-        null), red gap badges per gap_hits entry (e.g. 'gap: DBT') with the
-        matched term in the tooltip, and a min-coverage numeric filter input
-        styled after the existing 'min score' filter. Badges and column are
-        advisory only - the apply button is never disabled by coverage
-        (constraint 4).
+        null, nulls sort last; tooltip on the em dash: 'not rescored'), red gap
+        badges per gap_hits entry (e.g. 'gap: DBT') with the matched term in the
+        tooltip, and a min-coverage numeric filter input styled after the
+        existing 'min score' filter. The filter never excludes null-coverage
+        rows (gap badges remain visible on them regardless). Extend the
+        PostingRow TypeScript type in web/src/api/types.ts with the three new
+        fields. Badges and column are advisory only - the apply button is never
+        disabled by coverage (constraint 4).
       why: |
         The whole feature lands or dies at the inbox: the user must see likely
         halts before clicking apply (Goal 3).
       files:
         - web/src/app/postings.tsx
         - web/src/app/postings.test.tsx
+        - web/src/api/types.ts
       deps:
         - 4
       done_when:
-        - Coverage column renders values and em dashes, sorts correctly with nulls last; min-coverage filter excludes below-threshold rows but never rows with null coverage
-        - Gap badges render from gap_hits with tooltip; apply button remains enabled regardless of coverage
-        - 'Live Chrome verification on the running app: scored and unscored rows render correctly in the real inbox (per project verification rule)'
+        - Coverage column renders values and em dashes (tooltip 'not rescored'), sorts correctly with nulls last; min-coverage filter excludes below-threshold rows but never null-coverage rows
+        - Gap badges render from gap_hits with matched-term tooltip, including on null-coverage rows; apply button remains enabled regardless of coverage
+        - 'Live Chrome verification on the running app: scored, unscored, and gap-flagged rows render correctly in the real inbox (per project verification rule)'
       effort: M
       risk: Low
       tests: |
         Extend postings.test.tsx: column render + sort with nulls, filter
-        behavior including null passthrough, badge render, apply button enabled
-        on a gap-flagged row.
+        behavior including null passthrough, badge render on scored and
+        null-coverage rows, apply button enabled on a gap-flagged row.
       complexity: standard
       approved: false
       comment: ""
+      critic_revisions:
+        - source: sonnet
+          severity: LOW
+          summary: PostingRow TS type lives in web/src/api/types.ts (consumed via hooks.ts) - was missing from files; build would fail on type errors. Added.
+        - source: haiku
+          severity: LOW
+          summary: Filter x gap-badge interaction and uniform null rendering now explicit decisions (null rows never filtered out; badges independent of coverage).
       decisions_notes: |
         **Trigger:** render-time from API fields; no client-side matching logic.
         **State:** filter value in component state, consistent with existing
         min-score filter.
-        **Payload:** consumes slice-4 fields verbatim.
+        **Payload:** consumes slice-4 fields verbatim; PostingRow type extended
+        in web/src/api/types.ts.
+        **NULL semantics (explicit decision):** all null-coverage causes
+        (empty JD, outside rescored top-N, LLM timeout) render identically as an
+        em dash with a 'not rescored' tooltip - distinguishing them adds UI
+        complexity without changing the user's action (rescore or apply anyway).
+        Gap badges are independent of coverage and appear on null rows too.
         **Rejected:** blended fitxcoverage rank (hides why a row ranked low);
         badges-only (loses sortability, the main triage win).
 questions: []
+critique:
+    reviewed_at: "2026-06-12"
+    reviewers:
+        - Haiku (design)
+        - Sonnet (feasibility)
+    assumptions: []
+    critics: []
+    risks:
+        - risk: LLM coverage estimates are noisy on a 45s budget call
+          severity: Medium
+          mitigation: Verifiable uncovered-list mirrors halt vocabulary; advisory-only framing; NULL (never fabricated) on malformed output
+        - risk: _OUTPUT_SCHEMA additionalProperties:False rejects extended LLM output
+          severity: High
+          mitigation: Slice-2 explicitly adds coverage/uncovered_must_haves to the schema properties (llm_rescore.py:236) rather than relaxing the constraint
+        - risk: Gap badges go stale after the user fixes a gap in master content
+          severity: Medium
+          mitigation: 'Harvest-time revalidation: drop gaps whose terms now appear in the master digest (slice-3)'
+    synthesis: |
+        Both critics passed the core architecture. Resolved before human review:
+        data-lifecycle decisions are now explicit (LLM coverage is point-in-time
+        and recomputed only on rescore; gap matching re-evaluates ALL postings
+        with JD text every crawl; gaps are revalidated against master content at
+        harvest so fixed gaps expire); the _OUTPUT_SCHEMA extension, hardcoded
+        _PIPELINE_MIGRATIONS list (012/013), asymmetric halt-envelope shapes
+        (GitLab lacks additional_uncovered_must_haves), and the missing
+        schemas/postings.py + web/src/api/types.ts file entries are all baked
+        into the affected slices. Remaining for the reviewer: accept the
+        documented limitation that LLM coverage only exists for rescored top-N
+        postings (em dash elsewhere), and the q-overmatch conservatism trade-off.

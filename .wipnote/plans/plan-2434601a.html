@@ -411,7 +411,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-1" class="slice-nav-item" data-slice-nav="1">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="1"></span>
         <span>#1 Master-bullets digest builder</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="1 issue(s)">&#9888;1</span>
         
       </a>
     </li>
@@ -420,7 +420,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-2" class="slice-nav-item" data-slice-nav="2">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="2"></span>
         <span>#2 Coverage scoring in LLM rescore</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="5 issue(s)">&#9888;5</span>
         <span class="nav-triage-badge nav-triage-question" title="2 open question(s)">?2</span>
       </a>
     </li>
@@ -429,7 +429,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-3" class="slice-nav-item" data-slice-nav="3">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="3"></span>
         <span>#3 Known-gaps harvest and matcher</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="5 issue(s)">&#9888;5</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -438,7 +438,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-4" class="slice-nav-item" data-slice-nav="4">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="4"></span>
         <span>#4 Postings API exposes coverage and gap hits</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="2 issue(s)">&#9888;2</span>
         
       </a>
     </li>
@@ -447,7 +447,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-5" class="slice-nav-item" data-slice-nav="5">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="5"></span>
         <span>#5 Inbox UI: coverage column, gap badges, min-coverage filter</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="2 issue(s)">&#9888;2</span>
         
       </a>
     </li>
@@ -491,9 +491,9 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <div id="graph-data" style="display:none">
     <div data-node="1" data-name="Master-bullets digest builder" data-status="pending" data-deps="" data-files="2"></div>
     <div data-node="2" data-name="Coverage scoring in LLM rescore" data-status="pending" data-deps="1" data-files="4"></div>
-    <div data-node="3" data-name="Known-gaps harvest and matcher" data-status="pending" data-deps="" data-files="5"></div>
-    <div data-node="4" data-name="Postings API exposes coverage and gap hits" data-status="pending" data-deps="2,3" data-files="2"></div>
-    <div data-node="5" data-name="Inbox UI: coverage column, gap badges, min-coverage filter" data-status="pending" data-deps="4" data-files="2"></div>
+    <div data-node="3" data-name="Known-gaps harvest and matcher" data-status="pending" data-deps="1" data-files="5"></div>
+    <div data-node="4" data-name="Postings API exposes coverage and gap hits" data-status="pending" data-deps="2,3" data-files="3"></div>
+    <div data-node="5" data-name="Inbox UI: coverage column, gap badges, min-coverage filter" data-status="pending" data-deps="4" data-files="3"></div>
     
     <!--PLAN_GRAPH_NODES-->
   </div>
@@ -558,7 +558,7 @@ coverage signal.
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-1">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="1 critic issue(s)">1 issue</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -591,11 +591,13 @@ coverage signal.
           
           <input type="checkbox" id="slice-1-what-reveal" class="reveal-toggle">
           <div class="markdown-block reveal-content serif-prose"><p>New src/jobsmith/sourcing/coverage.py with build_master_digest(conn) -&gt; str:
-reads master content from the pipeline DB (same read path as the
-<code>jobsmith db dump-master</code> command in cli.py:1563), compresses bullets +
-skills into a digest hard-capped at ~500 tokens (~2000 chars), grouped by
-section. Pure function over a DB connection; no LLM calls. Built once per
-rescore_postings() invocation and shared across all N postings in the run.</p>
+reads the master_content table directly (schema in
+migrations/004_master_content.sql; same data the <code>jobsmith db dump-master</code>
+command at cli.py:1563 reads via ensure_master_loaded), compresses
+bullets + skills into a digest hard-capped at ~500 tokens (~2000 chars),
+grouped by section. Pure function over a DB connection; no LLM calls.
+Built once per rescore_postings() invocation and shared across all N
+postings in the run.</p>
 </div>
           <label for="slice-1-what-reveal" class="reveal-label">Show full description</label>
           
@@ -636,10 +638,10 @@ bullet inventory (Goal 1) without per-posting queries or staleness logic.</p>
         
         <input type="checkbox" id="slice-1-decisions-reveal" class="reveal-toggle">
         <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> called once per rescore_postings() run, not per posting.
-<strong>State:</strong> none persisted - digest is derived per run from DB master
-content (chosen over cached-digest-with-hash: staleness logic not worth
-one cheap query per run; chosen over reusing bullet-selector&#39;s view:
-avoids coupling sourcing to apply internals).
+<strong>State:</strong> none persisted - digest is derived per run from the
+master_content table (chosen over cached-digest-with-hash: staleness
+logic not worth one cheap query per run; chosen over reusing
+bullet-selector&#39;s view: avoids coupling sourcing to apply internals).
 <strong>Payload:</strong> plain-text digest, ~500 token cap, section-grouped.
 <strong>Rejected:</strong> cached digest (invalidation complexity); importing apply&#39;s
 bullet-selector representation (cross-module coupling).</p>
@@ -675,6 +677,19 @@ bullet-selector representation (cross-module coupling).</p>
     
 
     
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">LOW</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">Cite master_content table explicitly; read it directly, not via CLI (cli.py:1563 ensure_master_loaded path confirmed).</span>
+        </div>
+        
+      </div>
+    </div>
+    
 
     
 
@@ -701,7 +716,7 @@ bullet-selector representation (cross-module coupling).</p>
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-2">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="5 critic issue(s)">5 issues</span>
           <span class="badge badge-sm badge-questions" title="2 open question(s)">2 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -734,14 +749,19 @@ bullet-selector representation (cross-module coupling).</p>
           
           <input type="checkbox" id="slice-2-what-reveal" class="reveal-toggle">
           <div class="markdown-block reveal-content serif-prose"><p>Extend the rescore contract in src/jobsmith/sourcing/llm_rescore.py:
-inject the slice-1 digest into FIT_SCORER_SYSTEM_PROMPT (replacing the
-role of the hardcoded specialty evidence as bullet inventory - keep the
-specialty framing), and extend ReasoningResult parsing with
-coverage: int 0-100 and uncovered_must_haves: string[] (max 5 items,
-&lt;80 chars each, same vocabulary as apply&#39;s halt envelopes). Additive
-migration adds postings.coverage_score REAL NULL and
-postings.uncovered_json TEXT NULL; extend update_posting_llm_score() to
-write them. Postings outside the rescored top-N keep NULL (no signal).</p>
+inject the slice-1 digest into FIT_SCORER_SYSTEM_PROMPT as the
+authoritative bullet inventory (specialty framing stays), add
+coverage: int 0-100 and uncovered_must_haves: string[] (max 5, &lt;80 chars,
+halt-envelope vocabulary) to BOTH the ReasoningResult dataclass
+(llm_rescore.py:126-136) AND _OUTPUT_SCHEMA properties
+(llm_rescore.py:236 - it sets additionalProperties:False, so unlisted
+fields are rejected; extend the schema, do not relax the constraint).
+New migration migrations/012_posting_coverage.sql adds
+postings.coverage_score REAL NULL + postings.uncovered_json TEXT NULL,
+registered in db.py&#39;s hardcoded _PIPELINE_MIGRATIONS list. Extend
+update_posting_llm_score() (llm_rescore.py:144-168) with the two new
+kwargs and update its caller in rescore_postings() (~line 486-494).
+Postings outside the rescored top-N keep NULL (no signal).</p>
 </div>
           <label for="slice-2-what-reveal" class="reveal-label">Show full description</label>
           
@@ -764,13 +784,13 @@ both the ranking and the halt-prediction honest (Goals 1 and 4).</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/sourcing/llm_rescore.py, src/jobsmith/db.py, src/jobsmith/migrations/, tests/test_llm_rescore.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/sourcing/llm_rescore.py, src/jobsmith/db.py, src/jobsmith/migrations/012_posting_coverage.sql, tests/test_sourcing_llm_rescore.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Rescore writes coverage_score and uncovered_json for scored postings; unscored/empty-JD postings stay NULL</li><li>Backtest: the GitLab Senior AI Engineer and Arcadia Lead Analytics Engineer JDs score low coverage and list gaps matching their actual halt envelopes (AI/LLM bullets; DBT, healthcare claims)</li><li>Malformed/absent coverage fields in LLM output degrade to NULL with a rationale marker - never a fabricated score</li><li>Measured prompt token growth from the digest stays within the existing per-call timeout and budget semantics</li></ul>
+        <ul class="slice-done-list"><li>Rescore writes coverage_score and uncovered_json for scored postings; unscored/empty-JD postings stay NULL</li><li>Backtest: the GitLab Senior AI Engineer and Arcadia Lead Analytics Engineer JDs score low coverage and list gaps matching their actual halt envelopes (AI/LLM bullets; DBT, healthcare claims)</li><li>Malformed/absent coverage fields in LLM output degrade to NULL with a rationale marker - never a fabricated score; mid-run timeout leaves remaining postings NULL</li><li>Measured prompt token growth from the digest stays within the existing per-call timeout and budget semantics</li></ul>
       </div>
       
     
@@ -784,16 +804,24 @@ both the ranking and the halt-prediction honest (Goals 1 and 4).</p>
         <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> existing rescore_postings() pass after fast-scoring upsert -
 no new LLM pass (constraint 1).
 <strong>State:</strong> additive postings columns coverage_score REAL NULL +
-uncovered_json TEXT NULL, written via the update_posting_llm_score()
-pattern (chosen over separate coverage table: no history requirement,
-avoids joins on the inbox hot path; over computed-on-read: LLM output
-must persist).
+uncovered_json TEXT NULL via migration 012 (registered in db.py&#39;s
+hardcoded _PIPELINE_MIGRATIONS - the list is not auto-discovered).
+Written via the update_posting_llm_score() pattern (chosen over separate
+coverage table: no history requirement, avoids joins on the inbox hot
+path; over computed-on-read: LLM output must persist).
+<strong>Staleness (explicit decision):</strong> coverage is point-in-time - recomputed
+only when a posting is rescored under existing rescore semantics (new
+postings, top-N). Master-content edits do NOT retroactively re-score;
+accepted limitation, surfaced as em dash/tooltip in the UI. A bulk
+re-score trigger is out of scope (YAGNI) and can be a follow-up if the
+limitation bites.
 <strong>Payload:</strong> coverage 0-100 int + uncovered_must_haves string[] mirroring
 halt-envelope vocabulary so gaps read consistently across triage and
-apply (chosen over tier-only: loses sortability; over
-+matched-bullets: token cost without a consumer).
+apply (chosen over tier-only: loses sortability; over +matched-bullets:
+token cost without a consumer).
 <strong>Rejected:</strong> separate LLM coverage pass (budget); embedding similarity
-(new dependency).</p>
+(new dependency); relaxing additionalProperties (schema enforcement is
+the malformed-output guard).</p>
 </div>
         <label for="slice-2-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -811,12 +839,12 @@ apply (chosen over tier-only: loses sortability; over
           
           <div class="test-group" data-kind="unit">
             <span class="test-chip">UNIT &middot; 1</span>
-            <ul><li>parser handles coverage fields present/absent/malformed; digest</li></ul>
+            <ul><li>parser handles coverage fields present/absent/malformed; extended</li></ul>
           </div>
           
           <div class="test-group" data-kind="other">
-            <span class="test-chip">OTHER &middot; 4</span>
-            <ul><li>injection point renders into the prompt. Integration: rescore against the</li><li>two halted-run JD fixtures asserts low coverage &#43; expected gap strings</li><li>(mocked SDK responses for determinism, plus one recorded-real-output</li><li>fixture).</li></ul>
+            <span class="test-chip">OTHER &middot; 5</span>
+            <ul><li>_OUTPUT_SCHEMA accepts the new fields; digest injection renders into the</li><li>prompt. Integration: rescore against the two halted-run JD fixtures</li><li>asserts low coverage &#43; expected gap strings (mocked SDK responses for</li><li>determinism, plus one recorded-real-output fixture). Extend the existing</li><li>tests/test_sourcing_llm_rescore.py.</li></ul>
           </div>
           
         </div>
@@ -825,6 +853,43 @@ apply (chosen over tier-only: loses sortability; over
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">HIGH</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">_OUTPUT_SCHEMA has additionalProperties:False (llm_rescore.py:236) - new fields must be added to schema properties or SDK rejects output. Baked into what/tests.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">HIGH</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">Migrations are a hardcoded list in db.py (ends at 011); slice must add 012 file AND register it. Files list now names 012_posting_coverage.sql.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">HIGH</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">update_posting_llm_score() caller in rescore_postings() (~486-494) also needs updating - edit surface wider than first drafted; acknowledged in what.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">HIGH</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Coverage staleness on master-content change was undefined - now an explicit point-in-time decision with documented limitation (see Staleness in decisions_notes).</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">LOW</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Mid-run LLM timeout semantics now defined: remaining postings stay NULL (done_when 3).</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -881,7 +946,7 @@ apply (chosen over tier-only: loses sortability; over
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-3">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="5 critic issue(s)">5 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -915,14 +980,21 @@ apply (chosen over tier-only: loses sortability; over
           <input type="checkbox" id="slice-3-what-reveal" class="reveal-toggle">
           <div class="markdown-block reveal-content serif-prose"><p>New src/jobsmith/sourcing/gaps.py: harvest_known_gaps(conn) reads
 apply_state rows whose JSON payload has status=halt across all slugs
-(reuse get_state/list-state read helpers; read-only, open_pipeline_db_fast),
-extracting must_have + additional_uncovered_must_haves strings.
-extract_gap_terms(gap) derives 1-3 distinctive lowercase terms per gap
-(min length 3, curated stoplist for generic words like &#39;data&#39;,
-&#39;experience&#39;). match_posting(jd_text, gaps) returns conservative
-case-insensitive hits. Integrate in runner.run_crawl after the upsert
-loop; persist hits to additive postings.gap_hits_json TEXT NULL.
-Re-evaluated on each crawl so newly-accumulated halts apply to old rows.</p>
+(read-only via open_pipeline_db_fast/get_state), extracting must_have
+plus additional_uncovered_must_haves WHEN PRESENT - the two real
+envelopes differ: Arcadia has the field, GitLab carries extra gaps only
+in its summary string; handle both shapes defensively and fall back to
+must_have alone. Harvest-time revalidation: drop any gap whose extracted
+terms now appear in the current master digest (slice-1 builder) - fixed
+gaps expire automatically. extract_gap_terms(gap) derives 1-3 distinctive
+lowercase terms per gap (min length 3, curated stoplist for generic words
+like &#39;data&#39;, &#39;experience&#39;). match_posting(jd_text, gaps) returns
+conservative case-insensitive hits. Integrate in runner.run_crawl after
+the upsert loop (~line 664, before the rescore block at ~737): match
+against ALL postings with non-empty jd_text (dedicated query - NOT just
+new_posting_ids), so newly-accumulated halts apply to old rows. Persist
+to additive postings.gap_hits_json TEXT NULL via migration
+migrations/013_posting_gap_hits.sql registered in db.py.</p>
 </div>
           <label for="slice-3-what-reveal" class="reveal-label">Show full description</label>
           
@@ -945,13 +1017,13 @@ compounds with every halt, and works without any LLM call (Goal 2).</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/sourcing/gaps.py, src/jobsmith/sourcing/runner.py, src/jobsmith/db.py, src/jobsmith/migrations/, tests/test_sourcing_gaps.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/sourcing/gaps.py, src/jobsmith/sourcing/runner.py, src/jobsmith/db.py, src/jobsmith/migrations/013_posting_gap_hits.sql, tests/test_sourcing_gaps.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>harvest_known_gaps returns the two existing halt envelopes&#39; gaps (AI/LLM bullets; DBT; healthcare claims) from the real DB schema fixtures</li><li>Backtest: GitLab and Arcadia JD texts match their own gap terms; a tax-equity fixture JD matches none (over-match guard)</li><li>Crawl integration writes gap_hits_json additively; postings with empty JD text get no hits, not false negatives presented as clean</li></ul>
+        <ul class="slice-done-list"><li>harvest_known_gaps returns gaps from both real envelope shapes (Arcadia with additional_uncovered_must_haves, GitLab without) against schema fixtures</li><li>Backtest positive AND negative: GitLab JD matches its AI/LLM gap terms, Arcadia JD matches DBT/healthcare terms, and a tax-equity fixture JD matches none</li><li>A gap whose terms appear in current master content is dropped at harvest (fixed-gap expiry)</li><li>Crawl integration writes gap_hits_json for all postings with JD text (not only new ones); empty-JD postings get no hits, not false negatives presented as clean</li></ul>
       </div>
       
     
@@ -963,12 +1035,16 @@ compounds with every halt, and works without any LLM call (Goal 2).</p>
         
         <input type="checkbox" id="slice-3-decisions-reveal" class="reveal-toggle">
         <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> sourcing-time (run_crawl after upsert), re-evaluated each
-crawl (chosen over halt-time persistence to a dedicated table: would
-touch the apply path and miss the two existing halts without backfill;
-over manual gaps file: does not compound automatically).
-<strong>State:</strong> additive postings.gap_hits_json TEXT NULL; gaps themselves
-stay in their halt envelopes - apply_state remains the single source of
-truth (consistent with arch card apply-run-identity-db-first).
+crawl over ALL postings with JD text via a dedicated query (chosen over
+halt-time persistence to a dedicated table: would touch the apply path
+and miss the two existing halts without backfill; over manual gaps file:
+does not compound automatically). This is also the backfill story: the
+first crawl after merge badges the existing ~443-posting backlog.
+<strong>Gap lifecycle (explicit decision):</strong> gaps live in their halt envelopes
+(apply_state stays the single source of truth, consistent with arch card
+apply-run-identity-db-first) and are revalidated against the master
+digest at every harvest - when the user adds the missing bullet, the gap
+stops matching and its badges disappear on the next crawl.
 <strong>Payload:</strong> gap_hits_json = [{gap: , term: }].
 <strong>Rejected:</strong> embedding similarity (new dependency, constraint 2);
 LLM-judged gaps (only covers top-30; this mechanism must cover all
@@ -995,7 +1071,12 @@ postings with JD text).</p>
           
           <div class="test-group" data-kind="other">
             <span class="test-chip">OTHER &middot; 3</span>
-            <ul><li>terms and drops stoplist words; match_posting hit/miss fixtures including</li><li>the &#39;claims&#39; false-positive guard case. Integration: run_crawl fixture</li><li>writes gap_hits_json.</li></ul>
+            <ul><li>terms and drops stoplist words; both envelope shapes parse; revalidation</li><li>drops a gap once fixture master content contains its term; match_posting</li><li>hit/miss fixtures including the &#39;claims&#39; false-positive guard case.</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="integration">
+            <span class="test-chip">INTEGRATION &middot; 1</span>
+            <ul><li>run_crawl fixture writes gap_hits_json for an old posting.</li></ul>
           </div>
           
         </div>
@@ -1004,6 +1085,43 @@ postings with JD text).</p>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">HIGH</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">Real envelopes are asymmetric: GitLab halt lacks additional_uncovered_must_haves (Arcadia has it). Defensive parsing baked into what &#43; done_when 1.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">LOW</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">Re-evaluating old rows needs a dedicated all-postings-with-jd_text query - new_posting_ids only tracks new rows (runner.py upsert ends ~664). Baked in.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">HIGH</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Gap lifecycle was undefined (fixed gaps badged forever). Now: harvest-time revalidation against master digest expires fixed gaps.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">HIGH</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Backfill story now explicit: first crawl after merge badges the existing backlog (all-postings query). LLM coverage backfill stays out of scope.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">LOW</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Backtest was negative-only; done_when 2 now requires positive matches for both halted runs plus the must-not-match fixture.</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1018,7 +1136,7 @@ postings with JD text).</p>
           <textarea
             data-section="slice-3-question-q-overmatch"
             data-comment-for="slice-3-question-q-overmatch"
-            placeholder="Answer question q-overmatch...">Conservative extraction: only distinctive multi-word or domain terms (&#39;dbt&#39;, &#39;healthcare claims&#39;, &#39;ehr&#39;), min token length 3, curated stoplist, and badges are advisory UI hints - never filters applied by default. The backtest includes a must-not-match fixture.</textarea>
+            placeholder="Answer question q-overmatch...">Conservative extraction: only distinctive multi-word or domain terms (&#39;dbt&#39;, &#39;healthcare claims&#39;, &#39;ehr&#39;), min token length 3, curated stoplist, and badges are advisory UI hints - never filters applied by default. The backtest includes both must-match and must-not-match fixtures.</textarea>
           
         </div>
         
@@ -1026,7 +1144,7 @@ postings with JD text).</p>
     </div>
     
 
-    <div class="slice-deps">Dependencies: none</div>
+    <div class="slice-deps">Dependencies: slices 1</div>
 
     <details class="comment-collapse">
       <summary class="comment-collapse-trigger">+ Leave a comment</summary>
@@ -1041,7 +1159,7 @@ postings with JD text).</p>
     <span class="slice-num">#4</span>
     <span class="slice-title-col">
       <span class="slice-name">Postings API exposes coverage and gap hits</span>
-      <span class="slice-preview">Extend the postings list/detail payload in</span>
+      <span class="slice-preview">Extend the postings list/detail payload: add coveragescore,</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-pending badge-sm">S</span>
@@ -1049,7 +1167,7 @@ postings with JD text).</p>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-4">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="2 critic issue(s)">2 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1080,11 +1198,17 @@ postings with JD text).</p>
         <div class="slice-field-label">What</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Extend the postings list/detail payload in
-src/jobsmith/api/postings_routes.py with coverage_score (float|null),
-uncovered (parsed list|null) and gap_hits (parsed list|null) from the new
-columns. NULL columns serialize as null - the API never invents a value.</p>
+          <input type="checkbox" id="slice-4-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Extend the postings list/detail payload: add coverage_score,
+uncovered_json, gap_hits_json to the hardcoded _POSTINGS_LIST_COLUMNS
+string (src/jobsmith/api/postings_routes.py:171-175) and add
+coverage_score (float|null), uncovered (string[]|null), gap_hits
+(object[]|null) to the PostingRow schema
+(src/jobsmith/api/schemas/postings.py:8-33). JSON columns are parsed
+server-side; a malformed JSON value serializes as null (never a 500,
+never an invented value).</p>
 </div>
+          <label for="slice-4-what-reveal" class="reveal-label">Show full description</label>
           
         </div>
       </div>
@@ -1105,13 +1229,13 @@ rationale/evidence_json are exposed today.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/api/postings_routes.py, tests/test_api_postings.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/api/postings_routes.py, src/jobsmith/api/schemas/postings.py, tests/test_api_postings.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>GET /api/postings rows carry coverage_score, uncovered, gap_hits; nulls for unscored rows</li><li>Existing postings API tests stay green (additive change only)</li></ul>
+        <ul class="slice-done-list"><li>GET /api/postings rows carry coverage_score, uncovered, gap_hits; nulls for unscored rows and for malformed stored JSON</li><li>Existing postings API tests stay green (additive change only)</li></ul>
       </div>
       
     
@@ -1124,7 +1248,7 @@ rationale/evidence_json are exposed today.</p>
         <div class="markdown-block serif-prose"><p><strong>Trigger:</strong> existing postings endpoints, no new routes.
 <strong>State:</strong> none - pass-through of slice-2/3 columns.
 <strong>Payload:</strong> coverage_score: number|null, uncovered: string[]|null,
-gap_hits: {gap,term}[]|null.
+gap_hits: {gap,term}[]|null; malformed stored JSON degrades to null.
 <strong>Rejected:</strong> separate /api/postings/coverage endpoint (extra round-trip
 for the inbox table render).</p>
 </div>
@@ -1140,13 +1264,33 @@ for the inbox table render).</p>
         
         
         <div class="markdown-block slice-tests"><p>Extend test_api_postings.py: scored fixture row round-trips all three
-fields; legacy row (pre-migration values) serializes nulls.</p>
+fields; legacy row serializes nulls; malformed uncovered_json serializes
+null without erroring.</p>
 </div>
         
       </div>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">LOW</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">schemas/postings.py (PostingRow, lines 8-33) was missing from files; _POSTINGS_LIST_COLUMNS is a hardcoded string at postings_routes.py:171-175. Both added.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">LOW</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Malformed-JSON parse handling now explicit in what/done_when/tests (degrades to null, never 500).</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1174,7 +1318,7 @@ fields; legacy row (pre-migration values) serializes nulls.</p>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-5">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="2 critic issue(s)">2 issues</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1205,13 +1349,18 @@ fields; legacy row (pre-migration values) serializes nulls.</p>
         <div class="slice-field-label">What</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>In web/src/app/postings.tsx: add a sortable coverage column (em dash for
-null), red gap badges per gap_hits entry (e.g. &#39;gap: DBT&#39;) with the
-matched term in the tooltip, and a min-coverage numeric filter input
-styled after the existing &#39;min score&#39; filter. Badges and column are
-advisory only - the apply button is never disabled by coverage
-(constraint 4).</p>
+          <input type="checkbox" id="slice-5-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>In web/src/app/postings.tsx: add a sortable coverage column (em dash for
+null, nulls sort last; tooltip on the em dash: &#39;not rescored&#39;), red gap
+badges per gap_hits entry (e.g. &#39;gap: DBT&#39;) with the matched term in the
+tooltip, and a min-coverage numeric filter input styled after the
+existing &#39;min score&#39; filter. The filter never excludes null-coverage
+rows (gap badges remain visible on them regardless). Extend the
+PostingRow TypeScript type in web/src/api/types.ts with the three new
+fields. Badges and column are advisory only - the apply button is never
+disabled by coverage (constraint 4).</p>
 </div>
+          <label for="slice-5-what-reveal" class="reveal-label">Show full description</label>
           
         </div>
       </div>
@@ -1231,13 +1380,13 @@ halts before clicking apply (Goal 3).</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>web/src/app/postings.tsx, web/src/app/postings.test.tsx</code></div>
+        <div class="slice-field-value"><code>web/src/app/postings.tsx, web/src/app/postings.test.tsx, web/src/api/types.ts</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Coverage column renders values and em dashes, sorts correctly with nulls last; min-coverage filter excludes below-threshold rows but never rows with null coverage</li><li>Gap badges render from gap_hits with tooltip; apply button remains enabled regardless of coverage</li><li>Live Chrome verification on the running app: scored and unscored rows render correctly in the real inbox (per project verification rule)</li></ul>
+        <ul class="slice-done-list"><li>Coverage column renders values and em dashes (tooltip &#39;not rescored&#39;), sorts correctly with nulls last; min-coverage filter excludes below-threshold rows but never null-coverage rows</li><li>Gap badges render from gap_hits with matched-term tooltip, including on null-coverage rows; apply button remains enabled regardless of coverage</li><li>Live Chrome verification on the running app: scored, unscored, and gap-flagged rows render correctly in the real inbox (per project verification rule)</li></ul>
       </div>
       
     
@@ -1247,13 +1396,21 @@ halts before clicking apply (Goal 3).</p>
       <div class="slice-field-label">Decisions</div>
       <div class="slice-field-value">
         
-        <div class="markdown-block serif-prose"><p><strong>Trigger:</strong> render-time from API fields; no client-side matching logic.
+        <input type="checkbox" id="slice-5-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> render-time from API fields; no client-side matching logic.
 <strong>State:</strong> filter value in component state, consistent with existing
 min-score filter.
-<strong>Payload:</strong> consumes slice-4 fields verbatim.
+<strong>Payload:</strong> consumes slice-4 fields verbatim; PostingRow type extended
+in web/src/api/types.ts.
+<strong>NULL semantics (explicit decision):</strong> all null-coverage causes
+(empty JD, outside rescored top-N, LLM timeout) render identically as an
+em dash with a &#39;not rescored&#39; tooltip - distinguishing them adds UI
+complexity without changing the user&#39;s action (rescore or apply anyway).
+Gap badges are independent of coverage and appear on null rows too.
 <strong>Rejected:</strong> blended fitxcoverage rank (hides why a row ranked low);
 badges-only (loses sortability, the main triage win).</p>
 </div>
+        <label for="slice-5-decisions-reveal" class="reveal-label">Show full decisions</label>
         
       </div>
     </div>
@@ -1266,14 +1423,33 @@ badges-only (loses sortability, the main triage win).</p>
         
         
         <div class="markdown-block slice-tests"><p>Extend postings.test.tsx: column render + sort with nulls, filter
-behavior including null passthrough, badge render, apply button enabled
-on a gap-flagged row.</p>
+behavior including null passthrough, badge render on scored and
+null-coverage rows, apply button enabled on a gap-flagged row.</p>
 </div>
         
       </div>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">LOW</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">PostingRow TS type lives in web/src/api/types.ts (consumed via hooks.ts) - was missing from files; build would fail on type errors. Added.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">LOW</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Filter x gap-badge interaction and uniform null rendering now explicit decisions (null rows never filtered out; badges independent of coverage).</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
