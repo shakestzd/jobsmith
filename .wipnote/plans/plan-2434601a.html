@@ -405,6 +405,55 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <a href="#design" class="nav-link active" data-spy="design" data-initial="D">Design</a>
   <a href="#slices" class="nav-link" data-spy="slices" data-initial="S">Slices</a>
   
+  <ul class="slice-nav-list" id="slice-nav-list">
+    
+    <li>
+      <a href="#slice-1" class="slice-nav-item" data-slice-nav="1">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="1"></span>
+        <span>#1 Master-bullets digest builder</span>
+        
+        
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-2" class="slice-nav-item" data-slice-nav="2">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="2"></span>
+        <span>#2 Coverage scoring in LLM rescore</span>
+        
+        <span class="nav-triage-badge nav-triage-question" title="2 open question(s)">?2</span>
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-3" class="slice-nav-item" data-slice-nav="3">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="3"></span>
+        <span>#3 Known-gaps harvest and matcher</span>
+        
+        <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-4" class="slice-nav-item" data-slice-nav="4">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="4"></span>
+        <span>#4 Postings API exposes coverage and gap hits</span>
+        
+        
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-5" class="slice-nav-item" data-slice-nav="5">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="5"></span>
+        <span>#5 Inbox UI: coverage column, gap badges, min-coverage filter</span>
+        
+        
+      </a>
+    </li>
+    
+  </ul>
+  
   <a href="#questions" class="nav-link" data-spy="questions" data-initial="Q">Decisions</a>
   <a href="#critique" class="nav-link" data-spy="critique" data-initial="C">Critique</a>
   <a href="#feedback-summary" class="nav-link" data-spy="feedback-summary" data-initial="P">Progress</a>
@@ -417,10 +466,10 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <!-- Plan Header -->
 <header class="plan-header">
   <h1>Plan: Postings coverage filter: score postings against existing master bullets</h1>
-  <p style="color:var(--text-dim)">Surface a bullet-coverage signal on the postings inbox so likely UNCOVERED_MUST_HAVE halts are visible before an apply run is spent. Two mechanisms: (1) inject a digest of actual DB master bullets into the LLM triage rescore and emit coverage + likely-uncovered must-haves; (2) match postings against accumulated halt-envelope known gaps.</p>
+  
   <div class="meta">
     <span class="badge badge-pending">Draft</span>
-    <span style="font-size:.75rem;color:var(--text-muted)">v3 · 0 slices · Created 2026-06-12</span>
+    <span style="font-size:.75rem;color:var(--text-muted)">v1 · 5 slices · Created 2026-06-12</span>
   </div>
 </header>
 <button id="themeToggle" style="position:fixed;top:16px;right:16px;z-index:100;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;color:var(--text);font-family:var(--mono);font-size:0.75rem;cursor:pointer;">
@@ -440,6 +489,11 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <section class="dep-graph" data-zone="dependency-graph">
   <h2>Dependency Graph</h2>
   <div id="graph-data" style="display:none">
+    <div data-node="1" data-name="Master-bullets digest builder" data-status="pending" data-deps="" data-files="2"></div>
+    <div data-node="2" data-name="Coverage scoring in LLM rescore" data-status="pending" data-deps="1" data-files="4"></div>
+    <div data-node="3" data-name="Known-gaps harvest and matcher" data-status="pending" data-deps="" data-files="5"></div>
+    <div data-node="4" data-name="Postings API exposes coverage and gap hits" data-status="pending" data-deps="2,3" data-files="2"></div>
+    <div data-node="5" data-name="Inbox UI: coverage column, gap badges, min-coverage filter" data-status="pending" data-deps="4" data-files="2"></div>
     
     <!--PLAN_GRAPH_NODES-->
   </div>
@@ -453,21 +507,27 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <summary><span>Design</span><span class="badge badge-pending" data-badge-for="design">Pending</span></summary>
   <div class="section-body">
     <h4>Problem</h4>
-<div data-markdown>Apply runs cost real money and ~7 minutes, then halt on UNCOVERED_MUST_HAVE gaps that were knowable upfront from master content (2/2 live test runs halted: GitLab on zero AI/LLM bullets, Arcadia on DBT + healthcare-data). Equally, triage fit scores ignore the actual bullet inventory (hardcoded profile summary in FIT_SCORER_SYSTEM_PROMPT), so ranking quality itself suffers - both halt-prediction and ranking are facets of the same missing coverage signal.</div>
+<div data-markdown>Apply runs cost real money and ~7 minutes, then halt on UNCOVERED_MUST_HAVE
+gaps that were knowable upfront from master content (2/2 live test runs
+halted: GitLab on zero AI/LLM bullets, Arcadia on DBT + healthcare-data).
+Equally, triage fit scores ignore the actual bullet inventory (hardcoded
+profile summary in FIT_SCORER_SYSTEM_PROMPT), so ranking quality itself
+suffers. Halt-prediction and ranking are facets of the same missing
+coverage signal.
+</div>
 <h4>Goals</h4>
 <ol>
-<li data-markdown>Coverage estimate + likely-uncovered must-haves emitted by the LLM rescore using a digest of actual DB master bullets
-Known-gaps matching: badge postings whose JD text hits accumulated UNCOVERED_MUST_HAVE halt envelope gaps
-Postings inbox UI: sortable coverage column + filter alongside existing triage score
-Fewer halted apply runs on knowable gaps; better-ordered inbox</li>
+<li data-markdown>Coverage estimate + likely-uncovered must-haves emitted by the LLM rescore using a digest of actual DB master bullets</li>
+<li data-markdown>Known-gaps matching: badge postings whose JD text hits accumulated UNCOVERED_MUST_HAVE halt-envelope gaps</li>
+<li data-markdown>Postings inbox UI: sortable coverage column + gap badges + min-coverage filter alongside existing triage score</li>
+<li data-markdown>Fewer halted apply runs on knowable gaps; better-ordered inbox</li>
 </ol>
 <h4>Constraints</h4>
 <ul>
-<li data-markdown>Stay inside existing rescore budget cap (no new LLM passes; top-N=30 only; empty-JD postings show no signal</li>
-<li data-markdown>never a fake one)
-No new runtime dependencies
-Additive DB schema only (existing postings rows keep working without re-sourcing)
-Coverage is advisory - never blocks apply</li>
+<li data-markdown>Stay inside existing rescore budget cap (no new LLM passes; top-N=30 only; empty-JD postings show no signal, never a fake one)</li>
+<li data-markdown>No new runtime dependencies</li>
+<li data-markdown>Additive DB schema only (existing postings rows keep working without re-sourcing)</li>
+<li data-markdown>Coverage is advisory - never blocks apply</li>
 </ul>
 
     <div class="approval-row">
@@ -485,23 +545,756 @@ Coverage is advisory - never blocks apply</li>
 <details id="slices" class="section-card" open data-phase="slices" data-status="pending">
   <summary><span>Slices</span><span class="badge badge-pending" data-badge-for="slices">Pending</span></summary>
   <div class="section-body">
+    <details class="slice-card" id="slice-1" data-slice="1" data-slice-name="slice-1" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 1: Master-bullets digest builder">
+    <span class="slice-num">#1</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Master-bullets digest builder</span>
+      <span class="slice-preview">New src/jobsmith/sourcing/coverage.py with buildmasterdigest(conn) -&gt; str:</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-pending badge-sm">S</span>
+          <span class="badge badge-pending badge-sm">Low</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-1">Pending</span>
+          
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-1-approval" value="approved" data-section="slice-1" data-action="approve" aria-label="Approve slice 1">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-1-approval" value="changes_requested" data-section="slice-1" data-action="approve" aria-label="Request changes for slice 1">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-1-approval" value="rejected" data-section="slice-1" data-action="approve" aria-label="Reject slice 1">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
     
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-1-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>New src/jobsmith/sourcing/coverage.py with build_master_digest(conn) -&gt; str:
+reads master content from the pipeline DB (same read path as the
+<code>jobsmith db dump-master</code> command in cli.py:1563), compresses bullets +
+skills into a digest hard-capped at ~500 tokens (~2000 chars), grouped by
+section. Pure function over a DB connection; no LLM calls. Built once per
+rescore_postings() invocation and shared across all N postings in the run.</p>
+</div>
+          <label for="slice-1-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>The rescore prompt currently embeds a hardcoded profile summary; the
+digest is the bridge that lets triage see the user&#39;s actual, current
+bullet inventory (Goal 1) without per-posting queries or staleness logic.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/sourcing/coverage.py, tests/test_sourcing_coverage.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>build_master_digest returns a deterministic digest for fixture master content, hard-capped at the size limit even with oversized inputs</li><li>Digest includes section grouping and bullet text; empty master content yields an explicit empty marker, not a fabricated digest</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-1-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> called once per rescore_postings() run, not per posting.
+<strong>State:</strong> none persisted - digest is derived per run from DB master
+content (chosen over cached-digest-with-hash: staleness logic not worth
+one cheap query per run; chosen over reusing bullet-selector&#39;s view:
+avoids coupling sourcing to apply internals).
+<strong>Payload:</strong> plain-text digest, ~500 token cap, section-grouped.
+<strong>Rejected:</strong> cached digest (invalidation complexity); importing apply&#39;s
+bullet-selector representation (cross-module coupling).</p>
+</div>
+        <label for="slice-1-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>TestBuildMasterDigest - fixture master rows -&gt; digest contains known</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 2</span>
+            <ul><li>bullets, respects cap, deterministic ordering; empty-DB case returns the</li><li>empty marker.</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+
+    <div class="slice-deps">Dependencies: none</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-1" data-comment-for="slice-1" placeholder="Comments on slice 1..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-2" data-slice="2" data-slice-name="slice-2" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 2: Coverage scoring in LLM rescore">
+    <span class="slice-num">#2</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Coverage scoring in LLM rescore</span>
+      <span class="slice-preview">Extend the rescore contract in src/jobsmith/sourcing/llmrescore.py:</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-2">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="2 open question(s)">2 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-2-approval" value="approved" data-section="slice-2" data-action="approve" aria-label="Approve slice 2">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-2-approval" value="changes_requested" data-section="slice-2" data-action="approve" aria-label="Request changes for slice 2">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-2-approval" value="rejected" data-section="slice-2" data-action="approve" aria-label="Reject slice 2">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-2-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Extend the rescore contract in src/jobsmith/sourcing/llm_rescore.py:
+inject the slice-1 digest into FIT_SCORER_SYSTEM_PROMPT (replacing the
+role of the hardcoded specialty evidence as bullet inventory - keep the
+specialty framing), and extend ReasoningResult parsing with
+coverage: int 0-100 and uncovered_must_haves: string[] (max 5 items,
+&lt;80 chars each, same vocabulary as apply&#39;s halt envelopes). Additive
+migration adds postings.coverage_score REAL NULL and
+postings.uncovered_json TEXT NULL; extend update_posting_llm_score() to
+write them. Postings outside the rescored top-N keep NULL (no signal).</p>
+</div>
+          <label for="slice-2-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>This is the core mechanism: the same budget-capped LLM pass that already
+reads each JD can judge coverage against real bullets for free, making
+both the ranking and the halt-prediction honest (Goals 1 and 4).</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/sourcing/llm_rescore.py, src/jobsmith/db.py, src/jobsmith/migrations/, tests/test_llm_rescore.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Rescore writes coverage_score and uncovered_json for scored postings; unscored/empty-JD postings stay NULL</li><li>Backtest: the GitLab Senior AI Engineer and Arcadia Lead Analytics Engineer JDs score low coverage and list gaps matching their actual halt envelopes (AI/LLM bullets; DBT, healthcare claims)</li><li>Malformed/absent coverage fields in LLM output degrade to NULL with a rationale marker - never a fabricated score</li><li>Measured prompt token growth from the digest stays within the existing per-call timeout and budget semantics</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-2-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> existing rescore_postings() pass after fast-scoring upsert -
+no new LLM pass (constraint 1).
+<strong>State:</strong> additive postings columns coverage_score REAL NULL +
+uncovered_json TEXT NULL, written via the update_posting_llm_score()
+pattern (chosen over separate coverage table: no history requirement,
+avoids joins on the inbox hot path; over computed-on-read: LLM output
+must persist).
+<strong>Payload:</strong> coverage 0-100 int + uncovered_must_haves string[] mirroring
+halt-envelope vocabulary so gaps read consistently across triage and
+apply (chosen over tier-only: loses sortability; over
++matched-bullets: token cost without a consumer).
+<strong>Rejected:</strong> separate LLM coverage pass (budget); embedding similarity
+(new dependency).</p>
+</div>
+        <label for="slice-2-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>parser handles coverage fields present/absent/malformed; digest</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 4</span>
+            <ul><li>injection point renders into the prompt. Integration: rescore against the</li><li>two halted-run JD fixtures asserts low coverage &#43; expected gap strings</li><li>(mocked SDK responses for determinism, plus one recorded-real-output</li><li>fixture).</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>What happens when the LLM omits or fabricates coverage fields?</p>
+          
+          
+          <textarea
+            data-section="slice-2-question-q-llm-omits"
+            data-comment-for="slice-2-question-q-llm-omits"
+            placeholder="Answer question q-llm-omits...">Degrade to NULL coverage with a &#39;coverage-unavailable&#39; marker appended to rationale. The inbox renders NULL as an em dash. Never synthesize a number; noisy-LLM risk is mitigated by the verifiable uncovered-list and advisory-only framing.</textarea>
+          
+        </div>
+        
+        <div class="question-block slice-question-block">
+          <p>Does the digest replace or supplement the hardcoded specialty profile in the prompt?</p>
+          
+          
+          <textarea
+            data-section="slice-2-question-q-prompt-role"
+            data-comment-for="slice-2-question-q-prompt-role"
+            placeholder="Answer question q-prompt-role...">Supplement: specialties stay as fit-scoring context; the digest is added as the authoritative bullet inventory for the coverage judgment only. Replacing the profile would change fit-score semantics, which is out of scope.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: slices 1</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-2" data-comment-for="slice-2" placeholder="Comments on slice 2..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-3" data-slice="3" data-slice-name="slice-3" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 3: Known-gaps harvest and matcher">
+    <span class="slice-num">#3</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Known-gaps harvest and matcher</span>
+      <span class="slice-preview">New src/jobsmith/sourcing/gaps.py: harvestknowngaps(conn) reads</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-pending badge-sm">Low</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-3">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-3-approval" value="approved" data-section="slice-3" data-action="approve" aria-label="Approve slice 3">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-3-approval" value="changes_requested" data-section="slice-3" data-action="approve" aria-label="Request changes for slice 3">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-3-approval" value="rejected" data-section="slice-3" data-action="approve" aria-label="Reject slice 3">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-3-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>New src/jobsmith/sourcing/gaps.py: harvest_known_gaps(conn) reads
+apply_state rows whose JSON payload has status=halt across all slugs
+(reuse get_state/list-state read helpers; read-only, open_pipeline_db_fast),
+extracting must_have + additional_uncovered_must_haves strings.
+extract_gap_terms(gap) derives 1-3 distinctive lowercase terms per gap
+(min length 3, curated stoplist for generic words like &#39;data&#39;,
+&#39;experience&#39;). match_posting(jd_text, gaps) returns conservative
+case-insensitive hits. Integrate in runner.run_crawl after the upsert
+loop; persist hits to additive postings.gap_hits_json TEXT NULL.
+Re-evaluated on each crawl so newly-accumulated halts apply to old rows.</p>
+</div>
+          <label for="slice-3-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Halt envelopes already record exactly which must-haves the master content
+cannot cover; matching them against new postings is nearly free,
+compounds with every halt, and works without any LLM call (Goal 2).</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/sourcing/gaps.py, src/jobsmith/sourcing/runner.py, src/jobsmith/db.py, src/jobsmith/migrations/, tests/test_sourcing_gaps.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>harvest_known_gaps returns the two existing halt envelopes&#39; gaps (AI/LLM bullets; DBT; healthcare claims) from the real DB schema fixtures</li><li>Backtest: GitLab and Arcadia JD texts match their own gap terms; a tax-equity fixture JD matches none (over-match guard)</li><li>Crawl integration writes gap_hits_json additively; postings with empty JD text get no hits, not false negatives presented as clean</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-3-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> sourcing-time (run_crawl after upsert), re-evaluated each
+crawl (chosen over halt-time persistence to a dedicated table: would
+touch the apply path and miss the two existing halts without backfill;
+over manual gaps file: does not compound automatically).
+<strong>State:</strong> additive postings.gap_hits_json TEXT NULL; gaps themselves
+stay in their halt envelopes - apply_state remains the single source of
+truth (consistent with arch card apply-run-identity-db-first).
+<strong>Payload:</strong> gap_hits_json = [{gap: , term: }].
+<strong>Rejected:</strong> embedding similarity (new dependency, constraint 2);
+LLM-judged gaps (only covers top-30; this mechanism must cover all
+postings with JD text).</p>
+</div>
+        <label for="slice-3-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>extract_gap_terms on the three real gap strings produces expected</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 3</span>
+            <ul><li>terms and drops stoplist words; match_posting hit/miss fixtures including</li><li>the &#39;claims&#39; false-positive guard case. Integration: run_crawl fixture</li><li>writes gap_hits_json.</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>How is keyword over-matching prevented (e.g. &#39;claims&#39; badging insurance JDs that are legitimately relevant)?</p>
+          
+          
+          <textarea
+            data-section="slice-3-question-q-overmatch"
+            data-comment-for="slice-3-question-q-overmatch"
+            placeholder="Answer question q-overmatch...">Conservative extraction: only distinctive multi-word or domain terms (&#39;dbt&#39;, &#39;healthcare claims&#39;, &#39;ehr&#39;), min token length 3, curated stoplist, and badges are advisory UI hints - never filters applied by default. The backtest includes a must-not-match fixture.</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: none</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-3" data-comment-for="slice-3" placeholder="Comments on slice 3..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-4" data-slice="4" data-slice-name="slice-4" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 4: Postings API exposes coverage and gap hits">
+    <span class="slice-num">#4</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Postings API exposes coverage and gap hits</span>
+      <span class="slice-preview">Extend the postings list/detail payload in</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-pending badge-sm">S</span>
+          <span class="badge badge-pending badge-sm">Low</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-4">Pending</span>
+          
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-4-approval" value="approved" data-section="slice-4" data-action="approve" aria-label="Approve slice 4">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-4-approval" value="changes_requested" data-section="slice-4" data-action="approve" aria-label="Request changes for slice 4">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-4-approval" value="rejected" data-section="slice-4" data-action="approve" aria-label="Reject slice 4">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Extend the postings list/detail payload in
+src/jobsmith/api/postings_routes.py with coverage_score (float|null),
+uncovered (parsed list|null) and gap_hits (parsed list|null) from the new
+columns. NULL columns serialize as null - the API never invents a value.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>The inbox UI (slice-5) needs the signal on the wire; keeping parsing
+server-side means the web app gets typed JSON, consistent with how
+rationale/evidence_json are exposed today.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/api/postings_routes.py, tests/test_api_postings.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>GET /api/postings rows carry coverage_score, uncovered, gap_hits; nulls for unscored rows</li><li>Existing postings API tests stay green (additive change only)</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <div class="markdown-block serif-prose"><p><strong>Trigger:</strong> existing postings endpoints, no new routes.
+<strong>State:</strong> none - pass-through of slice-2/3 columns.
+<strong>Payload:</strong> coverage_score: number|null, uncovered: string[]|null,
+gap_hits: {gap,term}[]|null.
+<strong>Rejected:</strong> separate /api/postings/coverage endpoint (extra round-trip
+for the inbox table render).</p>
+</div>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="markdown-block slice-tests"><p>Extend test_api_postings.py: scored fixture row round-trips all three
+fields; legacy row (pre-migration values) serializes nulls.</p>
+</div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+
+    <div class="slice-deps">Dependencies: slices 2,3</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-4" data-comment-for="slice-4" placeholder="Comments on slice 4..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-5" data-slice="5" data-slice-name="slice-5" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 5: Inbox UI: coverage column, gap badges, min-coverage filter">
+    <span class="slice-num">#5</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Inbox UI: coverage column, gap badges, min-coverage filter</span>
+      <span class="slice-preview">In web/src/app/postings.tsx: add a sortable coverage column (em dash for</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-pending badge-sm">Low</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-5">Pending</span>
+          
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-5-approval" value="approved" data-section="slice-5" data-action="approve" aria-label="Approve slice 5">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-5-approval" value="changes_requested" data-section="slice-5" data-action="approve" aria-label="Request changes for slice 5">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-5-approval" value="rejected" data-section="slice-5" data-action="approve" aria-label="Reject slice 5">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>In web/src/app/postings.tsx: add a sortable coverage column (em dash for
+null), red gap badges per gap_hits entry (e.g. &#39;gap: DBT&#39;) with the
+matched term in the tooltip, and a min-coverage numeric filter input
+styled after the existing &#39;min score&#39; filter. Badges and column are
+advisory only - the apply button is never disabled by coverage
+(constraint 4).</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>The whole feature lands or dies at the inbox: the user must see likely
+halts before clicking apply (Goal 3).</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>web/src/app/postings.tsx, web/src/app/postings.test.tsx</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Coverage column renders values and em dashes, sorts correctly with nulls last; min-coverage filter excludes below-threshold rows but never rows with null coverage</li><li>Gap badges render from gap_hits with tooltip; apply button remains enabled regardless of coverage</li><li>Live Chrome verification on the running app: scored and unscored rows render correctly in the real inbox (per project verification rule)</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <div class="markdown-block serif-prose"><p><strong>Trigger:</strong> render-time from API fields; no client-side matching logic.
+<strong>State:</strong> filter value in component state, consistent with existing
+min-score filter.
+<strong>Payload:</strong> consumes slice-4 fields verbatim.
+<strong>Rejected:</strong> blended fitxcoverage rank (hides why a row ranked low);
+badges-only (loses sortability, the main triage win).</p>
+</div>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="markdown-block slice-tests"><p>Extend postings.test.tsx: column render + sort with nulls, filter
+behavior including null passthrough, badge render, apply button enabled
+on a gap-flagged row.</p>
+</div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+
+    <div class="slice-deps">Dependencies: slices 4</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-5" data-comment-for="slice-5" placeholder="Comments on slice 5..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+
     <!--PLAN_SLICE_CARDS-->
   </div>
 </details>
 
 <!-- Design Decisions (hidden for v2 plans — slice cards carry their own questions) -->
-<details id="questions" class="section-card" data-phase="questions" data-status="pending">
-  <summary><span>Design Decisions</span><span class="badge badge-pending" data-badge-for="questions">Pending</span></summary>
-  <div class="section-body">
-    <table class="q-table">
-      <thead><tr><th>Question</th><th>Selected</th><th>Status</th></tr></thead>
-      <tbody id="questionsRecap">
-        <!--PLAN_QUESTIONS_RECAP-->
-      </tbody>
-    </table>
-  </div>
-</details>
+
 
 
 
@@ -512,8 +1305,8 @@ Coverage is advisory - never blocks apply</li>
   <h2>Feedback Summary</h2>
   <div class="progress-stats">
     <div class="progress-stat"><strong id="approvedCount">0</strong> approved</div>
-    <div class="progress-stat"><strong id="totalSections">1</strong> sections</div>
-    <div class="progress-stat"><strong id="pendingCount">1</strong> pending</div>
+    <div class="progress-stat"><strong id="totalSections">6</strong> sections</div>
+    <div class="progress-stat"><strong id="pendingCount">6</strong> pending</div>
   </div>
   <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill" style="width:0%"></div></div>
   <div class="comments-summary">
@@ -593,7 +1386,7 @@ var planId=(function(){var a=document.querySelector('article[id]');return a?a.id
 
 (function(){
   'use strict';
-  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design"]/*END_PLAN_SECTIONS_JSON*/;
+  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design","slice-1","slice-2","slice-3","slice-4","slice-5"]/*END_PLAN_SECTIONS_JSON*/;
 
   function setBadge(el,ok){
     el.className='badge badge-'+(ok?'approved':'pending');
