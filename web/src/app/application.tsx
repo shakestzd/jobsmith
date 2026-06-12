@@ -958,7 +958,7 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
         <div
           className="card"
           role="region"
-          aria-label="Proposed cover letter revision"
+          aria-label={`Proposed ${activeProposal.proposal.asset === 'resume' ? activeProposal.proposal.target_section : 'cover letter'} revision`}
           style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--accent)' }}
         >
           {/* Panel header */}
@@ -973,7 +973,7 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
           }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 13, marginBottom: activeProposal.proposal.rationale ? 4 : 0 }}>
-                ✍️ Proposed revision
+                ✍️ Proposed {activeProposal.proposal.asset === 'resume' ? `resume edit — ${activeProposal.proposal.target_section} (per-app copy, not master resume)` : 'cover letter revision'}
                 {activeProposal.proposal.summary && (
                   <span style={{ fontWeight: 400, marginLeft: 8, color: 'var(--fg-muted)' }}>
                     — {activeProposal.proposal.summary}
@@ -991,7 +991,7 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
                 className="btn primary sm"
                 onClick={() => { void applyProposal(); }}
                 disabled={activeProposal.applying}
-                aria-label="Apply proposed cover letter change"
+                aria-label={`Apply proposed ${activeProposal.proposal.asset === 'resume' ? activeProposal.proposal.target_section : 'cover letter'} change`}
               >
                 {activeProposal.applying ? 'Applying…' : 'Apply'}
               </button>
@@ -999,14 +999,14 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
                 className="btn sm ghost"
                 onClick={rejectProposal}
                 disabled={activeProposal.applying}
-                aria-label="Reject proposed cover letter change"
+                aria-label={`Reject proposed ${activeProposal.proposal.asset === 'resume' ? activeProposal.proposal.target_section : 'cover letter'} change`}
               >
                 Reject
               </button>
             </div>
           </div>
 
-          {/* Fact-check failure warning */}
+          {/* Fact-check failure warning (cover letter only) */}
           {activeProposal.failedClaims && (
             <div
               role="alert"
@@ -1030,6 +1030,28 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
                 ))}
               </ul>
               <span style={{ color: 'var(--fg-muted)' }}>Ask the chat to revise it, then apply again.</span>
+            </div>
+          )}
+
+          {/* Resume validation error (resume only) */}
+          {activeProposal.error && (
+            <div
+              role="alert"
+              style={{
+                padding: '10px 16px',
+                background: 'var(--danger-soft)',
+                borderBottom: '1px solid var(--danger)',
+                fontSize: 12.5,
+                color: 'var(--danger)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>
+                ⚠ Error applying this revision:
+              </span>
+              <span style={{ marginTop: 2 }}>{activeProposal.error}</span>
             </div>
           )}
 

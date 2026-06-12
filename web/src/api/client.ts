@@ -330,11 +330,14 @@ export async function chatResetSession(slug: string): Promise<void> {
 
 /** A structured asset-edit proposal emitted by the chat agent. */
 export interface ChatProposal {
-  asset: string;            // e.g. "cover_letter"
+  asset: string;            // e.g. "cover_letter" | "resume"
   slug: string;
   summary: string;
   rationale: string;
-  new_content: string;      // COMPLETE revised draft
+  new_content: string;      // COMPLETE revised draft/YAML
+  // Resume-specific fields (present when asset === "resume")
+  target_section?: string;  // e.g. "Education", "Work", "Skills", "Author"
+  target_file?: string;     // e.g. "education.yml", "work.yml", "skill.yml", "author.yml"
 }
 
 /** Result of applying a cover-letter proposal. */
@@ -347,10 +350,31 @@ export interface ApplyCoverLetterResult {
   failed_claims?: string[]; // populated on 422
 }
 
+/** Result of applying a resume section proposal. */
+export interface ApplyResumeResult {
+  applied: boolean;
+  page_count?: number;      // page count on success or failure
+  render?: string;          // "ok" | "skipped" | "error: ..."
+  reason?: string;          // "invalid_yaml" | "schema_invalid" | "page_count_off" on 422
+  detail?: string;          // error detail for invalid_yaml / schema_invalid
+}
+
 /** Fetch the current cover-letter-draft.md text (the "OLD" side of the diff). */
 export async function getCoverLetterDraft(slug: string): Promise<string> {
   return apiGetText(
     `/api/applications/${encodeURIComponent(slug)}/documents/cover-letter-draft.md`,
+  );
+}
+
+/** Fetch the current resume section (e.g., education.yml). */
+export async function getResumeSection(
+  slug: string,
+  targetFile: string,
+): Promise<string> {
+  return apiGetText(
+    `/api/applications/${encodeURIComponent(slug)}/documents/${encodeURIComponent(
+      targetFile,
+    )}`,
   );
 }
 
@@ -385,6 +409,44 @@ export async function applyCoverLetter(
     throw new JobsmithApiError(formatDetail(detail, res.statusText), res.status);
   }
   notifyDataChanged(`/api/applications/${slug}/cover-letter`);
+  return data;
+}
+
+/**
+ * Apply a chat-proposed resume section revision. Handles structured errors
+ * (invalid_yaml, schema_invalid, page_count_off) by reading the 422 body.
+ */
+export async function applyResume(
+  slug: string,
+  targetSection: string,
+  targetFile: string,
+  newContent: string,
+): Promise<ApplyResumeResult> {
+  const res = await fetch(
+    `${BASE_URL}/api/applications/${encodeURIComponent(slug)}/resume/apply`,
+    {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        target_section: targetSection,
+        target_file: targetFile,
+        new_content: newContent,
+      }),
+    },
+  );
+  let data: ApplyResumeResult;
+  try {
+    data = (await res.json()) as ApplyResumeResult;
+  } catch {
+    throw new JobsmithApiError(res.statusText || 'Apply failed', res.status);
+  }
+  // 422 = structured error (invalid_yaml, schema_invalid, page_count_off).
+  // Any other non-OK status is a genuine error.
+  if (!res.ok && res.status !== 422) {
+    const detail = (data as unknown as Record<string, unknown>).detail;
+    throw new JobsmithApiError(formatDetail(detail, res.statusText), res.status);
+  }
+  notifyDataChanged(`/api/applications/${slug}/documents/${targetFile}`);
   return data;
 }
 
