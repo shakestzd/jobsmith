@@ -151,7 +151,7 @@ def build_system_prompt_with_digest(conn: sqlite3.Connection) -> str:
     str
         The full system prompt with the digest injected.
     """
-    from jobsmith.sourcing.coverage import build_master_digest  # noqa: WPS433
+    from jobsmith.sourcing.coverage import build_master_digest
 
     digest = build_master_digest(conn)
     return FIT_SCORER_SYSTEM_PROMPT.format(digest=digest)
@@ -308,7 +308,7 @@ def _build_options(timeout_sec: float, system_prompt: str | None = None) -> Any:
         The system prompt to use. Defaults to FIT_SCORER_SYSTEM_PROMPT with
         the empty-digest placeholder if not provided.
     """
-    from claude_agent_sdk import ClaudeAgentOptions  # noqa: WPS433
+    from claude_agent_sdk import ClaudeAgentOptions
 
     if system_prompt is None:
         system_prompt = FIT_SCORER_SYSTEM_PROMPT.format(digest=_EMPTY_DIGEST_MARKER)
@@ -329,7 +329,7 @@ def _build_options(timeout_sec: float, system_prompt: str | None = None) -> Any:
 
 
 def _default_query_fn() -> Callable:
-    from claude_agent_sdk import query  # noqa: WPS433
+    from claude_agent_sdk import query
 
     return query
 
@@ -493,7 +493,7 @@ async def _consume_messages(
     """
     result_cls = None
     try:
-        from claude_agent_sdk import ResultMessage  # noqa: WPS433
+        from claude_agent_sdk import ResultMessage
 
         result_cls = ResultMessage
     except ImportError:
