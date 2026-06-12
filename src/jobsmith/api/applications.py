@@ -694,7 +694,7 @@ def _find_run_row_for_slug(conn, slug: str):
     return None
 
 
-_ALLOWED_DOC_SUFFIXES = {".pdf", ".md", ".txt", ".typ"}
+_ALLOWED_DOC_SUFFIXES = {".pdf", ".md", ".txt", ".typ", ".yml", ".yaml"}
 
 
 def _to_slug(s: str) -> str:

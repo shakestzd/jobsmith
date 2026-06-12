@@ -1087,7 +1087,7 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
                 flex: 1,
               }}>
                 {lineDiff(
-                  activeProposal.oldContent || (state?.cover_letter ?? ''),
+                  activeProposal.oldContent || (activeProposal.proposal.asset === 'resume' ? '' : (state?.cover_letter ?? '')),
                   activeProposal.proposal.new_content,
                 ).filter(ln => ln.type !== 'add').map((ln, k) => (
                   <span
@@ -1130,7 +1130,7 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
                 flex: 1,
               }}>
                 {lineDiff(
-                  activeProposal.oldContent || (state?.cover_letter ?? ''),
+                  activeProposal.oldContent || (activeProposal.proposal.asset === 'resume' ? '' : (state?.cover_letter ?? '')),
                   activeProposal.proposal.new_content,
                 ).filter(ln => ln.type !== 'del').map((ln, k) => (
                   <span
