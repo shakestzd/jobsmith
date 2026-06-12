@@ -1171,4 +1171,42 @@ describe('ApplicationDetail fromApi unknown-phase fix (bug-300fb9ad)', () => {
     const firstMetaText = phaseMetas[0]?.textContent ?? '';
     expect(firstMetaText).toMatch(/—/);
   });
+
+  // bug-26db7047: when reloading a historical failed application (NO SSE events,
+  // only API data), the failed phase card must still show 'failed' status, not 'queued'.
+  it('reload of failed app shows failed state without SSE events (bug-26db7047)', async () => {
+    // Simulate reloading a page where the API detail is already loaded with
+    // status='failed' and phase='gather'. No SSE events are emitted; the card
+    // status must come from the API-derived state only.
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'failed',
+      phase: 'gather',
+      finished_at: '2026-05-01T10:00:00Z',
+      run_id: 'run-reload-failed',
+    });
+    renderWithProposal(<ApplicationDetail slug="reload-failed-app" back={() => {}} />);
+
+    // Wait for the API detail to load and the component to render.
+    await waitFor(() => {
+      expect(screen.queryByText(/loading/i)).toBeNull();
+    });
+
+    // The gather (phase 1) card should show 'failed' based on the API
+    // detail's status='failed' and phase='gather', without requiring any
+    // SSE events. This verifies that the fromApi/deriveProgress initialization
+    // properly seeds sseStatus and failedPhaseNum.
+    const phaseStatuses = document.querySelectorAll('.phase-status');
+    expect(phaseStatuses.length).toBeGreaterThanOrEqual(1);
+    const phase1Status = phaseStatuses[0]?.textContent ?? '';
+    expect(phase1Status).toMatch(/failed/i);
+
+    // Phases 2 and 3 should be 'queued', not 'failed' or 'done'
+    if (phaseStatuses[1]) {
+      expect(phaseStatuses[1].textContent).not.toMatch(/failed/i);
+    }
+    if (phaseStatuses[2]) {
+      expect(phaseStatuses[2].textContent).not.toMatch(/failed/i);
+    }
+  });
 });

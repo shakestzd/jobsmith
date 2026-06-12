@@ -2002,6 +2002,22 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     }
   }, [appliedVersion]);
 
+  // bug-26db7047: when loading a failed application from the API (e.g. on reload),
+  // ensure sseStatus and failedPhaseNum are seeded from the API's status and phase
+  // fields so the phase card shows 'failed' immediately without waiting for SSE.
+  // This runs in addition to the sync effect below to guarantee the failed state
+  // is set as soon as app.status becomes 'failed' (even on initial render if the
+  // API detail arrives synchronously or very quickly).
+  useEffect(() => {
+    if (app.status === 'failed') {
+      setSseStatus('failed');
+      // Derive which phase failed from the app's phase field
+      if (app.phase === 1 || app.phase === 2 || app.phase === 3) {
+        setFailedPhaseNum(app.phase);
+      }
+    }
+  }, [app.status, app.phase]);
+
   // ── Subscribe to SSE stream ──────────────────────────────────────────
   const subscribeToEvents = useCallback((targetSlug: string) => {
     // Close any existing connection.
