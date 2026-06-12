@@ -1015,10 +1015,12 @@ export function ChatPanel({ slug, open, width, onClose, onScopeChange, onResizeS
 
           {/* Compact proposal pointer chip — full diff + Apply/Reject lives in the Review tab */}
           {pendingProposal && (
-            <div className="chat-proposal-chip" role="status" aria-label="Cover letter revision pending review">
+            <div className="chat-proposal-chip" role="status" aria-label="Proposal pending review">
               <span className="chat-proposal-chip-icon">✍️</span>
               <span className="chat-proposal-chip-text">
-                Proposed a cover-letter revision — review &amp; apply in the{' '}
+                Proposed a {pendingProposal.proposal.asset === 'resume'
+                  ? `resume edit (${pendingProposal.proposal.target_section ?? 'section'})`
+                  : 'cover-letter revision'} — review &amp; apply in the{' '}
                 <strong>Review tab</strong>.
               </span>
               {!isGlobal && (

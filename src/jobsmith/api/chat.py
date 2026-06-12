@@ -232,6 +232,8 @@ async def send_chat_message(body: ChatSendRequest) -> EventSourceResponse:
                     "summary": proposal.get("summary", ""),
                     "rationale": proposal.get("rationale", ""),
                     "new_content": proposal.get("new_content", ""),
+                    "target_section": proposal.get("target_section"),
+                    "target_file": proposal.get("target_file"),
                 }
                 if payload["new_content"]:
                     yield ServerSentEvent(

@@ -973,7 +973,7 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
           }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 13, marginBottom: activeProposal.proposal.rationale ? 4 : 0 }}>
-                ✍️ Proposed {activeProposal.proposal.asset === 'resume' ? `resume edit — ${activeProposal.proposal.target_section} (per-app copy, not master resume)` : 'cover letter revision'}
+                ✍️ Proposed {activeProposal.proposal.asset === 'resume' ? `resume edit — ${activeProposal.proposal.target_section ?? activeProposal.proposal.target_file ?? 'resume section'} (per-app copy, not master resume)` : 'cover letter revision'}
                 {activeProposal.proposal.summary && (
                   <span style={{ fontWeight: 400, marginLeft: 8, color: 'var(--fg-muted)' }}>
                     — {activeProposal.proposal.summary}
