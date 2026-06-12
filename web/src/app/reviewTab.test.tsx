@@ -2,7 +2,6 @@
 // (feat-958dab07 resume edit support)
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
 import type { ChatProposal } from '../api/client';
 
 // Mock the ReviewTab component's proposal panel rendering logic
