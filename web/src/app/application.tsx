@@ -1973,7 +1973,12 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     } else {
       setActivePhase(next.activePhase);
     }
-    setFailedPhaseNum(next.failedPhaseNum);
+    // bug-26db7047: a halted run's API status moves to 'review', so
+    // deriveProgress cannot prove the failed phase and returns null here.
+    // The SSE phase handler has already pinned failedPhaseNum from the
+    // resent phase/failed event — keep that pin instead of clobbering it
+    // on every apiDetail refetch. Re-run paths reset it explicitly.
+    setFailedPhaseNum(prev => next.failedPhaseNum ?? prev);
     if (app.status === 'failed') {
       setSseStatus('failed');
       setRunning(false);
