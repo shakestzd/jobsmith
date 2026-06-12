@@ -1461,6 +1461,212 @@ def apply_cover_letter(slug: str, body: dict) -> dict:
     return out
 
 
+def _render_resume(documents_dir: Path) -> tuple[str, int]:
+    """Render resume.qmd and extract page count.
+
+    Returns ``(status, page_count)`` where status is one of ``"ok"``, ``"skipped"``,
+    or an error string.  page_count is 0 on error, or the extracted page count on success.
+    """
+    qmd = documents_dir / "resume.qmd"
+    if not qmd.exists():
+        logger.info("resume apply: no resume.qmd at %s — render skipped", documents_dir)
+        return "skipped", 0
+    quarto = shutil.which("quarto")
+    if quarto is None:
+        logger.info("resume apply: quarto not on PATH — render skipped")
+        return "skipped", 0
+    try:
+        proc = subprocess.run(
+            [quarto, "render", "resume.qmd", "--to", "awesomecv-typst"],
+            cwd=str(documents_dir),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("resume apply: quarto render failed: %s", exc)
+        return f"error: {exc}", 0
+    if proc.returncode != 0:
+        logger.warning(
+            "resume apply: quarto exited %s: %s",
+            proc.returncode,
+            proc.stderr.strip()[-300:],
+        )
+        return f"error: quarto exit {proc.returncode}", 0
+
+    # Extract page count from PDF
+    pdf_path = documents_dir / "resume.pdf"
+    if not pdf_path.exists():
+        logger.warning("resume apply: resume.pdf not found after render")
+        return "ok", 0
+
+    try:
+        proc = subprocess.run(
+            ["mdls", "-name", "kMDItemNumberOfPages", str(pdf_path)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if proc.returncode == 0:
+            # Output is like: kMDItemNumberOfPages = 1
+            match = re.search(r"=\s*(\d+)", proc.stdout)
+            if match:
+                page_count = int(match.group(1))
+                return "ok", page_count
+    except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+        logger.warning("resume apply: failed to read page count: %s", exc)
+    return "ok", 0
+
+
+def _validate_resume_section(section_file: str, data: str) -> tuple[bool, str | None]:
+    """Validate YAML for a resume section (education.yml, work.yml, skill.yml, author.yml).
+
+    Returns ``(valid, detail)`` where valid is True on success, detail is error message on failure.
+    """
+    import yaml
+
+    try:
+        parsed = yaml.safe_load(data)
+    except yaml.YAMLError as exc:
+        return False, f"Invalid YAML: {exc}"
+
+    # Use the lint validator for the specific section
+    from jobsmith.lint import _VALIDATORS
+
+    if section_file not in _VALIDATORS:
+        return False, f"Unknown resume section: {section_file}"
+
+    errors = []
+    validator = _VALIDATORS[section_file]
+    # Create a dummy path for error reporting
+    validator(parsed, Path(section_file), errors)
+
+    if errors:
+        return False, "; ".join(errors)
+    return True, None
+
+
+def _resolve_resume_write_path(slug: str, target_file: str) -> Path | None:
+    """Resolve the path where a resume section should be written.
+
+    Returns the per-application documents/ path for the section file.
+    Creates documents/ dir if needed.
+    """
+    app_dir = _get_app_dir(slug)
+    if app_dir is None:
+        return None
+    documents_dir = app_dir / "documents"
+    documents_dir.mkdir(parents=True, exist_ok=True)
+    return documents_dir / target_file
+
+
+def _write_resume_section_atomic(section_path: Path, yaml_content: str) -> None:
+    """Atomically write resume section YAML to section_path via tmp-file rename."""
+    section_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = section_path.with_suffix(".tmp")
+    try:
+        tmp_path.write_text(yaml_content, encoding="utf-8")
+        tmp_path.rename(section_path)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Write failed: {exc}") from exc
+
+
+@router.post("/applications/{slug}/resume/apply")
+def apply_resume(slug: str, body: dict) -> dict:
+    """Validate + apply a chat-proposed resume section revision.
+
+    Contract:
+    - Body: ``{"target_section": "Education|Work|Skills|Author", "target_file": \
+"education.yml|work.yml|skill.yml|author.yml", "new_content": "<complete YAML>"}``.
+    - Validates YAML parse; on error → 422 ``{reason: "invalid_yaml", detail}``.
+    - Validates YAML structure against schema; on error → 422 \
+``{reason: "schema_invalid", detail}``.
+    - Writes section file atomically to documents/ (copy-on-write: replaces symlinks).
+    - Renders resume via quarto; on page_count != 1 → ROLLS BACK and returns 422 \
+``{reason: "page_count_off", page_count: N}``.
+    - Success → ``{applied: true, page_count: 1}``.
+    """
+    new_content = body.get("new_content", "")
+    target_file = body.get("target_file", "")
+
+    if not isinstance(new_content, str) or not new_content.strip():
+        raise HTTPException(
+            status_code=422, detail="body.new_content must be a non-empty string"
+        )
+    if target_file not in ("education.yml", "work.yml", "skill.yml", "author.yml"):
+        raise HTTPException(
+            status_code=422, detail=f"Invalid target_file: {target_file!r}"
+        )
+
+    section_path = _resolve_resume_write_path(slug, target_file)
+    if section_path is None:
+        raise HTTPException(
+            status_code=404, detail=f"No application directory for {slug!r}"
+        )
+
+    # --- Validate YAML parse ---
+    valid, detail = _validate_resume_section(target_file, new_content)
+    if not valid:
+        if "Invalid YAML" in detail:
+            return JSONResponse(
+                status_code=422,
+                content={"applied": False, "reason": "invalid_yaml", "detail": detail},
+            )
+        else:
+            return JSONResponse(
+                status_code=422,
+                content={"applied": False, "reason": "schema_invalid", "detail": detail},
+            )
+
+    # --- Re-serialize parsed YAML before writing (never raw LLM string) ---
+    import yaml
+
+    parsed = yaml.safe_load(new_content)
+    new_content = yaml.dump(parsed, default_flow_style=False, sort_keys=False)
+
+    # --- Save the old content for potential rollback ---
+    old_content = ""
+    if section_path.exists():
+        with contextlib.suppress(OSError):
+            old_content = section_path.read_text(encoding="utf-8")
+
+    # --- Atomic write ---
+    _write_resume_section_atomic(section_path, new_content)
+
+    # --- Render and check page count ---
+    documents_dir = section_path.parent
+    render_status, page_count = _render_resume(documents_dir)
+
+    if page_count != 1:
+        # Rollback to old content and re-render to restore disk state
+        logger.warning(
+            "resume apply: page_count=%s != 1 for %s — rolling back", page_count, slug
+        )
+        if old_content:
+            _write_resume_section_atomic(section_path, old_content)
+        else:
+            # No previous content; delete the file
+            with contextlib.suppress(OSError):
+                section_path.unlink()
+        # Re-render with old content to restore consistent state
+        _render_resume(documents_dir)
+
+        return JSONResponse(
+            status_code=422,
+            content={
+                "applied": False,
+                "reason": "page_count_off",
+                "page_count": page_count,
+            },
+        )
+
+    return {
+        "applied": True,
+        "page_count": page_count,
+        "render": render_status,
+    }
+
+
 @router.post("/applications/{slug}/outcome-status")
 def set_outcome_status(slug: str, body: dict) -> dict:
     """Set the apply_runs outcome status for an application slug.

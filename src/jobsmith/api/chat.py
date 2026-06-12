@@ -277,24 +277,42 @@ def reset_chat_session(body: ChatResetRequest) -> dict:
 # files; it emits a structured proposal that the UI renders as a diff and the
 # user explicitly applies.
 _PROPOSAL_INSTRUCTIONS = """\
-## Editing the cover letter (propose-only)
+## Editing the cover letter or resume sections (propose-only)
 You CANNOT write files. If and ONLY IF the user asks you to change, edit, \
-rewrite, shorten, or otherwise revise the cover letter, do the following:
+rewrite, shorten, or otherwise revise the cover letter OR a resume section, \
+do the following:
 1. First write a short plain-text summary of what you changed and why.
 2. THEN append a single fenced code block tagged `jobsmith-proposal` containing \
 JSON with exactly these keys:
+
+### For cover letter edits:
 ```jobsmith-proposal
 {{"asset":"cover_letter","slug":"{slug}","summary":"<one-line summary>",\
 "rationale":"<why these changes>","new_content":"<COMPLETE revised cover \
 letter markdown>"}}
 ```
-The `new_content` value MUST be the COMPLETE revised cover letter (the full \
-document), not a partial excerpt and not a diff. Only make claims that are \
-supported by the work.yml / cover letter content provided below — do not \
-invent companies, numbers, dates, or metrics, as the proposal is fact-checked \
-before it can be applied.
+
+### For resume section edits (education.yml, work.yml, skill.yml, or author.yml):
+```jobsmith-proposal
+{{"asset":"resume","slug":"{slug}","target_section":"<Education|Work|Skills|Author>",\
+"target_file":"<education.yml|work.yml|skill.yml|author.yml>","summary":"<one-line summary>",\
+"rationale":"<why these changes>","new_content":"<COMPLETE revised section YAML>"}}
+```
+
+IMPORTANT for resume edits:
+- `new_content` MUST be valid YAML for that section file.
+- This is a PER-APPLICATION copy, not your master resume.
+- The resume must remain ONE PAGE after applying the edit.
+- Keep edits tight and focused.
+- Only propose changes to ONE section at a time.
+
+The `new_content` value MUST be the COMPLETE revised section (the full \
+document/YAML), not a partial excerpt and not a diff. Only make claims that are \
+supported by the work.yml and resume section content provided below — do not \
+invent companies, numbers, dates, or metrics.
+
 For normal questions (anything that is not a request to edit the cover \
-letter), answer normally and do NOT emit a `jobsmith-proposal` block.
+letter or resume), answer normally and do NOT emit a `jobsmith-proposal` block.
 """
 
 
@@ -323,8 +341,19 @@ def _resolve_cover_letter_draft(app_dir: Path) -> Path | None:
     return None
 
 
+def _resolve_resume_section(app_dir: Path, section_file: str) -> Path | None:
+    """Resolve a resume section file (education.yml, work.yml, skill.yml, author.yml).
+
+    Tries app_dir first, then documents/ (per-application copy location).
+    """
+    for candidate in (app_dir / section_file, app_dir / "documents" / section_file):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def _build_system_prompt(slug: str) -> str | None:
-    """Load work.yml and cover letter content for a slug to inject as context."""
+    """Load work.yml, cover letter, and resume sections for a slug to inject as context."""
     from jobsmith.api.applications import _get_app_dir
 
     app_dir = _get_app_dir(slug)
@@ -347,10 +376,39 @@ def _build_system_prompt(slug: str) -> str | None:
         with contextlib.suppress(OSError):
             cover_content = cover_path.read_text(encoding="utf-8")
 
+    # Load per-application resume sections (capped at 2500 chars each with truncation marker).
+    resume_sections = []
+    for section_label, section_file in [
+        ("Education", "education.yml"),
+        ("Work", "work.yml"),
+        ("Skills", "skill.yml"),
+        ("Author", "author.yml"),
+    ]:
+        section_content = ""
+        section_path = _resolve_resume_section(app_dir, section_file)
+        if section_path is not None:
+            with contextlib.suppress(OSError):
+                full_content = section_path.read_text(encoding="utf-8")
+                if len(full_content) > 2500:
+                    section_content = full_content[:2500] + "\n... [truncated]"
+                else:
+                    section_content = full_content
+        if section_content:
+            resume_sections.append(f"### {section_label} ({section_file})\n{section_content}")
+
+    resume_context = ""
+    if resume_sections:
+        resume_context = (
+            "\n\n## Resume Sections (this application's per-application copy)\n"
+            + "\n\n".join(resume_sections)
+        )
+
     return (
         f"Application: {slug}\n\n"
         f"## work.yml\n{work_content}\n\n"
-        f"## Cover Letter (current cover-letter-draft.md)\n{cover_content}\n\n"
+        f"## Cover Letter (current cover-letter-draft.md)\n{cover_content}"
+        + resume_context
+        + "\n\n"
         + _PROPOSAL_INSTRUCTIONS.format(slug=slug)
     )
 
