@@ -391,6 +391,44 @@ describe('ApplicationDetail SSE auto-subscribe (roborev job 945)', () => {
     });
     expect(constructorCalls.length).toBe(0);
   });
+
+  it('auto-subscribes when a run is in "queued" state (bug-404f66e2)', async () => {
+    // bug-404f66e2: when a user clicks apply on a posting and navigates to the
+    // detail page, the run is registered immediately but may still be in 'queued'
+    // state when the ApplicationDetail component mounts. The SSE stream should
+    // connect as soon as apiRunId is available, not wait for status='running'.
+    // The old code checked `if (apiStatus !== 'running') return;` which would
+    // miss the 'queued' state and never subscribe.
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'queued',
+      phase: 0,
+      finished_at: null,
+      run_id: 'run-queued-state',
+    });
+    renderWithProposal(<ApplicationDetail slug="queued-run" back={() => {}} />);
+    await waitFor(() => {
+      expect(constructorCalls.length).toBeGreaterThan(0);
+    });
+    // Should connect to the SSE stream even though status is 'queued', not 'running'.
+    expect(constructorCalls[0]).toBe('http://localhost/events-noop');
+  });
+
+  it('auto-subscribes when a run is in "gather" state (bug-404f66e2)', async () => {
+    // Additional coverage: gather, draft, render states should all subscribe.
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'gather',
+      phase: 1,
+      finished_at: null,
+      run_id: 'run-gather-state',
+    });
+    renderWithProposal(<ApplicationDetail slug="gather-run" back={() => {}} />);
+    await waitFor(() => {
+      expect(constructorCalls.length).toBeGreaterThan(0);
+    });
+    expect(constructorCalls[0]).toBe('http://localhost/events-noop');
+  });
 });
 
 describe('ApplicationDetail re-run button (feat-d6b1e167)', () => {
@@ -1089,5 +1127,48 @@ describe('ApplicationDetail fromApi unknown-phase fix (bug-300fb9ad)', () => {
     expect(/failed/i.test(texts[2] ?? '')).toBe(true);
     expect(/failed/i.test(texts[0] ?? '')).toBe(false);
     expect(/failed/i.test(texts[1] ?? '')).toBe(false);
+  });
+
+  // bug-26db7047: when a phase halts (SSE phase/failed event), the phase card
+  // should show 'failed' status, not revert to 'queued'.
+  it('SSE phase/failed event shows failed status on the phase card (bug-26db7047)', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'running',
+      phase: 'gather',
+      finished_at: null,
+      run_id: 'run-sse-halt',
+    });
+    renderWithProposal(<ApplicationDetail slug="sse-halt-test" back={() => {}} />);
+    await waitFor(() => expect(lastFakeEs).not.toBeNull());
+
+    // Emit a phase=gather, status=failed event from the transcript stream.
+    // These transcript-sourced events carry status but NOT timestamps (timestamps
+    // come later from the polling mechanism). This is the first indication the
+    // phase halted; phaseTimes won't have data yet so duration will be '—'.
+    await act(async () => {
+      lastFakeEs!.emit('phase', {
+        run_id: 'run-sse-halt',
+        phase: 'gather',
+        status: 'failed',
+      });
+    });
+
+    // After the phase/failed event, the gather phase card should show 'failed',
+    // not 'queued'.
+    await waitFor(() => {
+      const phaseStatuses = document.querySelectorAll('.phase-status');
+      const firstPhaseText = phaseStatuses[0]?.textContent ?? '';
+      expect(firstPhaseText).toMatch(/failed/i);
+    });
+
+    // The duration will be '—' (em dash) because the transcript event doesn't
+    // carry started_at/finished_at. The polling mechanism will eventually emit
+    // a phase event with timestamps, but in this test we only emit the
+    // transcript event. The important fix (bug-26db7047) is that the card shows
+    // 'failed' instead of 'queued'.
+    const phaseDurations = document.querySelectorAll('.phase .sub');
+    const firstDurationText = phaseDurations[0]?.textContent ?? '';
+    expect(firstDurationText).toMatch(/—/);
   });
 });

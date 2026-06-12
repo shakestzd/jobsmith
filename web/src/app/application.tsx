@@ -2055,14 +2055,6 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
           // ``phase_failed`` event with a real phase name. Only update
           // when the SSE payload names a real phase.
           if (data.phase === 'gather' || data.phase === 'draft' || data.phase === 'render') {
-            // bug-26db7047: mark the failed phase's progress as done (100%) so the
-            // phase card status logic correctly shows 'failed' instead of 'queued'.
-            // The card status is determined by: if progress >= 100 → 'done',
-            // else if isStuckPhase (failed) → 'failed', else → 'queued'.
-            // When a phase halts without completing, progress stays < 100 and the
-            // card incorrectly falls through to 'queued'. Setting progress to 100
-            // here ensures the card shows the failed state.
-            setProgress(p => ({ ...p, [phaseNum]: 100 }));
             setFailedPhaseNum(phaseNum as 1 | 2 | 3);
           }
         }
@@ -2510,10 +2502,16 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
           // authoritative source.
           const isStuckPhase =
             sseStatus === 'failed' && failedPhaseNum === p.num;
-          const status: PhaseStatus = pr >= 100
-            ? 'done'
-            : (isStuckPhase
-              ? 'failed'
+          // bug-26db7047: check for failed status BEFORE progress >= 100 so that
+          // a halted phase shows 'failed' not 'done'. Phase card status priority:
+          // 1. If sseStatus=failed and this is the failed phase → 'failed'
+          // 2. Else if progress >= 100 → 'done'
+          // 3. Else if currently running and incomplete → 'running'
+          // 4. Else → 'queued'
+          const status: PhaseStatus = isStuckPhase
+            ? 'failed'
+            : (pr >= 100
+              ? 'done'
               : (running && i === firstIncomplete ? 'running' : 'queued'));
           return (
             <PhaseCard
@@ -2528,7 +2526,9 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
               meta={[
                 { v: p.specs.length, k: 'specialists' },
                 {
-                  v: pr >= 100
+                  // bug-26db7047: show elapsed time for completed or failed phases.
+                  // For running phases, show 'live'; for queued, show '—'.
+                  v: (pr >= 100 || status === 'failed')
                     ? formatPhaseDuration(
                         phaseTimes[p.num].startedAt,
                         phaseTimes[p.num].finishedAt,
