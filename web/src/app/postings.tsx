@@ -18,6 +18,8 @@ import SourcingHealthBanner from './SourcingHealthBanner';
 
 const LAST_VISIT_KEY = 'jobsmith.postings.last_visit';
 
+type SortDir = 'asc' | 'desc';
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function relativeAge(iso: string): string {
@@ -58,6 +60,10 @@ export function PostingsView({ onPromoted }: PostingsViewProps) {
   const [sourceFilter, setSourceFilter] = useState<string>('');
   const [specialtyFilter, setSpecialtyFilter] = useState<string>('');
   const [minScore, setMinScore] = useState<string>('');
+  const [minCoverage, setMinCoverage] = useState<string>('');
+
+  // Coverage sort state
+  const [coverageSort, setCoverageSort] = useState<SortDir | null>(null);
 
   // Per-row action state
   const [pendingId, setPendingId] = useState<number | null>(null);
@@ -78,7 +84,27 @@ export function PostingsView({ onPromoted }: PostingsViewProps) {
   const minScoreNum = parseFloat(minScore);
   if (!isNaN(minScoreNum)) filter.min_score = minScoreNum;
 
-  const { data: postings = [], isLoading, error } = usePostings(filter);
+  const { data: rawPostings = [], isLoading, error } = usePostings(filter);
+
+  // Apply min-coverage filter (client-side): exclude below-threshold rows, never exclude null
+  const minCoverageNum = parseFloat(minCoverage);
+  const filteredByCoverage = isNaN(minCoverageNum)
+    ? rawPostings
+    : rawPostings.filter((p) =>
+        p.coverage_score == null || p.coverage_score >= minCoverageNum,
+      );
+
+  // Apply coverage sort (client-side): nulls always sort last
+  const postings = coverageSort
+    ? [...filteredByCoverage].sort((a, b) => {
+        const an = a.coverage_score;
+        const bn = b.coverage_score;
+        if (an == null && bn == null) return 0;
+        if (an == null) return 1; // nulls last
+        if (bn == null) return -1; // nulls last
+        return coverageSort === 'asc' ? an - bn : bn - an;
+      })
+    : filteredByCoverage;
 
   // Compute badge count: postings sourced after last-visit (all statuses, no filter)
   const { data: allPostings = [] } = usePostings({ status: 'sourced' });
@@ -265,6 +291,19 @@ export function PostingsView({ onPromoted }: PostingsViewProps) {
           onChange={(e) => setMinScore(e.target.value)}
           style={{ fontSize: 12, padding: '4px 8px', height: 30, width: 96 }}
         />
+
+        {/* Min coverage */}
+        <input
+          className="input"
+          type="number"
+          min={0}
+          max={100}
+          step={5}
+          placeholder="min coverage"
+          value={minCoverage}
+          onChange={(e) => setMinCoverage(e.target.value)}
+          style={{ fontSize: 12, padding: '4px 8px', height: 30, width: 108 }}
+        />
       </div>
 
       {/* Feedback messages */}
@@ -324,6 +363,16 @@ export function PostingsView({ onPromoted }: PostingsViewProps) {
                 <th style={thStyle}>role / company</th>
                 <th style={thStyle}>source</th>
                 <th style={{ ...thStyle, width: 60, textAlign: 'center' }}>triage</th>
+                <th
+                  style={{ ...thStyle, width: 72, textAlign: 'center', cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() =>
+                    setCoverageSort((prev) =>
+                      prev === null ? 'asc' : prev === 'asc' ? 'desc' : null,
+                    )
+                  }
+                >
+                  coverage{coverageSort === 'asc' ? ' ▲' : coverageSort === 'desc' ? ' ▼' : ''}
+                </th>
                 <th style={thStyle}>rationale</th>
                 <th style={{ ...thStyle, width: 48, textAlign: 'center' }}>age</th>
                 <th style={{ ...thStyle, width: 180, textAlign: 'right' }}>actions</th>
@@ -341,6 +390,11 @@ export function PostingsView({ onPromoted }: PostingsViewProps) {
                   scoreBg={scoreBg(p)}
                   scoreLabel={scoreLabel(p)}
                   age={relativeAge(p.first_seen_at)}
+                  coverageLabel={
+                    p.coverage_score != null
+                      ? p.coverage_score.toFixed(0)
+                      : null
+                  }
                 />
               ))}
             </tbody>
@@ -362,6 +416,8 @@ interface PostingTableRowProps {
   scoreBg: string;
   scoreLabel: string;
   age: string;
+  /** Percentage string like "75", or null when not rescored. */
+  coverageLabel: string | null;
 }
 
 function PostingTableRow({
@@ -373,6 +429,7 @@ function PostingTableRow({
   scoreBg,
   scoreLabel,
   age,
+  coverageLabel,
 }: PostingTableRowProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -426,6 +483,63 @@ function PostingTableRow({
           >
             {scoreLabel}
           </span>
+        </td>
+
+        {/* Coverage score */}
+        <td style={{ ...tdStyle, textAlign: 'center' }}>
+          {coverageLabel != null ? (
+            <span
+              style={{
+                display: 'inline-block',
+                borderRadius: 4,
+                padding: '2px 6px',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                fontWeight: 600,
+                minWidth: 28,
+                textAlign: 'center',
+                background: 'var(--bg-sunk)',
+              }}
+            >
+              {coverageLabel}
+            </span>
+          ) : (
+            <span
+              title="not rescored"
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: 13,
+                color: 'var(--fg-subtle)',
+              }}
+            >
+              —
+            </span>
+          )}
+          {/* Gap badges — shown regardless of coverage */}
+          {p.gap_hits && p.gap_hits.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 3, justifyContent: 'center' }}>
+              {p.gap_hits.map((gh, i) => (
+                <span
+                  key={i}
+                  title={`matched: ${gh.term}`}
+                  style={{
+                    display: 'inline-block',
+                    background: 'oklch(0.95 0.06 20)',
+                    border: '1px solid oklch(0.75 0.12 20)',
+                    color: 'oklch(0.4 0.14 20)',
+                    borderRadius: 3,
+                    padding: '1px 5px',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    fontFamily: 'var(--font-mono)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {gh.gap}
+                </span>
+              ))}
+            </div>
+          )}
         </td>
 
         {/* Rationale */}
@@ -522,7 +636,7 @@ function PostingTableRow({
       {/* Expanded detail row */}
       {expanded && (
         <tr style={{ background: 'var(--bg-sunk)' }}>
-          <td colSpan={6} style={{ padding: '10px 16px' }}>
+          <td colSpan={7} style={{ padding: '10px 16px' }}>
             <div
               style={{
                 fontSize: 12,
