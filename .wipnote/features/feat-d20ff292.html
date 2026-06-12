@@ -10,20 +10,26 @@
 <body>
     <article id="feat-d20ff292"
              data-type="feature"
-             data-status="in-progress"
+             data-status="done"
              data-priority="medium"
              data-created="2026-06-12T16:44:09.921833"
-             data-updated="2026-06-12T17:00:14.359628" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034">
+             data-updated="2026-06-12T17:27:42.414829" data-agent-assigned="claude-code" data-track-id="trk-cf0dc034">
 
         <header>
             <h1>Known-gaps harvest and matcher</h1>
             <div class="metadata">
-                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge status-done">Done</span>
                 <span class="badge priority-medium">Medium Priority</span>
             </div>
         </header>
 
         <nav data-graph-edges>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="plan-2434601a.html" data-relationship="planned_in" data-since="2026-06-12T16:44:09.930048">plan-2434601a</a></li>
+                </ul>
+            </section>
             <section data-edge-type="part_of">
                 <h3>Part Of:</h3>
                 <ul>
@@ -40,12 +46,6 @@
                 <h3>Blocked By:</h3>
                 <ul>
                     <li><a href="../features/feat-6ec8c30a.html" data-relationship="blocked_by">feat-6ec8c30a</a></li>
-                </ul>
-            </section>
-            <section data-edge-type="planned_in">
-                <h3>Planned In:</h3>
-                <ul>
-                    <li><a href="plan-2434601a.html" data-relationship="planned_in" data-since="2026-06-12T16:44:09.930048">plan-2434601a</a></li>
                 </ul>
             </section>
         </nav>
@@ -68,7 +68,8 @@ the upsert loop (~line 664, before the rescore block at ~737): match
 against ALL postings with non-empty jd_text (dedicated query - NOT just
 new_posting_ids), so newly-accumulated halts apply to old rows. Persist
 to additive postings.gap_hits_json TEXT NULL via migration
-migrations/013_posting_gap_hits.sql registered in db.py.</p>
+migrations/013_posting_gap_hits.sql registered in db.py.
+[2026-06-12 17:27 claude-code] accepted-advisory (provenance override): implementation committed as 2ac25f4 in agent worktree, merged as 7f3a91a; agent hit tool budget before completing attribution; orchestrator verified gates directly: ruff clean, 1925 passed / 14 skipped incl. 25 new gaps tests</p>
         </section>
     </article>
 </body>
