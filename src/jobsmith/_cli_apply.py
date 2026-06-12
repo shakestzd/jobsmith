@@ -1189,6 +1189,25 @@ def _run_apply_phases(
                         (slug, db_run_id),
                     )
                     db_conn.commit()
+                    # Notify the API supervisor of the slug rekey so connected SSE
+                    # clients can resolve the stale slug to the canonical one and
+                    # reconnect without 404ing. Only attempt this if we're in an
+                    # in-process API context (events parameter is not None).
+                    try:
+                        from .api.supervisor import get_supervisor
+                        supervisor = get_supervisor()
+                        supervisor.update_slug(
+                            old_slug=pre_reconcile_slug,
+                            new_slug=slug,
+                            run_id=db_run_id,
+                        )
+                    except Exception as supervisor_exc:  # noqa: BLE001
+                        logger.debug(
+                            "supervisor.update_slug failed (run_id=%s): %s — "
+                            "running via CLI or in a test without supervisor",
+                            db_run_id,
+                            supervisor_exc,
+                        )
                 except Exception as exc:
                     logger.warning(
                         "apply_runs slug rekey UPDATE failed (run_id=%s, "

@@ -195,12 +195,18 @@ def _resolve_supervisor(request: Request) -> RunSupervisor:
 _SYNTHETIC_SLUGS: frozenset[str] = frozenset({"onboard"})
 
 
-def _validate_slug_or_404(apps_dir: Path, slug: str) -> Path:
+def _validate_slug_or_404(
+    apps_dir: Path, slug: str, supervisor: RunSupervisor | None = None
+) -> Path:
     """Return the slug dir; raise 404 if missing or 400 if path-suspicious.
 
     Synthetic slugs (see ``_SYNTHETIC_SLUGS``) bypass the directory-existence
     404 — they are tracked by the run supervisor, not by an on-disk app dir —
     but still pass the invalid/path-traversal checks.
+
+    Stale slugs (ones rekeyed post-registration) are also allowed if the
+    supervisor has an alias mapping them to a canonical slug. This allows
+    EventSource reconnects after slug rekey to continue working.
     """
     if not slug or "/" in slug or ".." in slug or slug.startswith("."):
         raise HTTPException(status_code=400, detail=f"Invalid slug: {slug!r}")
@@ -216,6 +222,13 @@ def _validate_slug_or_404(apps_dir: Path, slug: str) -> Path:
 
     if slug in _SYNTHETIC_SLUGS:
         return slug_dir
+
+    # Check if this is a stale slug with an active alias to the canonical slug.
+    if supervisor is not None:
+        run_id = supervisor.get_active_for_slug(slug)
+        if run_id is not None:
+            # There's an active run for this slug (or it aliases to a canonical one).
+            return slug_dir
 
     if not slug_dir.is_dir():
         raise HTTPException(status_code=404, detail=f"Slug not found: {slug}")
@@ -715,10 +728,10 @@ async def stream_events(
         Resume from an apply_runs rowid.
     """
     apps_dir = _resolve_applications_dir(request)
-    _validate_slug_or_404(apps_dir, slug)
+    supervisor = _resolve_supervisor(request)
+    _validate_slug_or_404(apps_dir, slug, supervisor=supervisor)
 
     db_path = _resolve_pipeline_db_path(request)
-    supervisor = _resolve_supervisor(request)
 
     poll_interval_s = _get_event_tunable(
         request, "events_poll_interval_s", DEFAULT_POLL_INTERVAL_S

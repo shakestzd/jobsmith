@@ -257,6 +257,8 @@ class RunSupervisor:
         self._max_buffered_lines = max_buffered_lines
         self._runs: dict[str, _RunRecord] = {}
         self._active_by_slug: dict[str, str] = {}
+        # Maps stale slugs to canonical slugs for reconnection after rekey.
+        self._slug_aliases: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -327,6 +329,10 @@ class RunSupervisor:
             record.handle.status = "done" if rc == 0 else "failed"
             record.handle.finished_at = _now_iso()
             self._active_by_slug.pop(record.handle.slug, None)
+            # Clean up stale aliases for this run when it completes.
+            self._slug_aliases = {
+                k: v for k, v in self._slug_aliases.items() if v != record.handle.slug
+            }
 
         # Notify subscribers: end of stream.
         for q in record.subscribers:
@@ -339,15 +345,47 @@ class RunSupervisor:
         return record.handle if record is not None else None
 
     def get_active_for_slug(self, slug: str) -> str | None:
-        """Return the run_id of the slug's active (running) run, else None."""
-        run_id = self._active_by_slug.get(slug)
+        """Return the run_id of the slug's active (running) run, else None.
+
+        Resolves stale slugs through the alias map so reconnects after
+        a slug rekey work transparently.
+        """
+        canonical_slug = self._slug_aliases.get(slug, slug)
+        run_id = self._active_by_slug.get(canonical_slug)
         if run_id is None:
             return None
         record = self._runs.get(run_id)
         if record is None or record.handle.status != "running":
-            self._active_by_slug.pop(slug, None)
+            self._active_by_slug.pop(canonical_slug, None)
             return None
         return run_id
+
+    def update_slug(
+        self, old_slug: str, new_slug: str, run_id: str
+    ) -> None:
+        """Rename a registered run's slug (called after directory rekey).
+
+        Updates the active-slug mapping and creates an alias so the old slug
+        remains resolvable for the lifetime of the run. Updates the handle's
+        slug field so stream subscribers see the canonical slug.
+
+        Args:
+            old_slug: The original (pre-rekey) slug.
+            new_slug: The canonical (post-rekey) slug.
+            run_id: The run being rekeyed.
+        """
+        if old_slug == new_slug:
+            return
+        record = self._runs.get(run_id)
+        if record is None:
+            return
+        # Update the active-slug map.
+        self._active_by_slug.pop(old_slug, None)
+        self._active_by_slug[new_slug] = run_id
+        # Create the alias so reconnects via old_slug resolve to new_slug.
+        self._slug_aliases[old_slug] = new_slug
+        # Update the handle so the canonical slug is visible.
+        record.handle.slug = new_slug
 
     async def stream(
         self, run_id: str
@@ -429,6 +467,10 @@ class RunSupervisor:
             record.handle.exit_code = -1
             record.handle.finished_at = _now_iso()
             self._active_by_slug.pop(record.handle.slug, None)
+            # Clean up stale aliases for this run when it's killed.
+            self._slug_aliases = {
+                k: v for k, v in self._slug_aliases.items() if v != record.handle.slug
+            }
 
         for q in record.subscribers:
             q.put_nowait(None)
