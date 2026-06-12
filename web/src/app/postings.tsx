@@ -91,7 +91,7 @@ export function PostingsView({ onPromoted }: PostingsViewProps) {
   const filteredByCoverage = isNaN(minCoverageNum)
     ? rawPostings
     : rawPostings.filter((p) =>
-        p.coverage_score == null || p.coverage_score * 100 >= minCoverageNum,
+        p.coverage_score == null || p.coverage_score >= minCoverageNum,
       );
 
   // Apply coverage sort (client-side): nulls always sort last
@@ -392,7 +392,7 @@ export function PostingsView({ onPromoted }: PostingsViewProps) {
                   age={relativeAge(p.first_seen_at)}
                   coverageLabel={
                     p.coverage_score != null
-                      ? (p.coverage_score * 100).toFixed(0)
+                      ? p.coverage_score.toFixed(0)
                       : null
                   }
                 />

@@ -69,7 +69,7 @@ const POSTING_WITH_COVERAGE: PostingRow = {
   id: 2,
   title: 'Data Engineer',
   company: 'Databricks',
-  coverage_score: 0.75,
+  coverage_score: 75,
   uncovered: ['dbt'],
   gap_hits: [{ gap: 'DBT', term: 'dbt' }],
 };
@@ -207,7 +207,7 @@ describe('PostingsView', () => {
   it('renders numeric coverage value for scored row', () => {
     setupMockHook([POSTING_WITH_COVERAGE]);
     render(<PostingsView />);
-    // coverage_score=0.75 → "75"
+    // coverage_score=75 → "75"
     expect(screen.getByText('75')).toBeTruthy();
   });
 
@@ -221,8 +221,8 @@ describe('PostingsView', () => {
   });
 
   it('sorts coverage column: nulls last when ascending', () => {
-    const low: PostingRow = { ...POSTING_FIXTURE, id: 10, title: 'Low Score', coverage_score: 0.3, gap_hits: null, uncovered: null };
-    const high: PostingRow = { ...POSTING_FIXTURE, id: 11, title: 'High Score', coverage_score: 0.9, gap_hits: null, uncovered: null };
+    const low: PostingRow = { ...POSTING_FIXTURE, id: 10, title: 'Low Score', coverage_score: 30, gap_hits: null, uncovered: null };
+    const high: PostingRow = { ...POSTING_FIXTURE, id: 11, title: 'High Score', coverage_score: 90, gap_hits: null, uncovered: null };
     const nullCov: PostingRow = { ...POSTING_FIXTURE, id: 12, title: 'Null Coverage', coverage_score: null, gap_hits: null, uncovered: null };
     setupMockHook([low, high, nullCov]);
     render(<PostingsView />);
@@ -235,8 +235,8 @@ describe('PostingsView', () => {
   });
 
   it('sorts coverage column: nulls last when descending', () => {
-    const low: PostingRow = { ...POSTING_FIXTURE, id: 10, title: 'Low Score', coverage_score: 0.3, gap_hits: null, uncovered: null };
-    const high: PostingRow = { ...POSTING_FIXTURE, id: 11, title: 'High Score', coverage_score: 0.9, gap_hits: null, uncovered: null };
+    const low: PostingRow = { ...POSTING_FIXTURE, id: 10, title: 'Low Score', coverage_score: 30, gap_hits: null, uncovered: null };
+    const high: PostingRow = { ...POSTING_FIXTURE, id: 11, title: 'High Score', coverage_score: 90, gap_hits: null, uncovered: null };
     const nullCov: PostingRow = { ...POSTING_FIXTURE, id: 12, title: 'Null Coverage', coverage_score: null, gap_hits: null, uncovered: null };
     setupMockHook([low, high, nullCov]);
     render(<PostingsView />);
@@ -251,8 +251,8 @@ describe('PostingsView', () => {
   // ── Min-coverage filter tests ──────────────────────────────────────────────
 
   it('min-coverage filter excludes below-threshold rows', () => {
-    const low: PostingRow = { ...POSTING_FIXTURE, id: 10, title: 'Low Coverage Row', coverage_score: 0.3, gap_hits: null, uncovered: null };
-    const high: PostingRow = { ...POSTING_FIXTURE, id: 11, title: 'High Coverage Row', coverage_score: 0.9, gap_hits: null, uncovered: null };
+    const low: PostingRow = { ...POSTING_FIXTURE, id: 10, title: 'Low Coverage Row', coverage_score: 30, gap_hits: null, uncovered: null };
+    const high: PostingRow = { ...POSTING_FIXTURE, id: 11, title: 'High Coverage Row', coverage_score: 90, gap_hits: null, uncovered: null };
     setupMockHook([low, high]);
     render(<PostingsView />);
     const minCovInput = screen.getByPlaceholderText(/min coverage/i);
@@ -263,7 +263,7 @@ describe('PostingsView', () => {
 
   it('min-coverage filter passes through null-coverage rows', () => {
     const nullCov: PostingRow = { ...POSTING_FIXTURE, id: 12, title: 'Null Coverage Row', coverage_score: null, gap_hits: null, uncovered: null };
-    const low: PostingRow = { ...POSTING_FIXTURE, id: 10, title: 'Low Coverage Row', coverage_score: 0.2, gap_hits: null, uncovered: null };
+    const low: PostingRow = { ...POSTING_FIXTURE, id: 10, title: 'Low Coverage Row', coverage_score: 20, gap_hits: null, uncovered: null };
     setupMockHook([nullCov, low]);
     render(<PostingsView />);
     const minCovInput = screen.getByPlaceholderText(/min coverage/i);
