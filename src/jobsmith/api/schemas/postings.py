@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -10,6 +12,11 @@ class PostingRow(BaseModel):
 
     jd_text is intentionally excluded from the list response (can be large;
     only needed when rendering a single posting detail).
+
+    coverage_score, uncovered, and gap_hits are pass-through of the slice-2/3
+    DB columns (coverage_score REAL, uncovered_json TEXT, gap_hits_json TEXT).
+    JSON columns are parsed server-side in the route before construction;
+    malformed stored JSON → null, never a 500.
     """
 
     id: int
@@ -30,6 +37,10 @@ class PostingRow(BaseModel):
     dedup_key: str
     first_seen_at: str
     last_seen_at: str
+    # Coverage fields — slices 2 & 3 (feat-d10d8969)
+    coverage_score: float | None = None
+    uncovered: list[str] | None = None
+    gap_hits: list[dict[str, Any]] | None = None
 
 
 class PostingStatusUpdate(BaseModel):

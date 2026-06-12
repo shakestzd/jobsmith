@@ -20,6 +20,7 @@ The ``_get_db_path`` helper is module-level so tests can monkeypatch it.
 
 from __future__ import annotations
 
+import json as _json
 import logging
 import re as _re
 from pathlib import Path
@@ -168,10 +169,35 @@ async def _fetch_jd_text(url: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _parse_json_col(raw: object) -> object:
+    """Parse a JSON text column value; returns None on null or malformed input.
+
+    Never raises — a malformed stored value silently becomes null so that a
+    single bad row never causes a 500 for the entire list response.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        return None
+    try:
+        return _json.loads(raw)
+    except _json.JSONDecodeError:
+        return None
+
+
+def _row_to_posting(row: object) -> PostingRow:
+    """Convert a sqlite3.Row to a PostingRow, parsing JSON columns server-side."""
+    data = dict(row)  # type: ignore[call-overload]
+    data["uncovered"] = _parse_json_col(data.pop("uncovered_json", None))
+    data["gap_hits"] = _parse_json_col(data.pop("gap_hits_json", None))
+    return PostingRow(**data)
+
+
 _POSTINGS_LIST_COLUMNS = (
     "id, source, external_id, url, title, company, location, comp_text, "
     "posted_date, fast_score, llm_score, specialty, rationale, status, "
-    "promoted_application_id, dedup_key, first_seen_at, last_seen_at"
+    "promoted_application_id, dedup_key, first_seen_at, last_seen_at, "
+    "coverage_score, uncovered_json, gap_hits_json"
 )
 _POSTINGS_DEFAULT_LIMIT = 200
 _POSTINGS_MAX_LIMIT = 1000
@@ -267,7 +293,7 @@ def list_postings(
         """
         params.extend([limit, offset])
         rows = conn.execute(sql, params).fetchall()
-        return [PostingRow(**dict(row)) for row in rows]
+        return [_row_to_posting(row) for row in rows]
     finally:
         conn.close()
 
@@ -311,7 +337,7 @@ def update_posting_status(
         set_posting_status(conn, posting_id=posting_id, status=body.status)
         # Re-read after update
         updated = get_posting_by_id(conn, posting_id)
-        return PostingRow(**dict(updated))  # type: ignore[arg-type]
+        return _row_to_posting(updated)  # type: ignore[arg-type]
     finally:
         conn.close()
 

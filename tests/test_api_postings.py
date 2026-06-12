@@ -515,3 +515,107 @@ def test_is_safe_jd_url_rejects_private_ranges() -> None:
     ]
     for url in allowed:
         assert _is_safe_jd_url(url), f"Expected {url!r} to be allowed"
+
+
+# ---------------------------------------------------------------------------
+# feat-d10d8969 — coverage_score, uncovered, gap_hits pass-through
+# ---------------------------------------------------------------------------
+
+
+def _seed_scored_posting(db_path: Path) -> int:
+    """Insert one posting with all three coverage columns populated."""
+    conn = open_pipeline_db(db_path)
+    import json
+
+    pid = upsert_posting(
+        conn,
+        source="greenhouse/scored",
+        dedup_key="key-scored",
+        title="Scored Role",
+        company="ScoredCo",
+        specialty="backend",
+        llm_score=0.85,
+        fast_score=0.80,
+        url="https://scored.example.com/jobs/1",
+        jd_text="Some JD text.",
+    )
+    conn.execute(
+        """
+        UPDATE postings
+        SET coverage_score = ?,
+            uncovered_json = ?,
+            gap_hits_json  = ?
+        WHERE id = ?
+        """,
+        (
+            0.72,
+            json.dumps(["distributed systems", "Kafka"]),
+            json.dumps([{"gap": "stream proc", "term": "Kafka"}]),
+            pid,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return pid
+
+
+def test_scored_row_round_trips_all_three_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scored posting exposes coverage_score, uncovered, gap_hits correctly."""
+    db_path = tmp_path / "jobsmith.db"
+    _seed_scored_posting(db_path)
+    app = _make_app(db_path, monkeypatch)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/api/postings")
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["coverage_score"] == pytest.approx(0.72)
+    assert row["uncovered"] == ["distributed systems", "Kafka"]
+    assert row["gap_hits"] == [{"gap": "stream proc", "term": "Kafka"}]
+
+
+def test_legacy_row_serializes_nulls(client_and_ids) -> None:
+    """Rows without coverage data expose null for all three fields."""
+    client, _, _ = client_and_ids
+    resp = client.get("/api/postings")
+    assert resp.status_code == 200, resp.text
+    for row in resp.json():
+        assert row["coverage_score"] is None, f"Expected null coverage_score for id={row['id']}"
+        assert row["uncovered"] is None, f"Expected null uncovered for id={row['id']}"
+        assert row["gap_hits"] is None, f"Expected null gap_hits for id={row['id']}"
+
+
+def test_malformed_uncovered_json_serializes_null(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A malformed uncovered_json stored value must yield null, never a 500."""
+    db_path = tmp_path / "jobsmith.db"
+    conn = open_pipeline_db(db_path)
+    pid = upsert_posting(
+        conn,
+        source="greenhouse/bad",
+        dedup_key="key-bad",
+        title="Bad JSON Role",
+        company="BadCo",
+        specialty="backend",
+        url="https://bad.example.com/jobs/1",
+        jd_text="Some text.",
+    )
+    conn.execute(
+        "UPDATE postings SET uncovered_json = ?, gap_hits_json = ? WHERE id = ?",
+        ("not valid json!!!", "also broken", pid),
+    )
+    conn.commit()
+    conn.close()
+
+    app = _make_app(db_path, monkeypatch)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get("/api/postings")
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()
+    assert len(rows) == 1
+    assert rows[0]["uncovered"] is None
+    assert rows[0]["gap_hits"] is None
