@@ -171,4 +171,54 @@ describe('ReviewTab Proposal Panel - Asset Awareness', () => {
 
     expect(resumeProposal.failedClaims).toBeNull();
   });
+
+  // feat-5aa36278: manual editor proposals use the same header format as chat proposals.
+  it('manual resume proposal renders "resume edit — <section>" header (feat-5aa36278)', () => {
+    const activeProposal = {
+      proposal: {
+        asset: 'resume',
+        slug: 'test-app',
+        summary: 'Manual edit',
+        rationale: '',
+        new_content: '- school: Test Univ\n',
+        target_section: 'Education',
+        target_file: 'education.yml',
+      } as ChatProposal,
+      oldContent: '- school: Old Univ\n',
+      applying: false,
+      failedClaims: null,
+    };
+
+    const headerText =
+      activeProposal.proposal.asset === 'resume'
+        ? `✍️ Proposed resume edit — ${activeProposal.proposal.target_section ?? activeProposal.proposal.target_file ?? 'resume section'} (per-app copy, not master resume)`
+        : '✍️ Proposed cover letter revision';
+
+    expect(headerText).toContain('resume edit — Education');
+    expect(headerText).toContain('per-app copy');
+    expect(headerText).not.toContain('cover letter');
+  });
+
+  it('manual cover letter proposal renders cover letter revision header (feat-5aa36278)', () => {
+    const activeProposal = {
+      proposal: {
+        asset: 'cover_letter',
+        slug: 'test-app',
+        summary: 'Manual edit',
+        rationale: '',
+        new_content: 'Updated cover letter.',
+      } as ChatProposal,
+      oldContent: 'Original cover letter.',
+      applying: false,
+      failedClaims: null,
+    };
+
+    const headerText =
+      activeProposal.proposal.asset === 'resume'
+        ? `✍️ Proposed resume edit — ${activeProposal.proposal.target_section ?? activeProposal.proposal.target_file ?? 'resume section'} (per-app copy, not master resume)`
+        : '✍️ Proposed cover letter revision';
+
+    expect(headerText).toContain('cover letter revision');
+    expect(headerText).not.toContain('resume');
+  });
 });

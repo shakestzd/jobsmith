@@ -39,6 +39,13 @@ vi.mock('../api/client', () => ({
   apiPut: vi.fn(),
   postApplication: vi.fn(),
   postCoverLetter: vi.fn(),
+  getResumeSection: vi.fn(),
+  applyCoverLetter: vi.fn(),
+  getCoverLetterDraft: vi.fn(),
+  applyResume: vi.fn(),
+  notifyDataChanged: vi.fn(),
+  renderCoverLetterPdf: vi.fn(),
+  setOutcomeStatus: vi.fn(),
   buildEventsUrl: vi.fn().mockReturnValue('http://localhost/events-noop'),
   redactSensitive: (s: string) => s,
   JobsmithApiError: class JobsmithApiError extends Error {
@@ -46,7 +53,7 @@ vi.mock('../api/client', () => ({
   },
 }));
 
-import { apiGet, apiGetBlob, apiGetText, postApplication } from '../api/client';
+import { apiGet, apiGetBlob, apiGetText, postApplication, getResumeSection, getCoverLetterDraft } from '../api/client';
 
 function renderWithProposal(ui: React.ReactElement) {
   return render(<ProposalProvider>{ui}</ProposalProvider>);
@@ -1263,5 +1270,225 @@ describe('ApplicationDetail generate-cover-letter button (feat-ebb7a7ee)', () =>
     renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
     const btn = await screen.findByRole('button', { name: /generate cover letter/i });
     expect(btn).not.toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cover letter manual edit → review panel (feat-5aa36278 Part B)
+// ---------------------------------------------------------------------------
+
+describe('Cover letter manual edit routes through review panel (feat-5aa36278)', () => {
+  const REVIEW_API_DETAIL = {
+    ...BASE_API_DETAIL,
+    status: 'rendered',
+  };
+
+  const REVIEW_STATE = {
+    cover_letter: 'Dear Hiring Manager,\n\nThis is my cover letter.\n\nSincerely, Me',
+    fit_score: 0.85,
+    fit_rationale: 'Strong match',
+    fit_concerns: [],
+    review_status: 'pending',
+    reviewed_at: null,
+    canonical_slug: 'acme-eng-2026-04',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    constructorCalls.length = 0;
+    (apiGet as ReturnType<typeof vi.fn>).mockImplementation((path: string) => {
+      if (path.includes('/review')) return Promise.resolve(REVIEW_STATE);
+      return Promise.resolve(REVIEW_API_DETAIL);
+    });
+    (apiGetBlob as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no pdf'));
+    (apiGetText as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no text'));
+    (getCoverLetterDraft as ReturnType<typeof vi.fn>).mockResolvedValue(REVIEW_STATE.cover_letter);
+    URL.createObjectURL = vi.fn(() => 'blob:resume');
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  it('review tab shows "edit" button for the cover letter', async () => {
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    await waitFor(() => expect(screen.queryByText(/loading/i)).toBeNull());
+    // Navigate to review tab.
+    fireEvent.click(screen.getByText('review'));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^edit$/i })).toBeInTheDocument();
+    });
+  });
+
+  it('clicking edit opens the textarea pre-filled with cover letter text', async () => {
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    await waitFor(() => expect(screen.queryByText(/loading/i)).toBeNull());
+    fireEvent.click(screen.getByText('review'));
+    const editBtn = await screen.findByRole('button', { name: /^edit$/i });
+    fireEvent.click(editBtn);
+    await waitFor(() => {
+      const ta = screen.getByRole('textbox');
+      expect((ta as HTMLTextAreaElement).value).toContain('Dear Hiring Manager');
+    });
+  });
+
+  it('"review change" button does NOT call PUT /cover-letter; calls getCoverLetterDraft instead (via receiveProposal)', async () => {
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    await waitFor(() => expect(screen.queryByText(/loading/i)).toBeNull());
+    fireEvent.click(screen.getByText('review'));
+    const editBtn = await screen.findByRole('button', { name: /^edit$/i });
+    fireEvent.click(editBtn);
+    // Wait for textarea to appear.
+    const ta = await screen.findByRole('textbox');
+    fireEvent.change(ta, { target: { value: 'Updated cover letter content' } });
+    // Click the review change button.
+    const reviewBtn = await screen.findByRole('button', { name: /review change/i });
+    fireEvent.click(reviewBtn);
+    // The PUT /cover-letter should NOT have been called.
+    const { apiPut } = await import('../api/client');
+    expect(apiPut).not.toHaveBeenCalled();
+    // The inline editor should close (no textarea anymore).
+    await waitFor(() => {
+      expect(screen.queryByRole('textbox')).toBeNull();
+    });
+    // receiveProposal fetches the old content; getCoverLetterDraft should be called.
+    await waitFor(() => {
+      expect(getCoverLetterDraft).toHaveBeenCalledWith('acme-eng-2026-04');
+    });
+  });
+
+  it('after clicking "review change", the diff panel appears for the cover letter proposal', async () => {
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    await waitFor(() => expect(screen.queryByText(/loading/i)).toBeNull());
+    fireEvent.click(screen.getByText('review'));
+    const editBtn = await screen.findByRole('button', { name: /^edit$/i });
+    fireEvent.click(editBtn);
+    const ta = await screen.findByRole('textbox');
+    fireEvent.change(ta, { target: { value: 'New cover letter text' } });
+    fireEvent.click(await screen.findByRole('button', { name: /review change/i }));
+    // The proposal diff panel should appear — aria-label is "Proposed cover letter revision".
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: /Proposed cover letter revision/i }),
+      ).toBeInTheDocument();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Resume section manual editor (feat-5aa36278 Part A)
+// ---------------------------------------------------------------------------
+
+describe('Resume section editor (feat-5aa36278)', () => {
+  const REVIEW_API_DETAIL = { ...BASE_API_DETAIL, status: 'rendered' };
+
+  const REVIEW_STATE = {
+    cover_letter: null,
+    fit_score: null,
+    fit_rationale: null,
+    fit_concerns: [],
+    review_status: 'pending' as const,
+    reviewed_at: null,
+    canonical_slug: 'acme-eng-2026-04',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    constructorCalls.length = 0;
+    (apiGet as ReturnType<typeof vi.fn>).mockImplementation((path: string) => {
+      if (path.includes('/review')) return Promise.resolve(REVIEW_STATE);
+      return Promise.resolve(REVIEW_API_DETAIL);
+    });
+    // Simulate the resume PDF blob existing (gates the section editors).
+    (apiGetBlob as ReturnType<typeof vi.fn>).mockResolvedValue(new Blob(['pdf'], { type: 'application/pdf' }));
+    (apiGetText as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no text'));
+    (getResumeSection as ReturnType<typeof vi.fn>).mockResolvedValue(
+      '- school: Test University\n  degree: B.Sc.\n',
+    );
+    (getCoverLetterDraft as ReturnType<typeof vi.fn>).mockResolvedValue('');
+    URL.createObjectURL = vi.fn(() => 'blob:resume-pdf');
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  it('shows a "resume sections" card with Edit buttons when the PDF is loaded', async () => {
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    await waitFor(() => expect(screen.queryByText(/loading/i)).toBeNull());
+    fireEvent.click(screen.getByText('review'));
+    // Wait for the review tab to render.
+    await waitFor(() => {
+      expect(screen.getByText('resume sections')).toBeInTheDocument();
+    });
+    // All four section labels should appear.
+    expect(screen.getByText('Education')).toBeInTheDocument();
+    expect(screen.getByText('Work')).toBeInTheDocument();
+    expect(screen.getByText('Skills')).toBeInTheDocument();
+    expect(screen.getByText('Author')).toBeInTheDocument();
+    // At least one edit button per section.
+    const editBtns = screen.getAllByRole('button', { name: /edit/i });
+    expect(editBtns.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('clicking edit on Education fetches getResumeSection and opens a textarea', async () => {
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    await waitFor(() => expect(screen.queryByText(/loading/i)).toBeNull());
+    fireEvent.click(screen.getByText('review'));
+    await waitFor(() => expect(screen.getByText('resume sections')).toBeInTheDocument());
+    const editBtn = screen.getByRole('button', { name: /Edit Education section/i });
+    fireEvent.click(editBtn);
+    await waitFor(() => {
+      expect(getResumeSection).toHaveBeenCalledWith('acme-eng-2026-04', 'education.yml');
+    });
+    // Textarea should now be visible pre-filled with YAML.
+    const ta = await screen.findByRole('textbox', { name: /Education YAML editor/i });
+    expect((ta as HTMLTextAreaElement).value).toContain('Test University');
+  });
+
+  it('clicking "propose change" calls receiveProposal with the correct ChatProposal', async () => {
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    await waitFor(() => expect(screen.queryByText(/loading/i)).toBeNull());
+    fireEvent.click(screen.getByText('review'));
+    await waitFor(() => expect(screen.getByText('resume sections')).toBeInTheDocument());
+    // Open education editor.
+    fireEvent.click(screen.getByRole('button', { name: /Edit Education section/i }));
+    // Wait for textarea.
+    const ta = await screen.findByRole('textbox', { name: /Education YAML editor/i });
+    // Edit the content.
+    fireEvent.change(ta, { target: { value: '- school: New University\n  degree: M.Sc.\n' } });
+    // Propose the change.
+    fireEvent.click(screen.getByRole('button', { name: /Propose Education change/i }));
+    // The diff panel should appear — aria-label is "Proposed Education revision".
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: /Proposed Education revision/i }),
+      ).toBeInTheDocument();
+    });
+    // The header inside the panel should contain 'resume edit — Education'.
+    await waitFor(() => {
+      expect(screen.getByText(/resume edit — Education/i)).toBeInTheDocument();
+    });
+    // The textarea should be gone (editor closed after propose).
+    expect(screen.queryByRole('textbox', { name: /Education YAML editor/i })).toBeNull();
+  });
+
+  it('cancel button closes the textarea without proposing', async () => {
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    await waitFor(() => expect(screen.queryByText(/loading/i)).toBeNull());
+    fireEvent.click(screen.getByText('review'));
+    await waitFor(() => expect(screen.getByText('resume sections')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Edit Education section/i }));
+    // Wait for textarea.
+    await screen.findByRole('textbox', { name: /Education YAML editor/i });
+    // Click cancel.
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+    // Textarea should be gone.
+    expect(screen.queryByRole('textbox', { name: /Education YAML editor/i })).toBeNull();
+  });
+
+  it('shows "render the resume first" hint when no PDF is loaded', async () => {
+    // Override blob mock to reject (no PDF).
+    (apiGetBlob as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no pdf'));
+    URL.createObjectURL = vi.fn(() => 'blob:unused');
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    await waitFor(() => expect(screen.queryByText(/loading/i)).toBeNull());
+    fireEvent.click(screen.getByText('review'));
+    await waitFor(() => expect(screen.getByText('resume sections')).toBeInTheDocument());
+    expect(screen.getByText(/render the resume first/i)).toBeInTheDocument();
   });
 });

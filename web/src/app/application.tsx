@@ -11,7 +11,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { SampleApp, AppPhase, AppStatus, IconName } from '../types';
 import { Icon, Badge, StatusBadge } from './shared';
 import { useApplication } from '../api/hooks';
-import { JobsmithApiError, postApplication, postCoverLetter, buildEventsUrl, redactSensitive, apiGet, apiPost, apiPut, apiGetBlob, apiGetText, notifyDataChanged, renderCoverLetterPdf, setOutcomeStatus } from '../api/client';
+import { JobsmithApiError, postApplication, postCoverLetter, buildEventsUrl, redactSensitive, apiGet, apiPost, apiGetBlob, apiGetText, notifyDataChanged, renderCoverLetterPdf, setOutcomeStatus, getResumeSection } from '../api/client';
 import type { RenderCoverLetterPdfResult, OutcomeStatus } from '../api/client';
 import type {
   ApplicationDetail as ApiApplicationDetail,
@@ -803,6 +803,137 @@ function DocumentsTab({ slug }: { slug: string }) {
   );
 }
 
+// ── ResumeSectionEditor ───────────────────────────────────────────────────────
+
+const RESUME_SECTIONS: { label: string; file: string }[] = [
+  { label: 'Education', file: 'education.yml' },
+  { label: 'Work',      file: 'work.yml'      },
+  { label: 'Skills',    file: 'skill.yml'     },
+  { label: 'Author',    file: 'author.yml'    },
+];
+
+interface ResumeSectionEditorProps {
+  slug: string;
+  /** True when the resume has been rendered (pdf exists) — enables the editors. */
+  hasResume: boolean;
+  receiveProposal: (prop: import('../api/client').ChatProposal) => void;
+}
+
+function ResumeSectionEditor({ slug, hasResume, receiveProposal }: ResumeSectionEditorProps) {
+  const [openFile, setOpenFile] = useState<string | null>(null);
+  const [draftYaml, setDraftYaml] = useState('');
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleOpen = async (file: string) => {
+    setOpenFile(file);
+    setDraftYaml('');
+    setLoadError(null);
+    setLoading(true);
+    try {
+      const content = await getResumeSection(slug, file);
+      setDraftYaml(content);
+    } catch (err) {
+      setLoadError(
+        err instanceof Error ? err.message : `Could not load ${file}`,
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePropose = (file: string) => {
+    const section = RESUME_SECTIONS.find(s => s.file === file);
+    receiveProposal({
+      asset: 'resume',
+      slug,
+      target_section: section?.label ?? file,
+      target_file: file,
+      new_content: draftYaml,
+      summary: 'Manual edit',
+      rationale: '',
+    });
+    setOpenFile(null);
+  };
+
+  const handleCancel = () => {
+    setOpenFile(null);
+    setLoadError(null);
+  };
+
+  if (!hasResume) {
+    return (
+      <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--fg-muted)' }}>
+        render the resume first to edit sections
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+      {RESUME_SECTIONS.map(({ label, file }) => (
+        <div key={file}>
+          <div style={{
+            padding: '8px 14px',
+            borderTop: '1px solid var(--border)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}>
+            <span style={{ fontSize: 12, fontWeight: 500, flex: 1 }}>{label}</span>
+            {openFile !== file && (
+              <button
+                className="btn sm ghost"
+                onClick={() => { void handleOpen(file); }}
+                aria-label={`Edit ${label} section`}
+              >
+                edit
+              </button>
+            )}
+          </div>
+          {openFile === file && (
+            <div style={{ padding: '8px 14px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {loading ? (
+                <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>loading…</span>
+              ) : loadError ? (
+                <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>{loadError}</span>
+              ) : (
+                <textarea
+                  value={draftYaml}
+                  onChange={e => setDraftYaml(e.target.value)}
+                  aria-label={`${label} YAML editor`}
+                  style={{
+                    width: '100%', minHeight: 200, padding: 8,
+                    fontSize: 12, lineHeight: 1.55, fontFamily: 'var(--font-mono)',
+                    border: '1px solid var(--border)', borderRadius: 4,
+                    background: 'var(--surface, #fff)', color: 'var(--fg)',
+                    resize: 'vertical', boxSizing: 'border-box',
+                  }}
+                />
+              )}
+              {!loading && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    className="btn primary sm"
+                    onClick={() => handlePropose(file)}
+                    disabled={!!loadError}
+                    aria-label={`Propose ${label} change`}
+                  >
+                    propose change
+                  </button>
+                  <button className="btn sm ghost" onClick={handleCancel}>
+                    cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── ReviewTab ────────────────────────────────────────────────────────────────
 
 interface ReviewState {
@@ -827,8 +958,6 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   const [statusSaving, setStatusSaving] = useState(false);
 
   // On-demand cover-letter PDF (feat-0e29138c). The PDF is produced only by an
@@ -868,8 +997,8 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
     }
   };
 
-  // Proposal context — for the full-width diff panel.
-  const { pendingProposal, applyProposal, rejectProposal } = useProposal();
+  // Proposal context — for the full-width diff panel and manual editors.
+  const { pendingProposal, applyProposal, rejectProposal, receiveProposal } = useProposal();
   // Only show the proposal panel when it belongs to this application slug.
   const activeProposal =
     pendingProposal?.proposal.slug === slug ? pendingProposal : null;
@@ -906,27 +1035,18 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
 
   const handleEdit = () => {
     setDraft(state?.cover_letter ?? '');
-    setSaveError(null);
     setEditing(true);
   };
 
-  const handleSave = async () => {
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const result = await apiPut<{ saved: boolean; words: number }>(
-        `/api/applications/${slug}/cover-letter`,
-        { text: draft },
-      );
-      if (result.saved) {
-        setState(s => s ? { ...s, cover_letter: draft } : s);
-        setEditing(false);
-      }
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
+  const handleSave = () => {
+    receiveProposal({
+      asset: 'cover_letter',
+      slug,
+      new_content: draft,
+      summary: 'Manual edit',
+      rationale: '',
+    });
+    setEditing(false);
   };
 
   const handleSetStatus = async (newStatus: ReviewState['review_status']) => {
@@ -1185,24 +1305,37 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
 
       {/* Split pane */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 420px', gap: 12, alignItems: 'start' }}>
-        {/* Left: resume PDF */}
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>
-            resume.pdf
+        {/* Left: resume PDF + section editors */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>
+              resume.pdf
+            </div>
+            {pdfBlobUrl ? (
+              <div style={{ background: '#fff' }}>
+                <iframe
+                  src={pdfBlobUrl}
+                  title="resume.pdf"
+                  style={{ width: '100%', height: 780, border: 'none', display: 'block', colorScheme: 'light' }}
+                />
+              </div>
+            ) : (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--fg-muted)', fontSize: 13 }}>
+                resume not yet rendered — run phase 3
+              </div>
+            )}
           </div>
-          {pdfBlobUrl ? (
-            <div style={{ background: '#fff' }}>
-              <iframe
-                src={pdfBlobUrl}
-                title="resume.pdf"
-                style={{ width: '100%', height: 780, border: 'none', display: 'block', colorScheme: 'light' }}
-              />
+          {/* Resume section editors */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>
+              resume sections
             </div>
-          ) : (
-            <div style={{ padding: 24, textAlign: 'center', color: 'var(--fg-muted)', fontSize: 13 }}>
-              resume not yet rendered — run phase 3
-            </div>
-          )}
+            <ResumeSectionEditor
+              slug={slug}
+              hasResume={!!pdfBlobUrl}
+              receiveProposal={receiveProposal}
+            />
+          </div>
         </div>
 
         {/* Right: cover letter + fit score */}
@@ -1230,19 +1363,16 @@ function ReviewTab({ slug, reviewKey }: { slug: string; reviewKey: number }) {
                   }}
                 />
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <button className="btn primary sm" onClick={() => { void handleSave(); }} disabled={saving}>
-                    {saving ? 'saving…' : 'save'}
+                  <button className="btn primary sm" onClick={handleSave}>
+                    review change
                   </button>
-                  <button className="btn sm ghost" onClick={() => { setEditing(false); setSaveError(null); }} disabled={saving}>
+                  <button className="btn sm ghost" onClick={() => { setEditing(false); }}>
                     cancel
                   </button>
                   <span className="mono-sm" style={{ color: 'var(--fg-muted)', marginLeft: 'auto' }}>
                     {draft.trim().split(/\s+/).filter(Boolean).length}w
                   </span>
                 </div>
-                {saveError && (
-                  <span style={{ fontSize: 12, color: 'var(--danger, #c0392b)' }}>{saveError}</span>
-                )}
               </div>
             ) : (
               <pre style={{ margin: 0, padding: '14px 16px', whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.7, fontFamily: 'var(--font-sans, inherit)' }}>
