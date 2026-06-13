@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Manual edits through the review panel (resume sections &#43; cover letter)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-5aa36278"
+             data-type="feature"
+             data-status="todo"
+             data-priority="medium"
+             data-created="2026-06-13T17:26:46.481125"
+             data-updated="2026-06-13T17:26:46.492878" data-agent-assigned="claude-code" data-created-by-agent="claude-code" data-created-by-model="claude-fable-5" data-created-by-cli-version="0.62.0">
+
+        <header>
+            <h1>Manual edits through the review panel (resume sections &#43; cover letter)</h1>
+            <div class="metadata">
+                <span class="badge status-todo">Todo</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Let the user manually edit resume section YAMLs and the cover letter, routing both through the same propose-&gt;review(diff)-&gt;apply-&gt;re-render panel the chat uses. Reuses receiveProposal() injection + existing /resume/apply and /cover-letter/apply endpoints. Resume: section editor builds a ChatProposal(asset=resume,target_file) and calls receiveProposal. Cover letter: reroute existing inline Save through receiveProposal(asset=cover_letter) so manual edits also get the diff + failedClaims review instead of a silent direct PUT.</p>
+        </section>
+    </article>
+</body>
+</html>
