@@ -53,7 +53,14 @@ _PHASE_MAX_TURNS: dict[str, int] = {
     "gather": 30,
     "draft": 30,
     "render": 60,
+    "cover-letter": 30,
 }
+
+# The two cover-letter-exclusive specialists (feat-bd7c2d23 / feat-ebb7a7ee).
+CL_ONLY_SPECIALISTS: tuple[str, ...] = (
+    "apply-company-research",
+    "apply-cover-letter-writer",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +149,17 @@ def build_phase_prompt(
             "Render resume PDF, ATS check, visual layout, cover letter, index page, "
             "then jobsmith assemble."
         )
-    raise ValueError(f"Unknown phase: {phase!r}. Expected one of: gather, draft, render.")
+    if phase == "cover-letter":
+        return _with_paths(
+            f"Generate the cover letter for the EXISTING application {slug} "
+            "(standalone manual trigger). Read .apply-state/ artifacts from the "
+            "completed run. Dispatch apply-company-research ONLY if "
+            "company-research.md is missing, then apply-cover-letter-writer, "
+            "then refresh the index and run jobsmith assemble."
+        )
+    raise ValueError(
+        f"Unknown phase: {phase!r}. Expected one of: gather, draft, render, cover-letter."
+    )
 
 
 def _auto_freeze_contracts(contracts_path: Path) -> None:
@@ -1072,7 +1089,10 @@ def core_run_apply(
                     _conn.close()
 
     # Resolve cover_letter flag → skip_specialists list.
-    # When cover_letter is None, fall back to config (framework != "none").
+    # When cover_letter is None, fall back to config cover_letter.auto
+    # (feat-ebb7a7ee: OPT-IN — apply runs do not generate a cover letter
+    # unless --cover-letter is passed or config sets auto: true; the
+    # standalone `jobsmith cover-letter <slug>` trigger covers the rest).
     # When cover_letter is True/False, the explicit flag wins.
     _cl_enabled: bool
     if cover_letter is None:
@@ -1081,18 +1101,13 @@ def core_run_apply(
             from jobsmith.config import load_config as _load_cfg
 
             _cfg_path = _find_cfg(resolved_cwd)
-            _cl_enabled = _load_cfg(_cfg_path).cover_letter.cover_letter_enabled() if _cfg_path else True
-        except Exception:  # noqa: BLE001 — default to enabled on any config error
-            _cl_enabled = True
+            _cl_enabled = _load_cfg(_cfg_path).cover_letter.auto_generate() if _cfg_path else False
+        except Exception:  # noqa: BLE001 — opt-in: default to disabled on any config error
+            _cl_enabled = False
     else:
         _cl_enabled = cover_letter
 
-    # The two cover-letter-exclusive specialists (feat-bd7c2d23).
-    _cl_only_specialists: list[str] = [
-        "apply-company-research",
-        "apply-cover-letter-writer",
-    ]
-    skip_specialists: list[str] = [] if _cl_enabled else _cl_only_specialists
+    skip_specialists: list[str] = [] if _cl_enabled else list(CL_ONLY_SPECIALISTS)
 
     phase_done: dict[str, bool] = {
         name: phase_completed(manifest, name) for name, _ in _PHASES
@@ -1194,6 +1209,147 @@ def core_run_apply(
                             db_slug_ref[0],
                             db_run_id,
                         ),
+                    )
+                    db_conn.commit()
+            finally:
+                db_conn.close()
+
+
+def core_run_cover_letter(
+    slug: str,
+    *,
+    cwd: Path | None = None,
+    run_id: str | None = None,
+    cancel_event: threading.Event | None = None,
+    events: object = None,
+    phase_runner: Callable[..., int] | None = None,
+) -> int:
+    """Generate a cover letter for an EXISTING application (feat-ebb7a7ee).
+
+    The standalone, manually-triggered counterpart to the in-pipeline
+    cover-letter step: validates the application, clears any synthetic
+    ``action=skipped`` manifest entries left by a ``--no-cover-letter``
+    run (so the phase agent's manifest skip rule cannot silently skip
+    the requested work), then runs the dedicated ``cover-letter`` phase.
+
+    Parameters
+    ----------
+    slug:
+        Existing application slug under the applications directory.
+    cwd:
+        Repo root (defaults to current directory).
+    run_id / cancel_event / events:
+        Forwarded to the phase runner for supervisor/SSE integration.
+    phase_runner:
+        Callable executing one headless phase; signature
+        ``phase_runner(phase_name=, slug=, resolved_cwd=, app_dir=,
+        run_id=, cancel_event=, events=) -> int``.  ``None`` resolves the
+        CLI-coupled default from :mod:`jobsmith._cli_apply` lazily (avoids
+        a circular import).
+
+    Returns
+    -------
+    int
+        ``0`` success, ``2`` validation failure (unknown slug, missing
+        manifest, framework=none), or the phase runner's non-zero code.
+    """
+    import uuid as _uuid2
+
+    resolved_cwd = (cwd or Path.cwd()).resolve()
+
+    # Validation 1: application directory exists.
+    apps_dir = applications_dir(resolved_cwd)
+    app_dir = apps_dir / slug if apps_dir is not None else None
+    if app_dir is None or not app_dir.is_dir():
+        logger.error("cover-letter: unknown application slug %r", slug)
+        return 2
+
+    # Validation 2: cover letters are possible at all (framework != none).
+    try:
+        from jobsmith.config import find_config as _find_cfg
+        from jobsmith.config import load_config as _load_cfg
+
+        _cfg_path = _find_cfg(resolved_cwd)
+        if _cfg_path is not None and not _load_cfg(_cfg_path).cover_letter.cover_letter_enabled():
+            logger.error(
+                "cover-letter: cover_letter.framework is 'none' in config — "
+                "set a framework before generating."
+            )
+            return 2
+    except Exception:  # noqa: BLE001 — unreadable config must not block validation 3
+        logger.warning("cover-letter: config unreadable; proceeding", exc_info=True)
+
+    # Validation 3: the application actually ran (manifest exists).
+    manifest = load_manifest(app_dir, resolved_cwd)
+    if manifest is None:
+        logger.error(
+            "cover-letter: no manifest for %r — run `jobsmith apply` first.", slug
+        )
+        return 2
+
+    # Clear synthetic skipped entries so the phase re-dispatches CL work.
+    from jobsmith.core.manifest import remove_skipped_specialists
+
+    remove_skipped_specialists(manifest, list(CL_ONLY_SPECIALISTS))
+    db_path = pipeline_db_path(resolved_cwd)
+    if db_path is not None and db_path.exists():
+        from jobsmith.db import open_pipeline_db as _open_db
+        from jobsmith.db import put_state as _put_state
+
+        _conn = _open_db(db_path)
+        try:
+            _put_state(
+                _conn, slug=slug, kind="manifest", content_blob=json.dumps(manifest)
+            )
+        finally:
+            _conn.close()
+
+    # DB scaffolding: record the run for run-history/health surfaces.
+    db_run_id = run_id or str(_uuid2.uuid4())
+    db_conn = None
+    db_final_status = "failed"
+    if db_path is not None and db_path.exists():
+        from jobsmith.db import insert_apply_run as _insert_run
+        from jobsmith.db import open_pipeline_db as _open_db2
+
+        with contextlib.suppress(Exception):
+            db_conn = _open_db2(db_path)
+            _insert_run(
+                db_conn,
+                run_id=db_run_id,
+                slug=slug,
+                phase="cover-letter",
+                started_at=_db_now_iso(),
+                finished_at=None,
+                status="running",
+            )
+
+    try:
+        if phase_runner is None:
+            from jobsmith._cli_apply import (  # noqa: PLC0415 — lazy, avoids cycle
+                default_cover_letter_phase_runner,
+            )
+
+            phase_runner = default_cover_letter_phase_runner
+
+        rc = phase_runner(
+            phase_name="cover-letter",
+            slug=slug,
+            resolved_cwd=resolved_cwd,
+            app_dir=app_dir,
+            run_id=db_run_id,
+            cancel_event=cancel_event,
+            events=events,
+        )
+        db_final_status = "done" if rc == 0 else "failed"
+        return rc
+    finally:
+        if db_conn is not None:
+            try:
+                with contextlib.suppress(Exception):
+                    db_conn.execute(
+                        "UPDATE apply_runs SET status=?, finished_at=? WHERE run_id=?",
+                        (db_final_status, _db_now_iso(), db_run_id),
                     )
                     db_conn.commit()
             finally:

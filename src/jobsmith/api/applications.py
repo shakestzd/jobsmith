@@ -476,6 +476,62 @@ async def _launch_run(
     return run_id
 
 
+async def _launch_cover_letter_run(
+    supervisor: RunSupervisor,
+    slug: str,
+    cwd: Path,
+) -> str:
+    """Register and launch a standalone cover-letter run (feat-ebb7a7ee).
+
+    Mirrors :func:`_launch_run` but drives
+    :func:`jobsmith._cli_apply.run_cover_letter` — the dedicated
+    cover-letter phase against an existing application — instead of the
+    full three-phase pipeline. Events reach SSE subscribers through the
+    same renderer-emit wiring.
+    """
+    from jobsmith import _cli_apply
+    from jobsmith.render import ApplyRenderer
+
+    run_id = uuid.uuid4().hex
+    sink = supervisor.register_run(run_id=run_id, slug=slug)
+
+    rdr = ApplyRenderer(yes=True, verbosity=0)
+    _orig_emit = rdr.emit
+
+    def _emit_and_broadcast(event):
+        sink.emit(event)
+        try:
+            _orig_emit(event)
+        except Exception:  # noqa: BLE001 — never fail the run on a render side-effect
+            logger.exception("renderer.emit raised for run_id=%r", run_id)
+
+    rdr.emit = _emit_and_broadcast  # type: ignore[method-assign]
+
+    cancel_event = supervisor.get_cancel_event(run_id)
+
+    async def _run_wrapper() -> None:
+        try:
+            rc = await asyncio.to_thread(
+                _cli_apply.run_cover_letter,
+                slug,
+                cwd=cwd,
+                renderer=rdr,
+                run_id=run_id,
+                cancel_event=cancel_event,
+            )
+        except Exception:  # noqa: BLE001 — task must not propagate unhandled
+            logger.exception(
+                "cover-letter run raised for run_id=%r slug=%r", run_id, slug
+            )
+            rc = 1
+        finally:
+            supervisor.on_run_complete(run_id, rc)
+
+    task = asyncio.create_task(_run_wrapper(), name=f"cover-letter-{run_id}")
+    supervisor.set_task(run_id, task)
+    return run_id
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -584,6 +640,40 @@ async def create_application(
     )
 
     return ApplicationCreated(slug=slug, run_id=run_id)
+
+
+@router.post("/applications/{slug}/cover-letter", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_cover_letter(slug: str, request: Request) -> dict:
+    """Generate a cover letter for an EXISTING application (feat-ebb7a7ee).
+
+    Standalone manual trigger: 404 when the slug has no manifest (never
+    ran), 409 when a run is already active for the slug, otherwise 202
+    with the run_id to subscribe on /api/applications/{slug}/events.
+    """
+    from jobsmith.db import get_state
+
+    db_path = _get_db_path()
+    conn = _open_conn(db_path)
+    try:
+        blob = get_state(conn, slug=slug, kind="manifest")
+    finally:
+        conn.close()
+    if not blob:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No application manifest for slug {slug!r}.",
+        )
+
+    supervisor = _resolve_supervisor(request)
+    active_run_id = supervisor.get_active_for_slug(slug)
+    if active_run_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A run for slug {slug!r} is already active (run_id={active_run_id!r}).",
+        )
+
+    run_id = await _launch_cover_letter_run(supervisor, slug, repo_root_for())
+    return {"slug": slug, "run_id": run_id}
 
 
 @router.post("/applications/{slug}/runs/{run_id}/cancel")

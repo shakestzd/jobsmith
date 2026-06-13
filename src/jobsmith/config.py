@@ -153,6 +153,7 @@ class CoverLetterSettings(BaseModel):
     """Letter-specific tuning."""
 
     framework: Literal["careerfair-io", "minimal", "none"] = "careerfair-io"
+    auto: bool = False
     word_targets: dict[str, int] = Field(
         default_factory=lambda: {
             "senior_strategic": 150,
@@ -168,12 +169,25 @@ class CoverLetterSettings(BaseModel):
     default_salutation: str = "Hello,"
 
     def cover_letter_enabled(self) -> bool:
-        """Return True iff the cover letter should be generated.
+        """Return True iff cover-letter generation is possible at all.
 
         ``framework == "none"`` is the only disabled state.  All other
         framework values (``"careerfair-io"``, ``"minimal"``) are enabled.
+        Used by the standalone trigger (``jobsmith cover-letter``) as a
+        capability gate; whether apply runs generate one *automatically*
+        is governed by :meth:`auto_generate`.
         """
         return self.framework != "none"
+
+    def auto_generate(self) -> bool:
+        """Return True iff apply runs should generate a cover letter unprompted.
+
+        Opt-in (feat-ebb7a7ee): requires BOTH ``auto: true`` AND a usable
+        framework.  The default is False — cover letters are produced only
+        via the explicit ``--cover-letter`` flag or the standalone
+        ``jobsmith cover-letter <slug>`` trigger.
+        """
+        return self.auto and self.cover_letter_enabled()
 
 
 class ResumeSettings(BaseModel):

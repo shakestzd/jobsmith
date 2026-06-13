@@ -435,9 +435,10 @@ def apply(
         None,
         "--cover-letter/--no-cover-letter",
         help=(
-            "Generate a cover letter (default: follow cover_letter.framework in .apply-config.yaml)."
-            " --no-cover-letter skips apply-company-research and apply-cover-letter-writer."
-            " framework: none in config disables by default."
+            "Generate a cover letter during this run (default: OFF — opt-in)."
+            " Enable per-run with --cover-letter, or persistently with cover_letter.auto: true"
+            " in .apply-config.yaml. Generate one later for an existing application with"
+            " `jobsmith cover-letter <slug>`."
         ),
     ),
 ) -> None:
@@ -454,6 +455,22 @@ def apply(
                   jd_text=resolved_jd_text, slug=slug, run_id=run_id,
                   no_reuse=no_reuse, cover_letter=cover_letter)
     )
+
+
+@app.command(name="cover-letter")
+def cover_letter_cmd(
+    slug: str = typer.Argument(..., help="Existing application slug (see `jobsmith list`)."),
+) -> None:
+    """Generate a cover letter for an EXISTING application (standalone, manual trigger).
+
+    Runs the dedicated cover-letter phase against a completed apply run:
+    regenerates company research only if missing, writes cover-letter-draft.md,
+    refreshes the index, and re-assembles. Works for applications originally
+    run with --no-cover-letter.
+    """
+    from jobsmith import _cli_apply
+
+    raise typer.Exit(_cli_apply.run_cover_letter(slug))
 
 
 @app.command()
