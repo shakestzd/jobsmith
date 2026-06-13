@@ -38,6 +38,7 @@ vi.mock('../api/client', () => ({
   apiPost: vi.fn(),
   apiPut: vi.fn(),
   postApplication: vi.fn(),
+  postCoverLetter: vi.fn(),
   buildEventsUrl: vi.fn().mockReturnValue('http://localhost/events-noop'),
   redactSensitive: (s: string) => s,
   JobsmithApiError: class JobsmithApiError extends Error {
@@ -1208,5 +1209,59 @@ describe('ApplicationDetail fromApi unknown-phase fix (bug-300fb9ad)', () => {
     if (phaseStatuses[2]) {
       expect(phaseStatuses[2].textContent).not.toMatch(/failed/i);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Standalone cover-letter button (feat-ebb7a7ee)
+// ---------------------------------------------------------------------------
+
+import { postCoverLetter } from '../api/client';
+
+describe('ApplicationDetail generate-cover-letter button (feat-ebb7a7ee)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    constructorCalls.length = 0;
+    (postCoverLetter as ReturnType<typeof vi.fn>).mockResolvedValue({
+      slug: 'acme-eng-2026-04',
+      run_id: 'run-cl-1',
+    });
+  });
+
+  it('shows the button for a completed application', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'done',
+    });
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /generate cover letter/i }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('clicking the button calls postCoverLetter with the slug', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'done',
+    });
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /generate cover letter/i });
+    fireEvent.click(btn);
+    await waitFor(() => {
+      expect(postCoverLetter).toHaveBeenCalledWith('acme-eng-2026-04');
+    });
+  });
+
+  it('button works even when the app has no recorded URL (unlike re-run)', async () => {
+    (apiGet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...BASE_API_DETAIL,
+      status: 'done',
+      url: '',
+    });
+    renderWithProposal(<ApplicationDetail slug="acme-eng-2026-04" back={() => {}} />);
+    const btn = await screen.findByRole('button', { name: /generate cover letter/i });
+    expect(btn).not.toBeDisabled();
   });
 });

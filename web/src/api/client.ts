@@ -292,6 +292,18 @@ export function postApplication(
 }
 
 /**
+ * POST /api/applications/{slug}/cover-letter — standalone cover-letter run
+ * (feat-ebb7a7ee). Generates a cover letter for an EXISTING application;
+ * 202 with { slug, run_id } — subscribe to the same events stream.
+ */
+export function postCoverLetter(slug: string): Promise<ApplicationCreated> {
+  return apiPost<ApplicationCreated>(
+    `/api/applications/${encodeURIComponent(slug)}/cover-letter`,
+    {},
+  );
+}
+
+/**
  * Build the SSE URL for a slug's event stream.
  * Includes the Bearer token as a query param for EventSource (which cannot
  * set custom headers). Only used when TOKEN is set.

@@ -137,6 +137,38 @@ def inject_skipped_specialists(
     return manifest
 
 
+def remove_skipped_specialists(
+    manifest: dict,
+    specialists: list[str],
+) -> dict:
+    """Remove synthetic ``action=skipped`` invocations for *specialists*.
+
+    Inverse of :func:`inject_skipped_specialists`, used by the standalone
+    cover-letter trigger (feat-ebb7a7ee): an application originally run with
+    ``--no-cover-letter`` carries synthetic ``status=ok, action=skipped``
+    entries for the CL-only specialists, which would make the phase agent's
+    manifest-based skip rule silently skip the very work being requested.
+
+    Only entries whose ``action`` is ``"skipped"`` are removed — a specialist
+    that genuinely ran (no ``action`` marker) is never touched.
+
+    Returns the same *manifest* dict, mutated.
+    """
+    if "invocations" not in manifest or not isinstance(manifest.get("invocations"), list):
+        manifest["invocations"] = []
+        return manifest
+    manifest["invocations"] = [
+        inv
+        for inv in manifest["invocations"]
+        if not (
+            isinstance(inv, dict)
+            and inv.get("specialist") in specialists
+            and inv.get("action") == "skipped"
+        )
+    ]
+    return manifest
+
+
 def phase_completed(manifest: dict | None, phase_name: str) -> bool:
     """Return True iff every required specialist for *phase_name* is done.
 

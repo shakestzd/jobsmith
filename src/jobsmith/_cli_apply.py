@@ -1522,3 +1522,118 @@ def run_apply(
         start_from_phase=start_from_phase,
         cover_letter=cover_letter,
     )
+
+
+# ---------------------------------------------------------------------------
+# Standalone cover-letter trigger (feat-ebb7a7ee)
+# ---------------------------------------------------------------------------
+
+
+def make_cover_letter_phase_runner(renderer: ApplyRenderer | None = None):
+    """Build the headless-driving phase runner for the cover-letter phase.
+
+    *renderer* is reused when supplied (API path wires an SSE-forwarding
+    renderer); otherwise a non-interactive ``ApplyRenderer`` is constructed
+    per invocation.
+    """
+
+    def _runner(
+        *,
+        phase_name: str,
+        slug: str,
+        resolved_cwd: Path,
+        app_dir: Path,  # noqa: ARG001 — part of the phase-runner contract
+        run_id: str | None = None,  # noqa: ARG001 — recorded by the core caller
+        cancel_event: threading.Event | None = None,
+        events: object = None,  # noqa: ARG001 — SSE wiring rides on the renderer
+    ) -> int:
+        import uuid as _uuid
+
+        from jobsmith.core.paths import build_paths as _build_paths
+        from jobsmith.core.pipeline import build_phase_prompt as _build_prompt
+
+        rdr = renderer or ApplyRenderer(yes=True, verbosity=0)
+        plugin_directory = get_plugin_dir()
+        system_prompt = (
+            plugin_directory / "system-prompts" / f"phase-4-{phase_name}.md"
+        )
+        if not system_prompt.exists():
+            rdr.print_error(f"ERROR: system prompt not found: {system_prompt}")
+            return 1
+
+        paths = _build_paths(slug, resolved_cwd, plugin_directory)
+        prompt_text = _build_prompt(phase_name, slug, "", paths=paths)
+        session_id = str(_uuid.uuid4())
+
+        phase_succeeded = False
+        try:
+            for event in headless.run_phase(
+                phase=phase_name,
+                session_id=session_id,
+                prompt=prompt_text,
+                plugin_dir=plugin_directory,
+                system_prompt=system_prompt,
+                resume=False,
+                cwd=resolved_cwd,
+                max_turns=30,
+                cancel_event=cancel_event,
+            ):
+                rdr.render_event(event)
+                if event.type == "phase_complete":
+                    phase_succeeded = True
+                    break
+                if event.type == "phase_failed":
+                    rdr.close_transcript()
+                    rdr.print_error("Cover-letter phase failed. See output above.")
+                    return 3
+                if event.type == "error":
+                    rdr.stop_phase()
+                    rdr.close_transcript()
+                    rdr.print_error("Cover-letter phase encountered an error.")
+                    return 2
+        except Exception as exc:  # noqa: BLE001 — surface, never crash the caller
+            rdr.stop_phase()
+            rdr.close_transcript()
+            rdr.print_error(f"Unexpected error in cover-letter phase: {exc}")
+            return 2
+
+        rdr.close_transcript()
+        if not phase_succeeded:
+            rdr.stop_phase()
+            rdr.print_error(
+                "Cover-letter phase did not emit a phase_complete signal."
+            )
+            return 2
+        return 0
+
+    return _runner
+
+
+def default_cover_letter_phase_runner(**kwargs) -> int:
+    """Module-level default runner (lazy renderer); patchable in tests."""
+    return make_cover_letter_phase_runner()(**kwargs)
+
+
+def run_cover_letter(
+    slug: str,
+    *,
+    cwd: Path | None = None,
+    renderer: ApplyRenderer | None = None,
+    run_id: str | None = None,
+    cancel_event: threading.Event | None = None,
+) -> int:
+    """Generate a cover letter for an existing application (manual trigger).
+
+    Thin wrapper around :func:`jobsmith.core.pipeline.core_run_cover_letter`
+    supplying the CLI-coupled phase runner. Used by the ``jobsmith
+    cover-letter`` command and the API launch path.
+    """
+    from jobsmith.core.pipeline import core_run_cover_letter
+
+    return core_run_cover_letter(
+        slug,
+        cwd=cwd,
+        run_id=run_id,
+        cancel_event=cancel_event,
+        phase_runner=make_cover_letter_phase_runner(renderer),
+    )

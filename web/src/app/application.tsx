@@ -11,7 +11,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { SampleApp, AppPhase, AppStatus, IconName } from '../types';
 import { Icon, Badge, StatusBadge } from './shared';
 import { useApplication } from '../api/hooks';
-import { JobsmithApiError, postApplication, buildEventsUrl, redactSensitive, apiGet, apiPost, apiPut, apiGetBlob, apiGetText, notifyDataChanged, renderCoverLetterPdf, setOutcomeStatus } from '../api/client';
+import { JobsmithApiError, postApplication, postCoverLetter, buildEventsUrl, redactSensitive, apiGet, apiPost, apiPut, apiGetBlob, apiGetText, notifyDataChanged, renderCoverLetterPdf, setOutcomeStatus } from '../api/client';
 import type { RenderCoverLetterPdfResult, OutcomeStatus } from '../api/client';
 import type {
   ApplicationDetail as ApiApplicationDetail,
@@ -2308,6 +2308,24 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
     }
   }, [slug, app.url, hasLaunchableUrl, subscribeToEvents]);
 
+  // ── Standalone cover-letter handler (feat-ebb7a7ee) ──────────────────
+  const handleCoverLetter = useCallback(async () => {
+    setRunError(null);
+    setSseStatus(null);
+    setEvents([{ ts: now(), lvl: 'info', msg: `<span class="dim">cover-letter</span> start <span class="dim">slug=</span>${slug}` }]);
+    setRunning(true);
+    try {
+      await postCoverLetter(slug);
+      subscribeToEvents(slug);
+    } catch (err) {
+      setRunning(false);
+      const raw = err instanceof JobsmithApiError ? err.message : String(err);
+      const msg = redactSensitive(raw);
+      setRunError(msg);
+      setEvents(ev => [...ev, { ts: now(), lvl: 'warn', msg: `cover-letter launch failed: ${msg}` }]);
+    }
+  }, [slug, subscribeToEvents]);
+
   // ── Cancel handler ───────────────────────────────────────────────────
   const handleCancel = useCallback(async () => {
     if (esRef.current) {
@@ -2516,6 +2534,15 @@ export function ApplicationDetail({ slug, back }: ApplicationDetailProps) {
               }
             >
               <Icon name="play" size={12} /> {isComplete ? 'force re-run apply' : 're-run apply'}
+            </button>
+          )}
+          {!running && (app.status as string) !== 'incomplete' && (
+            <button
+              className="btn"
+              onClick={() => { void handleCoverLetter(); }}
+              title="Generate (or regenerate) the cover letter for this application — standalone run, does not touch the resume."
+            >
+              <Icon name="play" size={12} /> generate cover letter
             </button>
           )}
           {running && (
