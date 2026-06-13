@@ -1604,6 +1604,15 @@ def make_cover_letter_phase_runner(renderer: ApplyRenderer | None = None):
                 "Cover-letter phase did not emit a phase_complete signal."
             )
             return 2
+
+        # Snapshot the agent's cover-letter draft so `jobsmith feedback record`
+        # has a baseline to diff later user edits against — parity with the
+        # render phase's post-success snapshot (bug-8540c439).
+        from jobsmith.core.pipeline import (  # noqa: PLC0415 — lazy, avoids cycle
+            _snapshot_phase_drafts as _snap,
+        )
+
+        _snap(phase_name, slug, resolved_cwd)
         return 0
 
     return _runner

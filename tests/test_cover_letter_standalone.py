@@ -491,3 +491,101 @@ class TestApiCoverLetterRoute:
         assert resp.status_code == 202
         assert resp.json()["run_id"] == "run-123"
         assert m.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# 8. Draft snapshot for feedback baseline (bug-8540c439)
+# ---------------------------------------------------------------------------
+
+
+class TestCoverLetterSnapshot:
+    """The standalone runner must snapshot the agent's cover-letter draft to
+    .apply-state/cover-letter-draft.agent.md so `jobsmith feedback record`
+    has a baseline — parity with the render phase."""
+
+    def test_snapshot_handles_cover_letter_phase(self, tmp_path: Path) -> None:
+        """_snapshot_phase_drafts copies an app-root cover-letter-draft.md to
+        the .agent.md snapshot for phase='cover-letter'."""
+        from jobsmith.core.pipeline import _snapshot_phase_drafts
+
+        cfg = tmp_path / ".apply-config.yaml"
+        cfg.write_text(
+            "output:\n  applications_dir: private/applications\n"
+            "  jobsmith_db: private/jobsmith.db\n",
+            encoding="utf-8",
+        )
+        app_dir = tmp_path / "private" / "applications" / "acme-data-engineer"
+        state_dir = app_dir / ".apply-state"
+        state_dir.mkdir(parents=True)
+        (app_dir / "cover-letter-draft.md").write_text("Dear team,\n", encoding="utf-8")
+
+        _snapshot_phase_drafts("cover-letter", "acme-data-engineer", tmp_path)
+
+        snap = state_dir / "cover-letter-draft.agent.md"
+        assert snap.exists(), "cover-letter snapshot not created"
+        assert snap.read_text(encoding="utf-8") == "Dear team,\n"
+
+    def test_snapshot_noop_when_no_draft(self, tmp_path: Path) -> None:
+        """No draft on disk → no snapshot, no error."""
+        from jobsmith.core.pipeline import _snapshot_phase_drafts
+
+        cfg = tmp_path / ".apply-config.yaml"
+        cfg.write_text(
+            "output:\n  applications_dir: private/applications\n"
+            "  jobsmith_db: private/jobsmith.db\n",
+            encoding="utf-8",
+        )
+        state_dir = tmp_path / "private" / "applications" / "acme-data-engineer" / ".apply-state"
+        state_dir.mkdir(parents=True)
+
+        _snapshot_phase_drafts("cover-letter", "acme-data-engineer", tmp_path)
+
+        assert not (state_dir / "cover-letter-draft.agent.md").exists()
+
+    def test_runner_snapshots_on_success(self, tmp_path: Path) -> None:
+        """make_cover_letter_phase_runner snapshots the draft after the phase
+        emits phase_complete."""
+        from unittest.mock import patch as _patch
+
+        from jobsmith import _cli_apply
+
+        cfg = tmp_path / ".apply-config.yaml"
+        cfg.write_text(
+            "output:\n  applications_dir: private/applications\n"
+            "  jobsmith_db: private/jobsmith.db\n",
+            encoding="utf-8",
+        )
+        app_dir = tmp_path / "private" / "applications" / "acme-data-engineer"
+        state_dir = app_dir / ".apply-state"
+        state_dir.mkdir(parents=True)
+
+        class _Evt:
+            def __init__(self, type, name=""):
+                self.type = type
+                self.name = name
+                self.text = ""
+
+        def fake_run_phase(**kwargs):
+            # Simulate the cover-letter-writer producing the draft, then the
+            # phase emitting completion.
+            (app_dir / "cover-letter-draft.md").write_text("Hello,\n", encoding="utf-8")
+            yield _Evt("phase_complete", "cover-letter")
+
+        runner = _cli_apply.make_cover_letter_phase_runner()
+        with (
+            _patch.object(_cli_apply.headless, "run_phase", side_effect=fake_run_phase),
+            _patch.object(_cli_apply, "get_plugin_dir", return_value=tmp_path / "plugin"),
+        ):
+            (tmp_path / "plugin" / "system-prompts").mkdir(parents=True)
+            (tmp_path / "plugin" / "system-prompts" / "phase-4-cover-letter.md").write_text("x")
+            rc = runner(
+                phase_name="cover-letter",
+                slug="acme-data-engineer",
+                resolved_cwd=tmp_path,
+                app_dir=app_dir,
+            )
+
+        assert rc == 0
+        snap = state_dir / "cover-letter-draft.agent.md"
+        assert snap.exists(), "runner did not snapshot the draft on success"
+        assert snap.read_text(encoding="utf-8") == "Hello,\n"
