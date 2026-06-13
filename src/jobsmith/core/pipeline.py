@@ -327,7 +327,11 @@ def _snapshot_phase_drafts(phase: str, slug: str, cwd: Path) -> None:
     """Persist immutable agent-draft snapshots after a phase completes.
 
     - After phase ``draft``: snapshot ``prose-draft.md`` → ``prose-draft.agent.md``.
-    - After phase ``render``: snapshot the cover-letter draft.
+    - After phase ``render`` or ``cover-letter``: snapshot the cover-letter
+      draft → ``cover-letter-draft.agent.md`` (gives ``jobsmith feedback
+      record`` a baseline to diff user edits against — the standalone
+      cover-letter trigger needs this just as the render phase does;
+      bug-8540c439).
 
     Silently no-ops when source files are missing.
     """
@@ -341,7 +345,7 @@ def _snapshot_phase_drafts(phase: str, slug: str, cwd: Path) -> None:
         if src.exists():
             shutil.copy2(src, state_dir / "prose-draft.agent.md")
 
-    elif phase == "render":
+    elif phase in ("render", "cover-letter"):
         src_root = app_dir / "cover-letter-draft.md"
         src_state = state_dir / "cover-letter-draft.md"
         src = src_root if src_root.exists() else src_state
