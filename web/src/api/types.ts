@@ -158,6 +158,18 @@ export interface WriteResponse {
 
 // ── Config ───────────────────────────────────────────────────────────────
 
+export type LLMProvider = 'claude_cli' | 'antigravity_cli' | 'codex_cli' | 'openai_compatible';
+
+export interface LLMSettings {
+  provider: LLMProvider;
+  model: string | null;
+  base_url: string | null;
+  api_key?: string | null;
+  budget_usd: number;
+  timeout_s: number;
+  [k: string]: unknown;
+}
+
 export interface ConfigMasterPaths {
   work_yml: string;
   skill_yml: string;
@@ -198,6 +210,7 @@ export interface JobsmithConfig {
   fit_scorer: Record<string, unknown>;
   portfolio: Record<string, unknown>;
   benchmarks: Record<string, unknown>;
+  llm?: LLMSettings;
   [k: string]: unknown;
 }
 
