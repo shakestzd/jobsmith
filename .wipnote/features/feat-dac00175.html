@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>First-run `claude` CLI detection &#43; guided install prompt (desktop-gated)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-dac00175"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-26T06:06:07.259127"
+             data-updated="2026-06-26T08:04:00.574865" data-agent-assigned="claude-code" data-track-id="trk-a57cff96">
+
+        <header>
+            <h1>First-run `claude` CLI detection &#43; guided install prompt (desktop-gated)</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="../plans/plan-a23bba5f.html" data-relationship="planned_in" data-since="2026-06-26T06:06:07.265679">plan-a23bba5f</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-a57cff96.html" data-relationship="part_of" data-since="2026-06-26T06:06:07.270921">trk-a57cff96</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="../features/feat-fe3aeb26.html" data-relationship="blocked_by">feat-fe3aeb26</a></li>
+                    <li><a href="../features/feat-0c74180d.html" data-relationship="blocked_by">feat-0c74180d</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/89dae515-7da1-4053-b4c2-fd406ac63cf9.html" data-relationship="implemented_in" data-since="2026-06-26T08:04:00.574748">session 89dae515-7da1-4053-b4c2-fd406ac63cf9</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Add `src/jobsmith/desktop/deps.py`: detect whether the `claude` Claude Code CLI
+is resolvable (PATH lookup + `claude --version`), returning installed/version/path.
+Extend the desktop router (`src/jobsmith/api/routes/desktop.py`, JOBSMITH_DESKTOP-
+gated like slice 4) with `GET /api/desktop/deps/status` -&gt;
+{claude_installed, version, path}. A React `ClaudeInstallPrompt` component gates
+the apply flow: when `claude` is missing it shows guided install instructions
+pointing at Anthropic&#39;s no-Node native installer
+(`curl -fsSL https://claude.ai/install.sh | bash`) plus a &#34;re-check&#34; button.
+headless.py surfaces a structured &#39;claude_unavailable&#39; error instead of crashing
+when the binary is absent.</p>
+        </section>
+    </article>
+</body>
+</html>
