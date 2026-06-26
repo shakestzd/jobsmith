@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Expose LLM provider settings in Web UI (presets &#43; base_url/model)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-7e3444fd"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-26T18:48:28.408614"
+             data-updated="2026-06-26T20:06:47.705894" data-agent-assigned="claude-code" data-track-id="trk-f5052600">
+
+        <header>
+            <h1>Expose LLM provider settings in Web UI (presets &#43; base_url/model)</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="../features/feat-7f4d1643.html" data-relationship="blocked_by">feat-7f4d1643</a></li>
+                    <li><a href="../features/feat-59d71698.html" data-relationship="blocked_by">feat-59d71698</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="../plans/plan-938f735b.html" data-relationship="planned_in" data-since="2026-06-26T18:48:28.413651">plan-938f735b</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-f5052600.html" data-relationship="part_of" data-since="2026-06-26T18:48:28.417383">trk-f5052600</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/80a9b492-662a-459c-b9fd-8bd338a3bda7.html" data-relationship="implemented_in" data-since="2026-06-26T20:06:47.705773">session 80a9b492-662a-459c-b9fd-8bd338a3bda7</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Add an LLM provider selector to the Config tab in `web/src/app/application.tsx`:
+provider dropdown (Claude CLI / Antigravity / Codex / Local OpenAI-compatible),
+MLX and Ollama quick-presets, and base_url + model inputs (shown for
+openai_compatible). Bind settings to the `/api/config` GET/PUT routes (extend
+`config_routes.py` to accept the new `llm` payload).</p>
+        </section>
+    </article>
+</body>
+</html>
