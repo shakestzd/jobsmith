@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>macOS .dmg packaging — onefile bundle, ad-hoc-signed build &#43; notarization wiring &#43; build script</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-06c6055b"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-26T06:06:07.240732"
+             data-updated="2026-06-26T08:03:31.226142" data-agent-assigned="claude-code" data-track-id="trk-a57cff96">
+
+        <header>
+            <h1>macOS .dmg packaging — onefile bundle, ad-hoc-signed build &#43; notarization wiring &#43; build script</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="../plans/plan-a23bba5f.html" data-relationship="planned_in" data-since="2026-06-26T06:06:07.245652">plan-a23bba5f</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/89dae515-7da1-4053-b4c2-fd406ac63cf9.html" data-relationship="implemented_in" data-since="2026-06-26T08:03:31.226037">session 89dae515-7da1-4053-b4c2-fd406ac63cf9</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-a57cff96.html" data-relationship="part_of" data-since="2026-06-26T06:06:07.250486">trk-a57cff96</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="../features/feat-fe3aeb26.html" data-relationship="blocked_by">feat-fe3aeb26</a></li>
+                    <li><a href="../features/feat-0c74180d.html" data-relationship="blocked_by">feat-0c74180d</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Add `scripts/build-desktop.sh` orchestrating the full pipeline: npm build (web)
+-&gt; copy to src/jobsmith/web_dist -&gt; build-sidecar.sh (onefile) -&gt; `tauri build
+--bundles dmg`. Because the sidecar is ONEFILE, there is no _internal/ to ship —
+externalBin handles the single binary directly. Configure tauri.conf.json macOS
+signing: default to ad-hoc (`signingIdentity: &#34;-&#34;`) so the .dmg runs locally
+without an Apple Developer cert (user approves once in Privacy &amp; Security), and
+wire the env-driven notarization path: the script reads APPLE_SIGNING_IDENTITY +
+(APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID) and passes them to `tauri build`; if
+partial/absent it warns and falls back to ad-hoc rather than silently. Document
+that APPLE_PASSWORD is an app-specific password (appleid.apple.com), not the
+account password. Optional `.github/workflows` build job.</p>
+        </section>
+    </article>
+</body>
+</html>
