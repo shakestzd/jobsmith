@@ -520,6 +520,15 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       </a>
     </li>
     
+    <li>
+      <a href="#slice-7" class="slice-nav-item" data-slice-nav="7">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="7"></span>
+        <span>#7 Desktop offline-mode: detect/launch a local MLX or Ollama backend (chat + scoring)</span>
+        
+        <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
+      </a>
+    </li>
+    
   </ul>
   
   
@@ -537,7 +546,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <p style="color:var(--text-dim)">Package the Jobsmith React UI and Python FastAPI/CLI backend into a single-click macOS Tauri desktop app, with the Python backend bundled as a PyInstaller onefile sidecar (stdin-EOF shutdown), dynamic sidecar-reported port + Rust-issued token auth, and download-on-first-run Playwright Chromium.</p>
   <div class="meta">
     <span class="badge badge-pending">Draft</span>
-    <span style="font-size:.75rem;color:var(--text-muted)">v5 · 6 slices · Created 2026-06-26</span>
+    <span style="font-size:.75rem;color:var(--text-muted)">v5 · 7 slices · Created 2026-06-26</span>
   </div>
 </header>
 <button id="themeToggle" style="position:fixed;top:16px;right:16px;z-index:100;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;color:var(--text);font-family:var(--mono);font-size:0.75rem;cursor:pointer;">
@@ -604,6 +613,38 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <tbody>
       <tr><td><code>200 body</code></td><td><code>{&#34;claude_installed&#34;:bool,&#34;version&#34;:str|null,&#34;path&#34;:str|null}</code></td><td>&mdash;</td></tr>
       <tr><td><code>404 (standalone)</code></td><td><code>router absent unless JOBSMITH_DESKTOP=1</code></td><td>&mdash;</td></tr>
+      
+    </tbody>
+  </table>
+</div></div>
+      </div>
+      <div class="overview-block-entry">
+        <a class="overview-slice-label" href="#slice-7-block-api-endpoint-1" title="Jump to slice 7">
+          <span class="slice-num">#7</span>
+          <span class="overview-slice-title">Desktop offline-mode: detect/launch a local MLX or Ollama backend (chat + scoring)</span>
+        </a>
+        <div class="block-anchor" id="overview-slice-7-block-api-endpoint-1" data-block-anchor="slice-7-block-api-endpoint-1" data-block-kind="api-endpoint"><div class="block block-api-endpoint">
+  <div class="block-header"><span class="block-kind">api-endpoint</span><span class="api-method api-method-GET">GET</span><code class="api-path">/api/desktop/llm/status</code></div>
+  <table class="block-table">
+    <thead><tr><th>Param</th><th>Type</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td><code>200 body</code></td><td><code>{&#34;servers&#34;:[{&#34;kind&#34;:&#34;mlx|ollama&#34;,&#34;base_url&#34;:str,&#34;reachable&#34;:bool}],&#34;runtimes&#34;:{&#34;mlx_installed&#34;:bool,&#34;ollama_installed&#34;:bool}}</code></td><td>&mdash;</td></tr>
+      
+    </tbody>
+  </table>
+</div></div>
+      </div>
+      <div class="overview-block-entry">
+        <a class="overview-slice-label" href="#slice-7-block-api-endpoint-2" title="Jump to slice 7">
+          <span class="slice-num">#7</span>
+          <span class="overview-slice-title">Desktop offline-mode: detect/launch a local MLX or Ollama backend (chat + scoring)</span>
+        </a>
+        <div class="block-anchor" id="overview-slice-7-block-api-endpoint-2" data-block-anchor="slice-7-block-api-endpoint-2" data-block-kind="api-endpoint"><div class="block block-api-endpoint">
+  <div class="block-header"><span class="block-kind">api-endpoint</span><span class="api-method api-method-POST">POST</span><code class="api-path">/api/desktop/llm/offline-mode</code></div>
+  <table class="block-table">
+    <thead><tr><th>Param</th><th>Type</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td><code>body</code></td><td><code>{&#34;enabled&#34;:bool,&#34;base_url&#34;:str,&#34;model&#34;:str} -&gt; writes pluggable-backend llm config</code></td><td>&mdash;</td></tr>
       
     </tbody>
   </table>
@@ -714,6 +755,22 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   </ul>
 </div></div>
       </div>
+      <div class="overview-block-entry">
+        <a class="overview-slice-label" href="#slice-7-block-file-tree-1" title="Jump to slice 7">
+          <span class="slice-num">#7</span>
+          <span class="overview-slice-title">Desktop offline-mode: detect/launch a local MLX or Ollama backend (chat + scoring)</span>
+        </a>
+        <div class="block-anchor" id="overview-slice-7-block-file-tree-1" data-block-anchor="slice-7-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
+  <ul class="file-list">
+    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/deps.py (edit — probe 127.0.0.1:8080/v1 (MLX) &#43; :11434/v1 (Ollama); detect installed runtimes)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/api/routes/desktop.py (edit — GET /api/desktop/llm/status, POST /api/desktop/llm/offline-mode; JOBSMITH_DESKTOP gate)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/config.py (reference — reuse the `llm` config from plan-938f735b slice 1; offline-mode writes provider=openai_compatible)</code></li>
+    <li class="file-entry"><code class="file-path">web/src/components/OfflineModeToggle.tsx (new — status, enable, launch/guided-install)</code></li>
+    <li class="file-entry"><code class="file-path">web/src/api/client.ts (edit — llm status/offline-mode client calls)</code></li>
+    
+  </ul>
+</div></div>
+      </div>
       
     </div>
   </div>
@@ -803,6 +860,18 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   </div>
 </div></div>
       </div>
+      <div class="overview-block-entry">
+        <a class="overview-slice-label" href="#slice-7-block-diagram-1" title="Jump to slice 7">
+          <span class="slice-num">#7</span>
+          <span class="overview-slice-title">Desktop offline-mode: detect/launch a local MLX or Ollama backend (chat + scoring)</span>
+        </a>
+        <div class="block-anchor" id="overview-slice-7-block-diagram-1" data-block-anchor="slice-7-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
+  <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Offline-mode flow</span></div>
+  <div class="diagram-flow diagram-lr">
+    <div class="diagram-node">user toggles offline mode</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">GET /api/desktop/llm/status probes MLX :8080/v1 &#43; Ollama :11434/v1</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">reachable -&gt; POST offline-mode writes llm=openai_compatible&#43;base_url</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">installed-not-running -&gt; offer launch (mlx_lm.server / ollama serve)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">absent -&gt; guided install</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">chat &#43; scoring now run locally; apply still uses claude (slice 6)</div>
+  </div>
+</div></div>
+      </div>
       
     </div>
   </div>
@@ -819,6 +888,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <div data-node="4" data-name="Playwright Chromium download-on-first-run with graceful fallback (desktop-gated)" data-status="pending" data-deps="1,3" data-files="7"></div>
     <div data-node="5" data-name="macOS .dmg packaging — onefile bundle, ad-hoc-signed build + notarization wiring + build script" data-status="pending" data-deps="3,4" data-files="4"></div>
     <div data-node="6" data-name="First-run `claude` CLI detection + guided install prompt (desktop-gated)" data-status="pending" data-deps="3,4" data-files="5"></div>
+    <div data-node="7" data-name="Desktop offline-mode: detect/launch a local MLX or Ollama backend (chat + scoring)" data-status="pending" data-deps="3,4" data-files="5"></div>
     
     <!--PLAN_GRAPH_NODES-->
   </div>
@@ -2165,6 +2235,228 @@ slim and Constraint 1 intact while making the dependency explicit to the user
     </details>
   </div>
 </details>
+<details class="slice-card" id="slice-7" data-slice="7" data-slice-name="slice-7" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 7: Desktop offline-mode: detect/launch a local MLX or Ollama backend (chat &#43; scoring)">
+    <span class="slice-num">#7</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Desktop offline-mode: detect/launch a local MLX or Ollama backend (chat &#43; scoring)</span>
+      <span class="slice-preview">Surface an &#34;offline mode&#34; option in the desktop app that routes CHAT and SCORING</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-7">Pending</span>
+          
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-7-approval" value="approved" data-section="slice-7" data-action="approve" aria-label="Approve slice 7">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-7-approval" value="changes_requested" data-section="slice-7" data-action="approve" aria-label="Request changes for slice 7">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-7-approval" value="rejected" data-section="slice-7" data-action="approve" aria-label="Reject slice 7">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-7-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Surface an &#34;offline mode&#34; option in the desktop app that routes CHAT and SCORING
+to a local OpenAI-compatible server instead of the cloud. Extend
+<code>src/jobsmith/desktop/deps.py</code> to detect a running local server (MLX
+mlx_lm.server at 127.0.0.1:8080/v1 or Ollama at 127.0.0.1:11434/v1) and whether
+the runtime is installed. Add desktop-gated routes to
+<code>src/jobsmith/api/routes/desktop.py</code>: <code>GET /api/desktop/llm/status</code>
+(detected servers + installed runtimes) and <code>POST /api/desktop/llm/offline-mode</code>
+(enable -&gt; writes the pluggable-backend <code>llm</code> config from plan-938f735b:
+provider=openai_compatible + the detected base_url/model). If the runtime is
+installed but not running, offer to launch it (mlx_lm.server / <code>ollama serve</code>) as
+a managed child; if absent, show guided install. A React <code>OfflineModeToggle</code>
+component drives this. Apply pipeline still uses <code>claude</code> (slice 6) — offline mode
+covers chat + scoring only (the agentic apply pipeline is out of scope here).</p>
+</div>
+          <label for="slice-7-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>User choice — give the desktop app an offline/local-model option that reduces
+cloud/<code>claude</code> dependence for chat + scoring, leveraging the unified
+OpenAI-compatible provider built in plan-938f735b. MLX fits the macOS-first,
+Apple-Silicon target especially well.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/desktop/deps.py, src/jobsmith/api/routes/desktop.py, src/jobsmith/config.py, web/src/components/OfflineModeToggle.tsx, web/src/api/client.ts</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>With a local MLX or Ollama server running, enabling offline mode makes chat &#43; scoring run against it (no cloud calls), verified by config &#43; a live local request.</li><li>If the runtime is installed but not running, the toggle can launch it; if absent, a guided-install prompt is shown — never a silent failure.</li><li>On a `jobsmith up` server without JOBSMITH_DESKTOP=1, the /api/desktop/llm/* routes return 404 (Goal 4).</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-7-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> desktop offline-mode toggle; app boot probe.
+<strong>State:</strong> writes the pluggable-backend <code>llm</code> config (plan-938f735b); detection is live.
+<strong>Payload:</strong> llm/status JSON; offline-mode write sets provider=openai_compatible + base_url/model.
+<strong>Cross-plan dep:</strong> REQUIRES plan-938f735b slice 2/3 (the unified OpenAICompatibleProvider/Scorer). This slice only detects/launches the local server and flips the config; it does not implement the adapter.
+<strong>Rejected:</strong> Bundling MLX/Ollama + a model in the .dmg — gigabytes; detect/launch/guide instead. Replacing the apply pipeline (claude -p) with a local model — needs an agent loop, out of scope. A bespoke MLX adapter — the unified OpenAI-compatible provider already covers MLX (plan-938f735b decision).</p>
+</div>
+        <label for="slice-7-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-field slice-blocks">
+  <div class="slice-field-label">Blocks</div>
+  <div class="slice-field-value block-zone">
+    <div class="block-anchor" id="slice-7-block-file-tree-1" data-block-anchor="slice-7-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
+  <ul class="file-list">
+    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/deps.py (edit — probe 127.0.0.1:8080/v1 (MLX) &#43; :11434/v1 (Ollama); detect installed runtimes)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/api/routes/desktop.py (edit — GET /api/desktop/llm/status, POST /api/desktop/llm/offline-mode; JOBSMITH_DESKTOP gate)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/config.py (reference — reuse the `llm` config from plan-938f735b slice 1; offline-mode writes provider=openai_compatible)</code></li>
+    <li class="file-entry"><code class="file-path">web/src/components/OfflineModeToggle.tsx (new — status, enable, launch/guided-install)</code></li>
+    <li class="file-entry"><code class="file-path">web/src/api/client.ts (edit — llm status/offline-mode client calls)</code></li>
+    
+  </ul>
+</div></div>
+    <div class="block-anchor" id="slice-7-block-api-endpoint-1" data-block-anchor="slice-7-block-api-endpoint-1" data-block-kind="api-endpoint"><div class="block block-api-endpoint">
+  <div class="block-header"><span class="block-kind">api-endpoint</span><span class="api-method api-method-GET">GET</span><code class="api-path">/api/desktop/llm/status</code></div>
+  <table class="block-table">
+    <thead><tr><th>Param</th><th>Type</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td><code>200 body</code></td><td><code>{&#34;servers&#34;:[{&#34;kind&#34;:&#34;mlx|ollama&#34;,&#34;base_url&#34;:str,&#34;reachable&#34;:bool}],&#34;runtimes&#34;:{&#34;mlx_installed&#34;:bool,&#34;ollama_installed&#34;:bool}}</code></td><td>&mdash;</td></tr>
+      
+    </tbody>
+  </table>
+</div></div>
+    <div class="block-anchor" id="slice-7-block-api-endpoint-2" data-block-anchor="slice-7-block-api-endpoint-2" data-block-kind="api-endpoint"><div class="block block-api-endpoint">
+  <div class="block-header"><span class="block-kind">api-endpoint</span><span class="api-method api-method-POST">POST</span><code class="api-path">/api/desktop/llm/offline-mode</code></div>
+  <table class="block-table">
+    <thead><tr><th>Param</th><th>Type</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td><code>body</code></td><td><code>{&#34;enabled&#34;:bool,&#34;base_url&#34;:str,&#34;model&#34;:str} -&gt; writes pluggable-backend llm config</code></td><td>&mdash;</td></tr>
+      
+    </tbody>
+  </table>
+</div></div>
+    <div class="block-anchor" id="slice-7-block-diagram-1" data-block-anchor="slice-7-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
+  <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Offline-mode flow</span></div>
+  <div class="diagram-flow diagram-lr">
+    <div class="diagram-node">user toggles offline mode</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">GET /api/desktop/llm/status probes MLX :8080/v1 &#43; Ollama :11434/v1</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">reachable -&gt; POST offline-mode writes llm=openai_compatible&#43;base_url</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">installed-not-running -&gt; offer launch (mlx_lm.server / ollama serve)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">absent -&gt; guided install</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">chat &#43; scoring now run locally; apply still uses claude (slice 6)</div>
+  </div>
+</div></div>
+    
+  </div>
+</div>
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>deps.py reports reachable:false when the port is closed, true against a stub</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 4</span>
+            <ul><li>OpenAI-compatible server; runtime-installed detection via shutil.which. Regression:</li><li>standalone (no JOBSMITH_DESKTOP) -&gt; 404. Integration: enable offline-mode -&gt; assert</li><li>the `llm` config is written with provider=openai_compatible &#43; base_url, and a chat</li><li>turn hits the local endpoint (mock).</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">INFO</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Added per user request: desktop offline-mode surfacing MLX/Ollama for chat&#43;scoring; depends on plan-938f735b unified provider. Apply pipeline still claude-backed (slice 6). [added]</span>
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>Does offline mode cover the apply pipeline too?</p>
+          
+          
+          <textarea
+            data-section="slice-7-question-q-offline-scope"
+            data-comment-for="slice-7-question-q-offline-scope"
+            placeholder="Answer question q-offline-scope...">No — offline mode covers chat &#43; scoring (request/response LLM calls via the unified OpenAI-compatible provider). The agentic apply pipeline (claude -p) needs an agent loop to run on a raw local model; out of scope, tracked separately. (Design constraint surfaced during MLX/Ollama design.)</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: slices 3,4</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-7" data-comment-for="slice-7" placeholder="Comments on slice 7..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
 
     <!--PLAN_SLICE_CARDS-->
   </div>
@@ -2182,8 +2474,8 @@ slim and Constraint 1 intact while making the dependency explicit to the user
   <h2>Feedback Summary</h2>
   <div class="progress-stats">
     <div class="progress-stat"><strong id="approvedCount">0</strong> approved</div>
-    <div class="progress-stat"><strong id="totalSections">7</strong> sections</div>
-    <div class="progress-stat"><strong id="pendingCount">7</strong> pending</div>
+    <div class="progress-stat"><strong id="totalSections">8</strong> sections</div>
+    <div class="progress-stat"><strong id="pendingCount">8</strong> pending</div>
   </div>
   <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill" style="width:0%"></div></div>
   <div class="comments-summary">
@@ -2275,7 +2567,7 @@ var planId=(function(){var a=document.querySelector('article[id]');return a?a.id
 
 (function(){
   'use strict';
-  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design","slice-1","slice-2","slice-3","slice-4","slice-5","slice-6"]/*END_PLAN_SECTIONS_JSON*/;
+  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design","slice-1","slice-2","slice-3","slice-4","slice-5","slice-6","slice-7"]/*END_PLAN_SECTIONS_JSON*/;
 
   function setBadge(el,ok){
     el.className='badge badge-'+(ok?'approved':'pending');

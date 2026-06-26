@@ -597,6 +597,107 @@ slices:
             - user runs native installer (no Node) -> re-check
             - claude_installed:true -> apply flow unblocked
             - missing at apply time -> headless.py 'claude_unavailable' (no crash)
+    - id: slice-7
+      num: 7
+      title: 'Desktop offline-mode: detect/launch a local MLX or Ollama backend (chat + scoring)'
+      what: |
+        Surface an "offline mode" option in the desktop app that routes CHAT and SCORING
+        to a local OpenAI-compatible server instead of the cloud. Extend
+        `src/jobsmith/desktop/deps.py` to detect a running local server (MLX
+        mlx_lm.server at 127.0.0.1:8080/v1 or Ollama at 127.0.0.1:11434/v1) and whether
+        the runtime is installed. Add desktop-gated routes to
+        `src/jobsmith/api/routes/desktop.py`: `GET /api/desktop/llm/status`
+        (detected servers + installed runtimes) and `POST /api/desktop/llm/offline-mode`
+        (enable -> writes the pluggable-backend `llm` config from plan-938f735b:
+        provider=openai_compatible + the detected base_url/model). If the runtime is
+        installed but not running, offer to launch it (mlx_lm.server / `ollama serve`) as
+        a managed child; if absent, show guided install. A React `OfflineModeToggle`
+        component drives this. Apply pipeline still uses `claude` (slice 6) — offline mode
+        covers chat + scoring only (the agentic apply pipeline is out of scope here).
+      why: |
+        User choice — give the desktop app an offline/local-model option that reduces
+        cloud/`claude` dependence for chat + scoring, leveraging the unified
+        OpenAI-compatible provider built in plan-938f735b. MLX fits the macOS-first,
+        Apple-Silicon target especially well.
+      files:
+        - src/jobsmith/desktop/deps.py
+        - src/jobsmith/api/routes/desktop.py
+        - src/jobsmith/config.py
+        - web/src/components/OfflineModeToggle.tsx
+        - web/src/api/client.ts
+      deps:
+        - 3
+        - 4
+      done_when:
+        - With a local MLX or Ollama server running, enabling offline mode makes chat + scoring run against it (no cloud calls), verified by config + a live local request.
+        - If the runtime is installed but not running, the toggle can launch it; if absent, a guided-install prompt is shown — never a silent failure.
+        - On a `jobsmith up` server without JOBSMITH_DESKTOP=1, the /api/desktop/llm/* routes return 404 (Goal 4).
+      effort: M
+      risk: Med
+      tests: |
+        Unit: deps.py reports reachable:false when the port is closed, true against a stub
+        OpenAI-compatible server; runtime-installed detection via shutil.which. Regression:
+        standalone (no JOBSMITH_DESKTOP) -> 404. Integration: enable offline-mode -> assert
+        the `llm` config is written with provider=openai_compatible + base_url, and a chat
+        turn hits the local endpoint (mock).
+      complexity: complex
+      approved: false
+      comment: ""
+      research:
+        - url: https://github.com/ml-explore/mlx-lm
+          claim: mlx_lm.server serves an OpenAI-compatible API at 127.0.0.1:8080 on Apple Silicon — the MLX target this slice detects/launches; reached via plan-938f735b's unified adapter.
+          accessed: "2026-06-26"
+        - url: https://docs.ollama.com/api/openai-compatibility
+          claim: Ollama OpenAI-compatible endpoint at 127.0.0.1:11434/v1 — the Ollama target this slice detects; `ollama serve` starts it.
+          accessed: "2026-06-26"
+      questions:
+        - id: q-offline-scope
+          text: Does offline mode cover the apply pipeline too?
+          answer: No — offline mode covers chat + scoring (request/response LLM calls via the unified OpenAI-compatible provider). The agentic apply pipeline (claude -p) needs an agent loop to run on a raw local model; out of scope, tracked separately. (Design constraint surfaced during MLX/Ollama design.)
+      critic_revisions:
+        - source: local-design
+          severity: INFO
+          summary: 'Added per user request: desktop offline-mode surfacing MLX/Ollama for chat+scoring; depends on plan-938f735b unified provider. Apply pipeline still claude-backed (slice 6). [added]'
+      decisions_notes: |
+        **Trigger:** desktop offline-mode toggle; app boot probe.
+        **State:** writes the pluggable-backend `llm` config (plan-938f735b); detection is live.
+        **Payload:** llm/status JSON; offline-mode write sets provider=openai_compatible + base_url/model.
+        **Cross-plan dep:** REQUIRES plan-938f735b slice 2/3 (the unified OpenAICompatibleProvider/Scorer). This slice only detects/launches the local server and flips the config; it does not implement the adapter.
+        **Rejected:** Bundling MLX/Ollama + a model in the .dmg — gigabytes; detect/launch/guide instead. Replacing the apply pipeline (claude -p) with a local model — needs an agent loop, out of scope. A bespoke MLX adapter — the unified OpenAI-compatible provider already covers MLX (plan-938f735b decision).
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - src/jobsmith/desktop/deps.py (edit — probe 127.0.0.1:8080/v1 (MLX) + :11434/v1 (Ollama); detect installed runtimes)
+            - src/jobsmith/api/routes/desktop.py (edit — GET /api/desktop/llm/status, POST /api/desktop/llm/offline-mode; JOBSMITH_DESKTOP gate)
+            - src/jobsmith/config.py (reference — reuse the `llm` config from plan-938f735b slice 1; offline-mode writes provider=openai_compatible)
+            - web/src/components/OfflineModeToggle.tsx (new — status, enable, launch/guided-install)
+            - web/src/api/client.ts (edit — llm status/offline-mode client calls)
+        - type: api-endpoint
+          title: Local LLM status
+          fields:
+            method: GET
+            path: /api/desktop/llm/status
+          rows:
+            - name: 200 body
+              type: '{"servers":[{"kind":"mlx|ollama","base_url":str,"reachable":bool}],"runtimes":{"mlx_installed":bool,"ollama_installed":bool}}'
+        - type: api-endpoint
+          title: Enable offline mode
+          fields:
+            method: POST
+            path: /api/desktop/llm/offline-mode
+          rows:
+            - name: body
+              type: '{"enabled":bool,"base_url":str,"model":str} -> writes pluggable-backend llm config'
+        - type: diagram
+          title: Offline-mode flow
+          entries:
+            - user toggles offline mode
+            - GET /api/desktop/llm/status probes MLX :8080/v1 + Ollama :11434/v1
+            - reachable -> POST offline-mode writes llm=openai_compatible+base_url
+            - installed-not-running -> offer launch (mlx_lm.server / ollama serve)
+            - absent -> guided install
+            - chat + scoring now run locally; apply still uses claude (slice 6)
 questions: []
 critique:
     reviewed_at: "2026-06-26"
@@ -696,6 +797,7 @@ critique:
         removed via sidecar-reported port (W2). Design blockers — icons, data-dir, macOS
         close==quit, and desktop-route isolation — are all resolved in-slice. R-claude (the
         apply pipeline's external `claude` CLI dependency) is resolved by slice 6 (detect +
-        guided no-Node install). A separate local-backend exploration (MLX/Ollama) may
-        optionally remove the `claude`/cloud dependency; it links to the pluggable-LLM-
-        backends plan rather than expanding this one.
+        guided no-Node install). Slice 7 adds a desktop offline mode (local MLX/Ollama for
+        chat + scoring) wired to the unified OpenAI-compatible provider in plan-938f735b; the
+        agentic apply pipeline still uses `claude` (an agent loop on a local model is out of
+        scope). This plan relates_to plan-938f735b.
