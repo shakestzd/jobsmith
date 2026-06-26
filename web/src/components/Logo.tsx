@@ -6,9 +6,10 @@
  *   variant — 'default'  → Indigo Ink shaft (#2C2E72) + Forge Amber tip (#F4A024)
  *             'reversed' → white shaft (#ffffff) + Forge Amber tip (#F4A024)
  *             'mono'     → Indigo Ink shaft + Indigo Ink tip (single-color)
+ *             'adaptive' → currentColor shaft + Forge Amber tip (#F4A024) (inherits text color)
  */
 
-export type LogoVariant = 'default' | 'reversed' | 'mono';
+export type LogoVariant = 'default' | 'reversed' | 'mono' | 'adaptive';
 
 interface LogoProps {
   size?: number;
@@ -21,7 +22,9 @@ const AMBER = '#F4A024';
 
 export default function Logo({ size = 28, variant = 'default' }: LogoProps) {
   const shaftColor =
-    variant === 'reversed' ? INK_REVERSED : INK_DEFAULT;
+    variant === 'reversed' ? INK_REVERSED :
+    variant === 'adaptive' ? 'currentColor' :
+    INK_DEFAULT;
   const tipColor =
     variant === 'mono' ? INK_DEFAULT : AMBER;
 

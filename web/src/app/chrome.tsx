@@ -87,7 +87,7 @@ export function Sidebar({ view, open, setView, openNew }: SidebarProps) {
   return (
     <aside className="sidebar" style={{ overflow: 'hidden', opacity: open ? 1 : 0 }}>
       <div className="brand">
-        <Logo size={22} variant="reversed" />
+        <Logo size={22} variant="adaptive" />
         <span>jobsmith</span>
       </div>
 
