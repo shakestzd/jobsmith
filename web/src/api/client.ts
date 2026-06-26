@@ -548,6 +548,125 @@ export async function getFunnel(window: FunnelWindow = 30): Promise<FunnelRespon
   return apiGet<FunnelResponse>(`/api/funnel?window=${window}`);
 }
 
+// ── Desktop browser (Playwright Chromium) management (feat-0c74180d) ───────
+//
+// Desktop-only endpoints — mounted on the server ONLY when JOBSMITH_DESKTOP=1.
+// On a normal (non-desktop) server getBrowserStatus() resolves to a 404
+// JobsmithApiError; callers should treat that as "not a desktop build" and
+// render nothing.
+
+export interface BrowserStatus {
+  installed: boolean;
+  path: string;
+}
+
+/** GET /api/desktop/browser/status — is Chromium present in the app-data dir? */
+export async function getBrowserStatus(): Promise<BrowserStatus> {
+  return apiGet<BrowserStatus>('/api/desktop/browser/status');
+}
+
+export interface BrowserInstallAck {
+  // "started" | "in_progress" | "already_installed"
+  status: string;
+}
+
+/** POST /api/desktop/browser/install — kick off the one-time Chromium download. */
+export async function installBrowser(): Promise<BrowserInstallAck> {
+  return apiPost<BrowserInstallAck>('/api/desktop/browser/install', {});
+}
+
+/**
+ * Build the SSE URL for Chromium download progress. The bearer token rides as a
+ * ?token= query param because EventSource cannot set an Authorization header
+ * (same pattern as buildEventsUrl).
+ */
+export function buildBrowserInstallEventsUrl(): string {
+  const base = `${BASE_URL}/api/desktop/browser/install/events`;
+  const token = getAccessToken() || getRuntimeToken();
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+}
+
+// ── Desktop dependency detection (feat-dac00175, slice 6) ──────────────────
+//
+// Desktop-only — mounted on the server ONLY when JOBSMITH_DESKTOP=1. On a
+// normal (non-desktop) server getDepsStatus() resolves to a 404
+// JobsmithApiError; callers treat that as "not a desktop build" and render
+// nothing (same convention as getBrowserStatus).
+
+export interface DepsStatus {
+  claude_installed: boolean;
+  version: string | null;
+  path: string | null;
+}
+
+/** GET /api/desktop/deps/status — is the `claude` Claude Code CLI on PATH? */
+export async function getDepsStatus(): Promise<DepsStatus> {
+  return apiGet<DepsStatus>('/api/desktop/deps/status');
+}
+
+// ── Desktop offline-mode LLM detection (feat-aaa91b6d, slice 7) ────────────
+//
+// Desktop-only — mounted on the server ONLY when JOBSMITH_DESKTOP=1. On a
+// normal (non-desktop) server getLlmStatus() resolves to a 404 JobsmithApiError;
+// callers treat that as "not a desktop build" and render nothing.
+//
+// REDUCED SCOPE: status only. enableOfflineMode() hits a 501 placeholder — the
+// real pluggable-backend config + chat/scoring routing is deferred to
+// plan-938f735b — so the toggle degrades loudly instead of silently no-opping.
+
+/** One local OpenAI-compatible backend's status (MLX or Ollama). */
+export interface LlmBackendStatus {
+  reachable: boolean;
+  base_url: string;
+  runtime_installed: boolean;
+  model: string | null;
+}
+
+export interface LlmStatus {
+  mlx: LlmBackendStatus;
+  ollama: LlmBackendStatus;
+}
+
+/** GET /api/desktop/llm/status — local MLX/Ollama server + runtime detection. */
+export async function getLlmStatus(): Promise<LlmStatus> {
+  return apiGet<LlmStatus>('/api/desktop/llm/status');
+}
+
+/** Structured ack from the deferred enable action (always 501 for now). */
+export interface OfflineModeAck {
+  status: string; // "unavailable"
+  reason: string; // e.g. "offline backend config pending plan-938f735b"
+}
+
+/**
+ * POST /api/desktop/llm/offline-mode — deferred "enable offline mode" action.
+ *
+ * Currently a 501 placeholder that writes NO config; it returns a structured
+ * { status, reason } body so the UI can surface a clear "coming soon" notice.
+ * We read the body for the 501 case (rather than using apiPost, which throws
+ * and would discard the body) and only treat OTHER non-OK statuses as errors.
+ */
+export async function enableOfflineMode(): Promise<OfflineModeAck> {
+  const res = await fetch(`${BASE_URL}/api/desktop/llm/offline-mode`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({}),
+  });
+  let data: OfflineModeAck;
+  try {
+    data = (await res.json()) as OfflineModeAck;
+  } catch {
+    throw new JobsmithApiError(res.statusText || 'Enable failed', res.status);
+  }
+  // 501 = intentional "not implemented yet" placeholder (structured body).
+  // Any other non-OK status is a genuine error.
+  if (!res.ok && res.status !== 501) {
+    const detail = (data as unknown as Record<string, unknown>).detail;
+    throw new JobsmithApiError(formatDetail(detail, res.statusText), res.status);
+  }
+  return data;
+}
+
 /**
  * Redact secrets from any string before it lands in the DOM, clipboard, logs,
  * or any other user-visible surface. Catches:

@@ -15,6 +15,11 @@ class JdFetchResponse(BaseModel):
     text: str
     method: FetchMethod
     char_count: int
+    # feat-0c74180d: True when the Playwright/Chromium fallback could not run.
+    # The request still succeeds (httpx text is returned); detail is a clear,
+    # retryable message the UI can surface ("install browser and retry").
+    browser_unavailable: bool = False
+    detail: str | None = None
 
 
 @router.get("/fetch", response_model=JdFetchResponse)
@@ -26,10 +31,16 @@ async def fetch_jd_endpoint(
     if not url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="url must be http(s)")
     try:
-        text, method = await fetch_jd(url)
+        result = await fetch_jd(url)
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return JdFetchResponse(text=text, method=method, char_count=len(text))
+    return JdFetchResponse(
+        text=result.text,
+        method=result.method,
+        char_count=len(result.text),
+        browser_unavailable=result.browser_unavailable,
+        detail=result.detail,
+    )
 
 
 __all__ = ["router"]
