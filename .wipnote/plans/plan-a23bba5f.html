@@ -469,8 +469,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-1" class="slice-nav-item" data-slice-nav="1">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="1"></span>
-        <span>#1 PyInstaller sidecar build for the Python backend (additive entry point)</span>
-        
+        <span>#1 PyInstaller onefile sidecar for the Python backend (additive entry point)</span>
+        <span class="nav-triage-badge nav-triage-issue" title="4 issue(s)">&#9888;4</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -478,8 +478,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-2" class="slice-nav-item" data-slice-nav="2">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="2"></span>
-        <span>#2 Tauri v2 scaffold + macOS bundle config + splash frontend</span>
-        
+        <span>#2 Tauri v2 scaffold + macOS bundle config + icons + splash frontend</span>
+        <span class="nav-triage-badge nav-triage-issue" title="2 issue(s)">&#9888;2</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -487,8 +487,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-3" class="slice-nav-item" data-slice-nav="3">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="3"></span>
-        <span>#3 Sidecar lifecycle + dynamic port/token auth wiring (Rust)</span>
-        
+        <span>#3 Sidecar lifecycle + token auth + dynamic port wiring (Rust)</span>
+        <span class="nav-triage-badge nav-triage-issue" title="4 issue(s)">&#9888;4</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -496,8 +496,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-4" class="slice-nav-item" data-slice-nav="4">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="4"></span>
-        <span>#4 Playwright Chromium download-on-first-run with graceful fallback</span>
-        
+        <span>#4 Playwright Chromium download-on-first-run with graceful fallback (desktop-gated)</span>
+        <span class="nav-triage-badge nav-triage-issue" title="2 issue(s)">&#9888;2</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -505,8 +505,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-5" class="slice-nav-item" data-slice-nav="5">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="5"></span>
-        <span>#5 macOS .dmg packaging — ad-hoc-signed build + notarization stub + build script</span>
-        
+        <span>#5 macOS .dmg packaging — onefile bundle, ad-hoc-signed build + notarization wiring + build script</span>
+        <span class="nav-triage-badge nav-triage-issue" title="2 issue(s)">&#9888;2</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -525,10 +525,10 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <!-- Plan Header -->
 <header class="plan-header">
   <h1>Plan: Convert Jobsmith to Tauri Desktop Application</h1>
-  <p style="color:var(--text-dim)">Package the Jobsmith React UI and Python FastAPI/CLI backend into a single-click macOS Tauri desktop app, with the Python backend bundled as a PyInstaller sidecar, dynamic port/token auth, and download-on-first-run Playwright Chromium.</p>
+  <p style="color:var(--text-dim)">Package the Jobsmith React UI and Python FastAPI/CLI backend into a single-click macOS Tauri desktop app, with the Python backend bundled as a PyInstaller onefile sidecar (stdin-EOF shutdown), dynamic sidecar-reported port + Rust-issued token auth, and download-on-first-run Playwright Chromium.</p>
   <div class="meta">
     <span class="badge badge-pending">Draft</span>
-    <span style="font-size:.75rem;color:var(--text-muted)">v4 · 5 slices · Created 2026-06-26</span>
+    <span style="font-size:.75rem;color:var(--text-muted)">v5 · 5 slices · Created 2026-06-26</span>
   </div>
 </header>
 <button id="themeToggle" style="position:fixed;top:16px;right:16px;z-index:100;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;color:var(--text);font-family:var(--mono);font-size:0.75rem;cursor:pointer;">
@@ -553,7 +553,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-4-block-api-endpoint-1" title="Jump to slice 4">
           <span class="slice-num">#4</span>
-          <span class="overview-slice-title">Playwright Chromium download-on-first-run with graceful fallback</span>
+          <span class="overview-slice-title">Playwright Chromium download-on-first-run with graceful fallback (desktop-gated)</span>
         </a>
         <div class="block-anchor" id="overview-slice-4-block-api-endpoint-1" data-block-anchor="slice-4-block-api-endpoint-1" data-block-kind="api-endpoint"><div class="block block-api-endpoint">
   <div class="block-header"><span class="block-kind">api-endpoint</span><span class="api-method api-method-GET">GET</span><code class="api-path">/api/desktop/browser/status</code></div>
@@ -561,6 +561,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <thead><tr><th>Param</th><th>Type</th><th>Note</th></tr></thead>
     <tbody>
       <tr><td><code>200 body</code></td><td><code>{&#34;installed&#34;:bool,&#34;browsers_path&#34;:str,&#34;chromium_version&#34;:str|null}</code></td><td>&mdash;</td></tr>
+      <tr><td><code>404 (standalone)</code></td><td><code>router absent unless JOBSMITH_DESKTOP=1</code></td><td>&mdash;</td></tr>
       
     </tbody>
   </table>
@@ -569,7 +570,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-4-block-api-endpoint-2" title="Jump to slice 4">
           <span class="slice-num">#4</span>
-          <span class="overview-slice-title">Playwright Chromium download-on-first-run with graceful fallback</span>
+          <span class="overview-slice-title">Playwright Chromium download-on-first-run with graceful fallback (desktop-gated)</span>
         </a>
         <div class="block-anchor" id="overview-slice-4-block-api-endpoint-2" data-block-anchor="slice-4-block-api-endpoint-2" data-block-kind="api-endpoint"><div class="block block-api-endpoint">
   <div class="block-header"><span class="block-kind">api-endpoint</span><span class="api-method api-method-POST">POST</span><code class="api-path">/api/desktop/browser/install</code></div>
@@ -591,16 +592,15 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-1-block-file-tree-1" title="Jump to slice 1">
           <span class="slice-num">#1</span>
-          <span class="overview-slice-title">PyInstaller sidecar build for the Python backend (additive entry point)</span>
+          <span class="overview-slice-title">PyInstaller onefile sidecar for the Python backend (additive entry point)</span>
         </a>
         <div class="block-anchor" id="overview-slice-1-block-file-tree-1" data-block-anchor="slice-1-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
     <li class="file-entry"><code class="file-path">src/jobsmith/desktop/__init__.py (new)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/sidecar_main.py (new — argparse --port, watchdog, uvicorn.run create_app)</code></li>
-    <li class="file-entry"><code class="file-path">packaging/jobsmith-sidecar.spec (new — onedir, collect_all uvicorn/playwright, add web_dist)</code></li>
-    <li class="file-entry"><code class="file-path">scripts/build-sidecar.sh (new — pyinstaller &#43; rename to -$(rustc --print host-tuple))</code></li>
-    <li class="file-entry"><code class="file-path">pyproject.toml (edit — add [project.optional-dependencies] desktop = pyinstaller)</code></li>
-    <li class="file-entry"><code class="file-path">hatch_build.py (reference — npm build -&gt; src/jobsmith/web_dist used as PyInstaller data)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/sidecar_main.py (new — pop PUBLIC_BIND, data dir, ephemeral port &#43; print, uvicorn create_app, stdin-EOF &#43; SIGTERM shutdown)</code></li>
+    <li class="file-entry"><code class="file-path">packaging/jobsmith-sidecar.spec (new — ONEFILE -F, collect_all uvicorn/playwright/claude_agent_sdk, add web_dist data)</code></li>
+    <li class="file-entry"><code class="file-path">scripts/build-sidecar.sh (new — requires web_dist; pyinstaller; rename to -$(rustc --print host-tuple))</code></li>
+    <li class="file-entry"><code class="file-path">pyproject.toml (edit — add [project.optional-dependencies] desktop = pyinstaller; platformdirs already present)</code></li>
     
   </ul>
 </div></div>
@@ -608,15 +608,16 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-2-block-file-tree-1" title="Jump to slice 2">
           <span class="slice-num">#2</span>
-          <span class="overview-slice-title">Tauri v2 scaffold + macOS bundle config + splash frontend</span>
+          <span class="overview-slice-title">Tauri v2 scaffold + macOS bundle config + icons + splash frontend</span>
         </a>
         <div class="block-anchor" id="overview-slice-2-block-file-tree-1" data-block-anchor="slice-2-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">src-tauri/Cargo.toml (new — tauri v2, tauri-plugin-shell)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/Cargo.toml (new — tauri v2, tauri-plugin-shell, tauri-plugin-single-instance)</code></li>
     <li class="file-entry"><code class="file-path">src-tauri/build.rs (new)</code></li>
-    <li class="file-entry"><code class="file-path">src-tauri/src/main.rs (new — skeleton, builder.run)</code></li>
-    <li class="file-entry"><code class="file-path">src-tauri/tauri.conf.json (new — externalBin, bundle.macOS targets app&#43;dmg)</code></li>
-    <li class="file-entry"><code class="file-path">src-tauri/capabilities/default.json (new — shell:allow-spawn for binaries/jobsmith-sidecar)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/src/main.rs (new — skeleton, single-instance plugin, builder.run)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/tauri.conf.json (new — externalBin, bundle.macOS app&#43;dmg, icon refs)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/capabilities/default.json (new — shell:allow-spawn scoped to binaries/jobsmith-sidecar)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/icons/icon.icns &#43; icon.png (new — required for tauri build)</code></li>
     <li class="file-entry"><code class="file-path">src-tauri/splash/index.html (new — loading splash, design-token styled)</code></li>
     <li class="file-entry"><code class="file-path">package.json (new — root tauri dev/build scripts)</code></li>
     
@@ -626,14 +627,14 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-3-block-file-tree-1" title="Jump to slice 3">
           <span class="slice-num">#3</span>
-          <span class="overview-slice-title">Sidecar lifecycle + dynamic port/token auth wiring (Rust)</span>
+          <span class="overview-slice-title">Sidecar lifecycle + token auth + dynamic port wiring (Rust)</span>
         </a>
         <div class="block-anchor" id="overview-slice-3-block-file-tree-1" data-block-anchor="slice-3-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">src-tauri/src/main.rs (edit — free-port pick, token gen, spawn, health poll, navigate, exit-kill)</code></li>
-    <li class="file-entry"><code class="file-path">src-tauri/src/sidecar.rs (new — spawn/manage child, health-poll helper)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/api/staticui.py (reference/verify — existing shim fires for 127.0.0.1 host)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/api/auth.py (reference/verify — JOBSMITH_API_TOKEN honored as active token)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/src/main.rs (edit — token gen, spawn, read port from stdout, health poll, navigate, CloseRequested-&gt;quit, error dialog)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/src/sidecar.rs (new — spawn/manage child, stdout port parse, log tee, health-poll helper)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/api/staticui.py (reference/verify — shim fires for 127.0.0.1 host when PUBLIC_BIND unset)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/api/auth.py (reference/verify — JOBSMITH_API_TOKEN honored as active token; lru_cache reads fresh env)</code></li>
     
   </ul>
 </div></div>
@@ -641,16 +642,17 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-4-block-file-tree-1" title="Jump to slice 4">
           <span class="slice-num">#4</span>
-          <span class="overview-slice-title">Playwright Chromium download-on-first-run with graceful fallback</span>
+          <span class="overview-slice-title">Playwright Chromium download-on-first-run with graceful fallback (desktop-gated)</span>
         </a>
         <div class="block-anchor" id="overview-slice-4-block-file-tree-1" data-block-anchor="slice-4-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
     <li class="file-entry"><code class="file-path">src/jobsmith/desktop/playwright_bootstrap.py (new — platformdirs path, status, install runner)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/sidecar_main.py (edit — set PLAYWRIGHT_BROWSERS_PATH before playwright import)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/sidecar_main.py (edit — set JOBSMITH_DESKTOP=1; PLAYWRIGHT_BROWSERS_PATH already set in slice 1)</code></li>
     <li class="file-entry"><code class="file-path">src/jobsmith/api/routes/desktop.py (new — status/install/events routes)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/api/main.py (edit — include desktop router)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/jd/fetcher.py (edit — graceful &#39;chromium missing&#39; fallback to httpx path)</code></li>
-    <li class="file-entry"><code class="file-path">web/src/ (edit — first-run download prompt &#43; progress UI)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/api/main.py (edit — include desktop router ONLY if JOBSMITH_DESKTOP=1)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/jd/fetcher.py (edit — raise structured &#39;browser_unavailable&#39; &#43; keep httpx fast-path)</code></li>
+    <li class="file-entry"><code class="file-path">web/src/components/BrowserInstallPrompt.tsx (new — first-run download prompt &#43; progress)</code></li>
+    <li class="file-entry"><code class="file-path">web/src/api/client.ts (edit — browser status/install client calls &#43; SSE)</code></li>
     
   </ul>
 </div></div>
@@ -658,13 +660,13 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-5-block-file-tree-1" title="Jump to slice 5">
           <span class="slice-num">#5</span>
-          <span class="overview-slice-title">macOS .dmg packaging — ad-hoc-signed build + notarization stub + build script</span>
+          <span class="overview-slice-title">macOS .dmg packaging — onefile bundle, ad-hoc-signed build + notarization wiring + build script</span>
         </a>
         <div class="block-anchor" id="overview-slice-5-block-file-tree-1" data-block-anchor="slice-5-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">scripts/build-desktop.sh (new — web build -&gt; web_dist -&gt; sidecar -&gt; tauri build dmg)</code></li>
-    <li class="file-entry"><code class="file-path">src-tauri/tauri.conf.json (edit — bundle.macOS signingIdentity, resources for onedir _internal/, dmg config)</code></li>
-    <li class="file-entry"><code class="file-path">docs/desktop-build.md (new — local build &#43; notarization env vars)</code></li>
+    <li class="file-entry"><code class="file-path">scripts/build-desktop.sh (new — npm build -&gt; web_dist -&gt; build-sidecar.sh -&gt; tauri build dmg)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/tauri.conf.json (edit — bundle.macOS signingIdentity &#43; dmg config; no _internal/ resources needed for onefile)</code></li>
+    <li class="file-entry"><code class="file-path">docs/desktop-build.md (new — local build &#43; notarization env vars; APPLE_PASSWORD = app-specific password)</code></li>
     <li class="file-entry"><code class="file-path">.github/workflows/desktop-build.yml (new, optional — CI .dmg artifact)</code></li>
     
   </ul>
@@ -679,16 +681,16 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-2-block-wireframe-1" title="Jump to slice 2">
           <span class="slice-num">#2</span>
-          <span class="overview-slice-title">Tauri v2 scaffold + macOS bundle config + splash frontend</span>
+          <span class="overview-slice-title">Tauri v2 scaffold + macOS bundle config + icons + splash frontend</span>
         </a>
         <div class="block-anchor" id="overview-slice-2-block-wireframe-1" data-block-anchor="slice-2-block-wireframe-1" data-block-kind="wireframe"><div class="block block-wireframe">
   <div class="block-header"><span class="block-kind">wireframe</span><span class="block-title">Boot splash</span></div>
   <div class="wireframe-canvas" style="--wf-bg:var(--bg-card,#18181c);--wf-surface:var(--bg-input,#222228);--wf-fg:var(--text,#f0f0ed);--wf-muted:var(--text-muted,#9898a0);--wf-border:var(--border,#3a3a42);--wf-accent:var(--accent,#cdff00);--wf-radius:var(--radius,8px);position:relative;overflow:hidden;contain:layout paint;"><div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; background: var(--wf-surface); color: var(--wf-text)">
-<div>Jobsmith</div>
-<div style="color: var(--wf-text-muted)">Starting backend…</div>
-<div style="width: 160px; height: 4px; background: var(--wf-border); border-radius: 2px">
-  <div style="width: 40%; height: 100%; background: var(--wf-accent); border-radius: 2px"></div>
-</div>
+  <div>Jobsmith</div>
+  <div style="color: var(--wf-text-muted)">Starting backend…</div>
+  <div style="width: 160px; height: 4px; background: var(--wf-border); border-radius: 2px">
+    <div style="width: 40%; height: 100%; background: var(--wf-accent); border-radius: 2px"></div>
+  </div>
 </div>
 </div>
 </div></div>
@@ -702,48 +704,48 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-1-block-diagram-1" title="Jump to slice 1">
           <span class="slice-num">#1</span>
-          <span class="overview-slice-title">PyInstaller sidecar build for the Python backend (additive entry point)</span>
+          <span class="overview-slice-title">PyInstaller onefile sidecar for the Python backend (additive entry point)</span>
         </a>
         <div class="block-anchor" id="overview-slice-1-block-diagram-1" data-block-anchor="slice-1-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
-  <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Sidecar build pipeline</span></div>
+  <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Sidecar boot &#43; shutdown</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">npm run build (web/)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">copy web/dist -&gt; src/jobsmith/web_dist</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">pyinstaller jobsmith-sidecar.spec (onedir)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">rename binary -&gt; jobsmith-sidecar-&lt;triple&gt;</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">src-tauri/binaries/</div>
+    <div class="diagram-node">Tauri spawns sidecar (JOBSMITH_API_TOKEN in env, stdin held open)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">pop JOBSMITH_PUBLIC_BIND; export PLAYWRIGHT_BROWSERS_PATH (app data)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">bind 127.0.0.1:0 -&gt; port N; print JOBSMITH_LISTENING_PORT=N</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">uvicorn.run create_app on 127.0.0.1:N</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">daemon thread: sys.stdin.read() blocks</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">Tauri exits -&gt; stdin EOF -&gt; os._exit(0)</div>
   </div>
 </div></div>
       </div>
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-3-block-diagram-1" title="Jump to slice 3">
           <span class="slice-num">#3</span>
-          <span class="overview-slice-title">Sidecar lifecycle + dynamic port/token auth wiring (Rust)</span>
+          <span class="overview-slice-title">Sidecar lifecycle + token auth + dynamic port wiring (Rust)</span>
         </a>
         <div class="block-anchor" id="overview-slice-3-block-diagram-1" data-block-anchor="slice-3-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
   <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Startup &#43; auth handshake</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">Tauri setup: pick free port &#43; generate token</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">spawn sidecar (--port, JOBSMITH_API_TOKEN env)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">Python: auth.py adopts token; uvicorn binds 127.0.0.1:port</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">Rust polls GET /health until 200</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">navigate webview -&gt; http://127.0.0.1:port/</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">staticui shim injects window.__JOBSMITH__ before React boot</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">on app exit: kill sidecar child</div>
+    <div class="diagram-node">Tauri setup: generate token</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">spawn sidecar (JOBSMITH_API_TOKEN env, stdin open)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">read JOBSMITH_LISTENING_PORT=N from child stdout</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">Rust polls GET /health until 200 (timeout -&gt; error dialog)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">navigate webview -&gt; http://127.0.0.1:N/</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">staticui shim injects window.__JOBSMITH__ before React boot</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">WindowEvent::CloseRequested -&gt; kill child &#43; exit (no orphan)</div>
   </div>
 </div></div>
       </div>
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-4-block-diagram-1" title="Jump to slice 4">
           <span class="slice-num">#4</span>
-          <span class="overview-slice-title">Playwright Chromium download-on-first-run with graceful fallback</span>
+          <span class="overview-slice-title">Playwright Chromium download-on-first-run with graceful fallback (desktop-gated)</span>
         </a>
         <div class="block-anchor" id="overview-slice-4-block-diagram-1" data-block-anchor="slice-4-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
   <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">First-run Chromium flow</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">user starts a scrape needing Playwright</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">GET /api/desktop/browser/status -&gt; installed:false</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">UI prompts; POST /api/desktop/browser/install</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">playwright install chromium -&gt; PLAYWRIGHT_BROWSERS_PATH (app data)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">SSE streams progress -&gt; UI</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">on failure/offline: fall back to httpx fast-path &#43; retryable error</div>
+    <div class="diagram-node">user starts a scrape needing Playwright</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">GET /api/desktop/browser/status -&gt; installed:false</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">BrowserInstallPrompt -&gt; POST /api/desktop/browser/install</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">playwright install chromium -&gt; PLAYWRIGHT_BROWSERS_PATH (app data)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">SSE streams progress -&gt; UI</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">on failure/offline: httpx fast-path &#43; retryable &#39;browser_unavailable&#39;</div>
   </div>
 </div></div>
       </div>
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-5-block-diagram-1" title="Jump to slice 5">
           <span class="slice-num">#5</span>
-          <span class="overview-slice-title">macOS .dmg packaging — ad-hoc-signed build + notarization stub + build script</span>
+          <span class="overview-slice-title">macOS .dmg packaging — onefile bundle, ad-hoc-signed build + notarization wiring + build script</span>
         </a>
         <div class="block-anchor" id="overview-slice-5-block-diagram-1" data-block-anchor="slice-5-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
   <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Packaging pipeline</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">npm run build (web)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">copy -&gt; src/jobsmith/web_dist</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">build-sidecar.sh -&gt; src-tauri/binaries</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">tauri build --bundles dmg (ad-hoc sign)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">Jobsmith.dmg</div>
+    <div class="diagram-node">npm run build (web)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">copy -&gt; src/jobsmith/web_dist</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">build-sidecar.sh (onefile) -&gt; src-tauri/binaries</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">tauri build --bundles dmg (ad-hoc or notarized)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">Jobsmith.dmg</div>
   </div>
 </div></div>
       </div>
@@ -757,11 +759,11 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <section class="dep-graph" data-zone="dependency-graph">
   <h2>Dependency Graph</h2>
   <div id="graph-data" style="display:none">
-    <div data-node="1" data-name="PyInstaller sidecar build for the Python backend (additive entry point)" data-status="pending" data-deps="" data-files="6"></div>
-    <div data-node="2" data-name="Tauri v2 scaffold + macOS bundle config + splash frontend" data-status="pending" data-deps="" data-files="7"></div>
-    <div data-node="3" data-name="Sidecar lifecycle + dynamic port/token auth wiring (Rust)" data-status="pending" data-deps="1,2" data-files="4"></div>
-    <div data-node="4" data-name="Playwright Chromium download-on-first-run with graceful fallback" data-status="pending" data-deps="1,3" data-files="6"></div>
-    <div data-node="5" data-name="macOS .dmg packaging — ad-hoc-signed build + notarization stub + build script" data-status="pending" data-deps="3,4" data-files="4"></div>
+    <div data-node="1" data-name="PyInstaller onefile sidecar for the Python backend (additive entry point)" data-status="pending" data-deps="" data-files="5"></div>
+    <div data-node="2" data-name="Tauri v2 scaffold + macOS bundle config + icons + splash frontend" data-status="pending" data-deps="" data-files="9"></div>
+    <div data-node="3" data-name="Sidecar lifecycle + token auth + dynamic port wiring (Rust)" data-status="pending" data-deps="1,2" data-files="4"></div>
+    <div data-node="4" data-name="Playwright Chromium download-on-first-run with graceful fallback (desktop-gated)" data-status="pending" data-deps="1,3" data-files="7"></div>
+    <div data-node="5" data-name="macOS .dmg packaging — onefile bundle, ad-hoc-signed build + notarization wiring + build script" data-status="pending" data-deps="3,4" data-files="4"></div>
     
     <!--PLAN_GRAPH_NODES-->
   </div>
@@ -784,9 +786,9 @@ pre-installed Python or Node.
 <h4>Goals</h4>
 <ol>
 <li data-markdown>Package the React UI + Python FastAPI/CLI backend as a unified Tauri desktop app (macOS .dmg first).</li>
-<li data-markdown>Bundle the Python backend with PyInstaller as a Tauri sidecar; lifecycle managed automatically (starts with the app, terminates on window close).</li>
-<li data-markdown>Auto-authenticate: Rust assigns a port and token and hands them to the web view, reusing Jobsmith&#39;s existing localhost shim — no manual config.</li>
-<li data-markdown>Preserve codebase integrity: CLI (`jobsmith up`) and standalone FastAPI operation remain unchanged for non-desktop installs.</li>
+<li data-markdown>Bundle the Python backend with PyInstaller (onefile) as a Tauri sidecar; lifecycle managed automatically (starts with the app, terminates cleanly on app quit).</li>
+<li data-markdown>Auto-authenticate: Rust issues the token and the sidecar reports its port; both flow to the web view via Jobsmith&#39;s existing localhost shim — no manual config.</li>
+<li data-markdown>Preserve codebase integrity: CLI (`jobsmith up`) and standalone FastAPI operation remain unchanged, and new desktop-only API routes stay dormant for non-desktop installs.</li>
 </ol>
 <h4>Constraints</h4>
 <ul>
@@ -810,10 +812,10 @@ pre-installed Python or Node.
   <summary><span>Slices</span><span class="badge badge-pending" data-badge-for="slices">Pending</span></summary>
   <div class="section-body">
     <details class="slice-card" id="slice-1" data-slice="1" data-slice-name="slice-1" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 1: PyInstaller sidecar build for the Python backend (additive entry point)">
+  <summary class="slice-summary" aria-label="Slice 1: PyInstaller onefile sidecar for the Python backend (additive entry point)">
     <span class="slice-num">#1</span>
     <span class="slice-title-col">
-      <span class="slice-name">PyInstaller sidecar build for the Python backend (additive entry point)</span>
+      <span class="slice-name">PyInstaller onefile sidecar for the Python backend (additive entry point)</span>
       <span class="slice-preview">Add a NEW desktop sidecar entry point src/jobsmith/desktop/sidecarmain.py</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
@@ -822,7 +824,7 @@ pre-installed Python or Node.
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-1">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="4 critic issue(s)">4 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -855,15 +857,21 @@ pre-installed Python or Node.
           
           <input type="checkbox" id="slice-1-what-reveal" class="reveal-toggle">
           <div class="markdown-block reveal-content serif-prose"><p>Add a NEW desktop sidecar entry point <code>src/jobsmith/desktop/sidecar_main.py</code>
-that: parses <code>--port</code>, sets PLAYWRIGHT_BROWSERS_PATH before any Playwright
-import, starts a parent-PID watchdog (self-terminates if the Tauri parent
-dies), then runs uvicorn on 127.0.0.1:&lt;port&gt; via the existing
-<code>jobsmith.api.main:create_app</code> factory (no browser auto-open). Author a
-PyInstaller spec <code>packaging/jobsmith-sidecar.spec</code> (onedir) that collects
-uvicorn/fastapi/playwright/claude-agent-sdk hidden imports and bundles the
-pre-built <code>src/jobsmith/web_dist/</code> so the sidecar still serves the UI.
-<code>scripts/build-sidecar.sh</code> produces the binary named with the host target
-triple into <code>src-tauri/binaries/</code>. cli.py is NOT touched.</p>
+that: (a) pops JOBSMITH_PUBLIC_BIND from env so the loopback auth shim always
+fires; (b) resolves the data dir via the existing platformdirs dependency and
+exports PLAYWRIGHT_BROWSERS_PATH BEFORE any Playwright import; (c) selects a
+free ephemeral port (binds 127.0.0.1:0, retries on failure) and prints
+<code>JOBSMITH_LISTENING_PORT=&lt;n&gt;</code> to stdout so Rust learns the port without a
+cross-process race; (d) starts uvicorn on that port via the existing
+<code>jobsmith.api.main:create_app</code> factory (no browser auto-open); (e) installs a
+stdin-EOF shutdown sentinel (daemon thread on sys.stdin.read(); on EOF
+os._exit(0)) plus a SIGTERM handler. Author a PyInstaller spec
+<code>packaging/jobsmith-sidecar.spec</code> (ONEFILE / -F) collecting
+uvicorn/fastapi/playwright/claude-agent-sdk hidden imports and bundling the
+pre-built <code>src/jobsmith/web_dist/</code> as data. <code>scripts/build-sidecar.sh</code> REQUIRES
+web_dist to be pre-populated (it does NOT run npm — build-desktop.sh owns that)
+and emits the binary named with the host target triple into
+<code>src-tauri/binaries/</code>. cli.py is NOT touched.</p>
 </div>
           <label for="slice-1-what-reveal" class="reveal-label">Show full description</label>
           
@@ -876,9 +884,10 @@ triple into <code>src-tauri/binaries/</code>. cli.py is NOT touched.</p>
         <div class="slice-field-value">
           
           <div class="markdown-block serif-prose"><p>Goal 2 — the Python backend must run as a self-contained binary with no host
-Python. onedir (not onefile) is chosen so the bundled executable IS the server
-process, eliminating the bootloader-orphan kill problem and slow cold starts.
-Additive entry point preserves Goal 4 (CLI/FastAPI standalone unchanged).</p>
+Python. ONEFILE is chosen (not onedir) because field evidence (mclare.blog,
+dieharders) shows onedir&#39;s _internal/ does not resolve as a Tauri sidecar in a
+macOS .app bundle; stdin-EOF shutdown solves onefile&#39;s bootloader-orphan kill
+problem. Additive entry point preserves Goal 4 (CLI/FastAPI standalone unchanged).</p>
 </div>
           
         </div>
@@ -887,13 +896,13 @@ Additive entry point preserves Goal 4 (CLI/FastAPI standalone unchanged).</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/desktop/__init__.py, src/jobsmith/desktop/sidecar_main.py, packaging/jobsmith-sidecar.spec, scripts/build-sidecar.sh, pyproject.toml, hatch_build.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/desktop/__init__.py, src/jobsmith/desktop/sidecar_main.py, packaging/jobsmith-sidecar.spec, scripts/build-sidecar.sh, pyproject.toml</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Running the built `jobsmith-sidecar-&lt;triple&gt; --port 8123` serves the API and UI on 127.0.0.1:8123 with no system Python on PATH.</li><li>The sidecar process exits within ~2s of its parent process being killed (watchdog verified).</li><li>`jobsmith up` and `jobsmith api serve` behave identically to before — cli.py is byte-for-byte unchanged (Goal 4).</li></ul>
+        <ul class="slice-done-list"><li>Running the built `jobsmith-sidecar-&lt;triple&gt;` (stdin kept open) prints JOBSMITH_LISTENING_PORT=&lt;n&gt;, then serves the API and UI on 127.0.0.1:&lt;n&gt; with no system Python on PATH.</li><li>Closing the sidecar&#39;s stdin causes it to exit within ~2s (stdin-EOF sentinel verified); SIGTERM also exits cleanly.</li><li>With JOBSMITH_PUBLIC_BIND=1 inherited in the parent env, the served index.html STILL contains the window.__JOBSMITH__ shim (the entry point clears that var).</li><li>`jobsmith up` and `jobsmith api serve` behave identically to before — cli.py is byte-for-byte unchanged (Goal 4).</li></ul>
       </div>
       
     
@@ -905,9 +914,11 @@ Additive entry point preserves Goal 4 (CLI/FastAPI standalone unchanged).</p>
         
         <input type="checkbox" id="slice-1-decisions-reveal" class="reveal-toggle">
         <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> PyInstaller invoked by scripts/build-sidecar.sh (CI + local), output consumed by Tauri externalBin.
-<strong>State:</strong> Built binary + onedir _internal/ live under src-tauri/binaries/ (gitignored build artifact, rebuildable).
-<strong>Payload:</strong> A self-contained server binary exposing the existing FastAPI app on a caller-chosen port.
-<strong>Rejected:</strong> onefile (-F) — Tauri can only kill the bootloader PID, orphaning the real Python child per the dieharders reference; also slow cold start. Embedding a full CPython via uv — heavier and reinvents what PyInstaller already solves (Goal 2 mandates PyInstaller). Modifying cli.py <code>up</code> to double as the sidecar — would couple desktop concerns into the CLI and risk Goal 4.</p>
+<strong>State:</strong> Built single-file binary lives under src-tauri/binaries/ (gitignored build artifact, rebuildable). Data dir resolved via existing platformdirs dep.
+<strong>Payload:</strong> A self-contained server binary that reports its own ephemeral port on stdout and exposes the existing FastAPI app.
+<strong>Shutdown:</strong> stdin-EOF sentinel (validated by the dieharders reference) + SIGTERM handler. Chosen over a parent-PID watchdog because ppid changes on orphan-reaping (macOS) can cause false triggers/misses.
+<strong>web_dist contract:</strong> build-sidecar.sh REQUIRES src/jobsmith/web_dist pre-populated and errors clearly if absent; the npm build lives once in build-desktop.sh (slice 5) to avoid a double build (design critic F10).
+<strong>Rejected:</strong> onedir — _internal/ does not resolve as a Tauri sidecar in the .app bundle (mclare.blog); the original draft&#39;s onedir+watchdog was a misread of the dieharders source. Modifying cli.py <code>up</code> to double as the sidecar — couples desktop concerns into the CLI, risks Goal 4.</p>
 </div>
         <label for="slice-1-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -921,18 +932,17 @@ Additive entry point preserves Goal 4 (CLI/FastAPI standalone unchanged).</p>
     <div class="block-anchor" id="slice-1-block-file-tree-1" data-block-anchor="slice-1-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
     <li class="file-entry"><code class="file-path">src/jobsmith/desktop/__init__.py (new)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/sidecar_main.py (new — argparse --port, watchdog, uvicorn.run create_app)</code></li>
-    <li class="file-entry"><code class="file-path">packaging/jobsmith-sidecar.spec (new — onedir, collect_all uvicorn/playwright, add web_dist)</code></li>
-    <li class="file-entry"><code class="file-path">scripts/build-sidecar.sh (new — pyinstaller &#43; rename to -$(rustc --print host-tuple))</code></li>
-    <li class="file-entry"><code class="file-path">pyproject.toml (edit — add [project.optional-dependencies] desktop = pyinstaller)</code></li>
-    <li class="file-entry"><code class="file-path">hatch_build.py (reference — npm build -&gt; src/jobsmith/web_dist used as PyInstaller data)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/sidecar_main.py (new — pop PUBLIC_BIND, data dir, ephemeral port &#43; print, uvicorn create_app, stdin-EOF &#43; SIGTERM shutdown)</code></li>
+    <li class="file-entry"><code class="file-path">packaging/jobsmith-sidecar.spec (new — ONEFILE -F, collect_all uvicorn/playwright/claude_agent_sdk, add web_dist data)</code></li>
+    <li class="file-entry"><code class="file-path">scripts/build-sidecar.sh (new — requires web_dist; pyinstaller; rename to -$(rustc --print host-tuple))</code></li>
+    <li class="file-entry"><code class="file-path">pyproject.toml (edit — add [project.optional-dependencies] desktop = pyinstaller; platformdirs already present)</code></li>
     
   </ul>
 </div></div>
     <div class="block-anchor" id="slice-1-block-diagram-1" data-block-anchor="slice-1-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
-  <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Sidecar build pipeline</span></div>
+  <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Sidecar boot &#43; shutdown</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">npm run build (web/)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">copy web/dist -&gt; src/jobsmith/web_dist</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">pyinstaller jobsmith-sidecar.spec (onedir)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">rename binary -&gt; jobsmith-sidecar-&lt;triple&gt;</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">src-tauri/binaries/</div>
+    <div class="diagram-node">Tauri spawns sidecar (JOBSMITH_API_TOKEN in env, stdin held open)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">pop JOBSMITH_PUBLIC_BIND; export PLAYWRIGHT_BROWSERS_PATH (app data)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">bind 127.0.0.1:0 -&gt; port N; print JOBSMITH_LISTENING_PORT=N</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">uvicorn.run create_app on 127.0.0.1:N</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">daemon thread: sys.stdin.read() blocks</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">Tauri exits -&gt; stdin EOF -&gt; os._exit(0)</div>
   </div>
 </div></div>
     
@@ -949,12 +959,17 @@ Additive entry point preserves Goal 4 (CLI/FastAPI standalone unchanged).</p>
           
           <div class="test-group" data-kind="integration">
             <span class="test-chip">INTEGRATION &middot; 1</span>
-            <ul><li>build the sidecar in CI, run it on a free port in a clean env</li></ul>
+            <ul><li>build the sidecar in CI (after a web_dist is staged), run it in a</li></ul>
           </div>
           
           <div class="test-group" data-kind="other">
             <span class="test-chip">OTHER &middot; 3</span>
-            <ul><li>(PATH stripped of python), curl /health -&gt; 200 and curl / -&gt; index.html</li><li>containing the window.__JOBSMITH__ shim. Watchdog test: spawn sidecar under a</li><li>wrapper, kill the wrapper, assert the sidecar PID is gone within 3s.</li></ul>
+            <ul><li>clean env (PATH stripped of python) with stdin piped, parse JOBSMITH_LISTENING_PORT,</li><li>curl /health -&gt; 200 and curl / -&gt; index.html containing the window.__JOBSMITH__ shim.</li><li>JOBSMITH_PUBLIC_BIND=1 in the parent, assert the shim still injects.</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="shutdown test">
+            <span class="test-chip">SHUTDOWN TEST &middot; 1</span>
+            <ul><li>close stdin, assert the PID is gone within 3s. Env test: set</li></ul>
           </div>
           
           <div class="test-group" data-kind="regression">
@@ -969,6 +984,37 @@ Additive entry point preserves Goal 4 (CLI/FastAPI standalone unchanged).</p>
     
 
     
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">Original onedir&#43;watchdog was a misread of the dieharders source (which uses onefile &#43; stdin/stdout) and onedir _internal/ fails in the .app bundle (mclare.blog). Flipped to onefile &#43; stdin-EOF. [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">sidecar_main.py must os.environ.pop(&#39;JOBSMITH_PUBLIC_BIND&#39;) before uvicorn or staticui.py:208 _is_public_bind() suppresses the auth shim. Added as task &#43; done_when. [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">Port TOCTOU race removed: sidecar self-selects the ephemeral port and prints JOBSMITH_LISTENING_PORT to stdout instead of Rust picking-then-releasing. [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">web_dist population contract clarified — build-sidecar.sh requires it pre-staged; npm build owned by build-desktop.sh (no double build). [resolved]</span>
+        </div>
+        
+      </div>
+    </div>
+    
 
     
     <div class="slice-field slice-questions">
@@ -982,7 +1028,7 @@ Additive entry point preserves Goal 4 (CLI/FastAPI standalone unchanged).</p>
           <textarea
             data-section="slice-1-question-q-onefile-onedir"
             data-comment-for="slice-1-question-q-onefile-onedir"
-            placeholder="Answer question q-onefile-onedir...">onedir — eliminates the bootloader-orphan kill problem (dieharders) and gives faster cold start; Tauri externalBin points at the onedir executable, _internal/ ships as bundle resources. (Inferred from research; no offline-bundle requirement forces onefile.)</textarea>
+            placeholder="Answer question q-onefile-onedir...">onefile (-F) — feasibility critic confirmed onedir&#39;s _internal/ does not resolve as a Tauri sidecar in a macOS .app bundle (mclare.blog) and the dieharders reference itself uses onefile &#43; stdin/stdout shutdown. (Research-corrected after critique.)</textarea>
           
         </div>
         
@@ -1001,10 +1047,10 @@ Additive entry point preserves Goal 4 (CLI/FastAPI standalone unchanged).</p>
   </div>
 </details>
 <details class="slice-card" id="slice-2" data-slice="2" data-slice-name="slice-2" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 2: Tauri v2 scaffold &#43; macOS bundle config &#43; splash frontend">
+  <summary class="slice-summary" aria-label="Slice 2: Tauri v2 scaffold &#43; macOS bundle config &#43; icons &#43; splash frontend">
     <span class="slice-num">#2</span>
     <span class="slice-title-col">
-      <span class="slice-name">Tauri v2 scaffold &#43; macOS bundle config &#43; splash frontend</span>
+      <span class="slice-name">Tauri v2 scaffold &#43; macOS bundle config &#43; icons &#43; splash frontend</span>
       <span class="slice-preview">Initialize src-tauri/ for Tauri v2: Cargo.toml, build.rs, a minimal main.rs</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
@@ -1013,7 +1059,7 @@ Additive entry point preserves Goal 4 (CLI/FastAPI standalone unchanged).</p>
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-2">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="2 critic issue(s)">2 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1048,10 +1094,13 @@ Additive entry point preserves Goal 4 (CLI/FastAPI standalone unchanged).</p>
           <div class="markdown-block reveal-content serif-prose"><p>Initialize <code>src-tauri/</code> for Tauri v2: Cargo.toml, build.rs, a minimal main.rs
 skeleton, and tauri.conf.json declaring productName/identifier, macOS bundle
 targets [app, dmg], <code>bundle.externalBin: [&#34;binaries/jobsmith-sidecar&#34;]</code>, the
-tauri-plugin-shell, and a tiny bundled splash page (frontendDist) shown while
-the sidecar boots. Grant <code>shell:allow-spawn</code> for the sidecar in
-capabilities/default.json. Add root <code>package.json</code> scripts (<code>tauri dev</code>,
-<code>tauri build</code>). No backend wiring yet — that is slice 3.</p>
+tauri-plugin-shell, and the tauri-plugin-single-instance (so a second launch
+focuses the existing window instead of spawning a second sidecar). Provide the
+required <code>src-tauri/icons/</code> set (icon.icns + PNG sizes) — without these
+<code>tauri build</code> fails. Bundle a tiny splash page (frontendDist) shown while the
+sidecar boots. Grant <code>shell:allow-spawn</code> for the sidecar in
+capabilities/default.json (scoped to the sidecar name only). Add root
+<code>package.json</code> scripts (<code>tauri dev</code>, <code>tauri build</code>). No backend wiring yet — slice 3.</p>
 </div>
           <label for="slice-2-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1064,8 +1113,8 @@ capabilities/default.json. Add root <code>package.json</code> scripts (<code>tau
         <div class="slice-field-value">
           
           <div class="markdown-block serif-prose"><p>Goal 1 — establish the Tauri shell and bundle pipeline that wraps the existing
-React UI + Python sidecar. A splash frontend lets the window appear instantly
-while the sidecar starts, before navigating to the localhost server.</p>
+React UI + Python sidecar. Icons are build-blocking; single-instance matches
+macOS convention; the splash lets the window appear instantly before navigation.</p>
 </div>
           
         </div>
@@ -1074,13 +1123,13 @@ while the sidecar starts, before navigating to the localhost server.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src-tauri/Cargo.toml, src-tauri/build.rs, src-tauri/src/main.rs, src-tauri/tauri.conf.json, src-tauri/capabilities/default.json, src-tauri/splash/index.html, package.json</code></div>
+        <div class="slice-field-value"><code>src-tauri/Cargo.toml, src-tauri/build.rs, src-tauri/src/main.rs, src-tauri/tauri.conf.json, src-tauri/capabilities/default.json, src-tauri/icons/icon.icns, src-tauri/icons/icon.png, src-tauri/splash/index.html, package.json</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>`npm run tauri dev` opens a native window showing the splash page (sidecar not yet spawned).</li><li>tauri.conf.json validates and `tauri build --bundles dmg` reaches the sidecar-missing error (proving externalBin &#43; bundle config are wired) when no binary is present.</li></ul>
+        <ul class="slice-done-list"><li>`npm run tauri dev` opens a native window showing the splash page (sidecar not yet spawned).</li><li>The built `.app` shows the Jobsmith icon in Finder and the Dock — not the default Tauri acorn.</li><li>Launching a second instance focuses the existing window (single-instance) rather than opening a second window.</li></ul>
       </div>
       
     
@@ -1093,8 +1142,8 @@ while the sidecar starts, before navigating to the localhost server.</p>
         <input type="checkbox" id="slice-2-decisions-reveal" class="reveal-toggle">
         <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> <code>npm run tauri dev|build</code> from repo root; scaffold authored independently of the sidecar binary (referenced by convention).
 <strong>State:</strong> src-tauri/ is committed source; built bundles land in src-tauri/target/ (gitignored).
-<strong>Payload:</strong> A Tauri shell with macOS app+dmg bundle targets and a splash frontend.
-<strong>Rejected:</strong> Bundling the React build as Tauri frontendDist and talking to Python purely over IPC — discards the existing same-origin auth shim and duplicates UI serving; instead the window will navigate to the Python-served localhost UI (slice 3). Electron — far larger bundle, contradicts the Tauri goal.</p>
+<strong>Payload:</strong> A Tauri shell with macOS app+dmg targets, icons, single-instance, and a splash frontend.
+<strong>Rejected:</strong> Bundling the React build as Tauri frontendDist + pure IPC — discards the existing same-origin auth shim and duplicates UI serving; the window navigates to the Python-served localhost UI (slice 3) instead. Electron — far larger bundle, contradicts the Tauri goal. Multi-instance — contradicts macOS convention and doubles sidecars/Chromium downloads (design critic F6).</p>
 </div>
         <label for="slice-2-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1107,11 +1156,12 @@ while the sidecar starts, before navigating to the localhost server.</p>
   <div class="slice-field-value block-zone">
     <div class="block-anchor" id="slice-2-block-file-tree-1" data-block-anchor="slice-2-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">src-tauri/Cargo.toml (new — tauri v2, tauri-plugin-shell)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/Cargo.toml (new — tauri v2, tauri-plugin-shell, tauri-plugin-single-instance)</code></li>
     <li class="file-entry"><code class="file-path">src-tauri/build.rs (new)</code></li>
-    <li class="file-entry"><code class="file-path">src-tauri/src/main.rs (new — skeleton, builder.run)</code></li>
-    <li class="file-entry"><code class="file-path">src-tauri/tauri.conf.json (new — externalBin, bundle.macOS targets app&#43;dmg)</code></li>
-    <li class="file-entry"><code class="file-path">src-tauri/capabilities/default.json (new — shell:allow-spawn for binaries/jobsmith-sidecar)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/src/main.rs (new — skeleton, single-instance plugin, builder.run)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/tauri.conf.json (new — externalBin, bundle.macOS app&#43;dmg, icon refs)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/capabilities/default.json (new — shell:allow-spawn scoped to binaries/jobsmith-sidecar)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/icons/icon.icns &#43; icon.png (new — required for tauri build)</code></li>
     <li class="file-entry"><code class="file-path">src-tauri/splash/index.html (new — loading splash, design-token styled)</code></li>
     <li class="file-entry"><code class="file-path">package.json (new — root tauri dev/build scripts)</code></li>
     
@@ -1120,11 +1170,11 @@ while the sidecar starts, before navigating to the localhost server.</p>
     <div class="block-anchor" id="slice-2-block-wireframe-1" data-block-anchor="slice-2-block-wireframe-1" data-block-kind="wireframe"><div class="block block-wireframe">
   <div class="block-header"><span class="block-kind">wireframe</span><span class="block-title">Boot splash</span></div>
   <div class="wireframe-canvas" style="--wf-bg:var(--bg-card,#18181c);--wf-surface:var(--bg-input,#222228);--wf-fg:var(--text,#f0f0ed);--wf-muted:var(--text-muted,#9898a0);--wf-border:var(--border,#3a3a42);--wf-accent:var(--accent,#cdff00);--wf-radius:var(--radius,8px);position:relative;overflow:hidden;contain:layout paint;"><div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; background: var(--wf-surface); color: var(--wf-text)">
-<div>Jobsmith</div>
-<div style="color: var(--wf-text-muted)">Starting backend…</div>
-<div style="width: 160px; height: 4px; background: var(--wf-border); border-radius: 2px">
-  <div style="width: 40%; height: 100%; background: var(--wf-accent); border-radius: 2px"></div>
-</div>
+  <div>Jobsmith</div>
+  <div style="color: var(--wf-text-muted)">Starting backend…</div>
+  <div style="width: 160px; height: 4px; background: var(--wf-border); border-radius: 2px">
+    <div style="width: 40%; height: 100%; background: var(--wf-accent); border-radius: 2px"></div>
+  </div>
 </div>
 </div>
 </div></div>
@@ -1142,17 +1192,22 @@ while the sidecar starts, before navigating to the localhost server.</p>
           
           <div class="test-group" data-kind="manual">
             <span class="test-chip">MANUAL &middot; 1</span>
-            <ul><li>`npm run tauri dev` renders the splash window. Config: `tauri build`</li></ul>
+            <ul><li>`npm run tauri dev` renders the splash window with the correct icon.</li></ul>
           </div>
           
-          <div class="test-group" data-kind="other">
-            <span class="test-chip">OTHER &middot; 1</span>
-            <ul><li>dry-run / config validation passes. Assert capabilities/default.json grants</li></ul>
+          <div class="test-group" data-kind="config">
+            <span class="test-chip">CONFIG &middot; 1</span>
+            <ul><li>`tauri build` config validation passes. Assert capabilities/default.json</li></ul>
           </div>
           
-          <div class="test-group" data-kind="shell">
-            <span class="test-chip">SHELL &middot; 1</span>
+          <div class="test-group" data-kind="grants shell">
+            <span class="test-chip">GRANTS SHELL &middot; 1</span>
             <ul><li>allow-spawn scoped to the sidecar name only (least privilege).</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="single-instance">
+            <span class="test-chip">SINGLE-INSTANCE &middot; 1</span>
+            <ul><li>launch twice, confirm one window.</li></ul>
           </div>
           
         </div>
@@ -1161,6 +1216,25 @@ while the sidecar starts, before navigating to the localhost server.</p>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">src-tauri/icons/ was missing — tauri build fails without icon.icns/png. Added to files &#43; done_when. [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Added tauri-plugin-single-instance so a second launch focuses the window rather than spawning a second sidecar (macOS convention). [resolved]</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1194,11 +1268,11 @@ while the sidecar starts, before navigating to the localhost server.</p>
   </div>
 </details>
 <details class="slice-card" id="slice-3" data-slice="3" data-slice-name="slice-3" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 3: Sidecar lifecycle &#43; dynamic port/token auth wiring (Rust)">
+  <summary class="slice-summary" aria-label="Slice 3: Sidecar lifecycle &#43; token auth &#43; dynamic port wiring (Rust)">
     <span class="slice-num">#3</span>
     <span class="slice-title-col">
-      <span class="slice-name">Sidecar lifecycle &#43; dynamic port/token auth wiring (Rust)</span>
-      <span class="slice-preview">In main.rs: on setup, pick a free ephemeral port (bind :0, read, release),</span>
+      <span class="slice-name">Sidecar lifecycle &#43; token auth &#43; dynamic port wiring (Rust)</span>
+      <span class="slice-preview">In main.rs: on setup, generate a random token, spawn the sidecar via</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-blocked badge-sm">L</span>
@@ -1206,7 +1280,7 @@ while the sidecar starts, before navigating to the localhost server.</p>
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-3">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="4 critic issue(s)">4 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1238,16 +1312,19 @@ while the sidecar starts, before navigating to the localhost server.</p>
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-3-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>In main.rs: on setup, pick a free ephemeral port (bind :0, read, release),
-generate a random token, spawn the sidecar via <code>app.shell().sidecar()</code> with
-<code>--port &lt;p&gt;</code> and env <code>JOBSMITH_API_TOKEN=&lt;tok&gt;</code>, pipe its stdout/stderr to the
-Tauri log, poll <code>GET /health</code> until 200, then navigate the main WebviewWindow
-to <code>http://127.0.0.1:&lt;port&gt;/</code>. Jobsmith&#39;s existing localhost shim
-(staticui.py:208-216) reads the same token from auth.py and injects
-<code>window.__JOBSMITH__={token,apiBase}</code> into index.html before the React app
-boots — satisfying inject-before-load auth with zero new UI code. On
-RunEvent::ExitRequested / window close, kill the child (belt-and-suspenders
-with slice 1&#39;s watchdog).</p>
+          <div class="markdown-block reveal-content serif-prose"><p>In main.rs: on setup, generate a random token, spawn the sidecar via
+<code>app.shell().sidecar()</code> with env <code>JOBSMITH_API_TOKEN=&lt;tok&gt;</code> (stdin kept open so
+the stdin-EOF sentinel works), read <code>JOBSMITH_LISTENING_PORT=&lt;n&gt;</code> from the child
+stdout (rx channel), tee stdout/stderr to a log file at
+<code>~/Library/Logs/Jobsmith/sidecar.log</code>, poll <code>GET /health</code> until 200 (with a
+timeout), then navigate the main WebviewWindow to <code>http://127.0.0.1:&lt;n&gt;/</code>.
+Jobsmith&#39;s existing localhost shim (staticui.py:208-216) reads the same token
+from auth.py and injects <code>window.__JOBSMITH__={token,apiBase}</code> before the React
+app boots — inject-before-load auth with zero new UI code. Lifecycle: on macOS,
+bind <code>WindowEvent::CloseRequested</code> to fully quit the app (kill the child +
+process::exit) so closing the window is an explicit quit (no orphaned sidecar,
+no headless dock icon). If <code>/health</code> never returns 200 within the timeout, show a
+native error dialog (Retry + &#34;open log&#34;) rather than a blank window.</p>
 </div>
           <label for="slice-3-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1259,9 +1336,9 @@ with slice 1&#39;s watchdog).</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Goal 2 (managed lifecycle) + Goal 3 (Rust-owned port/token handed to the web
-view). Reusing the existing server-side shim is DRY — the token flows
-Rust -&gt; env -&gt; auth.py -&gt; shim -&gt; webview, no second auth mechanism.</p>
+          <div class="markdown-block serif-prose"><p>Goal 2 (managed lifecycle) + Goal 3 (Rust-issued token + sidecar-reported port
+handed to the web view). Reusing the existing server-side shim is DRY — the token
+flows Rust -&gt; env -&gt; auth.py -&gt; shim -&gt; webview, no second auth mechanism.</p>
 </div>
           
         </div>
@@ -1276,7 +1353,7 @@ Rust -&gt; env -&gt; auth.py -&gt; shim -&gt; webview, no second auth mechanism.
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Launching the app spawns the sidecar on a free port and shows the React UI fully authenticated, with no login prompt and no token in the URL.</li><li>Two app instances can run concurrently without port collision (ephemeral port per instance).</li><li>Closing the window terminates the sidecar process within a few seconds (no orphaned Python in `ps`).</li></ul>
+        <ul class="slice-done-list"><li>Launching the app spawns the sidecar, reads its reported port, and shows the React UI fully authenticated — no login prompt, no token in the URL.</li><li>Accessing the served root returns index.html containing window.__JOBSMITH__ with the token Rust passed (auth handshake proven end-to-end).</li><li>Closing the window quits the app and terminates the sidecar within a few seconds (no orphaned jobsmith-sidecar in `ps`).</li><li>If the sidecar never reaches /health within the timeout, the app shows a native error dialog with Retry and a link to ~/Library/Logs/Jobsmith/sidecar.log — never a blank window.</li></ul>
       </div>
       
     
@@ -1287,10 +1364,11 @@ Rust -&gt; env -&gt; auth.py -&gt; shim -&gt; webview, no second auth mechanism.
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-3-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> Tauri app setup() spawns the sidecar; RunEvent::ExitRequested kills it.
-<strong>State:</strong> Port + token are per-process, in-memory (Rust), passed by CLI arg + env; no persistence.
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> Tauri app setup() spawns the sidecar; WindowEvent::CloseRequested kills it and quits.
+<strong>State:</strong> Token is per-process, in-memory (Rust), passed via env; the port is chosen by the sidecar and reported via stdout (no Rust-side port race).
 <strong>Payload:</strong> token -&gt; JOBSMITH_API_TOKEN env -&gt; auth.py active token -&gt; existing window.<strong>JOBSMITH</strong> shim (inject-before-load, user&#39;s choice).
-<strong>Rejected:</strong> Token via URL query (?token=) — leaks into history/logs. Tauri invoke() IPC handshake on boot — adds an async boot step and a second auth path when the server-side shim already does it for free. Fixed port 8000 — collides with a user-run <code>jobsmith up</code>; ephemeral free port chosen instead.</p>
+<strong>Lifecycle:</strong> close-window == quit on macOS (explicit decision) so there is no orphaned sidecar and no UI-less dock icon (design critic F3). Sidecar logs to ~/Library/Logs/Jobsmith/sidecar.log for bug reports (design critic F15).
+<strong>Rejected:</strong> Token via URL query (?token=) — leaks into history/logs. Tauri invoke() IPC handshake — adds an async boot step and a second auth path when the server-side shim already does it. Rust picking the port then releasing it — TOCTOU race; sidecar-reports-port chosen instead (feasibility critic W2). Keeping the window alive after close (default macOS) — leaves a UI-less sidecar; rejected for v1.</p>
 </div>
         <label for="slice-3-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1303,17 +1381,17 @@ Rust -&gt; env -&gt; auth.py -&gt; shim -&gt; webview, no second auth mechanism.
   <div class="slice-field-value block-zone">
     <div class="block-anchor" id="slice-3-block-file-tree-1" data-block-anchor="slice-3-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">src-tauri/src/main.rs (edit — free-port pick, token gen, spawn, health poll, navigate, exit-kill)</code></li>
-    <li class="file-entry"><code class="file-path">src-tauri/src/sidecar.rs (new — spawn/manage child, health-poll helper)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/api/staticui.py (reference/verify — existing shim fires for 127.0.0.1 host)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/api/auth.py (reference/verify — JOBSMITH_API_TOKEN honored as active token)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/src/main.rs (edit — token gen, spawn, read port from stdout, health poll, navigate, CloseRequested-&gt;quit, error dialog)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/src/sidecar.rs (new — spawn/manage child, stdout port parse, log tee, health-poll helper)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/api/staticui.py (reference/verify — shim fires for 127.0.0.1 host when PUBLIC_BIND unset)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/api/auth.py (reference/verify — JOBSMITH_API_TOKEN honored as active token; lru_cache reads fresh env)</code></li>
     
   </ul>
 </div></div>
     <div class="block-anchor" id="slice-3-block-diagram-1" data-block-anchor="slice-3-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
   <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Startup &#43; auth handshake</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">Tauri setup: pick free port &#43; generate token</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">spawn sidecar (--port, JOBSMITH_API_TOKEN env)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">Python: auth.py adopts token; uvicorn binds 127.0.0.1:port</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">Rust polls GET /health until 200</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">navigate webview -&gt; http://127.0.0.1:port/</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">staticui shim injects window.__JOBSMITH__ before React boot</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">on app exit: kill sidecar child</div>
+    <div class="diagram-node">Tauri setup: generate token</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">spawn sidecar (JOBSMITH_API_TOKEN env, stdin open)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">read JOBSMITH_LISTENING_PORT=N from child stdout</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">Rust polls GET /health until 200 (timeout -&gt; error dialog)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">navigate webview -&gt; http://127.0.0.1:N/</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">staticui shim injects window.__JOBSMITH__ before React boot</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">WindowEvent::CloseRequested -&gt; kill child &#43; exit (no orphan)</div>
   </div>
 </div></div>
     
@@ -1326,16 +1404,48 @@ Rust -&gt; env -&gt; auth.py -&gt; shim -&gt; webview, no second auth mechanism.
       <div class="slice-field-value">
         
         
-        <div class="markdown-block slice-tests"><p>Integration (Rust): unit-test the free-port picker and the /health poll with a
-stub server. Manual E2E: launch packaged app, confirm UI loads authenticated;
-<code>ps aux | grep jobsmith-sidecar</code> empty after quit. Negative: kill the sidecar
-mid-session -&gt; Rust surfaces a clear error rather than a blank window.</p>
+        <div class="markdown-block slice-tests"><p>Integration (Rust): unit-test the JOBSMITH_LISTENING_PORT parser and the /health
+poll/timeout with a stub server. Manual E2E: launch packaged app, confirm UI loads
+authenticated; close window -&gt; <code>ps aux | grep jobsmith-sidecar</code> empty. Negative:
+make the sidecar exit nonzero at boot -&gt; assert the error dialog appears, not a
+blank window. Auth: curl the served root, assert window.<strong>JOBSMITH</strong> present with token.</p>
 </div>
         
       </div>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">macOS window-close vs quit was undefined. Decided: CloseRequested == quit (kill child &#43; exit) — no orphan, no UI-less dock icon. [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Added a /health-timeout native error dialog (Retry &#43; open-log) so a failed sidecar boot is not a blank window. [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Sidecar log destination specified: ~/Library/Logs/Jobsmith/sidecar.log. [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">Verified staticui shim fires for 127.0.0.1 host iff PUBLIC_BIND unset (handled in slice 1); auth.py lru_cache reads JOBSMITH_API_TOKEN from fresh env. [verified]</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1350,7 +1460,7 @@ mid-session -&gt; Rust surfaces a clear error rather than a blank window.</p>
           <textarea
             data-section="slice-3-question-q-token-transport"
             data-comment-for="slice-3-question-q-token-transport"
-            placeholder="Answer question q-token-transport...">Rust passes the token via JOBSMITH_API_TOKEN env to the sidecar; Python&#39;s existing staticui shim injects it into index.html before page load. User chose inject-before-load; reusing the shim avoids a second auth mechanism. (User-confirmed transport; reuse path inferred from architecture map.)</textarea>
+            placeholder="Answer question q-token-transport...">Rust generates the token and passes it via JOBSMITH_API_TOKEN env to the sidecar; Python&#39;s existing staticui shim injects it into index.html before page load. The port is reported back by the sidecar on stdout. (User-confirmed inject-before-load transport; port mechanism corrected after critique.)</textarea>
           
         </div>
         
@@ -1369,11 +1479,11 @@ mid-session -&gt; Rust surfaces a clear error rather than a blank window.</p>
   </div>
 </details>
 <details class="slice-card" id="slice-4" data-slice="4" data-slice-name="slice-4" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 4: Playwright Chromium download-on-first-run with graceful fallback">
+  <summary class="slice-summary" aria-label="Slice 4: Playwright Chromium download-on-first-run with graceful fallback (desktop-gated)">
     <span class="slice-num">#4</span>
     <span class="slice-title-col">
-      <span class="slice-name">Playwright Chromium download-on-first-run with graceful fallback</span>
-      <span class="slice-preview">Add src/jobsmith/desktop/playwrightbootstrap.py: resolve a stable</span>
+      <span class="slice-name">Playwright Chromium download-on-first-run with graceful fallback (desktop-gated)</span>
+      <span class="slice-preview">Add src/jobsmith/desktop/playwrightbootstrap.py: resolve an app-data browsers</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-revision badge-sm">M</span>
@@ -1381,7 +1491,7 @@ mid-session -&gt; Rust surfaces a clear error rather than a blank window.</p>
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-4">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="2 critic issue(s)">2 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1413,17 +1523,18 @@ mid-session -&gt; Rust surfaces a clear error rather than a blank window.</p>
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-4-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>Add <code>src/jobsmith/desktop/playwright_bootstrap.py</code>: resolve a stable
-app-data browsers dir via platformdirs, export PLAYWRIGHT_BROWSERS_PATH to it
-(set in sidecar_main.py BEFORE importing playwright, per the install==runtime
-rule), and expose status + install operations. New desktop API router
-<code>src/jobsmith/api/routes/desktop.py</code>: <code>GET /api/desktop/browser/status</code>
-(installed?/path), <code>POST /api/desktop/browser/install</code> (runs
-<code>playwright install chromium</code> in a background task), and an SSE
-<code>GET /api/desktop/browser/install/events</code> for progress. A small web/src
-surface prompts the download on first scrape and shows progress. If the
-download fails/offline, the existing httpx fast-path in jd/fetcher.py still
-handles most JDs — surface a clear, retryable error, never a hard crash.</p>
+          <div class="markdown-block reveal-content serif-prose"><p>Add <code>src/jobsmith/desktop/playwright_bootstrap.py</code>: resolve an app-data browsers
+dir via the existing platformdirs dep, expose status + install operations against
+PLAYWRIGHT_BROWSERS_PATH (exported in sidecar_main.py before any playwright
+import, per slice 1). New desktop API router <code>src/jobsmith/api/routes/desktop.py</code>,
+registered in main.py ONLY when <code>JOBSMITH_DESKTOP=1</code> (set by sidecar_main.py) so
+<code>jobsmith up</code> is unaffected (Goal 4). Routes: <code>GET /api/desktop/browser/status</code>,
+<code>POST /api/desktop/browser/install</code> (runs <code>playwright install chromium</code> in a
+background task), SSE <code>GET /api/desktop/browser/install/events</code> for progress. A
+first-run React prompt component surfaces the download + progress. If the download
+fails/offline, the existing httpx fast-path in jd/fetcher.py still handles most
+JDs — fetcher.py raises a structured &#39;browser_unavailable&#39; signal (retryable),
+never a hard crash.</p>
 </div>
           <label for="slice-4-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1435,9 +1546,9 @@ handles most JDs — surface a clear, retryable error, never a hard crash.</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Constraint 2 — Chromium can&#39;t ship in the .dmg (size) per the chosen
-download-on-first-run strategy; it must install into a writable app-data dir
-and degrade gracefully when unavailable.</p>
+          <div class="markdown-block serif-prose"><p>Constraint 2 — Chromium can&#39;t ship in the .dmg per the chosen download-on-first-run
+strategy; it must install into a writable app-data dir, stay dormant for non-desktop
+installs, and degrade gracefully when unavailable.</p>
 </div>
           
         </div>
@@ -1446,13 +1557,13 @@ and degrade gracefully when unavailable.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/desktop/playwright_bootstrap.py, src/jobsmith/desktop/sidecar_main.py, src/jobsmith/api/routes/desktop.py, src/jobsmith/api/main.py, src/jobsmith/jd/fetcher.py, web/src/api/client.ts</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/desktop/playwright_bootstrap.py, src/jobsmith/desktop/sidecar_main.py, src/jobsmith/api/routes/desktop.py, src/jobsmith/api/main.py, src/jobsmith/jd/fetcher.py, web/src/components/BrowserInstallPrompt.tsx, web/src/api/client.ts</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>On a clean machine, first scrape prompts a one-time Chromium download into the app-data dir and succeeds afterward without re-downloading.</li><li>PLAYWRIGHT_BROWSERS_PATH is identical at install and runtime so launch finds the installed browser.</li><li>With networking disabled and no Chromium present, JD fetching still returns results via the httpx fast-path and shows a clear retryable message instead of crashing.</li></ul>
+        <ul class="slice-done-list"><li>On a clean machine, first scrape prompts a one-time Chromium download into the app-data dir and succeeds afterward without re-downloading (PLAYWRIGHT_BROWSERS_PATH identical at install and runtime).</li><li>On a `jobsmith up` server WITHOUT JOBSMITH_DESKTOP=1, `GET /api/desktop/browser/status` returns 404 (Goal 4 regression).</li><li>With networking disabled and no Chromium present, JD fetching still returns results via the httpx fast-path and surfaces a clear retryable message instead of crashing.</li></ul>
       </div>
       
     
@@ -1463,10 +1574,10 @@ and degrade gracefully when unavailable.</p>
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-4-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> First Playwright-requiring scrape; explicit POST /api/desktop/browser/install.
-<strong>State:</strong> Chromium lives under a platformdirs app-data browsers dir; PLAYWRIGHT_BROWSERS_PATH exported before any playwright import.
-<strong>Payload:</strong> status JSON + SSE progress; on failure a structured retryable error.
-<strong>Rejected:</strong> Bundling Chromium in the .dmg — user chose download-on-first-run (smallest bundle). Using system Chrome via channel — fails when no compatible browser exists. Setting PLAYWRIGHT_BROWSERS_PATH after importing playwright — ignored by the driver (read at import).</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> First Playwright-requiring scrape; explicit POST /api/desktop/browser/install. Router only mounted when JOBSMITH_DESKTOP=1.
+<strong>State:</strong> Chromium lives under a platformdirs (already a dep) app-data browsers dir; PLAYWRIGHT_BROWSERS_PATH exported before any playwright import (slice 1).
+<strong>Payload:</strong> status JSON + SSE progress; on failure a structured retryable &#39;browser_unavailable&#39; error.
+<strong>Rejected:</strong> Bundling Chromium in the .dmg — user chose download-on-first-run (smallest bundle). System Chrome via channel — fails when no compatible browser exists. Registering the desktop router unconditionally — pollutes <code>jobsmith up</code> and risks unintended installs (design critic F8).</p>
 </div>
         <label for="slice-4-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1480,11 +1591,12 @@ and degrade gracefully when unavailable.</p>
     <div class="block-anchor" id="slice-4-block-file-tree-1" data-block-anchor="slice-4-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
     <li class="file-entry"><code class="file-path">src/jobsmith/desktop/playwright_bootstrap.py (new — platformdirs path, status, install runner)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/sidecar_main.py (edit — set PLAYWRIGHT_BROWSERS_PATH before playwright import)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/sidecar_main.py (edit — set JOBSMITH_DESKTOP=1; PLAYWRIGHT_BROWSERS_PATH already set in slice 1)</code></li>
     <li class="file-entry"><code class="file-path">src/jobsmith/api/routes/desktop.py (new — status/install/events routes)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/api/main.py (edit — include desktop router)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/jd/fetcher.py (edit — graceful &#39;chromium missing&#39; fallback to httpx path)</code></li>
-    <li class="file-entry"><code class="file-path">web/src/ (edit — first-run download prompt &#43; progress UI)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/api/main.py (edit — include desktop router ONLY if JOBSMITH_DESKTOP=1)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/jd/fetcher.py (edit — raise structured &#39;browser_unavailable&#39; &#43; keep httpx fast-path)</code></li>
+    <li class="file-entry"><code class="file-path">web/src/components/BrowserInstallPrompt.tsx (new — first-run download prompt &#43; progress)</code></li>
+    <li class="file-entry"><code class="file-path">web/src/api/client.ts (edit — browser status/install client calls &#43; SSE)</code></li>
     
   </ul>
 </div></div>
@@ -1494,6 +1606,7 @@ and degrade gracefully when unavailable.</p>
     <thead><tr><th>Param</th><th>Type</th><th>Note</th></tr></thead>
     <tbody>
       <tr><td><code>200 body</code></td><td><code>{&#34;installed&#34;:bool,&#34;browsers_path&#34;:str,&#34;chromium_version&#34;:str|null}</code></td><td>&mdash;</td></tr>
+      <tr><td><code>404 (standalone)</code></td><td><code>router absent unless JOBSMITH_DESKTOP=1</code></td><td>&mdash;</td></tr>
       
     </tbody>
   </table>
@@ -1511,7 +1624,7 @@ and degrade gracefully when unavailable.</p>
     <div class="block-anchor" id="slice-4-block-diagram-1" data-block-anchor="slice-4-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
   <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">First-run Chromium flow</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">user starts a scrape needing Playwright</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">GET /api/desktop/browser/status -&gt; installed:false</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">UI prompts; POST /api/desktop/browser/install</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">playwright install chromium -&gt; PLAYWRIGHT_BROWSERS_PATH (app data)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">SSE streams progress -&gt; UI</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">on failure/offline: fall back to httpx fast-path &#43; retryable error</div>
+    <div class="diagram-node">user starts a scrape needing Playwright</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">GET /api/desktop/browser/status -&gt; installed:false</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">BrowserInstallPrompt -&gt; POST /api/desktop/browser/install</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">playwright install chromium -&gt; PLAYWRIGHT_BROWSERS_PATH (app data)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">SSE streams progress -&gt; UI</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">on failure/offline: httpx fast-path &#43; retryable &#39;browser_unavailable&#39;</div>
   </div>
 </div></div>
     
@@ -1532,8 +1645,8 @@ and degrade gracefully when unavailable.</p>
           </div>
           
           <div class="test-group" data-kind="other">
-            <span class="test-chip">OTHER &middot; 4</span>
-            <ul><li>browser tree exists. Integration: POST install in a temp PLAYWRIGHT_BROWSERS_PATH</li><li>downloads chromium (network-gated test, skipped offline). Fallback: monkeypatch</li><li>chromium.launch to raise, assert fetcher.py returns the httpx result &#43; a</li><li>structured &#39;browser_unavailable&#39; signal, not an exception.</li></ul>
+            <span class="test-chip">OTHER &middot; 5</span>
+            <ul><li>browser tree exists. Regression: app without JOBSMITH_DESKTOP=1 returns 404 on the</li><li>desktop routes. Integration: POST install in a temp PLAYWRIGHT_BROWSERS_PATH</li><li>downloads chromium (network-gated, skipped offline). Fallback: monkeypatch</li><li>chromium.launch to raise, assert fetcher.py returns the httpx result &#43; a structured</li><li>&#39;browser_unavailable&#39; signal, not an exception.</li></ul>
           </div>
           
         </div>
@@ -1542,6 +1655,25 @@ and degrade gracefully when unavailable.</p>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Desktop router now gated on JOBSMITH_DESKTOP=1 so `jobsmith up` is unaffected; added a 404 regression done_when (Goal 4). [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">Added the missing React component (BrowserInstallPrompt.tsx) to the files list so the first-run-prompt done_when is testable. platformdirs already a dep — reuse, don&#39;t add. [resolved]</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1556,7 +1688,7 @@ and degrade gracefully when unavailable.</p>
           <textarea
             data-section="slice-4-question-q-fallback"
             data-comment-for="slice-4-question-q-fallback"
-            placeholder="Answer question q-fallback...">Degrade, don&#39;t crash: jd/fetcher.py already tries an httpx fast-path before Playwright, so JD fetching keeps working for most sites; the UI shows a clear retryable &#39;browser unavailable&#39; message. (Inferred from the existing fetcher fallback in the architecture map.)</textarea>
+            placeholder="Answer question q-fallback...">Degrade, don&#39;t crash: jd/fetcher.py already tries an httpx fast-path before Playwright (verified at fetcher.py:44-52), so JD fetching keeps working for most sites; the UI shows a clear retryable &#39;browser unavailable&#39; message. (Verified against the existing fetcher fallback.)</textarea>
           
         </div>
         
@@ -1575,10 +1707,10 @@ and degrade gracefully when unavailable.</p>
   </div>
 </details>
 <details class="slice-card" id="slice-5" data-slice="5" data-slice-name="slice-5" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 5: macOS .dmg packaging — ad-hoc-signed build &#43; notarization stub &#43; build script">
+  <summary class="slice-summary" aria-label="Slice 5: macOS .dmg packaging — onefile bundle, ad-hoc-signed build &#43; notarization wiring &#43; build script">
     <span class="slice-num">#5</span>
     <span class="slice-title-col">
-      <span class="slice-name">macOS .dmg packaging — ad-hoc-signed build &#43; notarization stub &#43; build script</span>
+      <span class="slice-name">macOS .dmg packaging — onefile bundle, ad-hoc-signed build &#43; notarization wiring &#43; build script</span>
       <span class="slice-preview">Add scripts/build-desktop.sh orchestrating the full pipeline: npm build (web)</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
@@ -1587,7 +1719,7 @@ and degrade gracefully when unavailable.</p>
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-5">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="2 critic issue(s)">2 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1620,13 +1752,15 @@ and degrade gracefully when unavailable.</p>
           
           <input type="checkbox" id="slice-5-what-reveal" class="reveal-toggle">
           <div class="markdown-block reveal-content serif-prose"><p>Add <code>scripts/build-desktop.sh</code> orchestrating the full pipeline: npm build (web)
--&gt; copy to src/jobsmith/web_dist -&gt; build-sidecar.sh -&gt; <code>tauri build --bundles dmg</code>.
-Configure tauri.conf.json macOS signing: default to ad-hoc
-(<code>signingIdentity: &#34;-&#34;</code>) so the .dmg runs locally without an Apple Developer
-cert (user approves once in Gatekeeper), and document/wire the env-driven
-notarization path (APPLE_SIGNING_IDENTITY + APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID)
-for later distributable builds. Ensure the onedir sidecar <code>_internal/</code> ships as
-bundle resources alongside externalBin. Optional <code>.github/workflows</code> build job.</p>
+-&gt; copy to src/jobsmith/web_dist -&gt; build-sidecar.sh (onefile) -&gt; <code>tauri build --bundles dmg</code>. Because the sidecar is ONEFILE, there is no _internal/ to ship —
+externalBin handles the single binary directly. Configure tauri.conf.json macOS
+signing: default to ad-hoc (<code>signingIdentity: &#34;-&#34;</code>) so the .dmg runs locally
+without an Apple Developer cert (user approves once in Privacy &amp; Security), and
+wire the env-driven notarization path: the script reads APPLE_SIGNING_IDENTITY +
+(APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID) and passes them to <code>tauri build</code>; if
+partial/absent it warns and falls back to ad-hoc rather than silently. Document
+that APPLE_PASSWORD is an app-specific password (appleid.apple.com), not the
+account password. Optional <code>.github/workflows</code> build job.</p>
 </div>
           <label for="slice-5-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1639,8 +1773,8 @@ bundle resources alongside externalBin. Optional <code>.github/workflows</code> 
         <div class="slice-field-value">
           
           <div class="markdown-block serif-prose"><p>Goal 1 (ship a macOS .dmg) + Constraint 1 (self-contained — no node/python at
-runtime). Ad-hoc signing unblocks a working first .dmg without waiting on an
-Apple Developer enrollment; notarization is staged for public distribution.</p>
+runtime). Ad-hoc signing unblocks a working first .dmg without waiting on an Apple
+Developer enrollment; notarization is staged for public distribution.</p>
 </div>
           
         </div>
@@ -1655,7 +1789,7 @@ Apple Developer enrollment; notarization is staged for public distribution.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>`scripts/build-desktop.sh` produces a Jobsmith .dmg that installs and launches the full app on a clean macOS host with no Python or Node installed (Constraint 1).</li><li>The ad-hoc-signed app runs after the one-time Gatekeeper approval; no Apple Developer cert is required for the local build.</li><li>Setting the APPLE_* env vars produces a notarized .dmg via the same script (documented; verified when a cert is available).</li></ul>
+        <ul class="slice-done-list"><li>`scripts/build-desktop.sh` produces a Jobsmith .dmg that installs and launches the full app on a clean macOS host with no Python or Node installed (Constraint 1).</li><li>The ad-hoc-signed app runs after the one-time Gatekeeper approval; no Apple Developer cert is required for the local build.</li><li>WIRED (inspectable): build-desktop.sh reads APPLE_SIGNING_IDENTITY/APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID and passes them to `tauri build`; missing/partial vars emit a clear warning and fall back to ad-hoc (no silent behavior change).</li><li>DEFERRED milestone: end-to-end notarization verified once an Apple Developer ID is provisioned.</li></ul>
       </div>
       
     
@@ -1668,8 +1802,9 @@ Apple Developer enrollment; notarization is staged for public distribution.</p>
         <input type="checkbox" id="slice-5-decisions-reveal" class="reveal-toggle">
         <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> scripts/build-desktop.sh locally or in CI.
 <strong>State:</strong> Output .dmg in src-tauri/target/release/bundle/dmg/ (build artifact).
-<strong>Payload:</strong> A self-contained macOS .dmg embedding the React UI, PyInstaller sidecar (+_internal), and Tauri runtime.
-<strong>Rejected:</strong> Requiring full Developer-ID signing + notarization for v1 — blocks on a paid Apple enrollment; ad-hoc signing ships a runnable .dmg now (Gatekeeper approve-once) with notarization staged. Per-arch universal binary in v1 — target aarch64-apple-darwin first, x86_64 later.</p>
+<strong>Payload:</strong> A self-contained macOS .dmg embedding the React UI, onefile PyInstaller sidecar, and Tauri runtime.
+<strong>Signing:</strong> ad-hoc (&#34;-&#34;) for v1 (Gatekeeper approve-once); notarization wired behind env vars and inspectable, end-to-end deferred to cert availability (design critic F12). APPLE_PASSWORD documented as an app-specific password (feasibility critic R5).
+<strong>Rejected:</strong> Requiring full Developer-ID signing + notarization for v1 — blocks on a paid Apple enrollment. Universal binary in v1 — target aarch64-apple-darwin first, x86_64 later. Shipping onedir _internal/ as resources — moot under onefile (and unsound per slice 1).</p>
 </div>
         <label for="slice-5-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1682,9 +1817,9 @@ Apple Developer enrollment; notarization is staged for public distribution.</p>
   <div class="slice-field-value block-zone">
     <div class="block-anchor" id="slice-5-block-file-tree-1" data-block-anchor="slice-5-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">scripts/build-desktop.sh (new — web build -&gt; web_dist -&gt; sidecar -&gt; tauri build dmg)</code></li>
-    <li class="file-entry"><code class="file-path">src-tauri/tauri.conf.json (edit — bundle.macOS signingIdentity, resources for onedir _internal/, dmg config)</code></li>
-    <li class="file-entry"><code class="file-path">docs/desktop-build.md (new — local build &#43; notarization env vars)</code></li>
+    <li class="file-entry"><code class="file-path">scripts/build-desktop.sh (new — npm build -&gt; web_dist -&gt; build-sidecar.sh -&gt; tauri build dmg)</code></li>
+    <li class="file-entry"><code class="file-path">src-tauri/tauri.conf.json (edit — bundle.macOS signingIdentity &#43; dmg config; no _internal/ resources needed for onefile)</code></li>
+    <li class="file-entry"><code class="file-path">docs/desktop-build.md (new — local build &#43; notarization env vars; APPLE_PASSWORD = app-specific password)</code></li>
     <li class="file-entry"><code class="file-path">.github/workflows/desktop-build.yml (new, optional — CI .dmg artifact)</code></li>
     
   </ul>
@@ -1692,7 +1827,7 @@ Apple Developer enrollment; notarization is staged for public distribution.</p>
     <div class="block-anchor" id="slice-5-block-diagram-1" data-block-anchor="slice-5-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
   <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Packaging pipeline</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">npm run build (web)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">copy -&gt; src/jobsmith/web_dist</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">build-sidecar.sh -&gt; src-tauri/binaries</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">tauri build --bundles dmg (ad-hoc sign)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">Jobsmith.dmg</div>
+    <div class="diagram-node">npm run build (web)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">copy -&gt; src/jobsmith/web_dist</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">build-sidecar.sh (onefile) -&gt; src-tauri/binaries</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">tauri build --bundles dmg (ad-hoc or notarized)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">Jobsmith.dmg</div>
   </div>
 </div></div>
     
@@ -1706,15 +1841,34 @@ Apple Developer enrollment; notarization is staged for public distribution.</p>
         
         
         <div class="markdown-block slice-tests"><p>Manual on a clean macOS VM/user: mount the .dmg, drag to Applications, launch,
-complete a scrape+apply with no host Python/Node. Verify the bundled sidecar +
-_internal/ are present and code-objects are ad-hoc signed (<code>codesign -dv</code>).
-Notarization path tested when an Apple Developer ID is provisioned.</p>
+complete a scrape+apply with no host Python/Node. Verify the bundled single-file
+sidecar is present and ad-hoc signed (<code>codesign -dv</code>). Inspect build-desktop.sh
+for the APPLE_* var handling + warning path. Notarization tested when a cert exists.</p>
 </div>
         
       </div>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">Removed the onedir _internal/-as-resources requirement (unsound &#43; moot): onefile externalBin handles the single binary directly. [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Split notarization done_when into an inspectable WIRED criterion and a DEFERRED milestone; documented APPLE_PASSWORD = app-specific password. [resolved]</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1729,7 +1883,7 @@ Notarization path tested when an Apple Developer ID is provisioned.</p>
           <textarea
             data-section="slice-5-question-q-signing"
             data-comment-for="slice-5-question-q-signing"
-            placeholder="Answer question q-signing...">Ad-hoc-signed local .dmg first (no Apple Developer cert needed; user approves once), with the env-driven notarization path wired and documented for a later distributable build. (Inferred default to avoid blocking on Apple enrollment; flagged unverified until a cert is available.)</textarea>
+            placeholder="Answer question q-signing...">Ad-hoc-signed local .dmg first (no Apple Developer cert needed; user approves once), with the env-driven notarization path wired/inspectable and documented for a later distributable build. (Inferred default to avoid blocking on Apple enrollment; flagged unverified until a cert is available.)</textarea>
           
         </div>
         

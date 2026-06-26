@@ -1,12 +1,12 @@
 meta:
     id: plan-a23bba5f
     title: Convert Jobsmith to Tauri Desktop Application
-    description: Package the Jobsmith React UI and Python FastAPI/CLI backend into a single-click macOS Tauri desktop app, with the Python backend bundled as a PyInstaller sidecar, dynamic port/token auth, and download-on-first-run Playwright Chromium.
+    description: Package the Jobsmith React UI and Python FastAPI/CLI backend into a single-click macOS Tauri desktop app, with the Python backend bundled as a PyInstaller onefile sidecar (stdin-EOF shutdown), dynamic sidecar-reported port + Rust-issued token auth, and download-on-first-run Playwright Chromium.
     created_at: "2026-06-26"
     status: draft
     priority: medium
     schema_version: v4
-    version: 4
+    version: 5
 design:
     problem: |
         Running Jobsmith today requires terminal commands (`uv tool install jobsmith`
@@ -16,161 +16,210 @@ design:
         pre-installed Python or Node.
     goals:
         - Package the React UI + Python FastAPI/CLI backend as a unified Tauri desktop app (macOS .dmg first).
-        - Bundle the Python backend with PyInstaller as a Tauri sidecar; lifecycle managed automatically (starts with the app, terminates on window close).
-        - 'Auto-authenticate: Rust assigns a port and token and hands them to the web view, reusing Jobsmith''s existing localhost shim — no manual config.'
-        - 'Preserve codebase integrity: CLI (`jobsmith up`) and standalone FastAPI operation remain unchanged for non-desktop installs.'
+        - Bundle the Python backend with PyInstaller (onefile) as a Tauri sidecar; lifecycle managed automatically (starts with the app, terminates cleanly on app quit).
+        - 'Auto-authenticate: Rust issues the token and the sidecar reports its port; both flow to the web view via Jobsmith''s existing localhost shim — no manual config.'
+        - 'Preserve codebase integrity: CLI (`jobsmith up`) and standalone FastAPI operation remain unchanged, and new desktop-only API routes stay dormant for non-desktop installs.'
     constraints:
         - The bundle must not require end-users to have node or python pre-installed at runtime.
         - Handle Playwright Chromium packaging — download on first run into the app data dir, with graceful fallback (httpx fast-path) when unavailable/offline.
     approved: false
-    comment: ""
+    comment: |
+        SCOPE NOTES (explicit deferrals so reviewers can tell intent from oversight):
+        - Auto-update (tauri-plugin-updater) is OUT OF SCOPE for this plan; follow-on milestone.
+        - Windows/Linux bundles are OUT OF SCOPE; macOS aarch64 .dmg first (x86_64 later).
+        - KNOWN RUNTIME DEPENDENCY (needs a decision): the apply pipeline shells out to the
+          `claude` Claude Code CLI via src/jobsmith/headless.py. The current slices do NOT
+          bundle or locate `claude`. Options: detect+prompt-to-install, document as a
+          prerequisite, or defer the apply pipeline. Tracked as risk R-claude below; flagged
+          to the human reviewer before approval.
+        - First-run AI credential/onboarding (API key or `claude` login) is assumed to reuse
+          the existing CLI-persisted config; a dedicated onboarding screen is out of scope for v1.
     research:
         - url: https://v2.tauri.app/develop/sidecar/
-          claim: Authoritative Tauri v2 sidecar contract — externalBin config, the -$TARGET_TRIPLE binary-naming requirement, shell:allow-spawn capability, and app.shell().sidecar() spawn API used across slices 2-3.
+          claim: 'Authoritative Tauri v2 sidecar contract — externalBin config, the -$TARGET_TRIPLE binary-naming requirement, shell:allow-spawn capability, and app.shell().sidecar() spawn API used across slices 2-3. Verified: docs expect a SINGLE binary file (informs the onefile choice).'
           accessed: "2026-06-26"
         - url: https://github.com/dieharders/example-tauri-v2-python-server-sidecar
-          claim: Proven Tauri v2 + FastAPI + PyInstaller reference; documents that with PyInstaller onefile, Tauri only holds the bootloader PID (not the Python child), so kill() leaks the process — motivates onedir + parent-PID watchdog in slices 1 and 3.
+          claim: Proven Tauri v2 + FastAPI + PyInstaller reference. Verified it uses PyInstaller ONEFILE (-F) and resolves the bootloader-PID kill problem via stdin/stdout signaling (NOT onedir + watchdog) — this is the validated pattern slices 1 and 3 now adopt.
+          accessed: "2026-06-26"
+        - url: https://mclare.blog/posts/writing-a-pandas-sidecar-for-tauri/
+          claim: 'Field report: PyInstaller onedir fails as a Tauri sidecar because _internal/ is not found at runtime in the .app bundle; author switched to onefile. Direct evidence for the onefile decision in slices 1 and 5.'
           accessed: "2026-06-26"
         - url: https://playwright.dev/docs/browsers
-          claim: PLAYWRIGHT_BROWSERS_PATH governs both install and runtime browser location and must be identical at both moments and set before importing Playwright — the basis for slice 4's app-data-dir Chromium strategy.
+          claim: PLAYWRIGHT_BROWSERS_PATH governs both install and runtime browser location and must be identical at both moments — the basis for slice 4's app-data-dir Chromium strategy. (The set-before-import detail is a Python implementation constraint, not stated in the docs.)
           accessed: "2026-06-26"
 slices:
     - id: slice-1
       num: 1
-      title: PyInstaller sidecar build for the Python backend (additive entry point)
+      title: PyInstaller onefile sidecar for the Python backend (additive entry point)
       what: |
         Add a NEW desktop sidecar entry point `src/jobsmith/desktop/sidecar_main.py`
-        that: parses `--port`, sets PLAYWRIGHT_BROWSERS_PATH before any Playwright
-        import, starts a parent-PID watchdog (self-terminates if the Tauri parent
-        dies), then runs uvicorn on 127.0.0.1:<port> via the existing
-        `jobsmith.api.main:create_app` factory (no browser auto-open). Author a
-        PyInstaller spec `packaging/jobsmith-sidecar.spec` (onedir) that collects
-        uvicorn/fastapi/playwright/claude-agent-sdk hidden imports and bundles the
-        pre-built `src/jobsmith/web_dist/` so the sidecar still serves the UI.
-        `scripts/build-sidecar.sh` produces the binary named with the host target
-        triple into `src-tauri/binaries/`. cli.py is NOT touched.
+        that: (a) pops JOBSMITH_PUBLIC_BIND from env so the loopback auth shim always
+        fires; (b) resolves the data dir via the existing platformdirs dependency and
+        exports PLAYWRIGHT_BROWSERS_PATH BEFORE any Playwright import; (c) selects a
+        free ephemeral port (binds 127.0.0.1:0, retries on failure) and prints
+        `JOBSMITH_LISTENING_PORT=<n>` to stdout so Rust learns the port without a
+        cross-process race; (d) starts uvicorn on that port via the existing
+        `jobsmith.api.main:create_app` factory (no browser auto-open); (e) installs a
+        stdin-EOF shutdown sentinel (daemon thread on sys.stdin.read(); on EOF
+        os._exit(0)) plus a SIGTERM handler. Author a PyInstaller spec
+        `packaging/jobsmith-sidecar.spec` (ONEFILE / -F) collecting
+        uvicorn/fastapi/playwright/claude-agent-sdk hidden imports and bundling the
+        pre-built `src/jobsmith/web_dist/` as data. `scripts/build-sidecar.sh` REQUIRES
+        web_dist to be pre-populated (it does NOT run npm — build-desktop.sh owns that)
+        and emits the binary named with the host target triple into
+        `src-tauri/binaries/`. cli.py is NOT touched.
       why: |
         Goal 2 — the Python backend must run as a self-contained binary with no host
-        Python. onedir (not onefile) is chosen so the bundled executable IS the server
-        process, eliminating the bootloader-orphan kill problem and slow cold starts.
-        Additive entry point preserves Goal 4 (CLI/FastAPI standalone unchanged).
+        Python. ONEFILE is chosen (not onedir) because field evidence (mclare.blog,
+        dieharders) shows onedir's _internal/ does not resolve as a Tauri sidecar in a
+        macOS .app bundle; stdin-EOF shutdown solves onefile's bootloader-orphan kill
+        problem. Additive entry point preserves Goal 4 (CLI/FastAPI standalone unchanged).
       files:
         - src/jobsmith/desktop/__init__.py
         - src/jobsmith/desktop/sidecar_main.py
         - packaging/jobsmith-sidecar.spec
         - scripts/build-sidecar.sh
         - pyproject.toml
-        - hatch_build.py
       deps: []
       done_when:
-        - Running the built `jobsmith-sidecar-<triple> --port 8123` serves the API and UI on 127.0.0.1:8123 with no system Python on PATH.
-        - The sidecar process exits within ~2s of its parent process being killed (watchdog verified).
+        - Running the built `jobsmith-sidecar-<triple>` (stdin kept open) prints JOBSMITH_LISTENING_PORT=<n>, then serves the API and UI on 127.0.0.1:<n> with no system Python on PATH.
+        - Closing the sidecar's stdin causes it to exit within ~2s (stdin-EOF sentinel verified); SIGTERM also exits cleanly.
+        - With JOBSMITH_PUBLIC_BIND=1 inherited in the parent env, the served index.html STILL contains the window.__JOBSMITH__ shim (the entry point clears that var).
         - '`jobsmith up` and `jobsmith api serve` behave identically to before — cli.py is byte-for-byte unchanged (Goal 4).'
       effort: L
       risk: Med
       tests: |
-        Integration: build the sidecar in CI, run it on a free port in a clean env
-        (PATH stripped of python), curl /health -> 200 and curl / -> index.html
-        containing the window.__JOBSMITH__ shim. Watchdog test: spawn sidecar under a
-        wrapper, kill the wrapper, assert the sidecar PID is gone within 3s.
+        Integration: build the sidecar in CI (after a web_dist is staged), run it in a
+        clean env (PATH stripped of python) with stdin piped, parse JOBSMITH_LISTENING_PORT,
+        curl /health -> 200 and curl / -> index.html containing the window.__JOBSMITH__ shim.
+        Shutdown test: close stdin, assert the PID is gone within 3s. Env test: set
+        JOBSMITH_PUBLIC_BIND=1 in the parent, assert the shim still injects.
         Regression: existing pytest suite (tests/) and `jobsmith up --help` unchanged.
       complexity: complex
       approved: false
       comment: ""
       research:
         - url: https://github.com/dieharders/example-tauri-v2-python-server-sidecar
-          claim: Onefile PyInstaller leaks the Python child because Tauri only knows the bootloader PID — adopt onedir + a parent-PID watchdog instead.
+          claim: Uses PyInstaller onefile (-F) and stdin/stdout shutdown signaling — the adopted shutdown pattern; the bootloader-PID problem is real but solved without onedir.
           accessed: "2026-06-26"
-        - url: https://aiechoes.substack.com/p/building-production-ready-desktop
-          claim: '`pyinstaller --onefile server.py` crashes at startup for FastAPI apps; a custom .spec collecting hidden imports/data is required — confirms the spec-file approach in this slice.'
+        - url: https://mclare.blog/posts/writing-a-pandas-sidecar-for-tauri/
+          claim: onedir _internal/ is not found at runtime as a Tauri sidecar; author switched to onefile — direct basis for the onefile decision.
           accessed: "2026-06-26"
       questions:
         - id: q-onefile-onedir
           text: onefile or onedir for the PyInstaller sidecar?
-          answer: onedir — eliminates the bootloader-orphan kill problem (dieharders) and gives faster cold start; Tauri externalBin points at the onedir executable, _internal/ ships as bundle resources. (Inferred from research; no offline-bundle requirement forces onefile.)
+          answer: onefile (-F) — feasibility critic confirmed onedir's _internal/ does not resolve as a Tauri sidecar in a macOS .app bundle (mclare.blog) and the dieharders reference itself uses onefile + stdin/stdout shutdown. (Research-corrected after critique.)
+      critic_revisions:
+        - source: local-feasibility
+          severity: DANGER
+          summary: Original onedir+watchdog was a misread of the dieharders source (which uses onefile + stdin/stdout) and onedir _internal/ fails in the .app bundle (mclare.blog). Flipped to onefile + stdin-EOF. [resolved]
+        - source: local-feasibility
+          severity: DANGER
+          summary: sidecar_main.py must os.environ.pop('JOBSMITH_PUBLIC_BIND') before uvicorn or staticui.py:208 _is_public_bind() suppresses the auth shim. Added as task + done_when. [resolved]
+        - source: local-feasibility
+          severity: WARN
+          summary: 'Port TOCTOU race removed: sidecar self-selects the ephemeral port and prints JOBSMITH_LISTENING_PORT to stdout instead of Rust picking-then-releasing. [resolved]'
+        - source: local-design
+          severity: WARN
+          summary: web_dist population contract clarified — build-sidecar.sh requires it pre-staged; npm build owned by build-desktop.sh (no double build). [resolved]
       decisions_notes: |
         **Trigger:** PyInstaller invoked by scripts/build-sidecar.sh (CI + local), output consumed by Tauri externalBin.
-        **State:** Built binary + onedir _internal/ live under src-tauri/binaries/ (gitignored build artifact, rebuildable).
-        **Payload:** A self-contained server binary exposing the existing FastAPI app on a caller-chosen port.
-        **Rejected:** onefile (-F) — Tauri can only kill the bootloader PID, orphaning the real Python child per the dieharders reference; also slow cold start. Embedding a full CPython via uv — heavier and reinvents what PyInstaller already solves (Goal 2 mandates PyInstaller). Modifying cli.py `up` to double as the sidecar — would couple desktop concerns into the CLI and risk Goal 4.
+        **State:** Built single-file binary lives under src-tauri/binaries/ (gitignored build artifact, rebuildable). Data dir resolved via existing platformdirs dep.
+        **Payload:** A self-contained server binary that reports its own ephemeral port on stdout and exposes the existing FastAPI app.
+        **Shutdown:** stdin-EOF sentinel (validated by the dieharders reference) + SIGTERM handler. Chosen over a parent-PID watchdog because ppid changes on orphan-reaping (macOS) can cause false triggers/misses.
+        **web_dist contract:** build-sidecar.sh REQUIRES src/jobsmith/web_dist pre-populated and errors clearly if absent; the npm build lives once in build-desktop.sh (slice 5) to avoid a double build (design critic F10).
+        **Rejected:** onedir — _internal/ does not resolve as a Tauri sidecar in the .app bundle (mclare.blog); the original draft's onedir+watchdog was a misread of the dieharders source. Modifying cli.py `up` to double as the sidecar — couples desktop concerns into the CLI, risks Goal 4.
       blocks:
         - type: file-tree
           title: Files this slice touches
           entries:
             - src/jobsmith/desktop/__init__.py (new)
-            - src/jobsmith/desktop/sidecar_main.py (new — argparse --port, watchdog, uvicorn.run create_app)
-            - packaging/jobsmith-sidecar.spec (new — onedir, collect_all uvicorn/playwright, add web_dist)
-            - scripts/build-sidecar.sh (new — pyinstaller + rename to -$(rustc --print host-tuple))
-            - pyproject.toml (edit — add [project.optional-dependencies] desktop = pyinstaller)
-            - hatch_build.py (reference — npm build -> src/jobsmith/web_dist used as PyInstaller data)
+            - src/jobsmith/desktop/sidecar_main.py (new — pop PUBLIC_BIND, data dir, ephemeral port + print, uvicorn create_app, stdin-EOF + SIGTERM shutdown)
+            - packaging/jobsmith-sidecar.spec (new — ONEFILE -F, collect_all uvicorn/playwright/claude_agent_sdk, add web_dist data)
+            - scripts/build-sidecar.sh (new — requires web_dist; pyinstaller; rename to -$(rustc --print host-tuple))
+            - pyproject.toml (edit — add [project.optional-dependencies] desktop = pyinstaller; platformdirs already present)
         - type: diagram
-          title: Sidecar build pipeline
-          fields:
-            direction: lr
+          title: Sidecar boot + shutdown
           entries:
-            - npm run build (web/)
-            - copy web/dist -> src/jobsmith/web_dist
-            - pyinstaller jobsmith-sidecar.spec (onedir)
-            - rename binary -> jobsmith-sidecar-<triple>
-            - src-tauri/binaries/
+            - Tauri spawns sidecar (JOBSMITH_API_TOKEN in env, stdin held open)
+            - pop JOBSMITH_PUBLIC_BIND; export PLAYWRIGHT_BROWSERS_PATH (app data)
+            - bind 127.0.0.1:0 -> port N; print JOBSMITH_LISTENING_PORT=N
+            - uvicorn.run create_app on 127.0.0.1:N
+            - 'daemon thread: sys.stdin.read() blocks'
+            - Tauri exits -> stdin EOF -> os._exit(0)
     - id: slice-2
       num: 2
-      title: Tauri v2 scaffold + macOS bundle config + splash frontend
+      title: Tauri v2 scaffold + macOS bundle config + icons + splash frontend
       what: |
         Initialize `src-tauri/` for Tauri v2: Cargo.toml, build.rs, a minimal main.rs
         skeleton, and tauri.conf.json declaring productName/identifier, macOS bundle
         targets [app, dmg], `bundle.externalBin: ["binaries/jobsmith-sidecar"]`, the
-        tauri-plugin-shell, and a tiny bundled splash page (frontendDist) shown while
-        the sidecar boots. Grant `shell:allow-spawn` for the sidecar in
-        capabilities/default.json. Add root `package.json` scripts (`tauri dev`,
-        `tauri build`). No backend wiring yet — that is slice 3.
+        tauri-plugin-shell, and the tauri-plugin-single-instance (so a second launch
+        focuses the existing window instead of spawning a second sidecar). Provide the
+        required `src-tauri/icons/` set (icon.icns + PNG sizes) — without these
+        `tauri build` fails. Bundle a tiny splash page (frontendDist) shown while the
+        sidecar boots. Grant `shell:allow-spawn` for the sidecar in
+        capabilities/default.json (scoped to the sidecar name only). Add root
+        `package.json` scripts (`tauri dev`, `tauri build`). No backend wiring yet — slice 3.
       why: |
         Goal 1 — establish the Tauri shell and bundle pipeline that wraps the existing
-        React UI + Python sidecar. A splash frontend lets the window appear instantly
-        while the sidecar starts, before navigating to the localhost server.
+        React UI + Python sidecar. Icons are build-blocking; single-instance matches
+        macOS convention; the splash lets the window appear instantly before navigation.
       files:
         - src-tauri/Cargo.toml
         - src-tauri/build.rs
         - src-tauri/src/main.rs
         - src-tauri/tauri.conf.json
         - src-tauri/capabilities/default.json
+        - src-tauri/icons/icon.icns
+        - src-tauri/icons/icon.png
         - src-tauri/splash/index.html
         - package.json
       deps: []
       done_when:
         - '`npm run tauri dev` opens a native window showing the splash page (sidecar not yet spawned).'
-        - tauri.conf.json validates and `tauri build --bundles dmg` reaches the sidecar-missing error (proving externalBin + bundle config are wired) when no binary is present.
+        - The built `.app` shows the Jobsmith icon in Finder and the Dock — not the default Tauri acorn.
+        - Launching a second instance focuses the existing window (single-instance) rather than opening a second window.
       effort: M
       risk: Low
       tests: |
-        Manual: `npm run tauri dev` renders the splash window. Config: `tauri build`
-        dry-run / config validation passes. Assert capabilities/default.json grants
-        shell:allow-spawn scoped to the sidecar name only (least privilege).
+        Manual: `npm run tauri dev` renders the splash window with the correct icon.
+        Config: `tauri build` config validation passes. Assert capabilities/default.json
+        grants shell:allow-spawn scoped to the sidecar name only (least privilege).
+        Single-instance: launch twice, confirm one window.
       complexity: complex
       approved: false
       comment: ""
       research:
         - url: https://v2.tauri.app/develop/sidecar/
-          claim: externalBin entries live in bundle config and require a -$TARGET_TRIPLE-suffixed binary; the shell:allow-spawn capability must be granted and scoped to the sidecar name.
+          claim: externalBin entries require a -$TARGET_TRIPLE-suffixed binary; shell:allow-spawn must be granted and scoped to the sidecar name.
           accessed: "2026-06-26"
       questions:
         - id: q-ui-serving
           text: Does Tauri serve the React build itself, or load the Python-served UI?
           answer: Load the Python-served localhost UI (window navigates to http://127.0.0.1:<port>/ in slice 3). Reuses the existing web_dist serving + window.__JOBSMITH__ shim; Tauri frontendDist is only a splash. (Inferred — maximizes reuse, satisfies the chosen inject-before-load auth.)
+      critic_revisions:
+        - source: local-design
+          severity: DANGER
+          summary: src-tauri/icons/ was missing — tauri build fails without icon.icns/png. Added to files + done_when. [resolved]
+        - source: local-design
+          severity: WARN
+          summary: Added tauri-plugin-single-instance so a second launch focuses the window rather than spawning a second sidecar (macOS convention). [resolved]
       decisions_notes: |
         **Trigger:** `npm run tauri dev|build` from repo root; scaffold authored independently of the sidecar binary (referenced by convention).
         **State:** src-tauri/ is committed source; built bundles land in src-tauri/target/ (gitignored).
-        **Payload:** A Tauri shell with macOS app+dmg bundle targets and a splash frontend.
-        **Rejected:** Bundling the React build as Tauri frontendDist and talking to Python purely over IPC — discards the existing same-origin auth shim and duplicates UI serving; instead the window will navigate to the Python-served localhost UI (slice 3). Electron — far larger bundle, contradicts the Tauri goal.
+        **Payload:** A Tauri shell with macOS app+dmg targets, icons, single-instance, and a splash frontend.
+        **Rejected:** Bundling the React build as Tauri frontendDist + pure IPC — discards the existing same-origin auth shim and duplicates UI serving; the window navigates to the Python-served localhost UI (slice 3) instead. Electron — far larger bundle, contradicts the Tauri goal. Multi-instance — contradicts macOS convention and doubles sidecars/Chromium downloads (design critic F6).
       blocks:
         - type: file-tree
           title: Files this slice touches
           entries:
-            - src-tauri/Cargo.toml (new — tauri v2, tauri-plugin-shell)
+            - src-tauri/Cargo.toml (new — tauri v2, tauri-plugin-shell, tauri-plugin-single-instance)
             - src-tauri/build.rs (new)
-            - src-tauri/src/main.rs (new — skeleton, builder.run)
-            - src-tauri/tauri.conf.json (new — externalBin, bundle.macOS targets app+dmg)
-            - src-tauri/capabilities/default.json (new — shell:allow-spawn for binaries/jobsmith-sidecar)
+            - src-tauri/src/main.rs (new — skeleton, single-instance plugin, builder.run)
+            - src-tauri/tauri.conf.json (new — externalBin, bundle.macOS app+dmg, icon refs)
+            - src-tauri/capabilities/default.json (new — shell:allow-spawn scoped to binaries/jobsmith-sidecar)
+            - src-tauri/icons/icon.icns + icon.png (new — required for tauri build)
             - src-tauri/splash/index.html (new — loading splash, design-token styled)
             - package.json (new — root tauri dev/build scripts)
         - type: wireframe
@@ -178,30 +227,33 @@ slices:
           fields:
             html: |
                 <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;background:var(--wf-surface);color:var(--wf-text)">
-                <div style="font-size:var(--wf-font-lg);font-weight:600">Jobsmith</div>
-                <div style="margin-top:var(--wf-space-md);color:var(--wf-text-muted)">Starting backend…</div>
-                <div style="margin-top:var(--wf-space-sm);width:160px;height:4px;background:var(--wf-border);border-radius:2px">
-                  <div style="width:40%;height:100%;background:var(--wf-accent);border-radius:2px"></div>
-                </div>
+                  <div style="font-size:var(--wf-font-lg);font-weight:600">Jobsmith</div>
+                  <div style="margin-top:var(--wf-space-md);color:var(--wf-text-muted)">Starting backend…</div>
+                  <div style="margin-top:var(--wf-space-sm);width:160px;height:4px;background:var(--wf-border);border-radius:2px">
+                    <div style="width:40%;height:100%;background:var(--wf-accent);border-radius:2px"></div>
+                  </div>
                 </div>
     - id: slice-3
       num: 3
-      title: Sidecar lifecycle + dynamic port/token auth wiring (Rust)
+      title: Sidecar lifecycle + token auth + dynamic port wiring (Rust)
       what: |
-        In main.rs: on setup, pick a free ephemeral port (bind :0, read, release),
-        generate a random token, spawn the sidecar via `app.shell().sidecar()` with
-        `--port <p>` and env `JOBSMITH_API_TOKEN=<tok>`, pipe its stdout/stderr to the
-        Tauri log, poll `GET /health` until 200, then navigate the main WebviewWindow
-        to `http://127.0.0.1:<port>/`. Jobsmith's existing localhost shim
-        (staticui.py:208-216) reads the same token from auth.py and injects
-        `window.__JOBSMITH__={token,apiBase}` into index.html before the React app
-        boots — satisfying inject-before-load auth with zero new UI code. On
-        RunEvent::ExitRequested / window close, kill the child (belt-and-suspenders
-        with slice 1's watchdog).
+        In main.rs: on setup, generate a random token, spawn the sidecar via
+        `app.shell().sidecar()` with env `JOBSMITH_API_TOKEN=<tok>` (stdin kept open so
+        the stdin-EOF sentinel works), read `JOBSMITH_LISTENING_PORT=<n>` from the child
+        stdout (rx channel), tee stdout/stderr to a log file at
+        `~/Library/Logs/Jobsmith/sidecar.log`, poll `GET /health` until 200 (with a
+        timeout), then navigate the main WebviewWindow to `http://127.0.0.1:<n>/`.
+        Jobsmith's existing localhost shim (staticui.py:208-216) reads the same token
+        from auth.py and injects `window.__JOBSMITH__={token,apiBase}` before the React
+        app boots — inject-before-load auth with zero new UI code. Lifecycle: on macOS,
+        bind `WindowEvent::CloseRequested` to fully quit the app (kill the child +
+        process::exit) so closing the window is an explicit quit (no orphaned sidecar,
+        no headless dock icon). If `/health` never returns 200 within the timeout, show a
+        native error dialog (Retry + "open log") rather than a blank window.
       why: |
-        Goal 2 (managed lifecycle) + Goal 3 (Rust-owned port/token handed to the web
-        view). Reusing the existing server-side shim is DRY — the token flows
-        Rust -> env -> auth.py -> shim -> webview, no second auth mechanism.
+        Goal 2 (managed lifecycle) + Goal 3 (Rust-issued token + sidecar-reported port
+        handed to the web view). Reusing the existing server-side shim is DRY — the token
+        flows Rust -> env -> auth.py -> shim -> webview, no second auth mechanism.
       files:
         - src-tauri/src/main.rs
         - src-tauri/src/sidecar.rs
@@ -211,120 +263,147 @@ slices:
         - 1
         - 2
       done_when:
-        - Launching the app spawns the sidecar on a free port and shows the React UI fully authenticated, with no login prompt and no token in the URL.
-        - Two app instances can run concurrently without port collision (ephemeral port per instance).
-        - Closing the window terminates the sidecar process within a few seconds (no orphaned Python in `ps`).
+        - Launching the app spawns the sidecar, reads its reported port, and shows the React UI fully authenticated — no login prompt, no token in the URL.
+        - Accessing the served root returns index.html containing window.__JOBSMITH__ with the token Rust passed (auth handshake proven end-to-end).
+        - Closing the window quits the app and terminates the sidecar within a few seconds (no orphaned jobsmith-sidecar in `ps`).
+        - If the sidecar never reaches /health within the timeout, the app shows a native error dialog with Retry and a link to ~/Library/Logs/Jobsmith/sidecar.log — never a blank window.
       effort: L
       risk: Med
       tests: |
-        Integration (Rust): unit-test the free-port picker and the /health poll with a
-        stub server. Manual E2E: launch packaged app, confirm UI loads authenticated;
-        `ps aux | grep jobsmith-sidecar` empty after quit. Negative: kill the sidecar
-        mid-session -> Rust surfaces a clear error rather than a blank window.
+        Integration (Rust): unit-test the JOBSMITH_LISTENING_PORT parser and the /health
+        poll/timeout with a stub server. Manual E2E: launch packaged app, confirm UI loads
+        authenticated; close window -> `ps aux | grep jobsmith-sidecar` empty. Negative:
+        make the sidecar exit nonzero at boot -> assert the error dialog appears, not a
+        blank window. Auth: curl the served root, assert window.__JOBSMITH__ present with token.
       complexity: complex
       approved: false
       comment: ""
       research:
         - url: https://v2.tauri.app/develop/sidecar/
-          claim: app.shell().sidecar(name).spawn() returns (rx, child); args and env are passed on the Command — the basis for handing --port and JOBSMITH_API_TOKEN to the sidecar.
+          claim: app.shell().sidecar(name).spawn() returns (rx, child); env is set on the Command and child stdout is read via rx — the basis for passing JOBSMITH_API_TOKEN and reading JOBSMITH_LISTENING_PORT.
           accessed: "2026-06-26"
         - url: https://github.com/dieharders/example-tauri-v2-python-server-sidecar
-          claim: Reference for terminating the sidecar on window close so no orphaned server/Python process remains.
+          claim: Reference for spawning + cleanly terminating the sidecar (stdin/stdout) so no orphaned server/Python remains on app exit.
           accessed: "2026-06-26"
       questions:
         - id: q-token-transport
           text: How does Rust hand the token to the web view?
-          answer: Rust passes the token via JOBSMITH_API_TOKEN env to the sidecar; Python's existing staticui shim injects it into index.html before page load. User chose inject-before-load; reusing the shim avoids a second auth mechanism. (User-confirmed transport; reuse path inferred from architecture map.)
+          answer: Rust generates the token and passes it via JOBSMITH_API_TOKEN env to the sidecar; Python's existing staticui shim injects it into index.html before page load. The port is reported back by the sidecar on stdout. (User-confirmed inject-before-load transport; port mechanism corrected after critique.)
+      critic_revisions:
+        - source: local-design
+          severity: DANGER
+          summary: 'macOS window-close vs quit was undefined. Decided: CloseRequested == quit (kill child + exit) — no orphan, no UI-less dock icon. [resolved]'
+        - source: local-design
+          severity: WARN
+          summary: Added a /health-timeout native error dialog (Retry + open-log) so a failed sidecar boot is not a blank window. [resolved]
+        - source: local-design
+          severity: WARN
+          summary: 'Sidecar log destination specified: ~/Library/Logs/Jobsmith/sidecar.log. [resolved]'
+        - source: local-feasibility
+          severity: WARN
+          summary: Verified staticui shim fires for 127.0.0.1 host iff PUBLIC_BIND unset (handled in slice 1); auth.py lru_cache reads JOBSMITH_API_TOKEN from fresh env. [verified]
       decisions_notes: |
-        **Trigger:** Tauri app setup() spawns the sidecar; RunEvent::ExitRequested kills it.
-        **State:** Port + token are per-process, in-memory (Rust), passed by CLI arg + env; no persistence.
+        **Trigger:** Tauri app setup() spawns the sidecar; WindowEvent::CloseRequested kills it and quits.
+        **State:** Token is per-process, in-memory (Rust), passed via env; the port is chosen by the sidecar and reported via stdout (no Rust-side port race).
         **Payload:** token -> JOBSMITH_API_TOKEN env -> auth.py active token -> existing window.__JOBSMITH__ shim (inject-before-load, user's choice).
-        **Rejected:** Token via URL query (?token=) — leaks into history/logs. Tauri invoke() IPC handshake on boot — adds an async boot step and a second auth path when the server-side shim already does it for free. Fixed port 8000 — collides with a user-run `jobsmith up`; ephemeral free port chosen instead.
+        **Lifecycle:** close-window == quit on macOS (explicit decision) so there is no orphaned sidecar and no UI-less dock icon (design critic F3). Sidecar logs to ~/Library/Logs/Jobsmith/sidecar.log for bug reports (design critic F15).
+        **Rejected:** Token via URL query (?token=) — leaks into history/logs. Tauri invoke() IPC handshake — adds an async boot step and a second auth path when the server-side shim already does it. Rust picking the port then releasing it — TOCTOU race; sidecar-reports-port chosen instead (feasibility critic W2). Keeping the window alive after close (default macOS) — leaves a UI-less sidecar; rejected for v1.
       blocks:
         - type: file-tree
           title: Files this slice touches
           entries:
-            - src-tauri/src/main.rs (edit — free-port pick, token gen, spawn, health poll, navigate, exit-kill)
-            - src-tauri/src/sidecar.rs (new — spawn/manage child, health-poll helper)
-            - src/jobsmith/api/staticui.py (reference/verify — existing shim fires for 127.0.0.1 host)
-            - src/jobsmith/api/auth.py (reference/verify — JOBSMITH_API_TOKEN honored as active token)
+            - src-tauri/src/main.rs (edit — token gen, spawn, read port from stdout, health poll, navigate, CloseRequested->quit, error dialog)
+            - src-tauri/src/sidecar.rs (new — spawn/manage child, stdout port parse, log tee, health-poll helper)
+            - src/jobsmith/api/staticui.py (reference/verify — shim fires for 127.0.0.1 host when PUBLIC_BIND unset)
+            - src/jobsmith/api/auth.py (reference/verify — JOBSMITH_API_TOKEN honored as active token; lru_cache reads fresh env)
         - type: diagram
           title: Startup + auth handshake
           entries:
-            - 'Tauri setup: pick free port + generate token'
-            - spawn sidecar (--port, JOBSMITH_API_TOKEN env)
-            - 'Python: auth.py adopts token; uvicorn binds 127.0.0.1:port'
-            - Rust polls GET /health until 200
-            - navigate webview -> http://127.0.0.1:port/
+            - 'Tauri setup: generate token'
+            - spawn sidecar (JOBSMITH_API_TOKEN env, stdin open)
+            - read JOBSMITH_LISTENING_PORT=N from child stdout
+            - Rust polls GET /health until 200 (timeout -> error dialog)
+            - navigate webview -> http://127.0.0.1:N/
             - staticui shim injects window.__JOBSMITH__ before React boot
-            - 'on app exit: kill sidecar child'
+            - WindowEvent::CloseRequested -> kill child + exit (no orphan)
     - id: slice-4
       num: 4
-      title: Playwright Chromium download-on-first-run with graceful fallback
+      title: Playwright Chromium download-on-first-run with graceful fallback (desktop-gated)
       what: |
-        Add `src/jobsmith/desktop/playwright_bootstrap.py`: resolve a stable
-        app-data browsers dir via platformdirs, export PLAYWRIGHT_BROWSERS_PATH to it
-        (set in sidecar_main.py BEFORE importing playwright, per the install==runtime
-        rule), and expose status + install operations. New desktop API router
-        `src/jobsmith/api/routes/desktop.py`: `GET /api/desktop/browser/status`
-        (installed?/path), `POST /api/desktop/browser/install` (runs
-        `playwright install chromium` in a background task), and an SSE
-        `GET /api/desktop/browser/install/events` for progress. A small web/src
-        surface prompts the download on first scrape and shows progress. If the
-        download fails/offline, the existing httpx fast-path in jd/fetcher.py still
-        handles most JDs — surface a clear, retryable error, never a hard crash.
+        Add `src/jobsmith/desktop/playwright_bootstrap.py`: resolve an app-data browsers
+        dir via the existing platformdirs dep, expose status + install operations against
+        PLAYWRIGHT_BROWSERS_PATH (exported in sidecar_main.py before any playwright
+        import, per slice 1). New desktop API router `src/jobsmith/api/routes/desktop.py`,
+        registered in main.py ONLY when `JOBSMITH_DESKTOP=1` (set by sidecar_main.py) so
+        `jobsmith up` is unaffected (Goal 4). Routes: `GET /api/desktop/browser/status`,
+        `POST /api/desktop/browser/install` (runs `playwright install chromium` in a
+        background task), SSE `GET /api/desktop/browser/install/events` for progress. A
+        first-run React prompt component surfaces the download + progress. If the download
+        fails/offline, the existing httpx fast-path in jd/fetcher.py still handles most
+        JDs — fetcher.py raises a structured 'browser_unavailable' signal (retryable),
+        never a hard crash.
       why: |
-        Constraint 2 — Chromium can't ship in the .dmg (size) per the chosen
-        download-on-first-run strategy; it must install into a writable app-data dir
-        and degrade gracefully when unavailable.
+        Constraint 2 — Chromium can't ship in the .dmg per the chosen download-on-first-run
+        strategy; it must install into a writable app-data dir, stay dormant for non-desktop
+        installs, and degrade gracefully when unavailable.
       files:
         - src/jobsmith/desktop/playwright_bootstrap.py
         - src/jobsmith/desktop/sidecar_main.py
         - src/jobsmith/api/routes/desktop.py
         - src/jobsmith/api/main.py
         - src/jobsmith/jd/fetcher.py
+        - web/src/components/BrowserInstallPrompt.tsx
         - web/src/api/client.ts
       deps:
         - 1
         - 3
       done_when:
-        - On a clean machine, first scrape prompts a one-time Chromium download into the app-data dir and succeeds afterward without re-downloading.
-        - PLAYWRIGHT_BROWSERS_PATH is identical at install and runtime so launch finds the installed browser.
-        - With networking disabled and no Chromium present, JD fetching still returns results via the httpx fast-path and shows a clear retryable message instead of crashing.
+        - On a clean machine, first scrape prompts a one-time Chromium download into the app-data dir and succeeds afterward without re-downloading (PLAYWRIGHT_BROWSERS_PATH identical at install and runtime).
+        - On a `jobsmith up` server WITHOUT JOBSMITH_DESKTOP=1, `GET /api/desktop/browser/status` returns 404 (Goal 4 regression).
+        - With networking disabled and no Chromium present, JD fetching still returns results via the httpx fast-path and surfaces a clear retryable message instead of crashing.
       effort: M
       risk: Med
       tests: |
         Unit: browser/status reports installed:false on empty dir, true after a stub
-        browser tree exists. Integration: POST install in a temp PLAYWRIGHT_BROWSERS_PATH
-        downloads chromium (network-gated test, skipped offline). Fallback: monkeypatch
-        chromium.launch to raise, assert fetcher.py returns the httpx result + a
-        structured 'browser_unavailable' signal, not an exception.
+        browser tree exists. Regression: app without JOBSMITH_DESKTOP=1 returns 404 on the
+        desktop routes. Integration: POST install in a temp PLAYWRIGHT_BROWSERS_PATH
+        downloads chromium (network-gated, skipped offline). Fallback: monkeypatch
+        chromium.launch to raise, assert fetcher.py returns the httpx result + a structured
+        'browser_unavailable' signal, not an exception.
       complexity: complex
       approved: false
       comment: ""
       research:
         - url: https://playwright.dev/docs/browsers
-          claim: PLAYWRIGHT_BROWSERS_PATH is read at install and at runtime and must match; setting it after importing Playwright has no effect — so it is exported in sidecar_main.py before any playwright import.
+          claim: PLAYWRIGHT_BROWSERS_PATH is read at install and at runtime and must match; an app-data absolute path is the supported way to relocate browsers.
           accessed: "2026-06-26"
       questions:
         - id: q-fallback
           text: What happens if the Chromium download fails or the host is offline?
-          answer: 'Degrade, don''t crash: jd/fetcher.py already tries an httpx fast-path before Playwright, so JD fetching keeps working for most sites; the UI shows a clear retryable ''browser unavailable'' message. (Inferred from the existing fetcher fallback in the architecture map.)'
+          answer: 'Degrade, don''t crash: jd/fetcher.py already tries an httpx fast-path before Playwright (verified at fetcher.py:44-52), so JD fetching keeps working for most sites; the UI shows a clear retryable ''browser unavailable'' message. (Verified against the existing fetcher fallback.)'
+      critic_revisions:
+        - source: local-design
+          severity: WARN
+          summary: Desktop router now gated on JOBSMITH_DESKTOP=1 so `jobsmith up` is unaffected; added a 404 regression done_when (Goal 4). [resolved]
+        - source: local-feasibility
+          severity: WARN
+          summary: Added the missing React component (BrowserInstallPrompt.tsx) to the files list so the first-run-prompt done_when is testable. platformdirs already a dep — reuse, don't add. [resolved]
       decisions_notes: |
-        **Trigger:** First Playwright-requiring scrape; explicit POST /api/desktop/browser/install.
-        **State:** Chromium lives under a platformdirs app-data browsers dir; PLAYWRIGHT_BROWSERS_PATH exported before any playwright import.
-        **Payload:** status JSON + SSE progress; on failure a structured retryable error.
-        **Rejected:** Bundling Chromium in the .dmg — user chose download-on-first-run (smallest bundle). Using system Chrome via channel — fails when no compatible browser exists. Setting PLAYWRIGHT_BROWSERS_PATH after importing playwright — ignored by the driver (read at import).
+        **Trigger:** First Playwright-requiring scrape; explicit POST /api/desktop/browser/install. Router only mounted when JOBSMITH_DESKTOP=1.
+        **State:** Chromium lives under a platformdirs (already a dep) app-data browsers dir; PLAYWRIGHT_BROWSERS_PATH exported before any playwright import (slice 1).
+        **Payload:** status JSON + SSE progress; on failure a structured retryable 'browser_unavailable' error.
+        **Rejected:** Bundling Chromium in the .dmg — user chose download-on-first-run (smallest bundle). System Chrome via channel — fails when no compatible browser exists. Registering the desktop router unconditionally — pollutes `jobsmith up` and risks unintended installs (design critic F8).
       blocks:
         - type: file-tree
           title: Files this slice touches
           entries:
             - src/jobsmith/desktop/playwright_bootstrap.py (new — platformdirs path, status, install runner)
-            - src/jobsmith/desktop/sidecar_main.py (edit — set PLAYWRIGHT_BROWSERS_PATH before playwright import)
+            - src/jobsmith/desktop/sidecar_main.py (edit — set JOBSMITH_DESKTOP=1; PLAYWRIGHT_BROWSERS_PATH already set in slice 1)
             - src/jobsmith/api/routes/desktop.py (new — status/install/events routes)
-            - src/jobsmith/api/main.py (edit — include desktop router)
-            - src/jobsmith/jd/fetcher.py (edit — graceful 'chromium missing' fallback to httpx path)
-            - web/src/ (edit — first-run download prompt + progress UI)
+            - src/jobsmith/api/main.py (edit — include desktop router ONLY if JOBSMITH_DESKTOP=1)
+            - src/jobsmith/jd/fetcher.py (edit — raise structured 'browser_unavailable' + keep httpx fast-path)
+            - web/src/components/BrowserInstallPrompt.tsx (new — first-run download prompt + progress)
+            - web/src/api/client.ts (edit — browser status/install client calls + SSE)
         - type: api-endpoint
           title: Browser status
           fields:
@@ -333,6 +412,8 @@ slices:
           rows:
             - name: 200 body
               type: '{"installed":bool,"browsers_path":str,"chromium_version":str|null}'
+            - name: 404 (standalone)
+              type: router absent unless JOBSMITH_DESKTOP=1
         - type: api-endpoint
           title: Trigger install
           fields:
@@ -346,26 +427,29 @@ slices:
           entries:
             - user starts a scrape needing Playwright
             - GET /api/desktop/browser/status -> installed:false
-            - UI prompts; POST /api/desktop/browser/install
+            - BrowserInstallPrompt -> POST /api/desktop/browser/install
             - playwright install chromium -> PLAYWRIGHT_BROWSERS_PATH (app data)
             - SSE streams progress -> UI
-            - 'on failure/offline: fall back to httpx fast-path + retryable error'
+            - 'on failure/offline: httpx fast-path + retryable ''browser_unavailable'''
     - id: slice-5
       num: 5
-      title: macOS .dmg packaging — ad-hoc-signed build + notarization stub + build script
+      title: macOS .dmg packaging — onefile bundle, ad-hoc-signed build + notarization wiring + build script
       what: |
         Add `scripts/build-desktop.sh` orchestrating the full pipeline: npm build (web)
-        -> copy to src/jobsmith/web_dist -> build-sidecar.sh -> `tauri build --bundles dmg`.
-        Configure tauri.conf.json macOS signing: default to ad-hoc
-        (`signingIdentity: "-"`) so the .dmg runs locally without an Apple Developer
-        cert (user approves once in Gatekeeper), and document/wire the env-driven
-        notarization path (APPLE_SIGNING_IDENTITY + APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID)
-        for later distributable builds. Ensure the onedir sidecar `_internal/` ships as
-        bundle resources alongside externalBin. Optional `.github/workflows` build job.
+        -> copy to src/jobsmith/web_dist -> build-sidecar.sh (onefile) -> `tauri build
+        --bundles dmg`. Because the sidecar is ONEFILE, there is no _internal/ to ship —
+        externalBin handles the single binary directly. Configure tauri.conf.json macOS
+        signing: default to ad-hoc (`signingIdentity: "-"`) so the .dmg runs locally
+        without an Apple Developer cert (user approves once in Privacy & Security), and
+        wire the env-driven notarization path: the script reads APPLE_SIGNING_IDENTITY +
+        (APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID) and passes them to `tauri build`; if
+        partial/absent it warns and falls back to ad-hoc rather than silently. Document
+        that APPLE_PASSWORD is an app-specific password (appleid.apple.com), not the
+        account password. Optional `.github/workflows` build job.
       why: |
         Goal 1 (ship a macOS .dmg) + Constraint 1 (self-contained — no node/python at
-        runtime). Ad-hoc signing unblocks a working first .dmg without waiting on an
-        Apple Developer enrollment; notarization is staged for public distribution.
+        runtime). Ad-hoc signing unblocks a working first .dmg without waiting on an Apple
+        Developer enrollment; notarization is staged for public distribution.
       files:
         - scripts/build-desktop.sh
         - src-tauri/tauri.conf.json
@@ -377,37 +461,46 @@ slices:
       done_when:
         - '`scripts/build-desktop.sh` produces a Jobsmith .dmg that installs and launches the full app on a clean macOS host with no Python or Node installed (Constraint 1).'
         - The ad-hoc-signed app runs after the one-time Gatekeeper approval; no Apple Developer cert is required for the local build.
-        - Setting the APPLE_* env vars produces a notarized .dmg via the same script (documented; verified when a cert is available).
+        - 'WIRED (inspectable): build-desktop.sh reads APPLE_SIGNING_IDENTITY/APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID and passes them to `tauri build`; missing/partial vars emit a clear warning and fall back to ad-hoc (no silent behavior change).'
+        - 'DEFERRED milestone: end-to-end notarization verified once an Apple Developer ID is provisioned.'
       effort: M
       risk: Med
       tests: |
         Manual on a clean macOS VM/user: mount the .dmg, drag to Applications, launch,
-        complete a scrape+apply with no host Python/Node. Verify the bundled sidecar +
-        _internal/ are present and code-objects are ad-hoc signed (`codesign -dv`).
-        Notarization path tested when an Apple Developer ID is provisioned.
+        complete a scrape+apply with no host Python/Node. Verify the bundled single-file
+        sidecar is present and ad-hoc signed (`codesign -dv`). Inspect build-desktop.sh
+        for the APPLE_* var handling + warning path. Notarization tested when a cert exists.
       complexity: complex
       approved: false
       comment: ""
       research:
         - url: https://v2.tauri.app/distribute/sign/macos/
-          claim: Ad-hoc signing (signingIdentity '-') lets the app run locally without Apple authentication (user whitelists once); notarization uses APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID (or App Store Connect API key) with `tauri build --bundles dmg`.
+          claim: Ad-hoc signing (signingIdentity '-') lets the app run locally after a one-time whitelist; notarization uses APPLE_ID/APPLE_PASSWORD(app-specific)/APPLE_TEAM_ID (or App Store Connect API key) with `tauri build --bundles dmg`.
           accessed: "2026-06-26"
       questions:
         - id: q-signing
           text: Sign + notarize for v1, or ship an ad-hoc-signed local .dmg first?
-          answer: Ad-hoc-signed local .dmg first (no Apple Developer cert needed; user approves once), with the env-driven notarization path wired and documented for a later distributable build. (Inferred default to avoid blocking on Apple enrollment; flagged unverified until a cert is available.)
+          answer: Ad-hoc-signed local .dmg first (no Apple Developer cert needed; user approves once), with the env-driven notarization path wired/inspectable and documented for a later distributable build. (Inferred default to avoid blocking on Apple enrollment; flagged unverified until a cert is available.)
+      critic_revisions:
+        - source: local-feasibility
+          severity: DANGER
+          summary: 'Removed the onedir _internal/-as-resources requirement (unsound + moot): onefile externalBin handles the single binary directly. [resolved]'
+        - source: local-design
+          severity: WARN
+          summary: Split notarization done_when into an inspectable WIRED criterion and a DEFERRED milestone; documented APPLE_PASSWORD = app-specific password. [resolved]
       decisions_notes: |
         **Trigger:** scripts/build-desktop.sh locally or in CI.
         **State:** Output .dmg in src-tauri/target/release/bundle/dmg/ (build artifact).
-        **Payload:** A self-contained macOS .dmg embedding the React UI, PyInstaller sidecar (+_internal), and Tauri runtime.
-        **Rejected:** Requiring full Developer-ID signing + notarization for v1 — blocks on a paid Apple enrollment; ad-hoc signing ships a runnable .dmg now (Gatekeeper approve-once) with notarization staged. Per-arch universal binary in v1 — target aarch64-apple-darwin first, x86_64 later.
+        **Payload:** A self-contained macOS .dmg embedding the React UI, onefile PyInstaller sidecar, and Tauri runtime.
+        **Signing:** ad-hoc ("-") for v1 (Gatekeeper approve-once); notarization wired behind env vars and inspectable, end-to-end deferred to cert availability (design critic F12). APPLE_PASSWORD documented as an app-specific password (feasibility critic R5).
+        **Rejected:** Requiring full Developer-ID signing + notarization for v1 — blocks on a paid Apple enrollment. Universal binary in v1 — target aarch64-apple-darwin first, x86_64 later. Shipping onedir _internal/ as resources — moot under onefile (and unsound per slice 1).
       blocks:
         - type: file-tree
           title: Files this slice touches
           entries:
-            - scripts/build-desktop.sh (new — web build -> web_dist -> sidecar -> tauri build dmg)
-            - src-tauri/tauri.conf.json (edit — bundle.macOS signingIdentity, resources for onedir _internal/, dmg config)
-            - docs/desktop-build.md (new — local build + notarization env vars)
+            - scripts/build-desktop.sh (new — npm build -> web_dist -> build-sidecar.sh -> tauri build dmg)
+            - src-tauri/tauri.conf.json (edit — bundle.macOS signingIdentity + dmg config; no _internal/ resources needed for onefile)
+            - docs/desktop-build.md (new — local build + notarization env vars; APPLE_PASSWORD = app-specific password)
             - .github/workflows/desktop-build.yml (new, optional — CI .dmg artifact)
         - type: diagram
           title: Packaging pipeline
@@ -416,7 +509,107 @@ slices:
           entries:
             - npm run build (web)
             - copy -> src/jobsmith/web_dist
-            - build-sidecar.sh -> src-tauri/binaries
-            - tauri build --bundles dmg (ad-hoc sign)
+            - build-sidecar.sh (onefile) -> src-tauri/binaries
+            - tauri build --bundles dmg (ad-hoc or notarized)
             - Jobsmith.dmg
 questions: []
+critique:
+    reviewed_at: "2026-06-26"
+    reviewers:
+        - 'local-design (role: design critic; runner: wipnote:researcher on Opus 4.8)'
+        - 'local-feasibility (role: feasibility critic; runner: wipnote:researcher on Opus 4.8; verified all 15 code citations + fetched all research URLs)'
+    assumptions:
+        - id: A1
+          status: verified
+          text: All cited code references (create_app, staticui shim, auth JOBSMITH_API_TOKEN, fetcher httpx-then-playwright, etc.) exist as stated.
+          evidence: Feasibility critic verified 15/15 citations against the repo (e.g. staticui.py:208-216, auth.py:87-89, jd/fetcher.py:44-70).
+        - id: A2
+          status: verified
+          text: onedir PyInstaller is unsuitable as a Tauri sidecar in a macOS .app bundle; onefile + stdin-EOF shutdown is the validated pattern.
+          evidence: https://mclare.blog/posts/writing-a-pandas-sidecar-for-tauri/ ; https://github.com/dieharders/example-tauri-v2-python-server-sidecar (uses -F + stdin/stdout).
+        - id: A3
+          status: verified
+          text: The existing staticui shim injects window.__JOBSMITH__ for a 127.0.0.1 Host iff JOBSMITH_PUBLIC_BIND is unset; the sidecar entry point must clear it.
+          evidence: staticui.py:208 checks not _is_public_bind() and _is_localhost_request(request).
+        - id: R-claude
+          status: questionable
+          text: The apply pipeline shells out to the `claude` Claude Code CLI via headless.py; the desktop bundle does not yet bundle or locate it. A runtime-dependency decision is required.
+          evidence: src/jobsmith/headless.py spawns `claude -p ...` as a subprocess (architecture map). No slice covers locating/bundling `claude`.
+    critics:
+        - title: DESIGN CRITIC
+          sections:
+            - heading: Build-blocking / data integrity
+              items:
+                - badge: icons
+                  kind: danger
+                  text: Missing src-tauri/icons/ would fail tauri build — added to slice 2.
+                - badge: data dir
+                  kind: danger
+                  text: No data/db directory story — slice 1 now resolves it via platformdirs; CLI data remains accessible.
+                - badge: lifecycle
+                  kind: danger
+                  text: macOS window-close vs quit undefined — slice 3 decides close==quit.
+            - heading: Integration boundary
+              items:
+                - badge: Goal 4
+                  kind: warn
+                  text: Desktop routes leaked into `jobsmith up` — slice 4 gates on JOBSMITH_DESKTOP=1 with a 404 regression test.
+                - badge: auth proof
+                  kind: warn
+                  text: Shim correctness now has an explicit done_when in slice 3.
+                - badge: failure UX
+                  kind: warn
+                  text: Sidecar boot failure + log path now surfaced (slice 3 error dialog, ~/Library/Logs/Jobsmith).
+            - heading: Scope clarity (now explicit)
+              items:
+                - badge: auto-update
+                  kind: info
+                  text: Deferred — noted in design.comment.
+                - badge: claude CLI
+                  kind: warn
+                  text: Apply pipeline depends on the `claude` CLI — flagged as R-claude for the reviewer.
+        - title: FEASIBILITY CRITIC
+          sections:
+            - heading: Packaging strategy (root-cause)
+              items:
+                - badge: onedir->onefile
+                  kind: danger
+                  text: Original onedir+watchdog misread the source; flipped to onefile + stdin-EOF (slices 1, 5).
+                - badge: _internal
+                  kind: danger
+                  text: onedir _internal/ does not resolve as a Tauri sidecar in the .app bundle — removed.
+                - badge: PUBLIC_BIND
+                  kind: danger
+                  text: sidecar_main.py must clear JOBSMITH_PUBLIC_BIND or the shim is suppressed — added.
+            - heading: Robustness
+              items:
+                - badge: port race
+                  kind: warn
+                  text: Sidecar self-selects + reports the port on stdout — TOCTOU race eliminated.
+                - badge: citations
+                  kind: success
+                  text: 15/15 code citations verified correct.
+                - badge: research URLs
+                  kind: success
+                  text: All research URLs resolve; dieharders + aiechoes claims corrected for accuracy.
+    risks:
+        - risk: onefile sidecar still needs a custom .spec (hiddenimports for uvicorn/playwright/claude-agent-sdk) or it crashes at boot.
+          severity: Medium
+          mitigation: Slice 1 uses collect_all for the heavy packages; slice-1 done_when runs the built binary in a clean env before downstream slices depend on it.
+        - risk: The `claude` Claude Code CLI is a runtime dependency of the apply pipeline not covered by any slice.
+          severity: High
+          mitigation: 'Decide before approval: detect+prompt, document as prereq, or defer the apply pipeline. Tracked as assumption R-claude; surfaced to the human reviewer.'
+        - risk: onefile cold-start latency on first launch may make the splash linger.
+          severity: Low
+          mitigation: Splash + /health poll already cover the wait; acceptable for v1. Revisit if startup exceeds a few seconds.
+    synthesis: |
+        The plan's grounding was solid — every code citation verified — but the feasibility
+        critic overturned the central packaging decision: onedir+watchdog was a misread of
+        the dieharders source and onedir's _internal/ does not resolve as a Tauri sidecar in
+        a macOS .app bundle. The plan is now revised to onefile + stdin-EOF shutdown
+        (A2/R2/R3/T2 resolved), with PUBLIC_BIND cleared (A3/T3) and the port TOCTOU race
+        removed via sidecar-reported port (W2). Design blockers — icons, data-dir, macOS
+        close==quit, and desktop-route isolation — are all resolved in-slice. ONE open item
+        remains for the human reviewer: R-claude — the apply pipeline depends on the external
+        `claude` CLI, which no slice yet bundles or locates. Decide that (detect+prompt vs
+        prereq vs defer apply) before approving slice 4/5.
