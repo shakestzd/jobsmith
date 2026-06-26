@@ -1,0 +1,61 @@
+name: desktop-build
+
+# Builds the self-contained Jobsmith macOS .dmg via scripts/build-desktop.sh.
+# Ad-hoc signed by default; notarizes when the APPLE_* secrets are configured.
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  macos-dmg:
+    # macos-14 is an Apple Silicon (aarch64) runner, matching the sidecar's
+    # host triple (aarch64-apple-darwin) baked by scripts/build-sidecar.sh.
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo + Tauri target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+
+      - name: Set up uv (Python + PyInstaller)
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Python desktop extra (PyInstaller)
+        run: uv sync --extra desktop
+
+      - name: Build .dmg
+        # PyInstaller is on PATH via the uv-managed venv.
+        env:
+          # Optional notarization secrets. When unset/partial the script warns
+          # and falls back to ad-hoc signing (see scripts/build-desktop.sh).
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          source .venv/bin/activate
+          scripts/build-desktop.sh
+
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jobsmith-dmg
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
