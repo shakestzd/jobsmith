@@ -109,6 +109,15 @@ def _prepare_env() -> Path:
     os.environ["JOBSMITH_DESKTOP"] = "1"
 
     data_dir = _resolve_data_dir()
+    # Create the user-data dir now so JOBSMITH_REPO_ROOT points at a real directory
+    # (repo_root_for() tier 2 skips env var silently when the path is absent).
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pin JOBSMITH_REPO_ROOT to the platformdirs user-data root so that
+    # repo_root_for() resolves correctly even when cwd="/" (Finder-launched .app).
+    # setdefault: never clobber a value the parent (Tauri) or user already exported.
+    os.environ.setdefault("JOBSMITH_REPO_ROOT", str(data_dir))
+
     # setdefault: never clobber a path the parent (Tauri) already exported.
     os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(data_dir / "ms-playwright"))
     return data_dir
