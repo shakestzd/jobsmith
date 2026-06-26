@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Jobsmith</title>
+    <style>
+      /* The splash renders standalone (before the React UI's design tokens load),
+         so define sensible fallbacks for the --wf-* wireframe tokens here. Values
+         mirror the app's dark-theme design tokens (web/src/styles.css). */
+      :root {
+        --wf-surface: #1c1d24;
+        --wf-text: #f0f1f5;
+        --wf-text-muted: #a7abba;
+        --wf-border: #383b47;
+        --wf-accent: #7c89ff;
+        --wf-font-lg: 24px;
+        --wf-space-md: 16px;
+        --wf-space-sm: 8px;
+        --wf-font:
+          'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        font-family: var(--wf-font);
+        background: var(--wf-surface);
+        color: var(--wf-text);
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      @keyframes wf-progress {
+        0% {
+          transform: translateX(-60%);
+        }
+        100% {
+          transform: translateX(260%);
+        }
+      }
+      .wf-bar > div {
+        animation: wf-progress 1.4s ease-in-out infinite;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;background:var(--wf-surface);color:var(--wf-text)"
+    >
+      <div style="font-size:var(--wf-font-lg);font-weight:600">Jobsmith</div>
+      <div style="margin-top:var(--wf-space-md);color:var(--wf-text-muted)">
+        Starting backend…
+      </div>
+      <div
+        class="wf-bar"
+        style="margin-top:var(--wf-space-sm);width:160px;height:4px;background:var(--wf-border);border-radius:2px;overflow:hidden"
+      >
+        <div
+          style="width:40%;height:100%;background:var(--wf-accent);border-radius:2px"
+        ></div>
+      </div>
+    </div>
+  </body>
+</html>
