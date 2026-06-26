@@ -39,13 +39,19 @@ for consistency with fast_score. The LLM returns an integer in [0, 100].
 
 from __future__ import annotations
 
+import abc
 import asyncio
 import json
 import logging
+import shutil
 import sqlite3
-from collections.abc import Callable
+import subprocess
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from jobsmith.config import LLMSettings
 
 logger = logging.getLogger("jobsmith.sourcing.llm_rescore")
 
@@ -175,6 +181,13 @@ class RescoreResult:
     cost_usd: float
     coverage_score: int | None = field(default=None)
     uncovered_must_haves: list[str] | None = field(default=None)
+    # parse_ok is False ONLY when an openai_compatible / antigravity backend
+    # returned content that robust-JSON parsing could not extract valid
+    # fit-metrics from (schema-violating / non-JSON). The posting is then
+    # flagged + degraded to fast_score rather than crashing the crawl. It stays
+    # True for transport/availability fallbacks (timeout, SDK offline), which
+    # are signalled by ``is_fallback`` instead.
+    parse_ok: bool = field(default=True)
 
 
 # ---------------------------------------------------------------------------
@@ -372,11 +385,7 @@ async def _rescore_one_async(
     """Score a single posting row via the SDK and return a RescoreResult."""
     posting_id = int(row["id"])
     fast_score = float(row["fast_score"] or 0.0)
-
-    fast_score_dict = {
-        "fast_score": fast_score,
-    }
-    prompt = _build_prompt(row, fast_score_dict)
+    prompt = _build_prompt(row, {"fast_score": fast_score})
 
     try:
         options = _build_options(timeout_sec, system_prompt=system_prompt)
@@ -386,8 +395,7 @@ async def _rescore_one_async(
 
     try:
         result = await asyncio.wait_for(
-            _consume_messages(query_fn, prompt, options),
-            timeout=timeout_sec,
+            _consume_messages(query_fn, prompt, options), timeout=timeout_sec
         )
     except asyncio.TimeoutError:
         logger.warning("posting=%d → timeout", posting_id)
@@ -404,7 +412,67 @@ async def _rescore_one_async(
     if subtype != "success":
         return _fallback_result(posting_id, fast_score, f"result_subtype:{subtype}")
 
-    # Parse structured output — core fields
+    rescored = _build_result_from_structured(
+        posting_id, fast_score, structured, float(cost or 0.0)
+    )
+    logger.info(
+        "posting=%d → %s=%.2f cov=%s (session=%s, $%.4f)",
+        posting_id,
+        rescored.specialty,
+        rescored.llm_score,
+        rescored.coverage_score,
+        (session_id or "")[:8],
+        rescored.cost_usd,
+    )
+    return rescored
+
+
+# ---------------------------------------------------------------------------
+# Shared structured-output → RescoreResult mapping (used by every backend)
+# ---------------------------------------------------------------------------
+
+
+def _parse_coverage(
+    structured: Mapping[str, Any] | None,
+) -> tuple[int | None, list[str] | None, bool]:
+    """Parse coverage fields; degrade to NULL on any problem. NEVER fabricate.
+
+    Returns ``(coverage_score, uncovered_must_haves, coverage_unavailable)``.
+    """
+    raw_coverage = (structured or {}).get("coverage")
+    raw_uncovered = (structured or {}).get("uncovered_must_haves")
+
+    if raw_coverage is None and raw_uncovered is None:
+        return None, None, True  # LLM omitted both coverage fields
+    try:
+        if raw_coverage is None:
+            raise ValueError("coverage field missing")
+        cov_int = int(raw_coverage)
+        if not isinstance(raw_coverage, (int, float)) or cov_int != raw_coverage:
+            # Reject non-numeric types (e.g. strings like "high")
+            raise ValueError(f"coverage is not a plain integer: {raw_coverage!r}")
+        coverage_score = max(0, min(100, cov_int))
+        uncovered_list = raw_uncovered if isinstance(raw_uncovered, list) else []
+        # Sanitise: keep only string items, max 5, each < 80 chars
+        uncovered = [str(i)[:79] for i in uncovered_list[:5] if isinstance(i, str)]
+        return coverage_score, uncovered, False
+    except Exception as exc:
+        logger.warning("coverage_parse_error:%s", exc)
+        return None, None, True
+
+
+def _build_result_from_structured(
+    posting_id: int,
+    fast_score: float,
+    structured: Mapping[str, Any] | None,
+    cost: float,
+) -> RescoreResult:
+    """Map a validated fit-metrics object to a RescoreResult (parse_ok=True).
+
+    Shared by ClaudeAgentScorer (SDK structured_output) and the robust-parse
+    backends (OpenAICompatibleScorer / AntigravityScorer) so coverage
+    degradation and score normalisation behave identically everywhere.
+    """
     try:
         score_raw = int((structured or {}).get("score", 0))
         specialty = str((structured or {}).get("specialty", "none"))
@@ -416,59 +484,17 @@ async def _rescore_one_async(
         logger.warning("posting=%d parse_error:%s", posting_id, exc)
         return _fallback_result(posting_id, fast_score, f"parse_error:{type(exc).__name__}")
 
-    # Parse coverage fields — degrade to NULL on any problem; NEVER fabricate
-    coverage_score: int | None = None
-    uncovered_must_haves: list[str] | None = None
-    coverage_unavailable = False
-
-    raw_coverage = (structured or {}).get("coverage")
-    raw_uncovered = (structured or {}).get("uncovered_must_haves")
-
-    if raw_coverage is None and raw_uncovered is None:
-        # LLM omitted both coverage fields
-        coverage_unavailable = True
-    else:
-        try:
-            if raw_coverage is None:
-                raise ValueError("coverage field missing")
-            cov_int = int(raw_coverage)
-            if not isinstance(raw_coverage, (int, float)) or cov_int != raw_coverage:
-                # Reject non-numeric types (e.g. strings like "high")
-                raise ValueError(f"coverage is not a plain integer: {raw_coverage!r}")
-            coverage_score = max(0, min(100, cov_int))
-            uncovered_list = raw_uncovered if isinstance(raw_uncovered, list) else []
-            # Sanitise: keep only string items, max 5, each < 80 chars
-            uncovered_must_haves = [
-                str(item)[:79]
-                for item in uncovered_list[:5]
-                if isinstance(item, str)
-            ]
-        except Exception as exc:
-            logger.warning("posting=%d coverage_parse_error:%s", posting_id, exc)
-            coverage_unavailable = True
+    coverage_score, uncovered_must_haves, coverage_unavailable = _parse_coverage(structured)
 
     if coverage_unavailable:
         rationale_suffix = " [coverage-unavailable]"
-        # Truncate core rationale to leave room for suffix
-        max_core = RATIONALE_MAX - len(rationale_suffix)
-        rationale = rationale[:max_core] + rationale_suffix
+        rationale = rationale[: RATIONALE_MAX - len(rationale_suffix)] + rationale_suffix
     else:
         rationale = rationale[:RATIONALE_MAX]
 
-    llm_score_normalised = max(0.0, min(1.0, score_raw / 100.0))
-    logger.info(
-        "posting=%d → %s=%.2f cov=%s (session=%s, $%.4f)",
-        posting_id,
-        specialty,
-        llm_score_normalised,
-        coverage_score,
-        (session_id or "")[:8],
-        cost or 0.0,
-    )
-
     return RescoreResult(
         posting_id=posting_id,
-        llm_score=llm_score_normalised,
+        llm_score=max(0.0, min(1.0, score_raw / 100.0)),
         specialty=specialty,
         rationale=rationale,
         evidence_json=json.dumps(evidence, ensure_ascii=False),
@@ -476,6 +502,7 @@ async def _rescore_one_async(
         cost_usd=float(cost or 0.0),
         coverage_score=coverage_score,
         uncovered_must_haves=uncovered_must_haves,
+        parse_ok=True,
     )
 
 
@@ -516,6 +543,344 @@ async def _consume_messages(
 
 
 # ---------------------------------------------------------------------------
+# Robust JSON extraction for openai_compatible / antigravity backends
+# ---------------------------------------------------------------------------
+#
+# HIGH-severity invariant: OpenAI-compatible servers (esp. Ollama's /v1) do NOT
+# reliably honour response_format json_schema — the schema may be ignored and
+# the body may be prose, fenced JSON, or schema-violating JSON. So we send the
+# json_schema response_format AND embed the schema in the prompt AND parse the
+# returned content defensively here. Anything we cannot turn into valid
+# fit-metrics is FLAGGED (parse_ok=False), never raised — the crawl must not
+# crash on a single bad posting.
+
+# OpenAI-style response_format (distinct from the claude-agent-sdk output_format
+# shape in _OUTPUT_SCHEMA). Sent best-effort; servers may silently ignore it.
+_OPENAI_RESPONSE_FORMAT: dict[str, Any] = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "fit_metrics",
+        "schema": _OUTPUT_SCHEMA["schema"],
+    },
+}
+
+
+def _strip_code_fence(text: str) -> str:
+    """Strip a leading/trailing markdown code fence (```json … ```)."""
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    # Drop the opening fence line (``` or ```json) and any trailing fence.
+    body = stripped[3:]
+    newline = body.find("\n")
+    if newline != -1:
+        first_line = body[:newline].strip().lower()
+        if first_line in ("", "json"):
+            body = body[newline + 1 :]
+    if body.rstrip().endswith("```"):
+        body = body.rstrip()[:-3]
+    return body.strip()
+
+
+def _coerce_json_object(content: str | None) -> dict | None:
+    """Best-effort: turn raw model output into a JSON object, else None."""
+    if not content or not isinstance(content, str):
+        return None
+    text = _strip_code_fence(content)
+    try:
+        obj = json.loads(text)
+        return obj if isinstance(obj, dict) else None
+    except (json.JSONDecodeError, TypeError):
+        pass
+    # Fallback: salvage the first {...} span (handles prose around the JSON).
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            obj = json.loads(text[start : end + 1])
+            return obj if isinstance(obj, dict) else None
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
+def _robust_parse_fit_metrics(content: str | None) -> tuple[bool, dict]:
+    """Parse model output into a fit-metrics object.
+
+    Returns ``(ok, obj)``. ``ok`` is True only when a JSON object with an
+    integer-coercible ``score`` was recovered — the minimum signal a usable
+    fit-metrics result requires. Coverage/specialty/rationale degrade
+    gracefully downstream; a missing or non-numeric ``score`` flags the posting.
+    """
+    obj = _coerce_json_object(content)
+    if not isinstance(obj, dict):
+        return False, {}
+    try:
+        int(obj.get("score"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False, {}
+    return True, obj
+
+
+def _flagged_parse_failure(posting_id: int, fast_score: float, raw: str | None) -> RescoreResult:
+    """Build a FLAGGED result (parse_ok=False) for unparseable model output.
+
+    The posting degrades to its fast_score and is marked so the crawl can skip /
+    surface it, but the run continues. ``raw`` is logged (truncated) for triage.
+    """
+    logger.warning(
+        "posting=%d → unparseable LLM output (flagged parse_ok=False): %.120r",
+        posting_id,
+        (raw or "")[:120],
+    )
+    return RescoreResult(
+        posting_id=posting_id,
+        llm_score=float(fast_score or 0.0),
+        specialty="none",
+        rationale="(LLM output unparseable) — posting flagged, parse_ok=False"[:RATIONALE_MAX],
+        evidence_json="[]",
+        is_fallback=True,
+        cost_usd=0.0,
+        parse_ok=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Prompt assembly for the non-SDK (text-in/text-out) backends
+# ---------------------------------------------------------------------------
+
+
+def _schema_prompt_block() -> str:
+    """Schema-in-prompt guard rail (the always-on half of the robustness pair).
+
+    Embedded verbatim so even a server that ignores ``response_format`` is told
+    the exact shape to emit.
+    """
+    schema_json = json.dumps(_OUTPUT_SCHEMA["schema"], ensure_ascii=False)
+    return (
+        "Respond with ONE JSON object and nothing else — no markdown fences, no "
+        "prose, no commentary. It MUST conform to this JSON schema:\n"
+        f"{schema_json}\n"
+        "Required keys: score (integer 0-100), rationale (string), "
+        "specialty (tax_equity | ai_research | elixir_distributed | none), "
+        "matched_evidence (array of strings)."
+    )
+
+
+def _build_text_messages(
+    row: Mapping[str, Any], system_prompt: str | None
+) -> list[dict[str, str]]:
+    """OpenAI-style chat messages: system (digest + schema) + user (payload)."""
+    base_system = system_prompt or FIT_SCORER_SYSTEM_PROMPT.format(digest=_EMPTY_DIGEST_MARKER)
+    fast_score = float(row["fast_score"] or 0.0)
+    return [
+        {"role": "system", "content": base_system + "\n\n" + _schema_prompt_block()},
+        {"role": "user", "content": _build_prompt(row, {"fast_score": fast_score})},
+    ]
+
+
+def _build_text_prompt(row: Mapping[str, Any], system_prompt: str | None) -> str:
+    """Single-shot prompt for CLI backends with no system-prompt flag (agy)."""
+    msgs = _build_text_messages(row, system_prompt)
+    return f"<context>\n{msgs[0]['content']}\n</context>\n\n{msgs[1]['content']}"
+
+
+# ---------------------------------------------------------------------------
+# Scorer backends — one per provider, all returning a RescoreResult
+# ---------------------------------------------------------------------------
+
+
+class BaseScorerBackend(abc.ABC):
+    """Abstract scorer: turn one posting row into fit-metrics (a RescoreResult).
+
+    Concrete backends are resolved by :func:`make_scorer` from
+    ``config.llm.provider``. Every backend MUST be crash-proof: transport
+    errors degrade to a fast-score fallback (``is_fallback=True``); unparseable
+    model output is flagged (``parse_ok=False``). Neither raises.
+    """
+
+    @abc.abstractmethod
+    def score(self, row: Mapping[str, Any], *, system_prompt: str | None = None) -> RescoreResult:
+        """Score one posting row and return a RescoreResult (never raises)."""
+        raise NotImplementedError
+
+
+class ClaudeAgentScorer(BaseScorerBackend):
+    """Default backend — the Claude Agent SDK path, behaviour-preserved.
+
+    Wraps the existing async SDK scorer so ``claude_cli`` reproduces today's
+    scoring exactly (strict backward compatibility).
+    """
+
+    def __init__(self, *, query_fn: Callable, timeout_sec: float = DEFAULT_TIMEOUT_SEC) -> None:
+        self.query_fn = query_fn
+        self.timeout_sec = timeout_sec
+
+    def score(self, row: Mapping[str, Any], *, system_prompt: str | None = None) -> RescoreResult:
+        return asyncio.run(
+            _rescore_one_async(row, self.query_fn, self.timeout_sec, system_prompt=system_prompt)
+        )
+
+
+class OpenAICompatibleScorer(BaseScorerBackend):
+    """Unified backend for MLX + Ollama + LM Studio + llama.cpp.
+
+    Reuses the shared :class:`jobsmith.llm.openai_compat.OpenAICompatClient`;
+    only ``base_url``/``model`` differ between runners. Prefers json_schema
+    ``response_format`` AND embeds the schema in the prompt, then parses the
+    returned content robustly (:func:`_robust_parse_fit_metrics`).
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str | None = None,
+        api_key: str | None = None,
+        timeout_s: float = 300.0,
+        _client: Any = None,
+    ) -> None:
+        self.base_url = base_url
+        self.model = model
+        self.api_key = api_key
+        self.timeout_s = timeout_s
+        self._client = _client  # injectable for tests
+
+    def _get_client(self) -> Any:
+        if self._client is not None:
+            return self._client
+        from jobsmith.llm.openai_compat import OpenAICompatClient
+
+        return OpenAICompatClient(
+            base_url=self.base_url,
+            model=self.model or "default",
+            api_key=self.api_key,
+            timeout_s=self.timeout_s,
+        )
+
+    def score(self, row: Mapping[str, Any], *, system_prompt: str | None = None) -> RescoreResult:
+        posting_id = int(row["id"])
+        fast_score = float(row["fast_score"] or 0.0)
+        try:
+            client = self._get_client()
+            content = client.complete(
+                _build_text_messages(row, system_prompt),
+                response_format=_OPENAI_RESPONSE_FORMAT,
+                temperature=0.0,
+            )
+        except Exception as exc:  # transport / server error → availability fallback
+            logger.warning("posting=%d openai_compat error:%s", posting_id, type(exc).__name__)
+            return _fallback_result(posting_id, fast_score, f"error:{type(exc).__name__}")
+
+        ok, obj = _robust_parse_fit_metrics(content)
+        if not ok:
+            return _flagged_parse_failure(posting_id, fast_score, content)
+        return _build_result_from_structured(posting_id, fast_score, obj, 0.0)
+
+
+class AntigravityScorer(BaseScorerBackend):
+    """Backend wrapping the Antigravity CLI (``agy -p`` print mode), single-shot.
+
+    Print mode has no system-prompt flag, so the digest + schema ride as a
+    ``<context>`` preamble. stdout is captured whole and parsed robustly.
+    """
+
+    BINARY = "agy"
+
+    def __init__(
+        self,
+        *,
+        timeout_sec: float = DEFAULT_TIMEOUT_SEC,
+        project_root: Any = None,
+        run_fn: Callable | None = None,
+    ) -> None:
+        self.timeout_sec = timeout_sec
+        self.project_root = project_root
+        self._run_fn = run_fn  # injectable for tests; defaults to subprocess
+
+    def score(self, row: Mapping[str, Any], *, system_prompt: str | None = None) -> RescoreResult:
+        posting_id = int(row["id"])
+        fast_score = float(row["fast_score"] or 0.0)
+        prompt = _build_text_prompt(row, system_prompt)
+        try:
+            run = self._run_fn or _default_agy_run
+            content = run(prompt, timeout_sec=self.timeout_sec, project_root=self.project_root)
+        except Exception as exc:  # spawn failure / non-zero exit / timeout
+            logger.warning("posting=%d antigravity error:%s", posting_id, type(exc).__name__)
+            return _fallback_result(posting_id, fast_score, f"error:{type(exc).__name__}")
+
+        ok, obj = _robust_parse_fit_metrics(content)
+        if not ok:
+            return _flagged_parse_failure(posting_id, fast_score, content)
+        return _build_result_from_structured(posting_id, fast_score, obj, 0.0)
+
+
+def _default_agy_run(prompt: str, *, timeout_sec: float, project_root: Any = None) -> str:
+    """Invoke ``agy -p <prompt> --dangerously-skip-permissions``; return stdout.
+
+    Raises (caught by the scorer) on a missing binary, non-zero exit, or timeout.
+    """
+    path = shutil.which(AntigravityScorer.BINARY) or AntigravityScorer.BINARY
+    proc = subprocess.run(
+        [path, "-p", prompt, "--dangerously-skip-permissions"],
+        capture_output=True,
+        text=True,
+        timeout=timeout_sec,
+        cwd=str(project_root) if project_root else None,
+    )
+    if proc.returncode:
+        raise RuntimeError(f"agy exited {proc.returncode}: {(proc.stderr or '').strip()}")
+    return proc.stdout or ""
+
+
+# ---------------------------------------------------------------------------
+# Factory — resolve the active scorer from config.llm.provider
+# ---------------------------------------------------------------------------
+
+
+def _load_llm_settings() -> LLMSettings:
+    """Load ``config.llm`` for the active project; default to claude_cli.
+
+    Any load/validation error falls back to default ``LLMSettings`` so scoring
+    keeps working exactly as before (strict backward compatibility).
+    """
+    from jobsmith.config import LLMSettings, load_config
+
+    try:
+        return load_config().llm
+    except Exception:  # noqa: BLE001 — never let config break scoring
+        return LLMSettings()
+
+
+def make_scorer(
+    llm: LLMSettings | None = None,
+    *,
+    query_fn: Callable | None = None,
+    timeout_sec: float = DEFAULT_TIMEOUT_SEC,
+) -> BaseScorerBackend:
+    """Resolve the scorer backend for ``llm.provider``.
+
+    Unknown / default providers (including ``codex_cli``, which has no dedicated
+    scorer in this slice) resolve to :class:`ClaudeAgentScorer` so existing
+    behaviour is preserved.
+    """
+    if llm is None:
+        llm = _load_llm_settings()
+
+    provider = getattr(llm, "provider", "claude_cli")
+    if provider == "openai_compatible":
+        return OpenAICompatibleScorer(
+            base_url=llm.base_url or "",
+            model=llm.model,
+            api_key=llm.api_key,
+            timeout_s=float(llm.timeout_s),
+        )
+    if provider == "antigravity_cli":
+        return AntigravityScorer(timeout_sec=timeout_sec)
+    # claude_cli or anything unrecognised → default Claude path.
+    return ClaudeAgentScorer(query_fn=query_fn or _default_query_fn(), timeout_sec=timeout_sec)
+
+
+# ---------------------------------------------------------------------------
 # Public synchronous entry point
 # ---------------------------------------------------------------------------
 
@@ -529,6 +894,8 @@ def rescore_postings(
     budget_usd: float = DEFAULT_BUDGET_USD,
     query_fn: Callable | None = None,
     timeout_sec: float = DEFAULT_TIMEOUT_SEC,
+    llm: LLMSettings | None = None,
+    scorer: BaseScorerBackend | None = None,
 ) -> list[RescoreResult]:
     """Rescore the top-N postings by fast_score via the LLM.
 
@@ -558,8 +925,17 @@ def rescore_postings(
     if no_llm or not posting_ids:
         return []
 
-    if query_fn is None:
-        query_fn = _default_query_fn()
+    # Resolve the active scorer backend.
+    #   - explicit ``scorer``  → use it (test / advanced injection).
+    #   - explicit ``query_fn`` with no ``llm`` → Claude path (back-compat: the
+    #     runner + every existing test inject query_fn and expect SDK scoring).
+    #   - otherwise            → factory keyed on config.llm.provider.
+    if scorer is None:
+        if llm is None and query_fn is not None:
+            from jobsmith.config import LLMSettings
+
+            llm = LLMSettings()  # default claude_cli
+        scorer = make_scorer(llm, query_fn=query_fn, timeout_sec=timeout_sec)
 
     # Build the master digest ONCE per invocation, shared across all postings.
     system_prompt = build_system_prompt_with_digest(conn)
@@ -595,9 +971,7 @@ def rescore_postings(
                 )
                 break
 
-        result = asyncio.run(
-            _rescore_one_async(row, query_fn, timeout_sec, system_prompt=system_prompt)
-        )
+        result = scorer.score(row, system_prompt=system_prompt)
 
         # Write to DB — include coverage columns
         uncovered_json: str | None = None
