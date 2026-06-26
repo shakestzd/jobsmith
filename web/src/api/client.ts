@@ -586,6 +586,24 @@ export function buildBrowserInstallEventsUrl(): string {
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 }
 
+// ── Desktop dependency detection (feat-dac00175, slice 6) ──────────────────
+//
+// Desktop-only — mounted on the server ONLY when JOBSMITH_DESKTOP=1. On a
+// normal (non-desktop) server getDepsStatus() resolves to a 404
+// JobsmithApiError; callers treat that as "not a desktop build" and render
+// nothing (same convention as getBrowserStatus).
+
+export interface DepsStatus {
+  claude_installed: boolean;
+  version: string | null;
+  path: string | null;
+}
+
+/** GET /api/desktop/deps/status — is the `claude` Claude Code CLI on PATH? */
+export async function getDepsStatus(): Promise<DepsStatus> {
+  return apiGet<DepsStatus>('/api/desktop/deps/status');
+}
+
 /**
  * Redact secrets from any string before it lands in the DOM, clipboard, logs,
  * or any other user-visible surface. Catches:
