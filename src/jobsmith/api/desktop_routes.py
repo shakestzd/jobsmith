@@ -21,6 +21,7 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 
@@ -38,6 +39,13 @@ router = APIRouter(prefix="/desktop/browser", tags=["desktop"])
 # mounted alongside `router` in api.main.create_app. Slice 7 will extend the
 # deps probe (LLM runtime) behind this same endpoint.
 deps_router = APIRouter(prefix="/desktop/deps", tags=["desktop"])
+
+# Local LLM backend detection for offline mode (feat-aaa91b6d, slice 7). Same
+# JOBSMITH_DESKTOP gating + header auth; mounted alongside the others in
+# api.main.create_app. REDUCED SCOPE: status only — the "enable offline mode"
+# action that writes the pluggable-backend `llm` config is deferred to
+# plan-938f735b (the POST below is a loud 501 placeholder that writes nothing).
+llm_router = APIRouter(prefix="/desktop/llm", tags=["desktop"])
 
 
 class BrowserStatus(BaseModel):
@@ -98,4 +106,46 @@ def deps_status(_user: UserRecord = Depends(current_user)) -> DepsStatus:
     )
 
 
-__all__ = ["deps_router", "router"]
+# --- Local LLM backend status (feat-aaa91b6d, slice 7) ---------------------
+
+
+class LlmBackendStatus(BaseModel):
+    reachable: bool
+    base_url: str
+    runtime_installed: bool
+    model: str | None = None
+
+
+class LlmStatus(BaseModel):
+    mlx: LlmBackendStatus
+    ollama: LlmBackendStatus
+
+
+# Returned (with HTTP 501) by the deferred enable action so the UI degrades
+# loudly instead of silently no-opping. The real offline-mode wiring (writing
+# the pluggable-backend `llm` config + routing chat/scoring) lands in
+# plan-938f735b.
+_OFFLINE_MODE_PENDING = {
+    "status": "unavailable",
+    "reason": "offline backend config pending plan-938f735b",
+}
+
+
+@llm_router.get("/status", response_model=LlmStatus)
+def llm_status(_user: UserRecord = Depends(current_user)) -> LlmStatus:
+    """Report reachability + runtime presence for local MLX / Ollama backends."""
+    return LlmStatus(**deps.llm_status())
+
+
+@llm_router.post("/offline-mode")
+def enable_offline_mode(_user: UserRecord = Depends(current_user)) -> JSONResponse:
+    """Deferred placeholder for "enable offline mode".
+
+    Writes NO config. Returns 501 + a clear pending reason so the desktop UI can
+    surface "coming soon — pending plan-938f735b" instead of failing silently.
+    The actual config write + chat/scoring routing is scoped to plan-938f735b.
+    """
+    return JSONResponse(status_code=501, content=_OFFLINE_MODE_PENDING)
+
+
+__all__ = ["deps_router", "llm_router", "router"]
