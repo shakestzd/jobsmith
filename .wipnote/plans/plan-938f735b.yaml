@@ -1,17 +1,264 @@
 meta:
     id: plan-938f735b
     title: Pluggable LLM Backends for jobsmith
-    description: 'Refactor chat and scoring modules to support switchable LLM backends: Claude Code CLI, Antigravity CLI, Codex CLI, and local Ollama API.'
+    description: Refactor chat and scoring modules to support switchable LLM backends. Subprocess harnesses (Claude Code CLI, Antigravity CLI, Codex CLI) plus a single unified OpenAI-compatible local provider that covers MLX (mlx_lm.server), Ollama (/v1), LM Studio, and llama.cpp via base_url + model.
     created_at: "2026-06-15"
     status: draft
     priority: medium
-    schema_version: v3
-    version: 2
+    schema_version: v4
+    version: 4
 design:
-    problem: ""
-    goals: []
-    constraints: []
+    problem: |
+        The jobsmith backend is tightly coupled to Claude Code CLI and the Claude Agent SDK
+        in headless mode. While robust, it restricts offline development, local model usage
+        (MLX on Apple Silicon, Ollama), and alternative assistant harnesses (Antigravity
+        CLI/agy, Codex CLI). MLX and Ollama both already expose OpenAI-compatible HTTP APIs,
+        so a single adapter can cover both (and more) rather than one adapter per runner.
+    goals:
+        - Abstract LLM chat and scoring pathways into pluggable provider interfaces.
+        - Add subprocess implementations for Antigravity (agy) and Codex CLI backends.
+        - Add ONE unified OpenAI-compatible HTTP adapter (base_url + model) covering MLX (mlx_lm.server), Ollama (/v1), LM Studio, and llama.cpp — MLX/Ollama are config presets, not bespoke adapters.
+        - Allow switching and configuration via yaml configs (.apply-config.yaml and sourcing.yaml) and the Web UI Config Tab.
+        - 'Strict backward compatibility: default config maps to the existing Claude Code CLI backend.'
+    constraints:
+        - 'Strict backward compatibility: default config must map to the existing Claude Code CLI backend.'
+        - Local/HTTP queries must respect budget limits and timeout controls; structured-output (scorer) must validate the schema with robust fallback parsing.
     approved: false
-    comment: ""
-slices: []
+    comment: |
+        DECISION (2026-06-26): MLX added via a UNIFIED OpenAI-compatible provider rather than
+        a bespoke MlxProvider — both MLX (mlx_lm.server) and Ollama (/v1) speak the OpenAI
+        Chat Completions protocol, so one adapter (base_url + model) covers MLX, Ollama, LM
+        Studio, and llama.cpp. The previously-planned native OllamaChatProvider/OllamaScorer
+        are folded into this unified adapter (Ollama reached via its /v1 endpoint).
+        SCOPE: This covers CHAT and SCORING (request/response LLM calls). It does NOT replace
+        the agentic apply pipeline (headless.py -> `claude -p`), which is a tool-using agent
+        harness; swapping that for a raw local model needs an agent loop and is out of scope.
+        Linked to plan-a23bba5f (Tauri desktop) which surfaces MLX/Ollama as a desktop
+        "offline mode".
+    research:
+        - url: https://github.com/ml-explore/mlx-lm
+          claim: mlx_lm.server (`mlx_lm.server` / `python -m mlx_lm server`) serves an OpenAI-compatible /v1/chat/completions API on Apple Silicon (default 127.0.0.1:8080), incl. tool-calling — so MLX is reachable via the same OpenAI-compatible adapter as Ollama.
+          accessed: "2026-06-26"
+        - url: https://docs.ollama.com/api/openai-compatibility
+          claim: Ollama exposes an OpenAI-compatible endpoint at http://localhost:11434/v1/chat/completions — confirms a single OpenAI-compatible adapter covers both Ollama and MLX (only base_url/model differ).
+          accessed: "2026-06-26"
+        - url: https://platform.openai.com/docs/api-reference/chat
+          claim: Canonical Chat Completions request/response + streaming shape the unified adapter targets; both MLX and Ollama implement this surface.
+          accessed: "2026-06-26"
+slices:
+    - id: slice-1
+      num: 1
+      title: Define configuration schema for LLM provider settings (incl. MLX/Ollama presets)
+      what: |
+        Update config models in `src/jobsmith/config.py` to add an `llm` section: provider
+        (enum: claude_cli | antigravity_cli | codex_cli | openai_compatible), model,
+        base_url (for openai_compatible), api_key (optional), budget_usd, timeout_s.
+        Ship presets so picking "MLX" fills base_url=http://127.0.0.1:8080/v1 and "Ollama"
+        fills http://localhost:11434/v1. Validate with Pydantic. Default maps to the
+        current Claude CLI configuration for backward compatibility.
+      why: Lets users pick a provider, model, and local base_url in config, validated on startup, with presets for MLX and Ollama.
+      files:
+        - src/jobsmith/config.py
+        - config-schema.yaml
+      deps: []
+      done_when:
+        - New `llm` fields load and parse from .apply-config.yaml; selecting the MLX or Ollama preset fills the correct base_url.
+        - Schema verification rejects unsupported provider values and missing base_url for openai_compatible.
+      effort: S
+      risk: Low
+      tests: |
+        Unit: `tests/test_config.py` — config parsing, default (claude_cli), MLX/Ollama
+        preset expansion, and invalid-schema inputs.
+      complexity: standard
+      approved: false
+      comment: ""
+      research:
+        - url: https://docs.ollama.com/api/openai-compatibility
+          claim: Ollama OpenAI base_url is http://localhost:11434/v1 — the value baked into the Ollama preset.
+          accessed: "2026-06-26"
+      critic_revisions:
+        - source: sonnet
+          severity: LOW
+          summary: 'Verify: Pydantic model validation on config load enforces the provider enum + base_url-required-for-openai_compatible constraint on startup.'
+        - source: local-design
+          severity: INFO
+          summary: 'Unified design: MLX/Ollama collapse to the openai_compatible provider with presets rather than separate enum values. [applied]'
+      decisions_notes: |
+        **Trigger:** startup configuration loading and schema validation.
+        **State:** immutable configuration state loaded on launch.
+        **Payload:** `llm` block with provider, model, base_url, api_key, budget_usd, timeout_s; MLX/Ollama presets.
+        **Rejected:** A separate provider enum value per local runner (mlx, ollama, lmstudio...) — they are all `openai_compatible` differing only by base_url/model; presets keep UX friendly without N enum values. Env-only vars (hard to document); DB-only settings (decouples from git).
+    - id: slice-2
+      num: 2
+      title: Implement pluggable Chat Backend providers (unified OpenAI-compatible adapter)
+      what: |
+        Refactor `src/jobsmith/api/claude_chat.py` to extract `BaseChatBackend`. Implement
+        subprocess providers `ClaudeCliProvider`, `AntigravityCliProvider`,
+        `CodexCliProvider`, and a single `OpenAICompatibleProvider` (new shared module
+        `src/jobsmith/llm/openai_compat.py`) that streams /v1/chat/completions from any
+        OpenAI-compatible base_url (MLX mlx_lm.server :8080, Ollama :11434/v1, LM Studio,
+        llama.cpp). Update the `/api/chat` route in `src/jobsmith/api/chat.py` to use a
+        backend factory keyed on config. All providers return a unified
+        Generator[str, None, None] of text deltas.
+      why: Decouples chat logic from the Claude Code executable; one OpenAI-compatible adapter serves MLX, Ollama, LM Studio, and llama.cpp.
+      files:
+        - src/jobsmith/api/claude_chat.py
+        - src/jobsmith/api/chat.py
+        - src/jobsmith/llm/openai_compat.py
+      deps:
+        - 1
+      done_when:
+        - Chat factory resolves and executes the active provider from config.
+        - Antigravity provider invokes `agy -p` with `--dangerously-skip-permissions`; Codex via `codex exec`.
+        - OpenAICompatibleProvider streams chat deltas from BOTH an MLX mlx_lm.server endpoint and an Ollama /v1 endpoint with only base_url/model changed.
+      effort: M
+      risk: Med
+      tests: |
+        Unit: `tests/test_claude_chat.py` — provider resolution; mock subprocess command
+        construction for `agy`/`codex`; mock httpx stream for the OpenAI-compatible adapter
+        asserting it parses SSE `data:` chunks into text deltas (same code path for MLX & Ollama).
+      complexity: standard
+      approved: false
+      comment: ""
+      research:
+        - url: https://github.com/ml-explore/mlx-lm
+          claim: mlx_lm.server implements the OpenAI Chat Completions API (incl. streaming + tools) on Apple Silicon — the OpenAICompatibleProvider reaches MLX with no MLX-specific code.
+          accessed: "2026-06-26"
+        - url: https://platform.openai.com/docs/api-reference/chat
+          claim: 'Streaming chunk shape (choices[].delta.content / data: [DONE]) the adapter parses.'
+          accessed: "2026-06-26"
+      critic_revisions:
+        - source: haiku
+          severity: INFO
+          summary: 'Ergonomics: providers must return a unified Generator[str]; subprocess lines vs HTTP SSE parse differently but converge to text deltas.'
+        - source: sonnet
+          severity: LOW
+          summary: 'Verify: agy --conversation requires a valid conversation ID; map review DB session_uuids to agy conversation IDs.'
+        - source: local-design
+          severity: INFO
+          summary: 'Unified: native OllamaChatProvider folded into OpenAICompatibleProvider (Ollama via /v1); MLX added at zero extra adapter cost. [applied]'
+      decisions_notes: |
+        **Trigger:** chat turn route `/api/applications/{slug}/chat`.
+        **State:** session ID persisted in the sqlite review database as before.
+        **Payload:** streaming text deltas (SSE-friendly Generator[str]).
+        **Unified adapter:** `openai_compat.py` is shared by chat (this slice) and scorer (slice 3) — DRY. MLX and Ollama differ only by base_url/model.
+        **Rejected:** Separate native OllamaChatProvider + MlxProvider — duplicates HTTP/streaming code for runners that share the OpenAI protocol (per the 2026-06-26 unified decision). Provider logic inside chat routes (violates SoC).
+    - id: slice-3
+      num: 3
+      title: Implement pluggable Scorer Backend providers (unified adapter + robust JSON)
+      what: |
+        Extract `BaseScorerBackend` and implement `ClaudeAgentScorer`,
+        `AntigravityScorer`, and `OpenAICompatibleScorer` in
+        `src/jobsmith/sourcing/llm_rescore.py`, reusing the shared
+        `src/jobsmith/llm/openai_compat.py` adapter. The OpenAI-compatible scorer requests
+        the fit-metrics JSON schema (via response_format json_schema where supported, else
+        schema-in-prompt) and uses robust try/except extraction so malformed model output
+        degrades gracefully instead of crashing the crawl. Works for both MLX and Ollama.
+      why: Lets the sourcing pipeline run fit-scoring on local/alternative models (MLX/Ollama) instead of depending solely on the Claude Agent SDK.
+      files:
+        - src/jobsmith/sourcing/llm_rescore.py
+        - src/jobsmith/llm/openai_compat.py
+      deps:
+        - 1
+      done_when:
+        - The rescoring loop runs under each provider; the OpenAI-compatible scorer works against both MLX and Ollama.
+        - Malformed/non-schema model output is caught and the posting is skipped/flagged, not crashed (robust parse verified).
+      effort: M
+      risk: Med
+      tests: |
+        Unit: `tests/test_sourcing_llm_rescore.py` — providers parse structured results;
+        feed a malformed JSON fixture and assert graceful handling; assert MLX and Ollama
+        share the same parse path.
+      complexity: standard
+      approved: false
+      comment: ""
+      research:
+        - url: https://docs.ollama.com/api/openai-compatibility
+          claim: Ollama's OpenAI-compatible endpoint does not fully enforce json_schema response_format yet — basis for the robust schema-in-prompt + try/except fallback (not relying on server-side enforcement).
+          accessed: "2026-06-26"
+      critic_revisions:
+        - source: sonnet
+          severity: HIGH
+          summary: 'Feasibility: Ollama format=''json'' / OpenAI json_schema do not guarantee key constraints; robust try/catch parsing is required in the scorer. [addressed in what/done_when]'
+        - source: local-design
+          severity: INFO
+          summary: 'Unified: OpenAICompatibleScorer replaces the separate OllamaScorer and adds MLX for free. [applied]'
+      decisions_notes: |
+        **Trigger:** sourcing crawl rescore pass inside `runner.run_crawl`.
+        **State:** stateless query; results saved to SQLite `postings` table.
+        **Payload:** JSON matching the fit-metrics schema.
+        **Structured output:** prefer response_format json_schema; fall back to schema-in-prompt + robust parse. Same path for MLX and Ollama (both OpenAI-compatible); not all servers enforce schema, so validation is in our code.
+        **Rejected:** Python Anthropic SDK for all non-Claude paths (no offline/local support); a separate native-Ollama scorer (folded into the unified adapter).
+    - id: slice-4
+      num: 4
+      title: Expose LLM provider settings in Web UI (presets + base_url/model)
+      what: |
+        Add an LLM provider selector to the Config tab in `web/src/app/application.tsx`:
+        provider dropdown (Claude CLI / Antigravity / Codex / Local OpenAI-compatible),
+        MLX and Ollama quick-presets, and base_url + model inputs (shown for
+        openai_compatible). Bind settings to the `/api/config` GET/PUT routes (extend
+        `config_routes.py` to accept the new `llm` payload).
+      why: Lets the operator view/select the active backend, choose an MLX/Ollama preset, and set base_url/model from the dashboard Config tab.
+      files:
+        - web/src/app/application.tsx
+        - src/jobsmith/api/config_routes.py
+      deps:
+        - 2
+        - 3
+      done_when:
+        - Config tab shows the active provider, MLX/Ollama presets, and base_url/model fields for the local option.
+        - Changing provider/preset persists via PUT /api/config and survives reload.
+      effort: S
+      risk: Low
+      tests: |
+        Unit: `web/src/app/config.test.tsx` — fields render, preset fills base_url, save
+        issues PUT with the `llm` payload.
+      complexity: standard
+      approved: false
+      comment: ""
+      research_waiver: UI wiring against the existing /api/config GET/PUT contract; no external API/standard governs this beyond the provider config defined in slices 1-3.
+      critic_revisions:
+        - source: haiku
+          severity: WARN
+          summary: 'Review: new UI config requires /api/config (config_routes.py) PUT to accept the `llm` payload — added config_routes.py to files. [addressed]'
+      decisions_notes: |
+        **Trigger:** Config tab component rendering.
+        **State:** reads/updates settings via `/api/config` GET/PUT.
+        **Payload:** JSON `llm` configuration incl. base_url/model; MLX/Ollama presets are one-click fills.
+        **Rejected:** Hardcoded frontend config (operator can't switch without editing files); separate MLX vs Ollama dropdown entries (they are both "Local OpenAI-compatible" + a preset).
 questions: []
+critique:
+    reviewed_at: "2026-06-26"
+    reviewers:
+        - Haiku (design)
+        - Sonnet (feasibility)
+        - local-design (2026-06-26 MLX/unified revision)
+    assumptions:
+        - id: A1
+          status: verified
+          text: Antigravity CLI (agy) supports --print, --dangerously-skip-permissions, and --conversation.
+          evidence: agy --help output
+        - id: A2
+          status: verified
+          text: MLX (mlx_lm.server) and Ollama both expose OpenAI-compatible /v1/chat/completions, so one adapter covers both.
+          evidence: https://github.com/ml-explore/mlx-lm ; https://docs.ollama.com/api/openai-compatibility
+        - id: A3
+          status: plausible
+          text: OpenAI-compatible servers do not reliably enforce json_schema; the scorer must validate output itself.
+          evidence: Ollama OpenAI-compat docs note partial json_schema support; mitigated by robust parse in slice 3.
+    critics: []
+    risks:
+        - risk: OpenAI-compatible JSON output does not enforce schema constraints natively.
+          severity: High
+          mitigation: Schema-in-prompt + robust try/except extraction in OpenAICompatibleScorer (slice 3).
+        - risk: MLX is Apple-Silicon only; mlx_lm.server must be installed/running and a model downloaded.
+          severity: Medium
+          mitigation: MLX is one preset among several; desktop offline-mode (plan-a23bba5f) handles detect/launch. Non-Apple hosts use Ollama or a cloud backend.
+    synthesis: |
+        The plan is feasible and now DRY: MLX is added with zero bespoke adapter code because
+        both MLX (mlx_lm.server) and Ollama (/v1) speak the OpenAI Chat Completions protocol —
+        a single OpenAICompatibleProvider/Scorer (shared src/jobsmith/llm/openai_compat.py)
+        serves MLX, Ollama, LM Studio, and llama.cpp via base_url + model. The main risk
+        remains structural JSON enforcement, mitigated by robust parsing in slice 3. Scope is
+        chat + scoring; the agentic apply pipeline (claude -p) is explicitly out of scope.
+        Links to plan-a23bba5f, which surfaces these local backends as a desktop offline mode.

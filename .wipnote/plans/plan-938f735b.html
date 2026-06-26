@@ -39,6 +39,10 @@
 [data-theme="light"] .badge-discuss{background:rgba(167,139,250,.08);color:#7c3aed;border-color:rgba(167,139,250,.2)}
 [data-theme="light"] .badge-pending{background:rgba(107,114,128,.08);color:#4b5563;border-color:rgba(107,114,128,.2)}
 [data-theme="light"] .badge-blocked{background:rgba(239,68,68,.08);color:#dc2626;border-color:rgba(239,68,68,.2)}
+[data-theme="light"] .badge-success{background:rgba(34,197,94,.08);color:#16a34a;border-color:rgba(34,197,94,.2)}
+[data-theme="light"] .badge-warn{background:rgba(245,158,11,.08);color:#d97706;border-color:rgba(245,158,11,.2)}
+[data-theme="light"] .badge-danger{background:rgba(239,68,68,.08);color:#dc2626;border-color:rgba(239,68,68,.2)}
+[data-theme="light"] .badge-info{background:rgba(99,179,237,.08);color:#2563eb;border-color:rgba(99,179,237,.2)}
 [data-theme="light"] .btn-finalize{background:#4a6e00;color:#fff}
 [data-theme="light"] .section-card{--shadow-card:0 1px 2px rgba(0,0,0,.04),0 0 0 1px var(--border)}
 
@@ -107,6 +111,11 @@ a:hover{opacity:.8}
 .badge-discuss{background:rgba(167,139,250,.1);color:var(--discuss);border-color:rgba(167,139,250,.25)}.badge-discuss::before{background:var(--discuss)}
 .badge-pending{background:rgba(107,114,128,.1);color:var(--pending);border-color:rgba(107,114,128,.2)}.badge-pending::before{background:var(--pending)}
 .badge-blocked{background:rgba(239,68,68,.1);color:var(--blocked);border-color:rgba(239,68,68,.25)}.badge-blocked::before{background:var(--blocked)}
+/* Critic-item kind badges: success=green, warn=amber, danger=red, info=neutral/blue */
+.badge-success{background:rgba(34,197,94,.1);color:var(--approved);border-color:rgba(34,197,94,.25)}.badge-success::before{background:var(--approved)}
+.badge-warn{background:rgba(245,158,11,.1);color:var(--revision);border-color:rgba(245,158,11,.25)}.badge-warn::before{background:var(--revision)}
+.badge-danger{background:rgba(239,68,68,.1);color:var(--blocked);border-color:rgba(239,68,68,.25)}.badge-danger::before{background:var(--blocked)}
+.badge-info{background:rgba(99,179,237,.1);color:#63b3ed;border-color:rgba(99,179,237,.25)}.badge-info::before{background:#63b3ed}
 
 /* ── Dependency graph ── */
 .dep-graph{background:var(--bg-card);border-radius:var(--radius);padding:28px;margin-bottom:28px;box-shadow:var(--shadow-card);overflow-x:auto}
@@ -393,6 +402,55 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   .chat-sidebar{width:100% !important;min-width:0;max-width:none;border-left:none;border-top:1px solid var(--border);height:400px;flex-shrink:0}
 }
 
+/* ── Slice visual blocks (shared plan/blocks renderers) ── */
+.slice-blocks .block-zone{display:flex;flex-direction:column;gap:12px}
+.block{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}
+.block-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.block-kind{font-family:var(--mono);font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--accent);background:var(--accent-dim);border-radius:4px;padding:2px 6px}
+.block-title{font-family:var(--sans);font-weight:600;font-size:.88rem;color:var(--text)}
+.block-table{width:100%;border-collapse:collapse;font-size:.82rem;margin-top:4px}
+.block-table th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.05em}
+.block-table td{padding:6px 8px;border-bottom:1px solid rgba(58,58,66,.5);color:var(--text-dim);vertical-align:top}
+.block-table tr:last-child td{border-bottom:none}
+.block-api-endpoint .api-method{font-family:var(--mono);font-size:.7rem;font-weight:700;padding:2px 7px;border-radius:4px;background:var(--bg-input);border:1px solid var(--border);color:var(--text)}
+.block-api-endpoint .api-path{font-size:.82rem;word-break:break-all}
+.block-file-tree .file-list{list-style:none;padding-left:0;margin:0;display:flex;flex-direction:column;gap:3px}
+.block-file-tree .file-entry{font-size:.84rem;color:var(--text-dim)}
+.block-file-tree .file-change{font-family:var(--mono);font-size:.62rem;font-weight:700;text-transform:uppercase;padding:1px 5px;border-radius:3px;margin-right:6px;border:1px solid var(--border)}
+.block-file-tree .file-change-add{color:var(--approved);border-color:rgba(34,197,94,.35)}
+.block-file-tree .file-change-modify{color:var(--revision);border-color:rgba(245,158,11,.35)}
+.block-file-tree .file-change-delete{color:var(--blocked);border-color:rgba(239,68,68,.35)}
+.block-wireframe .wireframe-canvas{background:var(--wf-bg);color:var(--wf-fg);border:1px dashed var(--wf-border);border-radius:var(--wf-radius);padding:14px}
+.block-wireframe .wireframe-error{font-family:var(--mono);font-size:.78rem;color:var(--blocked);background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:var(--radius-sm);padding:8px 10px}
+.block-diagram .diagram-flow{display:flex;gap:8px;flex-wrap:wrap}
+.block-diagram .diagram-lr{flex-direction:row;align-items:center}
+.block-diagram .diagram-tb{flex-direction:column;align-items:flex-start}
+.block-diagram .diagram-node{background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:7px 13px;font-family:var(--mono);font-size:.8rem;color:var(--text);white-space:nowrap}
+.block-diagram .diagram-arrow{color:var(--accent);font-family:var(--mono)}
+.block-diagram .diagram-tb .diagram-arrow{margin-left:16px}
+.block-tabs .tabs{position:relative}
+.block-tabs .tab-radio{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.block-tabs .tab-labels{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
+.block-tabs .tab-label{padding:6px 12px;font-family:var(--mono);font-size:.78rem;color:var(--text-muted);cursor:pointer;border:1px solid transparent;border-bottom:none;border-radius:6px 6px 0 0;margin-bottom:-1px}
+.block-tabs .tab-label:hover{color:var(--text)}
+.block-tabs .tab-panels{padding:12px 2px}
+.block-tabs .tab-panel{display:none;font-size:.88rem;color:var(--text-dim);white-space:pre-wrap;font-family:var(--sans)}
+.block-tabs .tabs .tab-radio:nth-of-type(1):checked~.tab-labels .tab-label:nth-child(1),.block-tabs .tabs .tab-radio:nth-of-type(2):checked~.tab-labels .tab-label:nth-child(2),.block-tabs .tabs .tab-radio:nth-of-type(3):checked~.tab-labels .tab-label:nth-child(3),.block-tabs .tabs .tab-radio:nth-of-type(4):checked~.tab-labels .tab-label:nth-child(4),.block-tabs .tabs .tab-radio:nth-of-type(5):checked~.tab-labels .tab-label:nth-child(5),.block-tabs .tabs .tab-radio:nth-of-type(6):checked~.tab-labels .tab-label:nth-child(6),.block-tabs .tabs .tab-radio:nth-of-type(7):checked~.tab-labels .tab-label:nth-child(7),.block-tabs .tabs .tab-radio:nth-of-type(8):checked~.tab-labels .tab-label:nth-child(8){color:var(--text);border-color:var(--border);background:var(--bg-card)}
+.block-tabs .tabs .tab-radio:nth-of-type(1):checked~.tab-panels .tab-panel:nth-child(1),.block-tabs .tabs .tab-radio:nth-of-type(2):checked~.tab-panels .tab-panel:nth-child(2),.block-tabs .tabs .tab-radio:nth-of-type(3):checked~.tab-panels .tab-panel:nth-child(3),.block-tabs .tabs .tab-radio:nth-of-type(4):checked~.tab-panels .tab-panel:nth-child(4),.block-tabs .tabs .tab-radio:nth-of-type(5):checked~.tab-panels .tab-panel:nth-child(5),.block-tabs .tabs .tab-radio:nth-of-type(6):checked~.tab-panels .tab-panel:nth-child(6),.block-tabs .tabs .tab-radio:nth-of-type(7):checked~.tab-panels .tab-panel:nth-child(7),.block-tabs .tabs .tab-radio:nth-of-type(8):checked~.tab-panels .tab-panel:nth-child(8){display:block}
+
+/* ── Visual Overview Zone ── */
+.visual-overview{background:var(--bg-card);border-radius:var(--radius);padding:28px;margin-bottom:28px;box-shadow:var(--shadow-card)}
+.visual-overview>h2{margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.overview-group{margin-bottom:28px}.overview-group:last-child{margin-bottom:0}
+.overview-group>h3{margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:.72rem;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.08em}
+.overview-group-blocks{display:flex;flex-direction:column;gap:16px}
+.overview-block-entry{display:flex;flex-direction:column;gap:6px}
+.overview-slice-label{display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:var(--text-muted);font-size:.8rem;transition:color var(--transition)}
+.overview-slice-label:hover{color:var(--text)}
+.overview-slice-label .slice-num{font-size:.7rem;padding:1px 6px}
+.overview-slice-title{font-family:var(--sans);font-size:.8rem;font-weight:500}
+
+
 </style>
 </head>
 <body>
@@ -402,11 +460,52 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <a href="/" class="brand">wipnote</a>
     <button class="sidebar-toggle" id="left-sidebar-toggle" title="Collapse sidebar" aria-label="Toggle left sidebar">&#8249;</button>
   </div>
+  
   <a href="#design" class="nav-link active" data-spy="design" data-initial="D">Design</a>
   <a href="#slices" class="nav-link" data-spy="slices" data-initial="S">Slices</a>
   
-  <a href="#questions" class="nav-link" data-spy="questions" data-initial="Q">Decisions</a>
-  <a href="#critique" class="nav-link" data-spy="critique" data-initial="C">Critique</a>
+  <ul class="slice-nav-list" id="slice-nav-list">
+    
+    <li>
+      <a href="#slice-1" class="slice-nav-item" data-slice-nav="1">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="1"></span>
+        <span>#1 Define configuration schema for LLM provider settings (incl. MLX/Ollama presets)</span>
+        <span class="nav-triage-badge nav-triage-issue" title="1 issue(s)">&#9888;1</span>
+        
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-2" class="slice-nav-item" data-slice-nav="2">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="2"></span>
+        <span>#2 Implement pluggable Chat Backend providers (unified OpenAI-compatible adapter)</span>
+        <span class="nav-triage-badge nav-triage-issue" title="1 issue(s)">&#9888;1</span>
+        
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-3" class="slice-nav-item" data-slice-nav="3">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="3"></span>
+        <span>#3 Implement pluggable Scorer Backend providers (unified adapter + robust JSON)</span>
+        <span class="nav-triage-badge nav-triage-issue" title="1 issue(s)">&#9888;1</span>
+        
+      </a>
+    </li>
+    
+    <li>
+      <a href="#slice-4" class="slice-nav-item" data-slice-nav="4">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="4"></span>
+        <span>#4 Expose LLM provider settings in Web UI (presets + base_url/model)</span>
+        <span class="nav-triage-badge nav-triage-issue" title="1 issue(s)">&#9888;1</span>
+        
+      </a>
+    </li>
+    
+  </ul>
+  
+  
+  
   <a href="#feedback-summary" class="nav-link" data-spy="feedback-summary" data-initial="P">Progress</a>
   <a href="#chat-panel" class="nav-link" data-spy="chat-panel" data-initial="&#9825;">Chat</a>
 </nav>
@@ -417,10 +516,10 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <!-- Plan Header -->
 <header class="plan-header">
   <h1>Plan: Pluggable LLM Backends for jobsmith</h1>
-  <p style="color:var(--text-dim)">Refactor chat and scoring modules to support switchable LLM backends: Claude Code CLI, Antigravity CLI, Codex CLI, and local Ollama API.</p>
+  <p style="color:var(--text-dim)">Refactor chat and scoring modules to support switchable LLM backends. Subprocess harnesses (Claude Code CLI, Antigravity CLI, Codex CLI) plus a single unified OpenAI-compatible local provider that covers MLX (mlx_lm.server), Ollama (/v1), LM Studio, and llama.cpp via base_url + model.</p>
   <div class="meta">
     <span class="badge badge-pending">Draft</span>
-    <span style="font-size:.75rem;color:var(--text-muted)">v2 · 0 slices · Created 2026-06-15</span>
+    <span style="font-size:.75rem;color:var(--text-muted)">v4 · 4 slices · Created 2026-06-15</span>
   </div>
 </header>
 <button id="themeToggle" style="position:fixed;top:16px;right:16px;z-index:100;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;color:var(--text);font-family:var(--mono);font-size:0.75rem;cursor:pointer;">
@@ -436,10 +535,17 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <pre><code class="language-yaml" id="yaml-content">Loading&#x2026;</code></pre>
 </details>
 
+<!-- ZONE 0: Visual Overview (blocks-first headline — expanded, above dependency graph) -->
+
+
 <!-- ZONE 1: Dependency Graph -->
 <section class="dep-graph" data-zone="dependency-graph">
   <h2>Dependency Graph</h2>
   <div id="graph-data" style="display:none">
+    <div data-node="1" data-name="Define configuration schema for LLM provider settings (incl. MLX/Ollama presets)" data-status="pending" data-deps="" data-files="2"></div>
+    <div data-node="2" data-name="Implement pluggable Chat Backend providers (unified OpenAI-compatible adapter)" data-status="pending" data-deps="1" data-files="3"></div>
+    <div data-node="3" data-name="Implement pluggable Scorer Backend providers (unified adapter + robust JSON)" data-status="pending" data-deps="1" data-files="2"></div>
+    <div data-node="4" data-name="Expose LLM provider settings in Web UI (presets + base_url/model)" data-status="pending" data-deps="2,3" data-files="2"></div>
     
     <!--PLAN_GRAPH_NODES-->
   </div>
@@ -452,17 +558,34 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <details id="design" class="section-card" open data-phase="design" data-status="pending">
   <summary><span>Design</span><span class="badge badge-pending" data-badge-for="design">Pending</span></summary>
   <div class="section-body">
-    <!--PLAN_DESIGN_CONTENT-->
-    <div class="sub-section">
-      <h4>Open Questions</h4>
-      <!--PLAN_QUESTIONS-->
-    </div>
+    <h4>Problem</h4>
+<div data-markdown>The jobsmith backend is tightly coupled to Claude Code CLI and the Claude Agent SDK
+in headless mode. While robust, it restricts offline development, local model usage
+(MLX on Apple Silicon, Ollama), and alternative assistant harnesses (Antigravity
+CLI/agy, Codex CLI). MLX and Ollama both already expose OpenAI-compatible HTTP APIs,
+so a single adapter can cover both (and more) rather than one adapter per runner.
+</div>
+<h4>Goals</h4>
+<ol>
+<li data-markdown>Abstract LLM chat and scoring pathways into pluggable provider interfaces.</li>
+<li data-markdown>Add subprocess implementations for Antigravity (agy) and Codex CLI backends.</li>
+<li data-markdown>Add ONE unified OpenAI-compatible HTTP adapter (base_url + model) covering MLX (mlx_lm.server), Ollama (/v1), LM Studio, and llama.cpp — MLX/Ollama are config presets, not bespoke adapters.</li>
+<li data-markdown>Allow switching and configuration via yaml configs (.apply-config.yaml and sourcing.yaml) and the Web UI Config Tab.</li>
+<li data-markdown>Strict backward compatibility: default config maps to the existing Claude Code CLI backend.</li>
+</ol>
+<h4>Constraints</h4>
+<ul>
+<li data-markdown>Strict backward compatibility: default config must map to the existing Claude Code CLI backend.</li>
+<li data-markdown>Local/HTTP queries must respect budget limits and timeout controls; structured-output (scorer) must validate the schema with robust fallback parsing.</li>
+</ul>
+
     <div class="approval-row">
       <label><input type="checkbox" data-section="design" data-action="approve"> Approve design</label>
       <textarea data-section="design" data-comment-for="design" placeholder="Comments on design decisions..."></textarea>
     </div>
   </div>
 </details>
+
 
 <!-- Structure Outline (hidden when empty) -->
 
@@ -471,23 +594,645 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <details id="slices" class="section-card" open data-phase="slices" data-status="pending">
   <summary><span>Slices</span><span class="badge badge-pending" data-badge-for="slices">Pending</span></summary>
   <div class="section-body">
+    <details class="slice-card" id="slice-1" data-slice="1" data-slice-name="slice-1" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 1: Define configuration schema for LLM provider settings (incl. MLX/Ollama presets)">
+    <span class="slice-num">#1</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Define configuration schema for LLM provider settings (incl. MLX/Ollama presets)</span>
+      <span class="slice-preview">Update config models in src/jobsmith/config.py to add an llm section: provider</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-pending badge-sm">S</span>
+          <span class="badge badge-pending badge-sm">Low</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-1">Pending</span>
+          <span class="badge badge-sm badge-issues" title="1 critic issue(s)">1 issue</span>
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-1-approval" value="approved" data-section="slice-1" data-action="approve" aria-label="Approve slice 1">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-1-approval" value="changes_requested" data-section="slice-1" data-action="approve" aria-label="Request changes for slice 1">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-1-approval" value="rejected" data-section="slice-1" data-action="approve" aria-label="Reject slice 1">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
     
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-1-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Update config models in <code>src/jobsmith/config.py</code> to add an <code>llm</code> section: provider
+(enum: claude_cli | antigravity_cli | codex_cli | openai_compatible), model,
+base_url (for openai_compatible), api_key (optional), budget_usd, timeout_s.
+Ship presets so picking &#34;MLX&#34; fills base_url=http://127.0.0.1:8080/v1 and &#34;Ollama&#34;
+fills http://localhost:11434/v1. Validate with Pydantic. Default maps to the
+current Claude CLI configuration for backward compatibility.</p>
+</div>
+          <label for="slice-1-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Lets users pick a provider, model, and local base_url in config, validated on startup, with presets for MLX and Ollama.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/config.py, config-schema.yaml</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>New `llm` fields load and parse from .apply-config.yaml; selecting the MLX or Ollama preset fills the correct base_url.</li><li>Schema verification rejects unsupported provider values and missing base_url for openai_compatible.</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-1-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> startup configuration loading and schema validation.
+<strong>State:</strong> immutable configuration state loaded on launch.
+<strong>Payload:</strong> <code>llm</code> block with provider, model, base_url, api_key, budget_usd, timeout_s; MLX/Ollama presets.
+<strong>Rejected:</strong> A separate provider enum value per local runner (mlx, ollama, lmstudio...) — they are all <code>openai_compatible</code> differing only by base_url/model; presets keep UX friendly without N enum values. Env-only vars (hard to document); DB-only settings (decouples from git).</p>
+</div>
+        <label for="slice-1-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>`tests/test_config.py` — config parsing, default (claude_cli), MLX/Ollama</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 1</span>
+            <ul><li>preset expansion, and invalid-schema inputs.</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">LOW</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">Verify: Pydantic model validation on config load enforces the provider enum &#43; base_url-required-for-openai_compatible constraint on startup.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">INFO</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Unified design: MLX/Ollama collapse to the openai_compatible provider with presets rather than separate enum values. [applied]</span>
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    <div class="slice-deps">Dependencies: none</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-1" data-comment-for="slice-1" placeholder="Comments on slice 1..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-2" data-slice="2" data-slice-name="slice-2" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 2: Implement pluggable Chat Backend providers (unified OpenAI-compatible adapter)">
+    <span class="slice-num">#2</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Implement pluggable Chat Backend providers (unified OpenAI-compatible adapter)</span>
+      <span class="slice-preview">Refactor src/jobsmith/api/claudechat.py to extract BaseChatBackend.</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-2">Pending</span>
+          <span class="badge badge-sm badge-issues" title="1 critic issue(s)">1 issue</span>
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-2-approval" value="approved" data-section="slice-2" data-action="approve" aria-label="Approve slice 2">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-2-approval" value="changes_requested" data-section="slice-2" data-action="approve" aria-label="Request changes for slice 2">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-2-approval" value="rejected" data-section="slice-2" data-action="approve" aria-label="Reject slice 2">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-2-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Refactor <code>src/jobsmith/api/claude_chat.py</code> to extract <code>BaseChatBackend</code>. Implement
+subprocess providers <code>ClaudeCliProvider</code>, <code>AntigravityCliProvider</code>,
+<code>CodexCliProvider</code>, and a single <code>OpenAICompatibleProvider</code> (new shared module
+<code>src/jobsmith/llm/openai_compat.py</code>) that streams /v1/chat/completions from any
+OpenAI-compatible base_url (MLX mlx_lm.server :8080, Ollama :11434/v1, LM Studio,
+llama.cpp). Update the <code>/api/chat</code> route in <code>src/jobsmith/api/chat.py</code> to use a
+backend factory keyed on config. All providers return a unified
+Generator[str, None, None] of text deltas.</p>
+</div>
+          <label for="slice-2-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Decouples chat logic from the Claude Code executable; one OpenAI-compatible adapter serves MLX, Ollama, LM Studio, and llama.cpp.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/api/claude_chat.py, src/jobsmith/api/chat.py, src/jobsmith/llm/openai_compat.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Chat factory resolves and executes the active provider from config.</li><li>Antigravity provider invokes `agy -p` with `--dangerously-skip-permissions`; Codex via `codex exec`.</li><li>OpenAICompatibleProvider streams chat deltas from BOTH an MLX mlx_lm.server endpoint and an Ollama /v1 endpoint with only base_url/model changed.</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-2-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> chat turn route <code>/api/applications/{slug}/chat</code>.
+<strong>State:</strong> session ID persisted in the sqlite review database as before.
+<strong>Payload:</strong> streaming text deltas (SSE-friendly Generator[str]).
+<strong>Unified adapter:</strong> <code>openai_compat.py</code> is shared by chat (this slice) and scorer (slice 3) — DRY. MLX and Ollama differ only by base_url/model.
+<strong>Rejected:</strong> Separate native OllamaChatProvider + MlxProvider — duplicates HTTP/streaming code for runners that share the OpenAI protocol (per the 2026-06-26 unified decision). Provider logic inside chat routes (violates SoC).</p>
+</div>
+        <label for="slice-2-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>`tests/test_claude_chat.py` — provider resolution; mock subprocess command</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 2</span>
+            <ul><li>construction for `agy`/`codex`; mock httpx stream for the OpenAI-compatible adapter</li><li>asserting it parses SSE `data:` chunks into text deltas (same code path for MLX &amp; Ollama).</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">INFO</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Ergonomics: providers must return a unified Generator[str]; subprocess lines vs HTTP SSE parse differently but converge to text deltas.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">LOW</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">Verify: agy --conversation requires a valid conversation ID; map review DB session_uuids to agy conversation IDs.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">INFO</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Unified: native OllamaChatProvider folded into OpenAICompatibleProvider (Ollama via /v1); MLX added at zero extra adapter cost. [applied]</span>
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    <div class="slice-deps">Dependencies: slices 1</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-2" data-comment-for="slice-2" placeholder="Comments on slice 2..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-3" data-slice="3" data-slice-name="slice-3" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 3: Implement pluggable Scorer Backend providers (unified adapter &#43; robust JSON)">
+    <span class="slice-num">#3</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Implement pluggable Scorer Backend providers (unified adapter &#43; robust JSON)</span>
+      <span class="slice-preview">Extract BaseScorerBackend and implement ClaudeAgentScorer,</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-revision badge-sm">Med</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-3">Pending</span>
+          <span class="badge badge-sm badge-issues" title="1 critic issue(s)">1 issue</span>
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-3-approval" value="approved" data-section="slice-3" data-action="approve" aria-label="Approve slice 3">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-3-approval" value="changes_requested" data-section="slice-3" data-action="approve" aria-label="Request changes for slice 3">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-3-approval" value="rejected" data-section="slice-3" data-action="approve" aria-label="Reject slice 3">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-3-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Extract <code>BaseScorerBackend</code> and implement <code>ClaudeAgentScorer</code>,
+<code>AntigravityScorer</code>, and <code>OpenAICompatibleScorer</code> in
+<code>src/jobsmith/sourcing/llm_rescore.py</code>, reusing the shared
+<code>src/jobsmith/llm/openai_compat.py</code> adapter. The OpenAI-compatible scorer requests
+the fit-metrics JSON schema (via response_format json_schema where supported, else
+schema-in-prompt) and uses robust try/except extraction so malformed model output
+degrades gracefully instead of crashing the crawl. Works for both MLX and Ollama.</p>
+</div>
+          <label for="slice-3-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Lets the sourcing pipeline run fit-scoring on local/alternative models (MLX/Ollama) instead of depending solely on the Claude Agent SDK.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/sourcing/llm_rescore.py, src/jobsmith/llm/openai_compat.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>The rescoring loop runs under each provider; the OpenAI-compatible scorer works against both MLX and Ollama.</li><li>Malformed/non-schema model output is caught and the posting is skipped/flagged, not crashed (robust parse verified).</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-3-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> sourcing crawl rescore pass inside <code>runner.run_crawl</code>.
+<strong>State:</strong> stateless query; results saved to SQLite <code>postings</code> table.
+<strong>Payload:</strong> JSON matching the fit-metrics schema.
+<strong>Structured output:</strong> prefer response_format json_schema; fall back to schema-in-prompt + robust parse. Same path for MLX and Ollama (both OpenAI-compatible); not all servers enforce schema, so validation is in our code.
+<strong>Rejected:</strong> Python Anthropic SDK for all non-Claude paths (no offline/local support); a separate native-Ollama scorer (folded into the unified adapter).</p>
+</div>
+        <label for="slice-3-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>`tests/test_sourcing_llm_rescore.py` — providers parse structured results;</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 2</span>
+            <ul><li>feed a malformed JSON fixture and assert graceful handling; assert MLX and Ollama</li><li>share the same parse path.</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">HIGH</span>
+          <span class="critic-revision-source">sonnet</span>
+          <span class="critic-revision-summary">Feasibility: Ollama format=&#39;json&#39; / OpenAI json_schema do not guarantee key constraints; robust try/catch parsing is required in the scorer. [addressed in what/done_when]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">INFO</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Unified: OpenAICompatibleScorer replaces the separate OllamaScorer and adds MLX for free. [applied]</span>
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    <div class="slice-deps">Dependencies: slices 1</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-3" data-comment-for="slice-3" placeholder="Comments on slice 3..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+<details class="slice-card" id="slice-4" data-slice="4" data-slice-name="slice-4" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 4: Expose LLM provider settings in Web UI (presets &#43; base_url/model)">
+    <span class="slice-num">#4</span>
+    <span class="slice-title-col">
+      <span class="slice-name">Expose LLM provider settings in Web UI (presets &#43; base_url/model)</span>
+      <span class="slice-preview">Add an LLM provider selector to the Config tab in web/src/app/application.tsx:</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-pending badge-sm">S</span>
+          <span class="badge badge-pending badge-sm">Low</span>
+          <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-4">Pending</span>
+          <span class="badge badge-sm badge-issues" title="1 critic issue(s)">1 issue</span>
+          
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-4-approval" value="approved" data-section="slice-4" data-action="approve" aria-label="Approve slice 4">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-4-approval" value="changes_requested" data-section="slice-4" data-action="approve" aria-label="Request changes for slice 4">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-4-approval" value="rejected" data-section="slice-4" data-action="approve" aria-label="Reject slice 4">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Add an LLM provider selector to the Config tab in <code>web/src/app/application.tsx</code>:
+provider dropdown (Claude CLI / Antigravity / Codex / Local OpenAI-compatible),
+MLX and Ollama quick-presets, and base_url + model inputs (shown for
+openai_compatible). Bind settings to the <code>/api/config</code> GET/PUT routes (extend
+<code>config_routes.py</code> to accept the new <code>llm</code> payload).</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Lets the operator view/select the active backend, choose an MLX/Ollama preset, and set base_url/model from the dashboard Config tab.</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>web/src/app/application.tsx, src/jobsmith/api/config_routes.py</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>Config tab shows the active provider, MLX/Ollama presets, and base_url/model fields for the local option.</li><li>Changing provider/preset persists via PUT /api/config and survives reload.</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <div class="markdown-block serif-prose"><p><strong>Trigger:</strong> Config tab component rendering.
+<strong>State:</strong> reads/updates settings via <code>/api/config</code> GET/PUT.
+<strong>Payload:</strong> JSON <code>llm</code> configuration incl. base_url/model; MLX/Ollama presets are one-click fills.
+<strong>Rejected:</strong> Hardcoded frontend config (operator can&#39;t switch without editing files); separate MLX vs Ollama dropdown entries (they are both &#34;Local OpenAI-compatible&#34; + a preset).</p>
+</div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>`web/src/app/config.test.tsx` — fields render, preset fills base_url, save</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 1</span>
+            <ul><li>issues PUT with the `llm` payload.</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">haiku</span>
+          <span class="critic-revision-summary">Review: new UI config requires /api/config (config_routes.py) PUT to accept the `llm` payload — added config_routes.py to files. [addressed]</span>
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+
+    <div class="slice-deps">Dependencies: slices 2,3</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-4" data-comment-for="slice-4" placeholder="Comments on slice 4..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
+
     <!--PLAN_SLICE_CARDS-->
   </div>
 </details>
 
 <!-- Design Decisions (hidden for v2 plans — slice cards carry their own questions) -->
-<details id="questions" class="section-card" data-phase="questions" data-status="pending">
-  <summary><span>Design Decisions</span><span class="badge badge-pending" data-badge-for="questions">Pending</span></summary>
-  <div class="section-body">
-    <table class="q-table">
-      <thead><tr><th>Question</th><th>Selected</th><th>Status</th></tr></thead>
-      <tbody id="questionsRecap">
-        <!--PLAN_QUESTIONS_RECAP-->
-      </tbody>
-    </table>
-  </div>
-</details>
+
 
 
 
@@ -498,8 +1243,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <h2>Feedback Summary</h2>
   <div class="progress-stats">
     <div class="progress-stat"><strong id="approvedCount">0</strong> approved</div>
-    <div class="progress-stat"><strong id="totalSections">1</strong> sections</div>
-    <div class="progress-stat"><strong id="pendingCount">1</strong> pending</div>
+    <div class="progress-stat"><strong id="totalSections">5</strong> sections</div>
+    <div class="progress-stat"><strong id="pendingCount">5</strong> pending</div>
   </div>
   <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill" style="width:0%"></div></div>
   <div class="comments-summary">
@@ -591,7 +1336,7 @@ var planId=(function(){var a=document.querySelector('article[id]');return a?a.id
 
 (function(){
   'use strict';
-  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design"]/*END_PLAN_SECTIONS_JSON*/;
+  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design","slice-1","slice-2","slice-3","slice-4"]/*END_PLAN_SECTIONS_JSON*/;
 
   function setBadge(el,ok){
     el.className='badge badge-'+(ok?'approved':'pending');
