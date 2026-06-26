@@ -1,13 +1,16 @@
-// Jobsmith desktop shell — Tauri v2 skeleton (slice-2).
+// Jobsmith desktop shell — Tauri v2 (slice-3).
 //
-// Scope of THIS slice: a compiling Rust shell that registers the
-// single-instance + shell plugins and opens a window on the static splash
-// page. The Python sidecar is NOT spawned here — that wiring lands in slice-3.
+// This shell spawns the Python sidecar, discovers its dynamically chosen
+// loopback port, polls /health, then navigates the window from the static
+// splash to the authenticated React UI. Closing the window is an explicit quit
+// that tears the sidecar down so nothing is orphaned.
 //
 // Prevents a spare console window on Windows release builds (no-op on macOS).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::Manager;
+mod sidecar;
+
+use tauri::{Manager, WindowEvent};
 
 fn main() {
     let builder = tauri::Builder::default();
@@ -25,14 +28,31 @@ fn main() {
     }));
 
     builder
-        // The shell plugin is registered here; the actual sidecar spawn (scoped
-        // by capabilities/default.json -> shell:allow-spawn) happens in slice-3.
+        // shell: spawn the bundled sidecar (scoped by capabilities/default.json
+        // -> shell:allow-spawn). dialog: native boot-failure dialog.
         .plugin(tauri_plugin_shell::init())
-        .setup(|_app| {
-            // slice-3: spawn sidecar, read JOBSMITH_LISTENING_PORT, navigate
-            // the "main" window from the splash to the React UI once the
-            // backend reports its listening port.
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            // The Tauri shell owns the API token: generate a fresh random one
+            // per launch and hand it to the sidecar via its environment. The
+            // sidecar's auth cache captures it on first read, so the injected
+            // localhost shim and the spawned server agree with zero Python
+            // changes.
+            let token = uuid::Uuid::new_v4().to_string();
+            app.manage(sidecar::SidecarState::new(token.clone()));
+            sidecar::launch(app.handle().clone(), token);
             Ok(())
+        })
+        // Closing the main window is an explicit quit: kill the sidecar so it is
+        // never orphaned, then exit immediately (avoids a UI-less macOS dock
+        // icon lingering after the window is gone).
+        .on_window_event(|window, event| {
+            if matches!(event, WindowEvent::CloseRequested { .. }) && window.label() == "main" {
+                if let Some(state) = window.try_state::<sidecar::SidecarState>() {
+                    state.shutdown();
+                }
+                std::process::exit(0);
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running Jobsmith desktop application");
