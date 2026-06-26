@@ -1,0 +1,11 @@
+{
+  "name": "jobsmith-desktop",
+  "private": true,
+  "description": "Tauri v2 desktop shell for Jobsmith (macOS). Wraps the React UI + Python sidecar.",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
