@@ -1,0 +1,17 @@
+meta:
+    id: plan-a23bba5f
+    title: Convert Jobsmith to Tauri Desktop Application
+    description: Plan to package Jobsmith frontend and Python backend into a Tauri desktop application
+    created_at: "2026-06-26"
+    status: draft
+    priority: medium
+    schema_version: v4
+    version: 2
+design:
+    problem: ""
+    goals: []
+    constraints: []
+    approved: false
+    comment: ""
+slices: []
+questions: []
