@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Sidecar lifecycle &#43; token auth &#43; dynamic port wiring (Rust)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-fe3aeb26"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-26T06:06:07.199447"
+             data-updated="2026-06-26T07:06:16.501803" data-agent-assigned="claude-code" data-track-id="trk-a57cff96">
+
+        <header>
+            <h1>Sidecar lifecycle &#43; token auth &#43; dynamic port wiring (Rust)</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-a57cff96.html" data-relationship="part_of" data-since="2026-06-26T06:06:07.209671">trk-a57cff96</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="../features/feat-b621a4ab.html" data-relationship="blocked_by">feat-b621a4ab</a></li>
+                    <li><a href="../features/feat-7b5bb30a.html" data-relationship="blocked_by">feat-7b5bb30a</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/89dae515-7da1-4053-b4c2-fd406ac63cf9.html" data-relationship="implemented_in" data-since="2026-06-26T07:06:16.501671">session 89dae515-7da1-4053-b4c2-fd406ac63cf9</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="../plans/plan-a23bba5f.html" data-relationship="planned_in" data-since="2026-06-26T06:06:07.204748">plan-a23bba5f</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>In main.rs: on setup, generate a random token, spawn the sidecar via
+`app.shell().sidecar()` with env `JOBSMITH_API_TOKEN=&lt;tok&gt;` (stdin kept open so
+the stdin-EOF sentinel works), read `JOBSMITH_LISTENING_PORT=&lt;n&gt;` from the child
+stdout (rx channel), tee stdout/stderr to a log file at
+`~/Library/Logs/Jobsmith/sidecar.log`, poll `GET /health` until 200 (with a
+timeout), then navigate the main WebviewWindow to `http://127.0.0.1:&lt;n&gt;/`.
+Jobsmith&#39;s existing localhost shim (staticui.py:208-216) reads the same token
+from auth.py and injects `window.__JOBSMITH__={token,apiBase}` before the React
+app boots — inject-before-load auth with zero new UI code. Lifecycle: on macOS,
+bind `WindowEvent::CloseRequested` to fully quit the app (kill the child +
+process::exit) so closing the window is an explicit quit (no orphaned sidecar,
+no headless dock icon). If `/health` never returns 200 within the timeout, show a
+native error dialog (Retry + &#34;open log&#34;) rather than a blank window.</p>
+        </section>
+    </article>
+</body>
+</html>
