@@ -24,7 +24,7 @@
 # the reverse.
 
 version: 1
-frozen_at: '2026-06-11'  # RESET: re-freeze when adopting jobsmith in your repo
+frozen_at: '2026-06-25'  # re-frozen: apply-jd-parser gains a graceful Chrome-render fetch fallback (feat-2c81da71)
 
 # ----------------------------------------------------------------------------
 # State directory layout (.apply-state/) — single source of truth between specialists
@@ -212,8 +212,21 @@ specialists:
       - Read
       - Write
       - Bash       # for `date` only; no shell pipelines
+      # Last-resort browser-render fallback (feat-2c81da71). Engaged ONLY after
+      # the JSON-endpoint, WebFetch, and Jina tiers fail, and skipped cleanly
+      # when no live browser is connected (headless/cron runs). NEVER the
+      # primary fetch for boards with a working JSON endpoint (Greenhouse,
+      # Lever, Ashby GraphQL). See agents/apply-jd-parser.md "Browser render
+      # fallback".
+      - ToolSearch
+      - mcp__claude-in-chrome__tabs_context_mcp
+      - mcp__claude-in-chrome__tabs_create_mcp
+      - mcp__claude-in-chrome__navigate
+      - mcp__claude-in-chrome__get_page_text
+      - mcp__claude-in-chrome__read_page
+      - mcp__claude-in-chrome__tabs_close_mcp
     failure_modes:
-      - condition: "WebFetch fails AND no jd_text provided"
+      - condition: "All fetch tiers fail (JSON endpoint, WebFetch, Jina, Chrome render) AND no jd_text provided"
         action: "halt — surface 'Need JD text pasted directly'"
       - condition: "Cannot determine role_type with confidence"
         action: "halt — emit a 4-line classification table; ask the user"
