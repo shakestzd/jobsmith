@@ -47,6 +47,71 @@ def _review_db_dir() -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Backend factory — keyed on config.llm.provider
+# ---------------------------------------------------------------------------
+
+
+def _load_llm_settings():
+    """Load ``config.llm`` for the active project, defaulting to claude_cli.
+
+    Any load/validation error falls back to default ``LLMSettings`` so chat
+    keeps working exactly as before (strict backward compatibility).
+    """
+    from jobsmith.config import LLMSettings, find_config, load_config
+
+    try:
+        config_path = find_config(_project_root())
+        config = load_config(path=config_path) if config_path else load_config()
+        return config.llm
+    except Exception:  # noqa: BLE001 — never let config break chat
+        return LLMSettings()
+
+
+def _make_backend(
+    *,
+    slug: str,
+    project_root: Path,
+    review_db_dir: Path,
+    system_prompt: str | None = None,
+    llm=None,
+):
+    """Resolve the chat backend for ``config.llm.provider``.
+
+    Returns a :class:`BaseChatBackend` subclass. Unknown / default providers
+    resolve to ``ClaudeChatBackend`` so existing behavior is preserved.
+    """
+    from jobsmith.api.claude_chat import (
+        AntigravityCliProvider,
+        ClaudeChatBackend,
+        CodexCliProvider,
+        OpenAICompatibleProvider,
+    )
+
+    if llm is None:
+        llm = _load_llm_settings()
+
+    common = {
+        "slug": slug,
+        "project_root": project_root,
+        "review_db_dir": review_db_dir,
+        "system_prompt": system_prompt,
+        "model": llm.model,
+        "base_url": llm.base_url,
+        "api_key": llm.api_key,
+        "timeout_s": llm.timeout_s,
+    }
+
+    providers = {
+        "antigravity_cli": AntigravityCliProvider,
+        "codex_cli": CodexCliProvider,
+        "openai_compatible": OpenAICompatibleProvider,
+        "claude_cli": ClaudeChatBackend,
+    }
+    backend_cls = providers.get(llm.provider, ClaudeChatBackend)
+    return backend_cls(**common)
+
+
+# ---------------------------------------------------------------------------
 # Proposal extraction
 # ---------------------------------------------------------------------------
 
@@ -151,9 +216,7 @@ async def send_chat_message(body: ChatSendRequest) -> EventSourceResponse:
     if slug != "__global__":
         system_prompt = _build_system_prompt(slug)
 
-    from jobsmith.api.claude_chat import ClaudeChatBackend
-
-    backend = ClaudeChatBackend(
+    backend = _make_backend(
         slug=slug,
         project_root=_project_root(),
         review_db_dir=_review_db_dir(),
