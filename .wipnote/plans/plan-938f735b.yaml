@@ -1,12 +1,13 @@
 meta:
     id: plan-938f735b
+    track_id: trk-f5052600
     title: Pluggable LLM Backends for jobsmith
     description: Refactor chat and scoring modules to support switchable LLM backends. Subprocess harnesses (Claude Code CLI, Antigravity CLI, Codex CLI) plus a single unified OpenAI-compatible local provider that covers MLX (mlx_lm.server), Ollama (/v1), LM Studio, and llama.cpp via base_url + model.
     created_at: "2026-06-15"
-    status: draft
+    status: finalized
     priority: medium
     schema_version: v4
-    version: 4
+    version: 5
 design:
     problem: |
         The jobsmith backend is tightly coupled to Claude Code CLI and the Claude Agent SDK
@@ -47,6 +48,7 @@ design:
           accessed: "2026-06-26"
 slices:
     - id: slice-1
+      feature_id: feat-0c1e16c3
       num: 1
       title: Define configuration schema for LLM provider settings (incl. MLX/Ollama presets)
       what: |
@@ -70,12 +72,13 @@ slices:
         Unit: `tests/test_config.py` — config parsing, default (claude_cli), MLX/Ollama
         preset expansion, and invalid-schema inputs.
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://docs.ollama.com/api/openai-compatibility
           claim: Ollama OpenAI base_url is http://localhost:11434/v1 — the value baked into the Ollama preset.
           accessed: "2026-06-26"
+      execution_status: promoted
       critic_revisions:
         - source: sonnet
           severity: LOW
@@ -112,6 +115,7 @@ slices:
             - name: timeout_s
               type: int
     - id: slice-2
+      feature_id: feat-7f4d1643
       num: 2
       title: Implement pluggable Chat Backend providers (unified OpenAI-compatible adapter)
       what: |
@@ -141,7 +145,7 @@ slices:
         construction for `agy`/`codex`; mock httpx stream for the OpenAI-compatible adapter
         asserting it parses SSE `data:` chunks into text deltas (same code path for MLX & Ollama).
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://github.com/ml-explore/mlx-lm
@@ -150,6 +154,7 @@ slices:
         - url: https://platform.openai.com/docs/api-reference/chat
           claim: 'Streaming chunk shape (choices[].delta.content / data: [DONE]) the adapter parses.'
           accessed: "2026-06-26"
+      execution_status: promoted
       critic_revisions:
         - source: haiku
           severity: INFO
@@ -188,6 +193,7 @@ slices:
             - factory -> ClaudeCli | Antigravity | Codex | OpenAICompatible(base_url)
             - unified Generator[str] text deltas -> /api/chat SSE
     - id: slice-3
+      feature_id: feat-59d71698
       num: 3
       title: Implement pluggable Scorer Backend providers (unified adapter + robust JSON)
       what: |
@@ -214,12 +220,13 @@ slices:
         feed a malformed JSON fixture and assert graceful handling; assert MLX and Ollama
         share the same parse path.
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://docs.ollama.com/api/openai-compatibility
           claim: Ollama's OpenAI-compatible endpoint does not fully enforce json_schema response_format yet — basis for the robust schema-in-prompt + try/except fallback (not relying on server-side enforcement).
           accessed: "2026-06-26"
+      execution_status: promoted
       critic_revisions:
         - source: sonnet
           severity: HIGH
@@ -251,6 +258,7 @@ slices:
             - name: parse_ok
               type: bool (false -> robust-parse fallback flagged the posting)
     - id: slice-4
+      feature_id: feat-7e3444fd
       num: 4
       title: Expose LLM provider settings in Web UI (presets + base_url/model)
       what: |
@@ -275,9 +283,10 @@ slices:
         Unit: `web/src/app/config.test.tsx` — fields render, preset fills base_url, save
         issues PUT with the `llm` payload.
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
       research_waiver: UI wiring against the existing /api/config GET/PUT contract; no external API/standard governs this beyond the provider config defined in slices 1-3.
+      execution_status: promoted
       critic_revisions:
         - source: haiku
           severity: WARN
