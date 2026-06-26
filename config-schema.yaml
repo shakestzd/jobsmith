@@ -213,3 +213,45 @@ benchmarks:
   # When false (default): missing user benchmarks fall back to Pat Doe silently.
   # When true: missing user benchmarks are a hard FAIL in `jobsmith doctor`.
   required: false
+
+# ----------------------------------------------------------------------------
+# llm — LLM backend for chat and scoring pipelines
+# ----------------------------------------------------------------------------
+# Controls which AI backend jobsmith uses for its chat and fit-scoring calls.
+# Omitting this section (the default) keeps all existing behaviour unchanged:
+# the pipeline routes through the Claude CLI subprocess exactly as before.
+#
+# Provider enum (exactly 4 values):
+#   claude_cli         — Claude Code CLI subprocess (default, backward-compat)
+#   antigravity_cli    — Antigravity `agy` CLI subprocess
+#   codex_cli          — OpenAI Codex CLI subprocess
+#   openai_compatible  — Single unified OpenAI-compatible HTTP endpoint
+#                        (covers MLX via mlx_lm.server and Ollama).
+#                        REQUIRES base_url.
+#
+# Quick presets for openai_compatible:
+#   MLX  (mlx_lm.server): base_url: http://127.0.0.1:8080/v1
+#   Ollama:               base_url: http://localhost:11434/v1
+llm:
+  # One of: claude_cli | antigravity_cli | codex_cli | openai_compatible
+  provider: claude_cli
+
+  # Optional. Model identifier passed to the provider.
+  # For openai_compatible this is the model name the server expects (e.g. "llama3.2").
+  model: null
+
+  # Required when provider == openai_compatible; ignored for CLI providers.
+  # Example values:
+  #   http://127.0.0.1:8080/v1   ← MLX (mlx_lm.server)
+  #   http://localhost:11434/v1  ← Ollama
+  base_url: null
+
+  # Optional. API key sent in the Authorization header for openai_compatible.
+  # Many local servers (MLX, Ollama) do not require a key — set to null or omit.
+  api_key: null
+
+  # Per-request spend ceiling in USD (advisory — not enforced by all providers).
+  budget_usd: 1.0
+
+  # Request timeout in seconds. Increase for large local models.
+  timeout_s: 300
