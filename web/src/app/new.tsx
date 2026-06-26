@@ -7,6 +7,8 @@
 import { useState } from 'react';
 import { Icon } from './shared';
 import { useDoctor } from '../api/hooks';
+import { BrowserInstallPrompt } from '../components/BrowserInstallPrompt';
+import { ClaudeInstallPrompt } from '../components/ClaudeInstallPrompt';
 
 // ── Prop interface ───────────────────────────────────────────────────────────
 
@@ -100,6 +102,10 @@ export function NewApplicationModal({ onClose, onLaunch }: NewApplicationModalPr
 
         {step === 1 && (
           <div className="modal-body">
+            {/* Desktop-only first-run gates. Both render null on a plain web
+                server (probes /api/desktop/* which 404 outside Tauri). */}
+            <BrowserInstallPrompt />
+            <ClaudeInstallPrompt />
             <div className="field">
               <label>job url</label>
               <input

@@ -58,6 +58,11 @@ vi.mock('../api/client', () => ({
   apiGet: vi.fn(),
   apiPost: vi.fn(),
   apiPut: vi.fn(),
+  // OfflineModeToggle is now mounted inside ConfigView. These mocks make it
+  // hide silently (404-like rejection → phase='hidden' → renders null) so
+  // it doesn't interfere with the config form tests.
+  getLlmStatus: vi.fn().mockRejectedValue(new Error('not desktop')),
+  enableOfflineMode: vi.fn(),
   JobsmithApiError: class JobsmithApiError extends Error {
     status: number;
     constructor(message: string, status: number) {

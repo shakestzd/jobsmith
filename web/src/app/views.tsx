@@ -7,6 +7,7 @@ import { Icon, Badge } from './shared';
 import { apiPost, apiPut, JobsmithApiError } from '../api/client';
 import { useApplications, useMasterSection, useConfig, useFeedback, useDoctor } from '../api/hooks';
 import type { MasterAuthor, ApplicationRow, JobsmithConfig, LLMProvider, ConfigValidateResponse, ConfigValidationError } from '../api/types';
+import { OfflineModeToggle } from '../components/OfflineModeToggle';
 
 // ── SiteView ─────────────────────────────────────────────────────────────
 
@@ -638,6 +639,12 @@ export function ConfigView() {
             </>
           )}
         </div>
+      </div>
+
+      {/* Desktop-only offline-mode status panel. Renders nothing on a plain
+          web server (probes /api/desktop/llm/status which 404s outside Tauri). */}
+      <div style={{ marginTop: 16 }}>
+        <OfflineModeToggle />
       </div>
     </div>
   );
