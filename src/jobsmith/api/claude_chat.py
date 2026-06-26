@@ -636,7 +636,15 @@ class OpenAICompatibleProvider(BaseChatBackend):
         messages: list[dict] = []
         if self.system_prompt:
             messages.append({"role": "system", "content": self.system_prompt})
-        messages.append({"role": "user", "content": user_msg})
+        # These servers are stateless, so the FULL conversation must be resent
+        # each turn. The base ``send`` persists this user turn before ``_stream``
+        # runs, so ``load_history`` already ends with the current message — reuse
+        # it instead of re-appending (which would duplicate the turn).
+        history = self.load_history()
+        messages.extend({"role": h["role"], "content": h["content"]} for h in history)
+        if not history or history[-1].get("role") != "user" or history[-1].get("content") != user_msg:
+            # Persistence is best-effort; ensure the current turn is present.
+            messages.append({"role": "user", "content": user_msg})
         return messages
 
     def _stream(self, user_msg: str) -> Generator[str, None, None]:

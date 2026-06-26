@@ -876,7 +876,16 @@ def make_scorer(
         )
     if provider == "antigravity_cli":
         return AntigravityScorer(timeout_sec=timeout_sec)
-    # claude_cli or anything unrecognised → default Claude path.
+    if provider == "codex_cli":
+        # codex has no dedicated scorer this slice; surface the fallback rather
+        # than silently scoring with Claude so the operator isn't surprised.
+        logger.warning(
+            "provider 'codex_cli' has no dedicated fit-scorer backend; "
+            "falling back to ClaudeAgentScorer for sourcing rescore "
+            "(codex_cli is supported for CHAT only). Select 'openai_compatible' "
+            "(MLX/Ollama) or 'claude_cli' for local/Claude scoring."
+        )
+    # claude_cli, codex_cli, or anything unrecognised → default Claude path.
     return ClaudeAgentScorer(query_fn=query_fn or _default_query_fn(), timeout_sec=timeout_sec)
 
 

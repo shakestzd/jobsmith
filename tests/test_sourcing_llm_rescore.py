@@ -1169,6 +1169,18 @@ def test_make_scorer_unknown_provider_falls_back_to_claude() -> None:
     assert isinstance(scorer, ClaudeAgentScorer)
 
 
+def test_make_scorer_codex_warns_about_claude_fallback(caplog) -> None:
+    """codex_cli scoring falls back to Claude but logs an explicit warning (not silent)."""
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="jobsmith.sourcing.llm_rescore"):
+        scorer = make_scorer(LLMSettings(provider="codex_cli"), query_fn=_make_fake_query())
+    assert isinstance(scorer, ClaudeAgentScorer)
+    assert any(
+        "codex_cli" in r.message and "fall" in r.message.lower() for r in caplog.records
+    ), "expected an explicit codex_cli→Claude fallback warning"
+
+
 def test_make_scorer_antigravity() -> None:
     scorer = make_scorer(LLMSettings(provider="antigravity_cli"))
     assert isinstance(scorer, AntigravityScorer)

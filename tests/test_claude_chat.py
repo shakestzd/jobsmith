@@ -704,3 +704,28 @@ def test_openai_compatible_provider_streams_via_client(tmp_path):
     with mock.patch("jobsmith.llm.openai_compat.httpx.Client", _FakeHttpxClient):
         chunks = list(backend.send("hi"))
     assert chunks == ["Hello", ", ", "world"]
+
+
+def test_openai_compatible_provider_resends_full_history(tmp_path):
+    """Stateless HTTP backend resends prior conversation each turn, no dup of the current one."""
+    backend = OpenAICompatibleProvider(
+        base_url="http://127.0.0.1:8080/v1",
+        model="local-model",
+        **_common_kwargs(tmp_path),
+    )
+    # Prior exchange + the current user turn — the base send() persists the user
+    # message before _stream/_messages runs, so it is already in history.
+    backend._persist_message(role="user", text="first question")
+    backend._persist_message(role="assistant", text="first answer")
+    backend._persist_message(role="user", text="second question")
+
+    messages = backend._messages("second question")
+
+    assert messages[0] == {"role": "system", "content": "ctx"}
+    assert messages[1:] == [
+        {"role": "user", "content": "first question"},
+        {"role": "assistant", "content": "first answer"},
+        {"role": "user", "content": "second question"},
+    ]
+    # current turn present exactly once (not duplicated by a trailing append)
+    assert sum(m == {"role": "user", "content": "second question"} for m in messages) == 1
