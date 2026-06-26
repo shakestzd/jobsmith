@@ -548,6 +548,44 @@ export async function getFunnel(window: FunnelWindow = 30): Promise<FunnelRespon
   return apiGet<FunnelResponse>(`/api/funnel?window=${window}`);
 }
 
+// ── Desktop browser (Playwright Chromium) management (feat-0c74180d) ───────
+//
+// Desktop-only endpoints — mounted on the server ONLY when JOBSMITH_DESKTOP=1.
+// On a normal (non-desktop) server getBrowserStatus() resolves to a 404
+// JobsmithApiError; callers should treat that as "not a desktop build" and
+// render nothing.
+
+export interface BrowserStatus {
+  installed: boolean;
+  path: string;
+}
+
+/** GET /api/desktop/browser/status — is Chromium present in the app-data dir? */
+export async function getBrowserStatus(): Promise<BrowserStatus> {
+  return apiGet<BrowserStatus>('/api/desktop/browser/status');
+}
+
+export interface BrowserInstallAck {
+  // "started" | "in_progress" | "already_installed"
+  status: string;
+}
+
+/** POST /api/desktop/browser/install — kick off the one-time Chromium download. */
+export async function installBrowser(): Promise<BrowserInstallAck> {
+  return apiPost<BrowserInstallAck>('/api/desktop/browser/install', {});
+}
+
+/**
+ * Build the SSE URL for Chromium download progress. The bearer token rides as a
+ * ?token= query param because EventSource cannot set an Authorization header
+ * (same pattern as buildEventsUrl).
+ */
+export function buildBrowserInstallEventsUrl(): string {
+  const base = `${BASE_URL}/api/desktop/browser/install/events`;
+  const token = getAccessToken() || getRuntimeToken();
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+}
+
 /**
  * Redact secrets from any string before it lands in the DOM, clipboard, logs,
  * or any other user-visible surface. Catches:
