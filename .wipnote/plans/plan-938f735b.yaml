@@ -88,6 +88,29 @@ slices:
         **State:** immutable configuration state loaded on launch.
         **Payload:** `llm` block with provider, model, base_url, api_key, budget_usd, timeout_s; MLX/Ollama presets.
         **Rejected:** A separate provider enum value per local runner (mlx, ollama, lmstudio...) — they are all `openai_compatible` differing only by base_url/model; presets keep UX friendly without N enum values. Env-only vars (hard to document); DB-only settings (decouples from git).
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - src/jobsmith/config.py (edit — add `llm` Pydantic section + MLX/Ollama presets)
+            - config-schema.yaml (edit — document the `llm` block)
+        - type: data-model
+          title: llm config block
+          fields:
+            name: llm
+          rows:
+            - name: provider
+              type: 'enum: claude_cli|antigravity_cli|codex_cli|openai_compatible (default claude_cli)'
+            - name: model
+              type: string
+            - name: base_url
+              type: string (required for openai_compatible; MLX preset 127.0.0.1:8080/v1, Ollama 127.0.0.1:11434/v1)
+            - name: api_key
+              type: string|null
+            - name: budget_usd
+              type: float
+            - name: timeout_s
+              type: int
     - id: slice-2
       num: 2
       title: Implement pluggable Chat Backend providers (unified OpenAI-compatible adapter)
@@ -143,6 +166,27 @@ slices:
         **Payload:** streaming text deltas (SSE-friendly Generator[str]).
         **Unified adapter:** `openai_compat.py` is shared by chat (this slice) and scorer (slice 3) — DRY. MLX and Ollama differ only by base_url/model.
         **Rejected:** Separate native OllamaChatProvider + MlxProvider — duplicates HTTP/streaming code for runners that share the OpenAI protocol (per the 2026-06-26 unified decision). Provider logic inside chat routes (violates SoC).
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - src/jobsmith/api/claude_chat.py (edit — extract BaseChatBackend + subprocess providers)
+            - src/jobsmith/api/chat.py (edit — backend factory keyed on config)
+            - src/jobsmith/llm/openai_compat.py (new — shared OpenAI-compatible streaming adapter, reused by scorer)
+        - type: api-endpoint
+          title: Chat turn
+          fields:
+            method: POST
+            path: /api/applications/{slug}/chat
+          rows:
+            - name: stream
+              type: text deltas (Generator[str]) — same shape for claude_cli/agy/codex/openai_compatible
+        - type: diagram
+          title: Backend factory
+          entries:
+            - config.llm.provider
+            - factory -> ClaudeCli | Antigravity | Codex | OpenAICompatible(base_url)
+            - unified Generator[str] text deltas -> /api/chat SSE
     - id: slice-3
       num: 3
       title: Implement pluggable Scorer Backend providers (unified adapter + robust JSON)
@@ -189,6 +233,23 @@ slices:
         **Payload:** JSON matching the fit-metrics schema.
         **Structured output:** prefer response_format json_schema; fall back to schema-in-prompt + robust parse. Same path for MLX and Ollama (both OpenAI-compatible); not all servers enforce schema, so validation is in our code.
         **Rejected:** Python Anthropic SDK for all non-Claude paths (no offline/local support); a separate native-Ollama scorer (folded into the unified adapter).
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - src/jobsmith/sourcing/llm_rescore.py (edit — BaseScorerBackend + Claude/Antigravity/OpenAICompatible scorers)
+            - src/jobsmith/llm/openai_compat.py (reuse — shared adapter from slice 2)
+        - type: data-model
+          title: fit-metrics result schema
+          fields:
+            name: fit_score
+          rows:
+            - name: score
+              type: int 0-100
+            - name: rationale
+              type: string
+            - name: parse_ok
+              type: bool (false -> robust-parse fallback flagged the posting)
     - id: slice-4
       num: 4
       title: Expose LLM provider settings in Web UI (presets + base_url/model)
@@ -226,6 +287,39 @@ slices:
         **State:** reads/updates settings via `/api/config` GET/PUT.
         **Payload:** JSON `llm` configuration incl. base_url/model; MLX/Ollama presets are one-click fills.
         **Rejected:** Hardcoded frontend config (operator can't switch without editing files); separate MLX vs Ollama dropdown entries (they are both "Local OpenAI-compatible" + a preset).
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - web/src/app/application.tsx (edit — Config tab provider selector + MLX/Ollama presets + base_url/model)
+            - src/jobsmith/api/config_routes.py (edit — PUT /api/config accepts the `llm` payload)
+        - type: api-endpoint
+          title: Persist config
+          fields:
+            method: PUT
+            path: /api/config
+          rows:
+            - name: body.llm
+              type: '{provider, model, base_url, api_key?, budget_usd, timeout_s}'
+        - type: wireframe
+          title: Config tab — LLM provider
+          fields:
+            html: |
+                <div style="padding:var(--wf-space-md);background:var(--wf-surface);color:var(--wf-text)">
+                  <label style="display:block;margin-bottom:var(--wf-space-sm)">LLM provider</label>
+                  <select style="width:100%;padding:var(--wf-space-sm);border:1px solid var(--wf-border)">
+                    <option>Claude CLI (default)</option>
+                    <option>Antigravity</option>
+                    <option>Codex</option>
+                    <option>Local (OpenAI-compatible)</option>
+                  </select>
+                  <div style="margin-top:var(--wf-space-sm);display:flex;gap:var(--wf-space-sm)">
+                    <button style="padding:var(--wf-space-sm);border:1px solid var(--wf-border)">MLX preset</button>
+                    <button style="padding:var(--wf-space-sm);border:1px solid var(--wf-border)">Ollama preset</button>
+                  </div>
+                  <input placeholder="base_url" style="margin-top:var(--wf-space-sm);width:100%;padding:var(--wf-space-sm);border:1px solid var(--wf-border)"/>
+                  <input placeholder="model" style="margin-top:var(--wf-space-sm);width:100%;padding:var(--wf-space-sm);border:1px solid var(--wf-border)"/>
+                </div>
 questions: []
 critique:
     reviewed_at: "2026-06-26"
