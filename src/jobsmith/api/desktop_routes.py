@@ -26,11 +26,18 @@ from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 
 from jobsmith.api.auth import current_user, current_user_or_query
 from jobsmith.api.schemas.auth import UserRecord
+from jobsmith.desktop import deps
 from jobsmith.desktop import playwright_bootstrap as pw
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/desktop/browser", tags=["desktop"])
+
+# Separate router for external-tool dependency detection (feat-dac00175,
+# slice 6). Same JOBSMITH_DESKTOP gating + header auth as the browser routes;
+# mounted alongside `router` in api.main.create_app. Slice 7 will extend the
+# deps probe (LLM runtime) behind this same endpoint.
+deps_router = APIRouter(prefix="/desktop/deps", tags=["desktop"])
 
 
 class BrowserStatus(BaseModel):
@@ -74,4 +81,21 @@ async def browser_install_events(
     return EventSourceResponse(_gen())
 
 
-__all__ = ["router"]
+class DepsStatus(BaseModel):
+    claude_installed: bool
+    version: str | None = None
+    path: str | None = None
+
+
+@deps_router.get("/status", response_model=DepsStatus)
+def deps_status(_user: UserRecord = Depends(current_user)) -> DepsStatus:
+    """Report whether the ``claude`` Claude Code CLI is available on PATH."""
+    snapshot = deps.claude_status()
+    return DepsStatus(
+        claude_installed=snapshot["installed"],
+        version=snapshot["version"],
+        path=snapshot["path"],
+    )
+
+
+__all__ = ["deps_router", "router"]
