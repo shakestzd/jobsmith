@@ -326,6 +326,17 @@ def create_app() -> FastAPI:
         dependencies=[Depends(current_user)],
     )
 
+    # feat-0c74180d (slice 4): desktop-only Playwright Chromium management.
+    # Mounted ONLY in the desktop sidecar (JOBSMITH_DESKTOP=1) so a normal
+    # server returns 404 for /api/desktop/* (Goal-4 regression). Per-route auth
+    # lives in the router: /status uses current_user; the SSE /install/events
+    # route uses current_user_or_query (EventSource cannot set headers), so we
+    # do NOT attach a blanket header-only dependency at include time.
+    if os.environ.get("JOBSMITH_DESKTOP") == "1":
+        from jobsmith.api.desktop_routes import router as desktop_router
+
+        app.include_router(desktop_router, prefix="/api")
+
     # OpenAPI: surface the HTTPBearer scheme so /docs has an Authorize button.
     _install_openapi_security(app)
 
