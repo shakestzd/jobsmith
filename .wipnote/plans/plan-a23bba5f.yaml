@@ -27,11 +27,10 @@ design:
         SCOPE NOTES (explicit deferrals so reviewers can tell intent from oversight):
         - Auto-update (tauri-plugin-updater) is OUT OF SCOPE for this plan; follow-on milestone.
         - Windows/Linux bundles are OUT OF SCOPE; macOS aarch64 .dmg first (x86_64 later).
-        - KNOWN RUNTIME DEPENDENCY (needs a decision): the apply pipeline shells out to the
-          `claude` Claude Code CLI via src/jobsmith/headless.py. The current slices do NOT
-          bundle or locate `claude`. Options: detect+prompt-to-install, document as a
-          prerequisite, or defer the apply pipeline. Tracked as risk R-claude below; flagged
-          to the human reviewer before approval.
+        - RESOLVED (slice 6): the apply pipeline shells out to the `claude` Claude Code CLI
+          via src/jobsmith/headless.py. Slice 6 detects `claude` and shows a guided
+          no-Node native-installer prompt; headless.py degrades to a structured error if
+          absent. (See also the MLX/Ollama local-backend exploration linked from this plan.)
         - First-run AI credential/onboarding (API key or `claude` login) is assumed to reuse
           the existing CLI-persisted config; a dedicated onboarding screen is out of scope for v1.
     research:
@@ -512,6 +511,92 @@ slices:
             - build-sidecar.sh (onefile) -> src-tauri/binaries
             - tauri build --bundles dmg (ad-hoc or notarized)
             - Jobsmith.dmg
+    - id: slice-6
+      num: 6
+      title: First-run `claude` CLI detection + guided install prompt (desktop-gated)
+      what: |
+        Add `src/jobsmith/desktop/deps.py`: detect whether the `claude` Claude Code CLI
+        is resolvable (PATH lookup + `claude --version`), returning installed/version/path.
+        Extend the desktop router (`src/jobsmith/api/routes/desktop.py`, JOBSMITH_DESKTOP-
+        gated like slice 4) with `GET /api/desktop/deps/status` ->
+        {claude_installed, version, path}. A React `ClaudeInstallPrompt` component gates
+        the apply flow: when `claude` is missing it shows guided install instructions
+        pointing at Anthropic's no-Node native installer
+        (`curl -fsSL https://claude.ai/install.sh | bash`) plus a "re-check" button.
+        headless.py surfaces a structured 'claude_unavailable' error instead of crashing
+        when the binary is absent.
+      why: |
+        Resolves risk R-claude: the apply pipeline shells out to `claude` (headless.py).
+        The native installer needs no Node, so detect + guided-install keeps the bundle
+        slim and Constraint 1 intact while making the dependency explicit to the user
+        (user choice: detect + guided install).
+      files:
+        - src/jobsmith/desktop/deps.py
+        - src/jobsmith/api/routes/desktop.py
+        - src/jobsmith/headless.py
+        - web/src/components/ClaudeInstallPrompt.tsx
+        - web/src/api/client.ts
+      deps:
+        - 3
+        - 4
+      done_when:
+        - On a host without `claude`, the apply flow is blocked by a guided prompt (native-installer instructions + re-check), not a crash or a silent failure.
+        - After installing `claude` and clicking re-check, GET /api/desktop/deps/status reports installed:true and the apply flow proceeds.
+        - On a `jobsmith up` server without JOBSMITH_DESKTOP=1, GET /api/desktop/deps/status returns 404 (Goal 4).
+      effort: M
+      risk: Low
+      tests: |
+        Unit: deps.py reports installed:false when shutil.which returns None, true with a
+        stub on PATH. Regression: standalone (no JOBSMITH_DESKTOP) returns 404. Fallback:
+        monkeypatch the claude subprocess to be missing, assert headless.py raises a
+        structured 'claude_unavailable' (caught by the UI) rather than an unhandled error.
+      complexity: complex
+      approved: false
+      comment: ""
+      research:
+        - url: https://code.claude.com/docs/en/setup
+          claim: Claude Code's recommended install is the native installer (`curl -fsSL https://claude.ai/install.sh | bash`) which needs no Node.js — so guided-install keeps Constraint 1 (no node/python) intact; `claude --version` verifies a successful install.
+          accessed: "2026-06-26"
+      questions:
+        - id: q-claude-dep
+          text: How does the bundle handle the apply pipeline's `claude` CLI dependency?
+          answer: Detect + guided install via Anthropic's no-Node native installer, with a re-check button; headless.py degrades to a structured error if absent. (User-chosen; native installer keeps Constraint 1 intact.)
+      critic_revisions:
+        - source: local-design
+          severity: WARN
+          summary: 'Resolves R-claude: the apply pipeline''s external `claude` CLI dependency is now detected with a guided no-Node install prompt rather than left implicit. [resolved]'
+      decisions_notes: |
+        **Trigger:** App boot + apply attempt; router only mounted when JOBSMITH_DESKTOP=1.
+        **State:** No persistence — detection is live (shutil.which + version probe each check).
+        **Payload:** deps/status JSON; missing -> guided ClaudeInstallPrompt; apply-time miss -> structured 'claude_unavailable'.
+        **Rejected:** Bundling the `claude` CLI as a second sidecar — heaviest, drags in a Node runtime + separate auth (user rejected). Documenting as a bare prerequisite — breaks the zero-terminal goal (user rejected). Deferring the apply pipeline — contradicts the full-parity choice (user rejected).
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - src/jobsmith/desktop/deps.py (new — shutil.which('claude') + claude --version probe)
+            - src/jobsmith/api/routes/desktop.py (edit — add GET /api/desktop/deps/status, same JOBSMITH_DESKTOP gate)
+            - src/jobsmith/headless.py (edit — structured 'claude_unavailable' error when binary missing)
+            - web/src/components/ClaudeInstallPrompt.tsx (new — guided install + re-check)
+            - web/src/api/client.ts (edit — deps/status client call)
+        - type: api-endpoint
+          title: Dependency status
+          fields:
+            method: GET
+            path: /api/desktop/deps/status
+          rows:
+            - name: 200 body
+              type: '{"claude_installed":bool,"version":str|null,"path":str|null}'
+            - name: 404 (standalone)
+              type: router absent unless JOBSMITH_DESKTOP=1
+        - type: diagram
+          title: First-run dependency check
+          entries:
+            - app boots; UI calls GET /api/desktop/deps/status
+            - claude_installed:false -> ClaudeInstallPrompt
+            - user runs native installer (no Node) -> re-check
+            - claude_installed:true -> apply flow unblocked
+            - missing at apply time -> headless.py 'claude_unavailable' (no crash)
 questions: []
 critique:
     reviewed_at: "2026-06-26"
@@ -532,9 +617,9 @@ critique:
           text: The existing staticui shim injects window.__JOBSMITH__ for a 127.0.0.1 Host iff JOBSMITH_PUBLIC_BIND is unset; the sidecar entry point must clear it.
           evidence: staticui.py:208 checks not _is_public_bind() and _is_localhost_request(request).
         - id: R-claude
-          status: questionable
-          text: The apply pipeline shells out to the `claude` Claude Code CLI via headless.py; the desktop bundle does not yet bundle or locate it. A runtime-dependency decision is required.
-          evidence: src/jobsmith/headless.py spawns `claude -p ...` as a subprocess (architecture map). No slice covers locating/bundling `claude`.
+          status: plausible
+          text: 'RESOLVED by slice 6: the apply pipeline shells out to the `claude` Claude Code CLI via headless.py; slice 6 adds detect + guided (no-Node) install. A local-backend alternative (MLX/Ollama) is being explored separately and may further reduce this dependency.'
+          evidence: src/jobsmith/headless.py spawns `claude -p ...` as a subprocess; slice 6 GET /api/desktop/deps/status + ClaudeInstallPrompt cover detection/guidance.
     critics:
         - title: DESIGN CRITIC
           sections:
@@ -596,9 +681,9 @@ critique:
         - risk: onefile sidecar still needs a custom .spec (hiddenimports for uvicorn/playwright/claude-agent-sdk) or it crashes at boot.
           severity: Medium
           mitigation: Slice 1 uses collect_all for the heavy packages; slice-1 done_when runs the built binary in a clean env before downstream slices depend on it.
-        - risk: The `claude` Claude Code CLI is a runtime dependency of the apply pipeline not covered by any slice.
-          severity: High
-          mitigation: 'Decide before approval: detect+prompt, document as prereq, or defer the apply pipeline. Tracked as assumption R-claude; surfaced to the human reviewer.'
+        - risk: The `claude` Claude Code CLI is a runtime dependency of the apply pipeline.
+          severity: Low
+          mitigation: Resolved by slice 6 (detect + guided no-Node native install). A local-model backend (MLX/Ollama) is being explored to optionally remove the external dependency entirely.
         - risk: onefile cold-start latency on first launch may make the splash linger.
           severity: Low
           mitigation: Splash + /health poll already cover the wait; acceptable for v1. Revisit if startup exceeds a few seconds.
@@ -609,7 +694,8 @@ critique:
         a macOS .app bundle. The plan is now revised to onefile + stdin-EOF shutdown
         (A2/R2/R3/T2 resolved), with PUBLIC_BIND cleared (A3/T3) and the port TOCTOU race
         removed via sidecar-reported port (W2). Design blockers — icons, data-dir, macOS
-        close==quit, and desktop-route isolation — are all resolved in-slice. ONE open item
-        remains for the human reviewer: R-claude — the apply pipeline depends on the external
-        `claude` CLI, which no slice yet bundles or locates. Decide that (detect+prompt vs
-        prereq vs defer apply) before approving slice 4/5.
+        close==quit, and desktop-route isolation — are all resolved in-slice. R-claude (the
+        apply pipeline's external `claude` CLI dependency) is resolved by slice 6 (detect +
+        guided no-Node install). A separate local-backend exploration (MLX/Ollama) may
+        optionally remove the `claude`/cloud dependency; it links to the pluggable-LLM-
+        backends plan rather than expanding this one.

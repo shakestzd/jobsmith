@@ -511,6 +511,15 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       </a>
     </li>
     
+    <li>
+      <a href="#slice-6" class="slice-nav-item" data-slice-nav="6">
+        <span class="slice-nav-dot" data-approval="pending" data-dot-for="6"></span>
+        <span>#6 First-run `claude` CLI detection + guided install prompt (desktop-gated)</span>
+        <span class="nav-triage-badge nav-triage-issue" title="1 issue(s)">&#9888;1</span>
+        <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
+      </a>
+    </li>
+    
   </ul>
   
   
@@ -528,7 +537,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <p style="color:var(--text-dim)">Package the Jobsmith React UI and Python FastAPI/CLI backend into a single-click macOS Tauri desktop app, with the Python backend bundled as a PyInstaller onefile sidecar (stdin-EOF shutdown), dynamic sidecar-reported port + Rust-issued token auth, and download-on-first-run Playwright Chromium.</p>
   <div class="meta">
     <span class="badge badge-pending">Draft</span>
-    <span style="font-size:.75rem;color:var(--text-muted)">v5 · 5 slices · Created 2026-06-26</span>
+    <span style="font-size:.75rem;color:var(--text-muted)">v5 · 6 slices · Created 2026-06-26</span>
   </div>
 </header>
 <button id="themeToggle" style="position:fixed;top:16px;right:16px;z-index:100;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;color:var(--text);font-family:var(--mono);font-size:0.75rem;cursor:pointer;">
@@ -578,6 +587,23 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <thead><tr><th>Param</th><th>Type</th><th>Note</th></tr></thead>
     <tbody>
       <tr><td><code>202 body</code></td><td><code>{&#34;status&#34;:&#34;installing&#34;} — progress via SSE /api/desktop/browser/install/events</code></td><td>&mdash;</td></tr>
+      
+    </tbody>
+  </table>
+</div></div>
+      </div>
+      <div class="overview-block-entry">
+        <a class="overview-slice-label" href="#slice-6-block-api-endpoint-1" title="Jump to slice 6">
+          <span class="slice-num">#6</span>
+          <span class="overview-slice-title">First-run `claude` CLI detection + guided install prompt (desktop-gated)</span>
+        </a>
+        <div class="block-anchor" id="overview-slice-6-block-api-endpoint-1" data-block-anchor="slice-6-block-api-endpoint-1" data-block-kind="api-endpoint"><div class="block block-api-endpoint">
+  <div class="block-header"><span class="block-kind">api-endpoint</span><span class="api-method api-method-GET">GET</span><code class="api-path">/api/desktop/deps/status</code></div>
+  <table class="block-table">
+    <thead><tr><th>Param</th><th>Type</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td><code>200 body</code></td><td><code>{&#34;claude_installed&#34;:bool,&#34;version&#34;:str|null,&#34;path&#34;:str|null}</code></td><td>&mdash;</td></tr>
+      <tr><td><code>404 (standalone)</code></td><td><code>router absent unless JOBSMITH_DESKTOP=1</code></td><td>&mdash;</td></tr>
       
     </tbody>
   </table>
@@ -672,6 +698,22 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   </ul>
 </div></div>
       </div>
+      <div class="overview-block-entry">
+        <a class="overview-slice-label" href="#slice-6-block-file-tree-1" title="Jump to slice 6">
+          <span class="slice-num">#6</span>
+          <span class="overview-slice-title">First-run `claude` CLI detection + guided install prompt (desktop-gated)</span>
+        </a>
+        <div class="block-anchor" id="overview-slice-6-block-file-tree-1" data-block-anchor="slice-6-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
+  <ul class="file-list">
+    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/deps.py (new — shutil.which(&#39;claude&#39;) &#43; claude --version probe)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/api/routes/desktop.py (edit — add GET /api/desktop/deps/status, same JOBSMITH_DESKTOP gate)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/headless.py (edit — structured &#39;claude_unavailable&#39; error when binary missing)</code></li>
+    <li class="file-entry"><code class="file-path">web/src/components/ClaudeInstallPrompt.tsx (new — guided install &#43; re-check)</code></li>
+    <li class="file-entry"><code class="file-path">web/src/api/client.ts (edit — deps/status client call)</code></li>
+    
+  </ul>
+</div></div>
+      </div>
       
     </div>
   </div>
@@ -749,6 +791,18 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   </div>
 </div></div>
       </div>
+      <div class="overview-block-entry">
+        <a class="overview-slice-label" href="#slice-6-block-diagram-1" title="Jump to slice 6">
+          <span class="slice-num">#6</span>
+          <span class="overview-slice-title">First-run `claude` CLI detection + guided install prompt (desktop-gated)</span>
+        </a>
+        <div class="block-anchor" id="overview-slice-6-block-diagram-1" data-block-anchor="slice-6-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
+  <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">First-run dependency check</span></div>
+  <div class="diagram-flow diagram-lr">
+    <div class="diagram-node">app boots; UI calls GET /api/desktop/deps/status</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude_installed:false -&gt; ClaudeInstallPrompt</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">user runs native installer (no Node) -&gt; re-check</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude_installed:true -&gt; apply flow unblocked</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">missing at apply time -&gt; headless.py &#39;claude_unavailable&#39; (no crash)</div>
+  </div>
+</div></div>
+      </div>
       
     </div>
   </div>
@@ -764,6 +818,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <div data-node="3" data-name="Sidecar lifecycle + token auth + dynamic port wiring (Rust)" data-status="pending" data-deps="1,2" data-files="4"></div>
     <div data-node="4" data-name="Playwright Chromium download-on-first-run with graceful fallback (desktop-gated)" data-status="pending" data-deps="1,3" data-files="7"></div>
     <div data-node="5" data-name="macOS .dmg packaging — onefile bundle, ad-hoc-signed build + notarization wiring + build script" data-status="pending" data-deps="3,4" data-files="4"></div>
+    <div data-node="6" data-name="First-run `claude` CLI detection + guided install prompt (desktop-gated)" data-status="pending" data-deps="3,4" data-files="5"></div>
     
     <!--PLAN_GRAPH_NODES-->
   </div>
@@ -1901,6 +1956,215 @@ for the APPLE_* var handling + warning path. Notarization tested when a cert exi
     </details>
   </div>
 </details>
+<details class="slice-card" id="slice-6" data-slice="6" data-slice-name="slice-6" data-status="pending" data-approval="pending">
+  <summary class="slice-summary" aria-label="Slice 6: First-run `claude` CLI detection &#43; guided install prompt (desktop-gated)">
+    <span class="slice-num">#6</span>
+    <span class="slice-title-col">
+      <span class="slice-name">First-run `claude` CLI detection &#43; guided install prompt (desktop-gated)</span>
+      <span class="slice-preview">Add src/jobsmith/desktop/deps.py: detect whether the claude Claude Code CLI</span>
+      <span class="slice-meta-row">
+        <span class="slice-summary-badges">
+          <span class="badge badge-revision badge-sm">M</span>
+          <span class="badge badge-pending badge-sm">Low</span>
+          <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
+          
+          <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-6">Pending</span>
+          <span class="badge badge-sm badge-issues" title="1 critic issue(s)">1 issue</span>
+          <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
+        </span>
+        <span class="slice-actions" onclick="event.stopPropagation()">
+          <span class="approval-segmented" role="group" aria-label="Approval action">
+            <label class="seg-btn seg-approve" title="Approve">
+              <input type="radio" name="slice-6-approval" value="approved" data-section="slice-6" data-action="approve" aria-label="Approve slice 6">
+              &#10003;
+            </label>
+            <label class="seg-btn seg-changes" title="Request changes">
+              <input type="radio" name="slice-6-approval" value="changes_requested" data-section="slice-6" data-action="approve" aria-label="Request changes for slice 6">
+              &#8635;
+            </label>
+            <label class="seg-btn seg-reject" title="Reject">
+              <input type="radio" name="slice-6-approval" value="rejected" data-section="slice-6" data-action="approve" aria-label="Reject slice 6">
+              &#10005;
+            </label>
+          </span>
+        </span>
+      </span>
+    </span>
+    <span class="slice-chevron" aria-hidden="true"></span>
+  </summary>
+
+  <div class="slice-body">
+    
+      
+      <div class="slice-field slice-what">
+        <div class="slice-field-label">What</div>
+        <div class="slice-field-value">
+          
+          <input type="checkbox" id="slice-6-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Add <code>src/jobsmith/desktop/deps.py</code>: detect whether the <code>claude</code> Claude Code CLI
+is resolvable (PATH lookup + <code>claude --version</code>), returning installed/version/path.
+Extend the desktop router (<code>src/jobsmith/api/routes/desktop.py</code>, JOBSMITH_DESKTOP-
+gated like slice 4) with <code>GET /api/desktop/deps/status</code> -&gt;
+{claude_installed, version, path}. A React <code>ClaudeInstallPrompt</code> component gates
+the apply flow: when <code>claude</code> is missing it shows guided install instructions
+pointing at Anthropic&#39;s no-Node native installer
+(<code>curl -fsSL https://claude.ai/install.sh | bash</code>) plus a &#34;re-check&#34; button.
+headless.py surfaces a structured &#39;claude_unavailable&#39; error instead of crashing
+when the binary is absent.</p>
+</div>
+          <label for="slice-6-what-reveal" class="reveal-label">Show full description</label>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field slice-why">
+        <div class="slice-field-label">Why</div>
+        <div class="slice-field-value">
+          
+          <div class="markdown-block serif-prose"><p>Resolves risk R-claude: the apply pipeline shells out to <code>claude</code> (headless.py).
+The native installer needs no Node, so detect + guided-install keeps the bundle
+slim and Constraint 1 intact while making the dependency explicit to the user
+(user choice: detect + guided install).</p>
+</div>
+          
+        </div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Files</div>
+        <div class="slice-field-value"><code>src/jobsmith/desktop/deps.py, src/jobsmith/api/routes/desktop.py, src/jobsmith/headless.py, web/src/components/ClaudeInstallPrompt.tsx, web/src/api/client.ts</code></div>
+      </div>
+      
+      
+      <div class="slice-field">
+        <div class="slice-field-label">Done when</div>
+        <ul class="slice-done-list"><li>On a host without `claude`, the apply flow is blocked by a guided prompt (native-installer instructions &#43; re-check), not a crash or a silent failure.</li><li>After installing `claude` and clicking re-check, GET /api/desktop/deps/status reports installed:true and the apply flow proceeds.</li><li>On a `jobsmith up` server without JOBSMITH_DESKTOP=1, GET /api/desktop/deps/status returns 404 (Goal 4).</li></ul>
+      </div>
+      
+    
+
+    
+    <div class="slice-field slice-decisions-notes">
+      <div class="slice-field-label">Decisions</div>
+      <div class="slice-field-value">
+        
+        <input type="checkbox" id="slice-6-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> App boot + apply attempt; router only mounted when JOBSMITH_DESKTOP=1.
+<strong>State:</strong> No persistence — detection is live (shutil.which + version probe each check).
+<strong>Payload:</strong> deps/status JSON; missing -&gt; guided ClaudeInstallPrompt; apply-time miss -&gt; structured &#39;claude_unavailable&#39;.
+<strong>Rejected:</strong> Bundling the <code>claude</code> CLI as a second sidecar — heaviest, drags in a Node runtime + separate auth (user rejected). Documenting as a bare prerequisite — breaks the zero-terminal goal (user rejected). Deferring the apply pipeline — contradicts the full-parity choice (user rejected).</p>
+</div>
+        <label for="slice-6-decisions-reveal" class="reveal-label">Show full decisions</label>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-field slice-blocks">
+  <div class="slice-field-label">Blocks</div>
+  <div class="slice-field-value block-zone">
+    <div class="block-anchor" id="slice-6-block-file-tree-1" data-block-anchor="slice-6-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
+  <ul class="file-list">
+    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/deps.py (new — shutil.which(&#39;claude&#39;) &#43; claude --version probe)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/api/routes/desktop.py (edit — add GET /api/desktop/deps/status, same JOBSMITH_DESKTOP gate)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/headless.py (edit — structured &#39;claude_unavailable&#39; error when binary missing)</code></li>
+    <li class="file-entry"><code class="file-path">web/src/components/ClaudeInstallPrompt.tsx (new — guided install &#43; re-check)</code></li>
+    <li class="file-entry"><code class="file-path">web/src/api/client.ts (edit — deps/status client call)</code></li>
+    
+  </ul>
+</div></div>
+    <div class="block-anchor" id="slice-6-block-api-endpoint-1" data-block-anchor="slice-6-block-api-endpoint-1" data-block-kind="api-endpoint"><div class="block block-api-endpoint">
+  <div class="block-header"><span class="block-kind">api-endpoint</span><span class="api-method api-method-GET">GET</span><code class="api-path">/api/desktop/deps/status</code></div>
+  <table class="block-table">
+    <thead><tr><th>Param</th><th>Type</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td><code>200 body</code></td><td><code>{&#34;claude_installed&#34;:bool,&#34;version&#34;:str|null,&#34;path&#34;:str|null}</code></td><td>&mdash;</td></tr>
+      <tr><td><code>404 (standalone)</code></td><td><code>router absent unless JOBSMITH_DESKTOP=1</code></td><td>&mdash;</td></tr>
+      
+    </tbody>
+  </table>
+</div></div>
+    <div class="block-anchor" id="slice-6-block-diagram-1" data-block-anchor="slice-6-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
+  <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">First-run dependency check</span></div>
+  <div class="diagram-flow diagram-lr">
+    <div class="diagram-node">app boots; UI calls GET /api/desktop/deps/status</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude_installed:false -&gt; ClaudeInstallPrompt</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">user runs native installer (no Node) -&gt; re-check</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude_installed:true -&gt; apply flow unblocked</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">missing at apply time -&gt; headless.py &#39;claude_unavailable&#39; (no crash)</div>
+  </div>
+</div></div>
+    
+  </div>
+</div>
+
+    
+    <div class="slice-field slice-tests-field">
+      <div class="slice-field-label">Test Strategy</div>
+      <div class="slice-field-value">
+        
+        
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="unit">
+            <span class="test-chip">UNIT &middot; 1</span>
+            <ul><li>deps.py reports installed:false when shutil.which returns None, true with a</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 3</span>
+            <ul><li>stub on PATH. Regression: standalone (no JOBSMITH_DESKTOP) returns 404. Fallback:</li><li>monkeypatch the claude subprocess to be missing, assert headless.py raises a</li><li>structured &#39;claude_unavailable&#39; (caught by the UI) rather than an unhandled error.</li></ul>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Resolves R-claude: the apply pipeline&#39;s external `claude` CLI dependency is now detected with a guided no-Node install prompt rather than left implicit. [resolved]</span>
+        </div>
+        
+      </div>
+    </div>
+    
+
+    
+    <div class="slice-field slice-questions">
+      <div class="slice-field-label">Open Questions</div>
+      <div class="slice-field-value">
+        
+        <div class="question-block slice-question-block">
+          <p>How does the bundle handle the apply pipeline&#39;s `claude` CLI dependency?</p>
+          
+          
+          <textarea
+            data-section="slice-6-question-q-claude-dep"
+            data-comment-for="slice-6-question-q-claude-dep"
+            placeholder="Answer question q-claude-dep...">Detect &#43; guided install via Anthropic&#39;s no-Node native installer, with a re-check button; headless.py degrades to a structured error if absent. (User-chosen; native installer keeps Constraint 1 intact.)</textarea>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+
+    <div class="slice-deps">Dependencies: slices 3,4</div>
+
+    <details class="comment-collapse">
+      <summary class="comment-collapse-trigger">+ Leave a comment</summary>
+      <div class="comment-collapse-body">
+        <textarea data-section="slice-6" data-comment-for="slice-6" placeholder="Comments on slice 6..."></textarea>
+      </div>
+    </details>
+  </div>
+</details>
 
     <!--PLAN_SLICE_CARDS-->
   </div>
@@ -1918,8 +2182,8 @@ for the APPLE_* var handling + warning path. Notarization tested when a cert exi
   <h2>Feedback Summary</h2>
   <div class="progress-stats">
     <div class="progress-stat"><strong id="approvedCount">0</strong> approved</div>
-    <div class="progress-stat"><strong id="totalSections">6</strong> sections</div>
-    <div class="progress-stat"><strong id="pendingCount">6</strong> pending</div>
+    <div class="progress-stat"><strong id="totalSections">7</strong> sections</div>
+    <div class="progress-stat"><strong id="pendingCount">7</strong> pending</div>
   </div>
   <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill" style="width:0%"></div></div>
   <div class="comments-summary">
@@ -2011,7 +2275,7 @@ var planId=(function(){var a=document.querySelector('article[id]');return a?a.id
 
 (function(){
   'use strict';
-  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design","slice-1","slice-2","slice-3","slice-4","slice-5"]/*END_PLAN_SECTIONS_JSON*/;
+  var SECTIONS=/*PLAN_SECTIONS_JSON*/["design","slice-1","slice-2","slice-3","slice-4","slice-5","slice-6"]/*END_PLAN_SECTIONS_JSON*/;
 
   function setBadge(el,ok){
     el.className='badge badge-'+(ok?'approved':'pending');
