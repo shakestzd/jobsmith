@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Playwright Chromium download-on-first-run with graceful fallback (desktop-gated)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-0c74180d"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-26T06:06:07.220537"
+             data-updated="2026-06-26T07:29:00.57838" data-agent-assigned="claude-code" data-track-id="trk-a57cff96">
+
+        <header>
+            <h1>Playwright Chromium download-on-first-run with graceful fallback (desktop-gated)</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-a57cff96.html" data-relationship="part_of" data-since="2026-06-26T06:06:07.230711">trk-a57cff96</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="../features/feat-b621a4ab.html" data-relationship="blocked_by">feat-b621a4ab</a></li>
+                    <li><a href="../features/feat-fe3aeb26.html" data-relationship="blocked_by">feat-fe3aeb26</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/89dae515-7da1-4053-b4c2-fd406ac63cf9.html" data-relationship="implemented_in" data-since="2026-06-26T07:29:00.578251">session 89dae515-7da1-4053-b4c2-fd406ac63cf9</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="../plans/plan-a23bba5f.html" data-relationship="planned_in" data-since="2026-06-26T06:06:07.22567">plan-a23bba5f</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Add `src/jobsmith/desktop/playwright_bootstrap.py`: resolve an app-data browsers
+dir via the existing platformdirs dep, expose status + install operations against
+PLAYWRIGHT_BROWSERS_PATH (exported in sidecar_main.py before any playwright
+import, per slice 1). New desktop API router `src/jobsmith/api/routes/desktop.py`,
+registered in main.py ONLY when `JOBSMITH_DESKTOP=1` (set by sidecar_main.py) so
+`jobsmith up` is unaffected (Goal 4). Routes: `GET /api/desktop/browser/status`,
+`POST /api/desktop/browser/install` (runs `playwright install chromium` in a
+background task), SSE `GET /api/desktop/browser/install/events` for progress. A
+first-run React prompt component surfaces the download + progress. If the download
+fails/offline, the existing httpx fast-path in jd/fetcher.py still handles most
+JDs — fetcher.py raises a structured &#39;browser_unavailable&#39; signal (retryable),
+never a hard crash.</p>
+        </section>
+    </article>
+</body>
+</html>
