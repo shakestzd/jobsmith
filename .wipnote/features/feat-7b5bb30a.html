@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Tauri v2 scaffold &#43; macOS bundle config &#43; icons &#43; splash frontend</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-7b5bb30a"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-26T06:06:07.179194"
+             data-updated="2026-06-26T06:13:37.271905" data-agent-assigned="claude-code" data-track-id="trk-a57cff96">
+
+        <header>
+            <h1>Tauri v2 scaffold &#43; macOS bundle config &#43; icons &#43; splash frontend</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="../plans/plan-a23bba5f.html" data-relationship="planned_in" data-since="2026-06-26T06:06:07.184772">plan-a23bba5f</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-a57cff96.html" data-relationship="part_of" data-since="2026-06-26T06:06:07.189528">trk-a57cff96</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/89dae515-7da1-4053-b4c2-fd406ac63cf9.html" data-relationship="implemented_in" data-since="2026-06-26T06:13:37.271781">session 89dae515-7da1-4053-b4c2-fd406ac63cf9</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Initialize `src-tauri/` for Tauri v2: Cargo.toml, build.rs, a minimal main.rs
+skeleton, and tauri.conf.json declaring productName/identifier, macOS bundle
+targets [app, dmg], `bundle.externalBin: [&#34;binaries/jobsmith-sidecar&#34;]`, the
+tauri-plugin-shell, and the tauri-plugin-single-instance (so a second launch
+focuses the existing window instead of spawning a second sidecar). Provide the
+required `src-tauri/icons/` set (icon.icns + PNG sizes) — without these
+`tauri build` fails. Bundle a tiny splash page (frontendDist) shown while the
+sidecar boots. Grant `shell:allow-spawn` for the sidecar in
+capabilities/default.json (scoped to the sidecar name only). Add root
+`package.json` scripts (`tauri dev`, `tauri build`). No backend wiring yet — slice 3.</p>
+        </section>
+    </article>
+</body>
+</html>
