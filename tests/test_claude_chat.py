@@ -435,3 +435,272 @@ def test_chat_messages_persisted(tmp_path: Path) -> None:
     texts = {r["role"]: r["text"] for r in rows}
     assert "Hello Claude!" in texts["user"]
     assert "Nice to meet you." in texts["assistant"]
+
+
+# ===========================================================================
+# Slice 2 — pluggable backend providers (feat-7f4d1643)
+# ===========================================================================
+
+from jobsmith.api.chat import _make_backend as make_backend_factory  # noqa: E402
+from jobsmith.api.claude_chat import (  # noqa: E402
+    AntigravityCliProvider,
+    BaseChatBackend,
+    CodexCliProvider,
+    OpenAICompatibleProvider,
+)
+from jobsmith.config import LLMSettings  # noqa: E402
+from jobsmith.llm.openai_compat import (  # noqa: E402
+    OpenAICompatClient,
+    iter_sse_content_deltas,
+)
+
+
+def _common_kwargs(tmp_path: Path) -> dict:
+    review_dir = tmp_path / ".review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    return {
+        "slug": "test-slug",
+        "project_root": tmp_path,
+        "review_db_dir": review_dir,
+        "system_prompt": "ctx",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Backend factory resolution
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "provider, expected_cls",
+    [
+        ("claude_cli", ClaudeChatBackend),
+        ("antigravity_cli", AntigravityCliProvider),
+        ("codex_cli", CodexCliProvider),
+        ("openai_compatible", OpenAICompatibleProvider),
+    ],
+)
+def test_backend_factory_resolves_provider_class(tmp_path, provider, expected_cls):
+    """The factory maps each config.llm.provider value to the correct class."""
+    base_url = "http://127.0.0.1:8080/v1" if provider == "openai_compatible" else None
+    llm = LLMSettings(provider=provider, model="m", base_url=base_url)
+    backend = make_backend_factory(llm=llm, **_common_kwargs(tmp_path))
+    assert type(backend) is expected_cls
+    assert isinstance(backend, BaseChatBackend)
+
+
+def test_backend_factory_defaults_to_claude(tmp_path):
+    """Default LLMSettings (no llm block) resolves to ClaudeChatBackend."""
+    backend = make_backend_factory(llm=LLMSettings(), **_common_kwargs(tmp_path))
+    assert type(backend) is ClaudeChatBackend
+
+
+# ---------------------------------------------------------------------------
+# Antigravity CLI (`agy -p ... --dangerously-skip-permissions`)
+# ---------------------------------------------------------------------------
+
+
+def test_antigravity_cmd_construction(tmp_path):
+    """argv is `agy -p <prompt> --dangerously-skip-permissions` (no --conversation)."""
+    backend = AntigravityCliProvider(**_common_kwargs(tmp_path))
+    with mock.patch("shutil.which", return_value="/usr/bin/agy"):
+        cmd = backend._build_cmd("hello there")
+    assert cmd[0] == "/usr/bin/agy"
+    assert cmd[1] == "-p"
+    assert "--dangerously-skip-permissions" in cmd
+    assert "--conversation" not in cmd
+    # context embedded as <context> preamble on the user turn
+    assert "<context>" in cmd[2]
+    assert "hello there" in cmd[2]
+
+
+def test_antigravity_cmd_includes_conversation_when_session_present(tmp_path):
+    """A stored session id maps onto `--conversation <id>`."""
+    backend = AntigravityCliProvider(session_id="conv-123", **_common_kwargs(tmp_path))
+    with mock.patch("shutil.which", return_value="/usr/bin/agy"):
+        cmd = backend._build_cmd("hi")
+    assert "--conversation" in cmd
+    assert cmd[cmd.index("--conversation") + 1] == "conv-123"
+
+
+def test_antigravity_stream_yields_plaintext_lines(tmp_path):
+    """Plain-text stdout lines are forwarded verbatim as text deltas."""
+    backend = AntigravityCliProvider(**_common_kwargs(tmp_path))
+
+    proc_mock = mock.MagicMock()
+    proc_mock.stdout = iter(["Hello\n", "world\n"])
+    proc_mock.stderr = StringIO("")
+    proc_mock.returncode = 0
+    proc_mock.wait.return_value = 0
+
+    with mock.patch("shutil.which", return_value="/usr/bin/agy"), mock.patch(
+        "subprocess.Popen", return_value=proc_mock
+    ):
+        chunks = list(backend.send("hi"))
+    assert "".join(chunks) == "Hello\nworld\n"
+
+
+# ---------------------------------------------------------------------------
+# Codex CLI (`codex exec --json`)
+# ---------------------------------------------------------------------------
+
+
+def test_codex_cmd_construction(tmp_path):
+    """argv is `codex exec --json <prompt>` on a fresh session."""
+    backend = CodexCliProvider(**_common_kwargs(tmp_path))
+    with mock.patch("shutil.which", return_value="/usr/bin/codex"):
+        cmd = backend._build_cmd("summarize")
+    assert cmd[0] == "/usr/bin/codex"
+    assert cmd[1] == "exec"
+    assert "--json" in cmd
+    assert "resume" not in cmd
+    assert any("summarize" in part for part in cmd)
+
+
+def test_codex_cmd_resumes_with_session_id(tmp_path):
+    """A stored session id produces `codex exec resume <id> --json <prompt>`."""
+    backend = CodexCliProvider(session_id="thread-abc", **_common_kwargs(tmp_path))
+    with mock.patch("shutil.which", return_value="/usr/bin/codex"):
+        cmd = backend._build_cmd("again")
+    assert cmd[1:4] == ["exec", "resume", "thread-abc"]
+    assert "--json" in cmd
+
+
+def test_codex_stream_parses_agent_message_and_captures_session(tmp_path):
+    """JSONL item.completed/agent_message yields text; thread.started captures id."""
+    backend = CodexCliProvider(**_common_kwargs(tmp_path))
+
+    events = [
+        json.dumps({"type": "thread.started", "thread_id": "thread-xyz"}) + "\n",
+        json.dumps({"type": "turn.started"}) + "\n",
+        json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"id": "item_3", "type": "agent_message", "text": "Final answer."},
+            }
+        )
+        + "\n",
+        json.dumps({"type": "turn.completed"}) + "\n",
+    ]
+    proc_mock = mock.MagicMock()
+    proc_mock.stdout = iter(events)
+    proc_mock.stderr = StringIO("")
+    proc_mock.returncode = 0
+    proc_mock.wait.return_value = 0
+
+    with mock.patch("shutil.which", return_value="/usr/bin/codex"), mock.patch(
+        "subprocess.Popen", return_value=proc_mock
+    ):
+        chunks = list(backend.send("question"))
+
+    assert chunks == ["Final answer."]
+    assert backend.session_id == "thread-xyz"
+
+
+# ---------------------------------------------------------------------------
+# OpenAI-compatible SSE parsing (shared client — reused by the scorer)
+# ---------------------------------------------------------------------------
+
+_CANNED_SSE = [
+    'data: {"choices":[{"delta":{"role":"assistant"}}]}',
+    'data: {"choices":[{"delta":{"content":"Hello"}}]}',
+    "",  # keep-alive blank line
+    'data: {"choices":[{"delta":{"content":", "}}]}',
+    'data: {"choices":[{"delta":{"content":"world"}}]}',
+    "data: [DONE]",
+    'data: {"choices":[{"delta":{"content":"AFTER-DONE"}}]}',  # must be ignored
+]
+
+
+def test_iter_sse_content_deltas_orders_and_terminates():
+    """Pure parser yields ordered content deltas and stops at [DONE]."""
+    deltas = list(iter_sse_content_deltas(_CANNED_SSE))
+    assert deltas == ["Hello", ", ", "world"]
+    assert "AFTER-DONE" not in deltas
+
+
+class _FakeStreamResponse:
+    def __init__(self, lines):
+        self._lines = lines
+
+    def raise_for_status(self):
+        return None
+
+    def iter_lines(self):
+        yield from self._lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _FakeHttpxClient:
+    """Records the streamed/posted URL and replays canned SSE lines."""
+
+    captured_url = None
+    captured_post_url = None
+    post_json = {"choices": [{"message": {"content": "FULL"}}]}
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def stream(self, method, url, **kwargs):
+        _FakeHttpxClient.captured_url = url
+        return _FakeStreamResponse(_CANNED_SSE)
+
+    def post(self, url, **kwargs):
+        _FakeHttpxClient.captured_post_url = url
+        resp = mock.MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = _FakeHttpxClient.post_json
+        return resp
+
+
+@pytest.mark.parametrize(
+    "base_url, expected_endpoint",
+    [
+        ("http://127.0.0.1:8080/v1", "http://127.0.0.1:8080/v1/chat/completions"),
+        ("http://localhost:11434/v1", "http://localhost:11434/v1/chat/completions"),
+    ],
+)
+def test_openai_compat_same_parse_path_mlx_and_ollama(base_url, expected_endpoint):
+    """MLX and Ollama differ only by base_url; the SSE parse path is identical."""
+    client = OpenAICompatClient(base_url=base_url, model="local-model")
+    with mock.patch("jobsmith.llm.openai_compat.httpx.Client", _FakeHttpxClient):
+        deltas = list(client.stream_chat([{"role": "user", "content": "hi"}]))
+    assert deltas == ["Hello", ", ", "world"]
+    assert _FakeHttpxClient.captured_url == expected_endpoint
+
+
+def test_openai_compat_complete_returns_full_content():
+    """Non-streaming complete() returns choices[0].message.content for the scorer."""
+    client = OpenAICompatClient(base_url="http://localhost:11434/v1", model="m")
+    with mock.patch("jobsmith.llm.openai_compat.httpx.Client", _FakeHttpxClient):
+        result = client.complete(
+            [{"role": "user", "content": "score this"}],
+            response_format={"type": "json_object"},
+        )
+    assert result == "FULL"
+    assert _FakeHttpxClient.captured_post_url == (
+        "http://localhost:11434/v1/chat/completions"
+    )
+
+
+def test_openai_compatible_provider_streams_via_client(tmp_path):
+    """OpenAICompatibleProvider.send streams deltas through the shared client."""
+    backend = OpenAICompatibleProvider(
+        base_url="http://127.0.0.1:8080/v1",
+        model="local-model",
+        **_common_kwargs(tmp_path),
+    )
+    with mock.patch("jobsmith.llm.openai_compat.httpx.Client", _FakeHttpxClient):
+        chunks = list(backend.send("hi"))
+    assert chunks == ["Hello", ", ", "world"]
