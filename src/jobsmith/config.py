@@ -27,7 +27,7 @@ LLMProvider = Literal["claude_cli", "antigravity_cli", "codex_cli", "openai_comp
 LLM_PRESETS: dict[str, dict[str, str]] = {
     "mlx": {
         "base_url": "http://127.0.0.1:8080/v1",
-        "model": "mlx-community/gemma-3-4b-it-4bit",
+        "model": "mlx-community/gemma-4-E4B-it-qat-4bit",
     },
     "ollama": {
         "base_url": "http://localhost:11434/v1",

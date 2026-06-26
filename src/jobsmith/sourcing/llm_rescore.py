@@ -766,6 +766,13 @@ class OpenAICompatibleScorer(BaseScorerBackend):
                 _build_text_messages(row, system_prompt),
                 response_format=_OPENAI_RESPONSE_FORMAT,
                 temperature=0.0,
+                # Allow generous token budget: thinking/reasoning models (e.g.
+                # gemma-4) consume reasoning tokens before emitting the JSON
+                # content block.  Without an explicit ceiling the server may
+                # exhaust its default budget mid-reasoning, returning an empty
+                # content string (parse_ok=False).  3 000 tokens comfortably
+                # covers the reasoning + the ~150-token JSON payload.
+                extra={"max_tokens": 3000},
             )
         except Exception as exc:  # transport / server error → availability fallback
             logger.warning("posting=%d openai_compat error:%s", posting_id, type(exc).__name__)

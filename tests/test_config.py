@@ -207,7 +207,7 @@ def test_llm_block_round_trips_from_yaml_file(tmp_path: Path) -> None:
 def test_llm_mlx_preset_base_url() -> None:
     """MLX preset carries the correct base_url and default gemma model."""
     assert LLM_PRESETS["mlx"]["base_url"] == "http://127.0.0.1:8080/v1"
-    assert LLM_PRESETS["mlx"]["model"] == "mlx-community/gemma-3-4b-it-4bit"
+    assert LLM_PRESETS["mlx"]["model"] == "mlx-community/gemma-4-E4B-it-qat-4bit"
 
 
 def test_llm_ollama_preset_base_url() -> None:
