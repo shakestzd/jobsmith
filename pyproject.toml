@@ -77,6 +77,11 @@ dependencies = [
 tui = [
     "textual>=0.60",
 ]
+# feat-b621a4ab — desktop sidecar: PyInstaller onefile build of the FastAPI
+# backend, spawned by the Tauri shell. platformdirs is already a runtime dep.
+desktop = [
+    "pyinstaller>=6.0",
+]
 test = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
