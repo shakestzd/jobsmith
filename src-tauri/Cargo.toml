@@ -12,6 +12,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
+# Native boot-failure dialog (Retry / Open Log) when the sidecar fails to start.
+tauri-plugin-dialog = "2"
+# Per-launch random API token handed to the sidecar via its environment.
+uuid = { version = "1", features = ["v4"] }
 
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-single-instance = "2"
