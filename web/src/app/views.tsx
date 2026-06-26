@@ -603,7 +603,7 @@ export function ConfigView() {
               <button
                 type="button"
                 className="btn"
-                onClick={() => { setLlmProvider('openai_compatible'); setLlmBaseUrl('http://127.0.0.1:8080/v1'); }}
+                onClick={() => { setLlmProvider('openai_compatible'); setLlmBaseUrl('http://127.0.0.1:8080/v1'); setLlmModel('mlx-community/gemma-3-4b-it-4bit'); }}
               >
                 MLX
               </button>

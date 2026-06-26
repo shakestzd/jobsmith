@@ -653,7 +653,7 @@ class OpenAICompatibleProvider(BaseChatBackend):
         if not self.base_url:
             raise RuntimeError(
                 "openai_compatible provider requires config.llm.base_url "
-                "(e.g. LLM_PRESETS['mlx'] or LLM_PRESETS['ollama'])."
+                "(e.g. LLM_PRESETS['mlx']['base_url'] or LLM_PRESETS['ollama']['base_url'])."
             )
         client = OpenAICompatClient(
             base_url=self.base_url,

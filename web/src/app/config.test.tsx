@@ -288,6 +288,7 @@ describe('ConfigView — LLM provider section', () => {
     const select = screen.getByRole('combobox', { name: /provider/i });
     expect((select as HTMLSelectElement).value).toBe('openai_compatible');
     expect(screen.getByDisplayValue('http://127.0.0.1:8080/v1')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('mlx-community/gemma-3-4b-it-4bit')).toBeInTheDocument();
   });
 
   it('Ollama preset button fills base_url and switches provider to openai_compatible', async () => {
@@ -336,5 +337,6 @@ describe('ConfigView — LLM provider section', () => {
     const llm = payload.llm as Record<string, unknown>;
     expect(llm.provider).toBe('openai_compatible');
     expect(llm.base_url).toBe('http://127.0.0.1:8080/v1');
+    expect(llm.model).toBe('mlx-community/gemma-3-4b-it-4bit');
   });
 });
