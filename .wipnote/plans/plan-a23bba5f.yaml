@@ -1,12 +1,13 @@
 meta:
     id: plan-a23bba5f
+    track_id: trk-a57cff96
     title: Convert Jobsmith to Tauri Desktop Application
     description: Package the Jobsmith React UI and Python FastAPI/CLI backend into a single-click macOS Tauri desktop app, with the Python backend bundled as a PyInstaller onefile sidecar (stdin-EOF shutdown), dynamic sidecar-reported port + Rust-issued token auth, and download-on-first-run Playwright Chromium.
     created_at: "2026-06-26"
-    status: draft
+    status: finalized
     priority: medium
     schema_version: v4
-    version: 5
+    version: 6
 design:
     problem: |
         Running Jobsmith today requires terminal commands (`uv tool install jobsmith`
@@ -48,6 +49,7 @@ design:
           accessed: "2026-06-26"
 slices:
     - id: slice-1
+      feature_id: feat-b621a4ab
       num: 1
       title: PyInstaller onefile sidecar for the Python backend (additive entry point)
       what: |
@@ -95,7 +97,7 @@ slices:
         JOBSMITH_PUBLIC_BIND=1 in the parent, assert the shim still injects.
         Regression: existing pytest suite (tests/) and `jobsmith up --help` unchanged.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://github.com/dieharders/example-tauri-v2-python-server-sidecar
@@ -104,6 +106,7 @@ slices:
         - url: https://mclare.blog/posts/writing-a-pandas-sidecar-for-tauri/
           claim: onedir _internal/ is not found at runtime as a Tauri sidecar; author switched to onefile — direct basis for the onefile decision.
           accessed: "2026-06-26"
+      execution_status: promoted
       questions:
         - id: q-onefile-onedir
           text: onefile or onedir for the PyInstaller sidecar?
@@ -147,6 +150,7 @@ slices:
             - 'daemon thread: sys.stdin.read() blocks'
             - Tauri exits -> stdin EOF -> os._exit(0)
     - id: slice-2
+      feature_id: feat-7b5bb30a
       num: 2
       title: Tauri v2 scaffold + macOS bundle config + icons + splash frontend
       what: |
@@ -187,12 +191,13 @@ slices:
         grants shell:allow-spawn scoped to the sidecar name only (least privilege).
         Single-instance: launch twice, confirm one window.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://v2.tauri.app/develop/sidecar/
           claim: externalBin entries require a -$TARGET_TRIPLE-suffixed binary; shell:allow-spawn must be granted and scoped to the sidecar name.
           accessed: "2026-06-26"
+      execution_status: promoted
       questions:
         - id: q-ui-serving
           text: Does Tauri serve the React build itself, or load the Python-served UI?
@@ -233,6 +238,7 @@ slices:
                   </div>
                 </div>
     - id: slice-3
+      feature_id: feat-fe3aeb26
       num: 3
       title: Sidecar lifecycle + token auth + dynamic port wiring (Rust)
       what: |
@@ -275,7 +281,7 @@ slices:
         make the sidecar exit nonzero at boot -> assert the error dialog appears, not a
         blank window. Auth: curl the served root, assert window.__JOBSMITH__ present with token.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://v2.tauri.app/develop/sidecar/
@@ -284,6 +290,7 @@ slices:
         - url: https://github.com/dieharders/example-tauri-v2-python-server-sidecar
           claim: Reference for spawning + cleanly terminating the sidecar (stdin/stdout) so no orphaned server/Python remains on app exit.
           accessed: "2026-06-26"
+      execution_status: promoted
       questions:
         - id: q-token-transport
           text: How does Rust hand the token to the web view?
@@ -326,6 +333,7 @@ slices:
             - staticui shim injects window.__JOBSMITH__ before React boot
             - WindowEvent::CloseRequested -> kill child + exit (no orphan)
     - id: slice-4
+      feature_id: feat-0c74180d
       num: 4
       title: Playwright Chromium download-on-first-run with graceful fallback (desktop-gated)
       what: |
@@ -370,12 +378,13 @@ slices:
         chromium.launch to raise, assert fetcher.py returns the httpx result + a structured
         'browser_unavailable' signal, not an exception.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://playwright.dev/docs/browsers
           claim: PLAYWRIGHT_BROWSERS_PATH is read at install and at runtime and must match; an app-data absolute path is the supported way to relocate browsers.
           accessed: "2026-06-26"
+      execution_status: promoted
       questions:
         - id: q-fallback
           text: What happens if the Chromium download fails or the host is offline?
@@ -431,6 +440,7 @@ slices:
             - SSE streams progress -> UI
             - 'on failure/offline: httpx fast-path + retryable ''browser_unavailable'''
     - id: slice-5
+      feature_id: feat-06c6055b
       num: 5
       title: macOS .dmg packaging — onefile bundle, ad-hoc-signed build + notarization wiring + build script
       what: |
@@ -470,12 +480,13 @@ slices:
         sidecar is present and ad-hoc signed (`codesign -dv`). Inspect build-desktop.sh
         for the APPLE_* var handling + warning path. Notarization tested when a cert exists.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://v2.tauri.app/distribute/sign/macos/
           claim: Ad-hoc signing (signingIdentity '-') lets the app run locally after a one-time whitelist; notarization uses APPLE_ID/APPLE_PASSWORD(app-specific)/APPLE_TEAM_ID (or App Store Connect API key) with `tauri build --bundles dmg`.
           accessed: "2026-06-26"
+      execution_status: promoted
       questions:
         - id: q-signing
           text: Sign + notarize for v1, or ship an ad-hoc-signed local .dmg first?
@@ -512,6 +523,7 @@ slices:
             - tauri build --bundles dmg (ad-hoc or notarized)
             - Jobsmith.dmg
     - id: slice-6
+      feature_id: feat-dac00175
       num: 6
       title: First-run `claude` CLI detection + guided install prompt (desktop-gated)
       what: |
@@ -551,12 +563,13 @@ slices:
         monkeypatch the claude subprocess to be missing, assert headless.py raises a
         structured 'claude_unavailable' (caught by the UI) rather than an unhandled error.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://code.claude.com/docs/en/setup
           claim: Claude Code's recommended install is the native installer (`curl -fsSL https://claude.ai/install.sh | bash`) which needs no Node.js — so guided-install keeps Constraint 1 (no node/python) intact; `claude --version` verifies a successful install.
           accessed: "2026-06-26"
+      execution_status: promoted
       questions:
         - id: q-claude-dep
           text: How does the bundle handle the apply pipeline's `claude` CLI dependency?
@@ -598,6 +611,7 @@ slices:
             - claude_installed:true -> apply flow unblocked
             - missing at apply time -> headless.py 'claude_unavailable' (no crash)
     - id: slice-7
+      feature_id: feat-aaa91b6d
       num: 7
       title: 'Desktop offline-mode: detect/launch a local MLX or Ollama backend (chat + scoring)'
       what: |
@@ -641,7 +655,7 @@ slices:
         the `llm` config is written with provider=openai_compatible + base_url, and a chat
         turn hits the local endpoint (mock).
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://github.com/ml-explore/mlx-lm
@@ -650,6 +664,7 @@ slices:
         - url: https://docs.ollama.com/api/openai-compatibility
           claim: Ollama OpenAI-compatible endpoint at 127.0.0.1:11434/v1 — the Ollama target this slice detects; `ollama serve` starts it.
           accessed: "2026-06-26"
+      execution_status: promoted
       questions:
         - id: q-offline-scope
           text: Does offline mode cover the apply pipeline too?
