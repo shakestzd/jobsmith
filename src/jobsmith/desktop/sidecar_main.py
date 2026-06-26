@@ -27,7 +27,10 @@ Environment contract (applied before uvicorn / Playwright import):
 from __future__ import annotations
 
 import contextlib
+import copy
+import logging
 import os
+import re
 import signal
 import socket
 import sys
@@ -39,6 +42,51 @@ import platformdirs
 _HOST = "127.0.0.1"
 _APP_NAME = "jobsmith"
 _PORT_SELECT_RETRIES = 5
+
+# Redact ``token=<value>`` query-param values from uvicorn access-log records.
+# The localhost auto-auth shim passes the bearer token via ``?token=`` on SSE
+# endpoints (browser EventSource cannot set Authorization headers).  Uvicorn's
+# access log records the full request URL, which the Tauri shell tees to a
+# persistent file (~/Library/Logs/Jobsmith/sidecar.log) — so the token would be
+# written to disk in cleartext.  Redacting at the source keeps it out of stdout
+# entirely, before the parent ever sees it (roborev job 1056).
+_TOKEN_QS_RE = re.compile(r"(token=)[^&\s'\"]+")
+
+
+class _RedactTokenLogFilter(logging.Filter):
+    """Logging filter that redacts ``token=<value>`` from access-log records.
+
+    Uvicorn's access logger emits the request line via ``record.args``
+    (client_addr, method, full_path, http_version, status_code).  We rewrite
+    the string args in place before any handler formats them, leaving non-string
+    args (e.g. the integer status code) untouched.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.args:
+            record.args = tuple(
+                _TOKEN_QS_RE.sub(r"\1REDACTED", a) if isinstance(a, str) else a
+                for a in record.args
+            )
+        return True
+
+
+def _redacting_log_config() -> dict:
+    """Return uvicorn's default logging config with token redaction added.
+
+    Attaches :class:`_RedactTokenLogFilter` to uvicorn's ``access`` handler so
+    the bearer token never reaches the persisted sidecar log.
+    """
+    from uvicorn.config import LOGGING_CONFIG
+
+    config = copy.deepcopy(LOGGING_CONFIG)
+    config.setdefault("filters", {})["redact_token"] = {
+        "()": f"{__name__}._RedactTokenLogFilter"
+    }
+    access_handler = config.get("handlers", {}).get("access")
+    if access_handler is not None:
+        access_handler.setdefault("filters", []).append("redact_token")
+    return config
 
 
 def _resolve_data_dir() -> Path:
@@ -134,6 +182,7 @@ def main() -> None:
         host=_HOST,
         port=port,
         reload=False,
+        log_config=_redacting_log_config(),
     )
 
 

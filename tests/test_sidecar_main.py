@@ -69,3 +69,36 @@ def test_emit_port_writes_exact_sentinel_line():
     stream = io.StringIO()
     sidecar_main._emit_port(54321, stream=stream)
     assert "JOBSMITH_LISTENING_PORT=54321\n" in stream.getvalue()
+
+
+def test_redact_token_filter_redacts_query_token():
+    import logging
+
+    record = logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg='%s - "%s %s HTTP/%s" %d',
+        args=(
+            "127.0.0.1:1",
+            "GET",
+            "/api/x/events?verbosity=verbose&token=abc123-XYZ",
+            "1.1",
+            200,
+        ),
+        exc_info=None,
+    )
+
+    assert sidecar_main._RedactTokenLogFilter().filter(record) is True
+    # The secret value is gone; the redaction marker is present.
+    assert "abc123-XYZ" not in record.args[2]
+    assert "token=REDACTED" in record.args[2]
+    # Non-string args (the integer status code) are passed through untouched.
+    assert record.args[4] == 200
+
+
+def test_redacting_log_config_attaches_filter_to_access_handler():
+    config = sidecar_main._redacting_log_config()
+    assert "redact_token" in config["filters"]
+    assert "redact_token" in config["handlers"]["access"]["filters"]
