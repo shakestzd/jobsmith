@@ -258,3 +258,75 @@ def test_put_config_invalid_does_not_write_file(client: TestClient, tmp_path: Pa
         )
 
     assert not config_file.exists()
+
+
+# ---------------------------------------------------------------------------
+# LLM settings round-trip
+# ---------------------------------------------------------------------------
+
+_LLM_OPENAI_COMPAT_DATA: dict = {
+    "llm": {
+        "provider": "openai_compatible",
+        "base_url": "http://127.0.0.1:8080/v1",
+        "model": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+    }
+}
+
+
+def test_get_config_returns_llm_field(client: TestClient) -> None:
+    """GET /api/config response includes an 'llm' key."""
+    mock_config = JobsmithConfig()
+    with patch("jobsmith.api.config.load_config", return_value=mock_config):
+        resp = client.get("/api/config", headers=_auth())
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "llm" in data
+
+
+def test_get_config_default_llm_provider_is_claude_cli(client: TestClient) -> None:
+    """Default LLM provider is 'claude_cli' (backward-compatible)."""
+    mock_config = JobsmithConfig()
+    with patch("jobsmith.api.config.load_config", return_value=mock_config):
+        resp = client.get("/api/config", headers=_auth())
+    assert resp.json()["llm"]["provider"] == "claude_cli"
+
+
+def test_put_config_llm_openai_compat_round_trip(client: TestClient, tmp_path: Path) -> None:
+    """PUT with openai_compatible llm body → response includes correct llm settings."""
+    with patch("jobsmith.api.config.Path") as mock_path_cls:
+        mock_path_cls.cwd.return_value = tmp_path
+        mock_path_cls.side_effect = lambda *args: Path(*args)
+        resp = client.put(
+            "/api/config",
+            content=yaml.safe_dump(_LLM_OPENAI_COMPAT_DATA),
+            headers={**_auth(), "Content-Type": "application/x-yaml"},
+        )
+    assert resp.status_code == 200
+    llm = resp.json()["llm"]
+    assert llm["provider"] == "openai_compatible"
+    assert llm["base_url"] == "http://127.0.0.1:8080/v1"
+    assert llm["model"] == "mlx-community/Llama-3.2-3B-Instruct-4bit"
+
+
+def test_put_config_openai_compat_missing_base_url_returns_422(client: TestClient) -> None:
+    """PUT openai_compatible without base_url → 422 (LLMSettings validator)."""
+    resp = client.put(
+        "/api/config",
+        content=yaml.safe_dump({"llm": {"provider": "openai_compatible"}}),
+        headers={**_auth(), "Content-Type": "application/x-yaml"},
+    )
+    assert resp.status_code == 422
+
+
+def test_put_config_preserves_default_provider_on_empty_llm(client: TestClient, tmp_path: Path) -> None:
+    """PUT without an llm block → response still has llm.provider == 'claude_cli'."""
+    with patch("jobsmith.api.config.Path") as mock_path_cls:
+        mock_path_cls.cwd.return_value = tmp_path
+        mock_path_cls.side_effect = lambda *args: Path(*args)
+        resp = client.put(
+            "/api/config",
+            content=yaml.safe_dump(_VALID_CONFIG_DATA),
+            headers={**_auth(), "Content-Type": "application/x-yaml"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["llm"]["provider"] == "claude_cli"
