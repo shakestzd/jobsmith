@@ -60,6 +60,11 @@ _PHASE_FAILED_RE = re.compile(r"<<PHASE_FAILED:\s*([\w-]+)\s*(?::\s*(.+?)\s*)?>>
 # Marker text fragment scanned for tool results.
 _TOOL_RESULT_TYPE = "tool_result"
 
+# Structured signal emitted (instead of an unhandled FileNotFoundError) when the
+# `claude` Claude Code CLI is not installed / not on PATH. The desktop UI catches
+# this to show a guided install prompt rather than a crash (feat-dac00175).
+CLAUDE_UNAVAILABLE = "claude_unavailable"
+
 
 def _parse_agent_file(path: Path) -> tuple[str, dict[str, str]] | None:
     """Return a Claude ``--agents`` entry parsed from a plugin agent file."""
@@ -391,14 +396,32 @@ def run_phase(
         ``phase_complete`` / ``error``).
     """
     cmd = _build_command(phase, session_id, prompt, plugin_dir, system_prompt, resume, max_turns)
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,
-        cwd=str(cwd) if cwd else None,
-    )
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            cwd=str(cwd) if cwd else None,
+        )
+    except FileNotFoundError:
+        # The `claude` CLI is not installed / not on PATH. Surface a structured
+        # signal the API/UI can catch (feat-dac00175) instead of letting
+        # FileNotFoundError crash the apply pipeline. Behaviour is unchanged
+        # when `claude` IS present — Popen succeeds and we fall through.
+        yield Event(
+            type="error",
+            error=CLAUDE_UNAVAILABLE,
+            raw={
+                "code": CLAUDE_UNAVAILABLE,
+                "message": (
+                    "The `claude` Claude Code CLI was not found on PATH. "
+                    "Install it to run the apply pipeline."
+                ),
+            },
+        )
+        return
 
     emitted: int = 0
 

@@ -333,9 +333,12 @@ def create_app() -> FastAPI:
     # route uses current_user_or_query (EventSource cannot set headers), so we
     # do NOT attach a blanket header-only dependency at include time.
     if os.environ.get("JOBSMITH_DESKTOP") == "1":
+        from jobsmith.api.desktop_routes import deps_router
         from jobsmith.api.desktop_routes import router as desktop_router
 
         app.include_router(desktop_router, prefix="/api")
+        # feat-dac00175 (slice 6): claude CLI detection, same gating + auth.
+        app.include_router(deps_router, prefix="/api")
 
     # OpenAPI: surface the HTTPBearer scheme so /docs has an Authorize button.
     _install_openapi_security(app)
