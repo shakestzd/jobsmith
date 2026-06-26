@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="wipnote-version" content="1.0">
-<title>Plan: Model-agnostic apply pipeline: run claude -p on local gemma via claude-code-router</title>
+<title>Plan: Model-agnostic apply pipeline: run claude -p on local gemma via vllm-mlx (Anthropic-native)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,500;1,8..60,300;1,8..60,400&display=swap" rel="stylesheet">
@@ -469,8 +469,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-1" class="slice-nav-item" data-slice-nav="1">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="1"></span>
-        <span>#1 SPIKE: prove gemma-4 drives the Claude Code agentic apply via claude-code-router (decision gate)</span>
-        
+        <span>#1 SPIKE: prove gemma-4 drives the Claude Code agentic apply via vllm-mlx (decision gate)</span>
+        <span class="nav-triage-badge nav-triage-issue" title="5 issue(s)">&#9888;5</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -479,7 +479,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-2" class="slice-nav-item" data-slice-nav="2">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="2"></span>
         <span>#2 Extend the `llm` config with an apply-pipeline backend selector</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="2 issue(s)">&#9888;2</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -487,8 +487,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-3" class="slice-nav-item" data-slice-nav="3">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="3"></span>
-        <span>#3 claude-code-router gateway: lifecycle + config in front of mlx_lm.server</span>
-        
+        <span>#3 vllm-mlx engine: lifecycle serving gemma-4 over Anthropic (apply) + OpenAI (chat/scoring)</span>
+        <span class="nav-triage-badge nav-triage-issue" title="3 issue(s)">&#9888;3</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -496,8 +496,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-4" class="slice-nav-item" data-slice-nav="4">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="4"></span>
-        <span>#4 headless.py: inject BYO-model env when apply_backend=claude_local</span>
-        
+        <span>#4 headless.py: build the env= seam + inject BYO-model env when apply_backend=claude_local</span>
+        <span class="nav-triage-badge nav-triage-issue" title="2 issue(s)">&#9888;2</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -505,8 +505,8 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <li>
       <a href="#slice-5" class="slice-nav-item" data-slice-nav="5">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="5"></span>
-        <span>#5 End-to-end apply on local gemma + cloud fallback</span>
-        
+        <span>#5 End-to-end apply on local gemma + gateway-crash detection + cloud fallback</span>
+        <span class="nav-triage-badge nav-triage-issue" title="2 issue(s)">&#9888;2</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -515,7 +515,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-6" class="slice-nav-item" data-slice-nav="6">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="6"></span>
         <span>#6 Config-tab UI + docs: select the apply backend</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="1 issue(s)">&#9888;1</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -533,11 +533,11 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 
 <!-- Plan Header -->
 <header class="plan-header">
-  <h1>Plan: Model-agnostic apply pipeline: run claude -p on local gemma via claude-code-router</h1>
-  <p style="color:var(--text-dim)">Keep the Claude Code agentic apply harness but point claude -p at a local gemma-4 (mlx_lm.server) through a claude-code-router proxy, config-driven, cloud Claude preserved as default. Extends plan-938f735b.</p>
+  <h1>Plan: Model-agnostic apply pipeline: run claude -p on local gemma via vllm-mlx (Anthropic-native)</h1>
+  <p style="color:var(--text-dim)">Keep the Claude Code agentic apply harness but point claude -p at a local gemma-4 served by vllm-mlx (a single MLX server exposing the native Anthropic Messages API with real tool_use blocks + MCP tool calling — no translation proxy). Config-driven, cloud Claude preserved as default. Extends plan-938f735b.</p>
   <div class="meta">
     <span class="badge badge-pending">Draft</span>
-    <span style="font-size:.75rem;color:var(--text-muted)">v2 · 6 slices · Created 2026-06-26</span>
+    <span style="font-size:.75rem;color:var(--text-muted)">v3 · 6 slices · Created 2026-06-26</span>
   </div>
 </header>
 <button id="themeToggle" style="position:fixed;top:16px;right:16px;z-index:100;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;color:var(--text);font-family:var(--mono);font-size:0.75rem;cursor:pointer;">
@@ -570,9 +570,10 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
     <thead><tr><th>Field</th><th>Type</th><th>Note</th></tr></thead>
     <tbody>
       <tr><td><code>backend</code></td><td><code>enum: claude_cloud | claude_local (default claude_cloud)</code></td><td>&mdash;</td></tr>
-      <tr><td><code>router_url</code></td><td><code>string (Anthropic-Messages endpoint of claude-code-router, e.g. http://127.0.0.1:8788)</code></td><td>&mdash;</td></tr>
-      <tr><td><code>anthropic_model</code></td><td><code>string (model name claude -p requests; router maps it to the gemma upstream)</code></td><td>&mdash;</td></tr>
-      <tr><td><code>small_fast_model</code></td><td><code>string (ANTHROPIC_SMALL_FAST_MODEL mapping)</code></td><td>&mdash;</td></tr>
+      <tr><td><code>anthropic_url</code></td><td><code>string (vllm-mlx native Anthropic endpoint, e.g. http://127.0.0.1:8081/anthropic or /v1)</code></td><td>&mdash;</td></tr>
+      <tr><td><code>anthropic_model</code></td><td><code>string (model name claude -p requests; vllm-mlx maps to the loaded gemma)</code></td><td>&mdash;</td></tr>
+      <tr><td><code>haiku_model</code></td><td><code>string (ANTHROPIC_DEFAULT_HAIKU_MODEL value)</code></td><td>&mdash;</td></tr>
+      <tr><td><code>on_failure</code></td><td><code>enum: error | fallback_cloud (default error)</code></td><td>&mdash;</td></tr>
       
     </tbody>
   </table>
@@ -587,13 +588,14 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-1-block-file-tree-1" title="Jump to slice 1">
           <span class="slice-num">#1</span>
-          <span class="overview-slice-title">SPIKE: prove gemma-4 drives the Claude Code agentic apply via claude-code-router (decision gate)</span>
+          <span class="overview-slice-title">SPIKE: prove gemma-4 drives the Claude Code agentic apply via vllm-mlx (decision gate)</span>
         </a>
         <div class="block-anchor" id="overview-slice-1-block-file-tree-1" data-block-anchor="slice-1-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">scripts/_apply_byo_spike.sh (new, throwaway — start router-&gt;mlx, run claude -p apply against it)</code></li>
-    <li class="file-entry"><code class="file-path">docs/spikes/byo-model-apply.md (new — GO/NO-GO findings &#43; fidelity notes)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/headless.py (reference only — read how claude -p is built; no edits this slice)</code></li>
+    <li class="file-entry"><code class="file-path">scripts/_apply_byo_spike.sh (new, throwaway — start vllm-mlx, run claude -p apply against its Anthropic endpoint)</code></li>
+    <li class="file-entry"><code class="file-path">docs/spikes/byo-model-apply.md (new — GO/NO-GO &#43; fidelity evidence)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/headless.py (reference only — _build_command ~241-294, run_phase ~415, markers ~57-58/477-489)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/plugin/agents/apply/specialist-contracts.yaml (reference — the haiku/sonnet/opus tiers to exercise)</code></li>
     
   </ul>
 </div></div>
@@ -605,7 +607,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
         </a>
         <div class="block-anchor" id="overview-slice-2-block-file-tree-1" data-block-anchor="slice-2-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">src/jobsmith/config.py (edit — add llm.apply_backend &#43; gateway settings)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/config.py (edit — add llm.apply: backend &#43; anthropic_url &#43; models &#43; fallback)</code></li>
     <li class="file-entry"><code class="file-path">config-schema.yaml (edit — document the new fields)</code></li>
     <li class="file-entry"><code class="file-path">tests/test_config.py (edit — parse/default/validation tests)</code></li>
     
@@ -615,12 +617,12 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-3-block-file-tree-1" title="Jump to slice 3">
           <span class="slice-num">#3</span>
-          <span class="overview-slice-title">claude-code-router gateway: lifecycle + config in front of mlx_lm.server</span>
+          <span class="overview-slice-title">vllm-mlx engine: lifecycle serving gemma-4 over Anthropic (apply) + OpenAI (chat/scoring)</span>
         </a>
         <div class="block-anchor" id="overview-slice-3-block-file-tree-1" data-block-anchor="slice-3-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">src/jobsmith/llm/cc_router.py (new — write router config, start/stop child, health check)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/deps.py (edit — detect claude-code-router install &#43; guided install)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/llm/vllm_mlx.py (new — start/stop, free-port &#43; PID-lock, health: loading vs crashed)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/deps.py (edit — detect vllm-mlx install &#43; guided pip install)</code></li>
     
   </ul>
 </div></div>
@@ -628,12 +630,13 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-4-block-file-tree-1" title="Jump to slice 4">
           <span class="slice-num">#4</span>
-          <span class="overview-slice-title">headless.py: inject BYO-model env when apply_backend=claude_local</span>
+          <span class="overview-slice-title">headless.py: build the env= seam + inject BYO-model env when apply_backend=claude_local</span>
         </a>
         <div class="block-anchor" id="overview-slice-4-block-file-tree-1" data-block-anchor="slice-4-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">src/jobsmith/headless.py (edit — conditional env injection in the claude -p subprocess builder)</code></li>
-    <li class="file-entry"><code class="file-path">tests/test_headless.py (edit — assert env set for claude_local, absent for claude_cloud)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/headless.py (edit — add extra_env kwarg on run_phase; env={**os.environ, **extra_env} on Popen ~415)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/apply.py (edit — resolve config.llm.apply backend; build &#43; pass extra_env)</code></li>
+    <li class="file-entry"><code class="file-path">tests/test_headless.py (edit — assert env for claude_local; absent for claude_cloud; flags unchanged)</code></li>
     
   </ul>
 </div></div>
@@ -641,13 +644,14 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-5-block-file-tree-1" title="Jump to slice 5">
           <span class="slice-num">#5</span>
-          <span class="overview-slice-title">End-to-end apply on local gemma + cloud fallback</span>
+          <span class="overview-slice-title">End-to-end apply on local gemma + gateway-crash detection + cloud fallback</span>
         </a>
         <div class="block-anchor" id="overview-slice-5-block-file-tree-1" data-block-anchor="slice-5-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">src/jobsmith/headless.py (edit — orchestrate gateway-up -&gt; claude -p local -&gt; fallback)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/llm/cc_router.py (reuse — health/start/stop)</code></li>
-    <li class="file-entry"><code class="file-path">tests/test_apply_local_backend.py (new — e2e-ish with mocked router &#43; fallback paths)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/apply.py (edit — ensure engine healthy -&gt; spawn local -&gt; on-failure policy)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/headless.py (edit — backend suffix in deterministic_session_id; classify connection-refused vs model failure)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/llm/vllm_mlx.py (reuse — health() for mid-run crash detection)</code></li>
+    <li class="file-entry"><code class="file-path">tests/test_apply_local_backend.py (new — orchestration &#43; fallback &#43; session-isolation paths)</code></li>
     
   </ul>
 </div></div>
@@ -661,7 +665,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <ul class="file-list">
     <li class="file-entry"><code class="file-path">web/src/app/views.tsx (edit — apply-backend toggle in the Config tab)</code></li>
     <li class="file-entry"><code class="file-path">src/jobsmith/api/config_routes.py (edit — accept llm.apply in PUT /api/config)</code></li>
-    <li class="file-entry"><code class="file-path">docs/local-apply-backend.md (new — router &#43; mlx_lm.server setup)</code></li>
+    <li class="file-entry"><code class="file-path">docs/local-apply-backend.md (new — vllm-mlx setup &#43; cold-load &#43; session note)</code></li>
     
   </ul>
 </div></div>
@@ -683,9 +687,10 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <label style="display: block">Apply pipeline backend</label>
   
     Claude (cloud) — default
-    Local gemma (via router)
+    Local gemma (vllm-mlx)
   
   
+  <div style="color: var(--wf-text-muted)">First apply after start loads the model (~60-90s).</div>
 </div>
 </div>
 </div></div>
@@ -699,48 +704,48 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-1-block-diagram-1" title="Jump to slice 1">
           <span class="slice-num">#1</span>
-          <span class="overview-slice-title">SPIKE: prove gemma-4 drives the Claude Code agentic apply via claude-code-router (decision gate)</span>
+          <span class="overview-slice-title">SPIKE: prove gemma-4 drives the Claude Code agentic apply via vllm-mlx (decision gate)</span>
         </a>
         <div class="block-anchor" id="overview-slice-1-block-diagram-1" data-block-anchor="slice-1-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
   <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Spike data path</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">mlx_lm.server (gemma-4-E4B) on :8081 (OpenAI /v1)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude-code-router on :PORT (Anthropic /v1/messages -&gt; OpenAI)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude -p (ANTHROPIC_BASE_URL=router, apply system prompt &#43; allowedTools)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">agentic loop: tool calls (WebFetch/Read/Write/Bash &#43; chrome render)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">assess: gather-&gt;draft-&gt;render completed? tool fidelity?</div>
+    <div class="diagram-node">vllm-mlx serving gemma-4-E4B (native Anthropic /v1/messages &#43; tool_use)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude -p (ANTHROPIC_BASE_URL=vllm-mlx, dummy token, MODEL &#43; DEFAULT_HAIKU_MODEL)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">agentic loop: tool_use blocks (WebFetch/Read/Write/Bash &#43; chrome render)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">specialist dispatch: haiku (jd-parser) &#43; sonnet (bullet-selector) -&gt; gemma</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">assess: tools fire? markers emitted? &gt;=2 tiers route? draft produced?</div>
   </div>
 </div></div>
       </div>
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-3-block-diagram-1" title="Jump to slice 3">
           <span class="slice-num">#3</span>
-          <span class="overview-slice-title">claude-code-router gateway: lifecycle + config in front of mlx_lm.server</span>
+          <span class="overview-slice-title">vllm-mlx engine: lifecycle serving gemma-4 over Anthropic (apply) + OpenAI (chat/scoring)</span>
         </a>
         <div class="block-anchor" id="overview-slice-3-block-diagram-1" data-block-anchor="slice-3-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
-  <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Gateway lifecycle</span></div>
+  <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Engine lifecycle</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">ensure mlx_lm.server up (gemma-4)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">write router config (anthropic_model -&gt; mlx OpenAI route)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">start claude-code-router child</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">poll router health (Anthropic /v1/messages reachable)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">on apply done / app exit: stop router</div>
+    <div class="diagram-node">start() -&gt; PID-lock check (idempotent) &#43; free port</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">launch vllm-mlx (gemma-4; Anthropic &#43; OpenAI endpoints)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">health: loading (~60-90s) -&gt; emit &#39;model loading&#39; status</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">health: ready -&gt; Anthropic /v1/messages reachable</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">health: crashed -&gt; error (distinct from loading)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">stop(): terminate; no orphan</div>
   </div>
 </div></div>
       </div>
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-4-block-diagram-1" title="Jump to slice 4">
           <span class="slice-num">#4</span>
-          <span class="overview-slice-title">headless.py: inject BYO-model env when apply_backend=claude_local</span>
+          <span class="overview-slice-title">headless.py: build the env= seam + inject BYO-model env when apply_backend=claude_local</span>
         </a>
         <div class="block-anchor" id="overview-slice-4-block-diagram-1" data-block-anchor="slice-4-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
   <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Env injection seam</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">config.llm.apply.backend == claude_local?</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">yes -&gt; subprocess env &#43;= ANTHROPIC_BASE_URL/AUTH/MODEL/SMALL_FAST &#43; ATTRIBUTION_HEADER=0</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">no  -&gt; spawn claude -p unchanged (cloud)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude -p runs the SAME specialists/tools either way</div>
+    <div class="diagram-node">apply.py resolves config.llm.apply.backend</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude_local -&gt; extra_env = {ANTHROPIC_BASE_URL, AUTH_TOKEN(dummy), MODEL, DEFAULT_HAIKU_MODEL, ATTRIBUTION_HEADER=0}</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude_cloud -&gt; extra_env = None (no override)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">run_phase Popen(cmd, env={**os.environ, **extra_env} if extra_env else inherited)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude -p runs the SAME specialists/tools either way</div>
   </div>
 </div></div>
       </div>
       <div class="overview-block-entry">
         <a class="overview-slice-label" href="#slice-5-block-diagram-1" title="Jump to slice 5">
           <span class="slice-num">#5</span>
-          <span class="overview-slice-title">End-to-end apply on local gemma + cloud fallback</span>
+          <span class="overview-slice-title">End-to-end apply on local gemma + gateway-crash detection + cloud fallback</span>
         </a>
         <div class="block-anchor" id="overview-slice-5-block-diagram-1" data-block-anchor="slice-5-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
   <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">End-to-end local apply</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">apply_backend=claude_local -&gt; ensure gateway healthy</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">spawn claude -p (BYO env) -&gt; gather-&gt;draft-&gt;render via gemma-4</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">tool calls incl. Chrome render fallback fire</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">on gateway-unhealthy / run-failure -&gt; clear error (&#43; optional cloud fallback)</div>
+    <div class="diagram-node">claude_local -&gt; ensure vllm-mlx healthy (else error/loading)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">session id suffixed by backend (no cloud&lt;-&gt;local resume)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">spawn claude -p (BYO env) -&gt; gather-&gt;draft-&gt;render via gemma-4 &#43; chrome fallback</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">mid-run connection-refused -&gt; health() says down -&gt; on_failure (error | fallback_cloud)</div>
   </div>
 </div></div>
       </div>
@@ -754,12 +759,12 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
 <section class="dep-graph" data-zone="dependency-graph">
   <h2>Dependency Graph</h2>
   <div id="graph-data" style="display:none">
-    <div data-node="1" data-name="SPIKE: prove gemma-4 drives the Claude Code agentic apply via claude-code-router (decision gate)" data-status="pending" data-deps="" data-files="2"></div>
+    <div data-node="1" data-name="SPIKE: prove gemma-4 drives the Claude Code agentic apply via vllm-mlx (decision gate)" data-status="pending" data-deps="" data-files="2"></div>
     <div data-node="2" data-name="Extend the `llm` config with an apply-pipeline backend selector" data-status="pending" data-deps="1" data-files="3"></div>
-    <div data-node="3" data-name="claude-code-router gateway: lifecycle + config in front of mlx_lm.server" data-status="pending" data-deps="1" data-files="2"></div>
-    <div data-node="4" data-name="headless.py: inject BYO-model env when apply_backend=claude_local" data-status="pending" data-deps="2,3" data-files="2"></div>
-    <div data-node="5" data-name="End-to-end apply on local gemma + cloud fallback" data-status="pending" data-deps="4" data-files="3"></div>
-    <div data-node="6" data-name="Config-tab UI + docs: select the apply backend" data-status="pending" data-deps="4" data-files="3"></div>
+    <div data-node="3" data-name="vllm-mlx engine: lifecycle serving gemma-4 over Anthropic (apply) + OpenAI (chat/scoring)" data-status="pending" data-deps="1" data-files="2"></div>
+    <div data-node="4" data-name="headless.py: build the env= seam + inject BYO-model env when apply_backend=claude_local" data-status="pending" data-deps="2,3" data-files="3"></div>
+    <div data-node="5" data-name="End-to-end apply on local gemma + gateway-crash detection + cloud fallback" data-status="pending" data-deps="4" data-files="4"></div>
+    <div data-node="6" data-name="Config-tab UI + docs: select the apply backend" data-status="pending" data-deps="2" data-files="3"></div>
     
     <!--PLAN_GRAPH_NODES-->
   </div>
@@ -774,25 +779,26 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
   <div class="section-body">
     <h4>Problem</h4>
 <div data-markdown>jobsmith&#39;s apply pipeline (gather -&gt; draft -&gt; render) is hardwired to the Claude
-Code CLI: src/jobsmith/headless.py spawns `claude -p` with a system-prompt file,
---allowedTools, and specialist subagents (apply-jd-parser etc.), doing multi-step
-agentic tool calls (WebFetch/Read/Write/Bash + claude-in-chrome MCP, incl. the new
-Workday Chrome-render fallback). plan-938f735b made CHAT + sourcing SCORING
-pluggable but explicitly scoped OUT this agentic harness. The user wants the WHOLE
+Code CLI: src/jobsmith/headless.py builds a `claude -p` command (_build_command,
+~241-294) with --system-prompt-file/--allowedTools/--agents and spawns it via
+subprocess.Popen (run_phase, ~415), parsing stream-json events incl. text markers
+&lt;&lt;PHASE_COMPLETE&gt;&gt;/&lt;&lt;PHASE_FAILED&gt;&gt; and dispatching specialist sub-agents that each
+request a Claude tier (haiku/sonnet/opus). plan-938f735b made CHAT + sourcing
+SCORING pluggable but scoped OUT this agentic harness. The user wants the WHOLE
 pipeline runnable by a local/open model so jobsmith is not Claude-locked.
 </div>
 <h4>Goals</h4>
 <ol>
-<li data-markdown>Run the full apply pipeline end-to-end on a local gemma-4 model, reusing the existing Claude Code harness unchanged (no specialist/tool re-architecture).</li>
-<li data-markdown>Drive it by pointing `claude -p` at a local Anthropic-API gateway (claude-code-router) that translates to mlx_lm.server (gemma-4) — selected via the existing `llm` config.</li>
+<li data-markdown>Run the full apply pipeline end-to-end on a local gemma-4 model, reusing the Claude Code harness unchanged (no specialist/tool re-architecture).</li>
+<li data-markdown>Drive it by pointing `claude -p` at a local Anthropic-native MLX server (vllm-mlx) that serves gemma-4 with real tool_use blocks — selected via the existing `llm` config. No translation proxy.</li>
 <li data-markdown>Preserve the cloud Claude path as the default/backward-compatible backend; the local path is opt-in.</li>
-<li data-markdown>Prove tool-calling fidelity first (spike) before building the plumbing — de-risk that a 4B gemma can complete the agentic loop.</li>
+<li data-markdown>Prove tool-calling fidelity first (spike) before building plumbing — de-risk that a 4B gemma can complete the agentic loop AND that vllm-mlx carries tool_use for all requested Claude tiers.</li>
 </ol>
 <h4>Constraints</h4>
 <ul>
 <li data-markdown>Do not regress the existing `claude -p` cloud path (default behavior unchanged when the local backend is not selected).</li>
-<li data-markdown>Tool use under the local model must work — WebFetch/Read/Write/Bash + the claude-in-chrome Chrome-render fallback (feat-2c81da71).</li>
-<li data-markdown>No LiteLLM 1.82.7/1.82.8 (shipped credential-stealing malware); prefer claude-code-router as the gateway. Apple Silicon (MLX) for the model engine.</li>
+<li data-markdown>Tool use under the local model must work end-to-end — WebFetch/Read/Write/Bash + the claude-in-chrome Chrome-render fallback (feat-2c81da71). The engine MUST support tool calling (mlx_lm.server does NOT — that is why vllm-mlx is chosen).</li>
+<li data-markdown>Use the current Claude Code env var ANTHROPIC_DEFAULT_HAIKU_MODEL (ANTHROPIC_SMALL_FAST_MODEL is deprecated). Apple Silicon (MLX). Avoid LiteLLM 1.82.7/1.82.8 (malware).</li>
 </ul>
 
     <div class="approval-row">
@@ -811,11 +817,11 @@ pipeline runnable by a local/open model so jobsmith is not Claude-locked.
   <summary><span>Slices</span><span class="badge badge-pending" data-badge-for="slices">Pending</span></summary>
   <div class="section-body">
     <details class="slice-card" id="slice-1" data-slice="1" data-slice-name="slice-1" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 1: SPIKE: prove gemma-4 drives the Claude Code agentic apply via claude-code-router (decision gate)">
+  <summary class="slice-summary" aria-label="Slice 1: SPIKE: prove gemma-4 drives the Claude Code agentic apply via vllm-mlx (decision gate)">
     <span class="slice-num">#1</span>
     <span class="slice-title-col">
-      <span class="slice-name">SPIKE: prove gemma-4 drives the Claude Code agentic apply via claude-code-router (decision gate)</span>
-      <span class="slice-preview">Stand up claude-code-router in front of the existing mlxlm.server</span>
+      <span class="slice-name">SPIKE: prove gemma-4 drives the Claude Code agentic apply via vllm-mlx (decision gate)</span>
+      <span class="slice-preview">Stand up vllm-mlx serving gemma-4-E4B-it-qat-4bit over its native Anthropic</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-revision badge-sm">M</span>
@@ -823,7 +829,7 @@ pipeline runnable by a local/open model so jobsmith is not Claude-locked.
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-1">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="5 critic issue(s)">5 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -855,15 +861,17 @@ pipeline runnable by a local/open model so jobsmith is not Claude-locked.
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-1-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>Stand up claude-code-router in front of the existing mlx_lm.server
-(gemma-4-E4B-it-qat-4bit) so it exposes an Anthropic-Messages endpoint mapping
-to the local OpenAI model. Run a real <code>claude -p</code> against it with the apply
-system prompt + the apply-jd-parser allowedTools, on a representative
-JS-rendered job (e.g. the NVIDIA Workday URL), and assess whether gemma-4
-completes the agentic loop: correct tool calls (WebFetch/Read/Write/Bash +
-claude-in-chrome render), specialist hand-off, and a usable gather-&gt;draft-&gt;render
-result. Output a GO/NO-GO with concrete fidelity notes (which gemma size, router
-config needed, where tool-calling broke if it did). This gates slices 2-6.</p>
+          <div class="markdown-block reveal-content serif-prose"><p>Stand up vllm-mlx serving gemma-4-E4B-it-qat-4bit over its native Anthropic
+/v1/messages endpoint. Run a real <code>claude -p</code> against it (ANTHROPIC_BASE_URL=the
+vllm-mlx Anthropic endpoint, dummy ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL +
+ANTHROPIC_DEFAULT_HAIKU_MODEL, CLAUDE_CODE_ATTRIBUTION_HEADER=0) with the apply
+system prompt + allowedTools, on a JS-rendered job (NVIDIA Workday URL). Verify
+the agentic loop actually works: (a) tool_use blocks fire (WebFetch/Read/Write/
+Bash + claude-in-chrome render), (b) specialist dispatch works for &gt;=2 Claude
+tiers (haiku jd-parser AND sonnet bullet-selector both reach gemma), (c) the
+text markers &lt;&lt;PHASE_COMPLETE: gather&gt;&gt; etc. are emitted so run_phase advances,
+(d) claude -p initializes with a dummy auth token. Output a GO/NO-GO with
+evidence. This gates slices 2-6; NO-GO pivots to the C fallback (OpenCode/OpenHands).</p>
 </div>
           <label for="slice-1-what-reveal" class="reveal-label">Show full description</label>
           
@@ -875,9 +883,10 @@ config needed, where tool-calling broke if it did). This gates slices 2-6.</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>The whole approach hinges on a 4B local model driving Claude Code&#39;s multi-step
-tool-calling. Proving it first avoids building config plumbing on a false premise;
-a NO-GO pivots to the C fallback (OpenCode/OpenHands).</p>
+          <div class="markdown-block serif-prose"><p>The approach rests on a 4B local model driving Claude Code&#39;s multi-step tool
+calls AND on vllm-mlx faithfully carrying tool_use across all requested Claude
+tiers. Proving it first avoids building plumbing on a false premise (the previous
+engine/gateway both failed feasibility — see critique).</p>
 </div>
           
         </div>
@@ -892,7 +901,7 @@ a NO-GO pivots to the C fallback (OpenCode/OpenHands).</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>A `claude -p` apply run against gemma-4-via-router completes a gather-&gt;draft-&gt;render on a real JS-rendered job, with the tool calls actually firing (not hallucinated).</li><li>docs/spikes/byo-model-apply.md records an explicit GO or NO-GO with evidence (transcript excerpts, which tools worked/failed, gemma size, router config).</li></ul>
+        <ul class="slice-done-list"><li>A `claude -p` apply run against gemma-4-on-vllm-mlx fires REAL tool_use blocks (not hallucinated) for at least WebFetch/Read/Write and the claude-in-chrome render path.</li><li>At least two specialist tiers (haiku jd-parser AND sonnet bullet-selector) both successfully reach gemma (no unrouted-model error) — confirming vllm-mlx serves the loaded model regardless of the requested Claude tier name.</li><li>The text markers &lt;&lt;PHASE_COMPLETE: gather&gt;&gt; (and draft/render) appear in the transcript so run_phase advances instead of exhausting max_turns; and claude -p initializes cleanly with a dummy ANTHROPIC_AUTH_TOKEN.</li><li>Verifiable output: jd-parsed.json has non-empty company/position &#43; must_haves (&gt;=2) &#43; role_type, AND prose-draft.md has a non-empty Professional Summary section. docs/spikes/byo-model-apply.md records an explicit GO or NO-GO with transcript evidence.</li></ul>
       </div>
       
     
@@ -905,8 +914,8 @@ a NO-GO pivots to the C fallback (OpenCode/OpenHands).</p>
         <input type="checkbox" id="slice-1-decisions-reveal" class="reveal-toggle">
         <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> manual spike before any plumbing.
 <strong>State:</strong> throwaway script + a findings doc; no production code changes.
-<strong>Payload:</strong> a GO/NO-GO decision + fidelity notes that shape slices 2-6.
-<strong>Rejected:</strong> building the config/headless plumbing first (slices 2-4) — wasteful if gemma can&#39;t drive the loop; spike-first de-risks. Using a larger gemma (12B) up front — try E4B first (matches the chosen default), escalate only if E4B fails.</p>
+<strong>Payload:</strong> GO/NO-GO + fidelity notes (tool_use fired? tiers routed? markers emitted?) shaping slices 2-6.
+<strong>Rejected:</strong> building config/headless first (wasteful if NO-GO); the prior mlx_lm.server engine (no tool calling) and claude-code-router gateway (Electron GUI, no headless) — both failed feasibility, replaced by vllm-mlx. Larger gemma (12B/31B) up front — try E4B first, escalate only if E4B&#39;s tool fidelity is poor.</p>
 </div>
         <label for="slice-1-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -919,16 +928,17 @@ a NO-GO pivots to the C fallback (OpenCode/OpenHands).</p>
   <div class="slice-field-value block-zone">
     <div class="block-anchor" id="slice-1-block-file-tree-1" data-block-anchor="slice-1-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">scripts/_apply_byo_spike.sh (new, throwaway — start router-&gt;mlx, run claude -p apply against it)</code></li>
-    <li class="file-entry"><code class="file-path">docs/spikes/byo-model-apply.md (new — GO/NO-GO findings &#43; fidelity notes)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/headless.py (reference only — read how claude -p is built; no edits this slice)</code></li>
+    <li class="file-entry"><code class="file-path">scripts/_apply_byo_spike.sh (new, throwaway — start vllm-mlx, run claude -p apply against its Anthropic endpoint)</code></li>
+    <li class="file-entry"><code class="file-path">docs/spikes/byo-model-apply.md (new — GO/NO-GO &#43; fidelity evidence)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/headless.py (reference only — _build_command ~241-294, run_phase ~415, markers ~57-58/477-489)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/plugin/agents/apply/specialist-contracts.yaml (reference — the haiku/sonnet/opus tiers to exercise)</code></li>
     
   </ul>
 </div></div>
     <div class="block-anchor" id="slice-1-block-diagram-1" data-block-anchor="slice-1-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
   <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Spike data path</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">mlx_lm.server (gemma-4-E4B) on :8081 (OpenAI /v1)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude-code-router on :PORT (Anthropic /v1/messages -&gt; OpenAI)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude -p (ANTHROPIC_BASE_URL=router, apply system prompt &#43; allowedTools)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">agentic loop: tool calls (WebFetch/Read/Write/Bash &#43; chrome render)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">assess: gather-&gt;draft-&gt;render completed? tool fidelity?</div>
+    <div class="diagram-node">vllm-mlx serving gemma-4-E4B (native Anthropic /v1/messages &#43; tool_use)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude -p (ANTHROPIC_BASE_URL=vllm-mlx, dummy token, MODEL &#43; DEFAULT_HAIKU_MODEL)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">agentic loop: tool_use blocks (WebFetch/Read/Write/Bash &#43; chrome render)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">specialist dispatch: haiku (jd-parser) &#43; sonnet (bullet-selector) -&gt; gemma</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">assess: tools fire? markers emitted? &gt;=2 tiers route? draft produced?</div>
   </div>
 </div></div>
     
@@ -945,12 +955,12 @@ a NO-GO pivots to the C fallback (OpenCode/OpenHands).</p>
           
           <div class="test-group" data-kind="manual spike">
             <span class="test-chip">MANUAL SPIKE &middot; 1</span>
-            <ul><li>run scripts/_apply_byo_spike.sh end-to-end; capture the claude -p</li></ul>
+            <ul><li>scripts/_apply_byo_spike.sh runs end-to-end; capture the stream-json</li></ul>
           </div>
           
           <div class="test-group" data-kind="other">
             <span class="test-chip">OTHER &middot; 2</span>
-            <ul><li>stream-json transcript; verify real tool-use events &#43; a produced draft. Compare</li><li>output quality against a cloud-Claude baseline run on the same job.</li></ul>
+            <ul><li>transcript; grep for tool_use events &#43; the phase markers; inspect jd-parsed.json /</li><li>prose-draft.md against the field checklist; compare to a cloud-Claude baseline.</li></ul>
           </div>
           
         </div>
@@ -959,6 +969,43 @@ a NO-GO pivots to the C fallback (OpenCode/OpenHands).</p>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">mlx_lm.server has NO tool calling (no tools field in /v1/chat/completions) — agentic loop impossible on it. Engine switched to vllm-mlx (native tool_use). Spike now explicitly tests tool_use firing. [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Specialists use 3 Claude tiers (haiku/sonnet/opus); spike now verifies &gt;=2 tiers route to the single gemma (a single-model Anthropic server serves the loaded model regardless of requested name). [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Phase-complete markers are model-generated text a 4B model may skip -&gt; max_turns hang. Spike done_when now requires &lt;&lt;PHASE_COMPLETE&gt;&gt; emission. [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">&#39;usable result&#39; was unverifiable -&gt; replaced with concrete field checks (jd-parsed.json fields, prose-draft.md Professional Summary). [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">Dummy ANTHROPIC_AUTH_TOKEN: spike now verifies claude -p initializes without auth error against the local endpoint. [resolved]</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -973,7 +1020,7 @@ a NO-GO pivots to the C fallback (OpenCode/OpenHands).</p>
           <textarea
             data-section="slice-1-question-q-gate"
             data-comment-for="slice-1-question-q-gate"
-            placeholder="Answer question q-gate...">Pivot to the C fallback (adopt OpenCode or OpenHands&#39; Python SDK as the apply orchestrator) — captured in design.comment; slices 2-6 are D-specific and would be re-planned. (User chose D primary; C is the documented fallback.)</textarea>
+            placeholder="Answer question q-gate...">Pivot to the C fallback (adopt OpenCode or OpenHands&#39; Python SDK as the apply orchestrator) — slices 2-6 are vllm-mlx/Claude-Code-specific and would be re-planned. (User chose D primary; C documented fallback.)</textarea>
           
         </div>
         
@@ -996,7 +1043,7 @@ a NO-GO pivots to the C fallback (OpenCode/OpenHands).</p>
     <span class="slice-num">#2</span>
     <span class="slice-title-col">
       <span class="slice-name">Extend the `llm` config with an apply-pipeline backend selector</span>
-      <span class="slice-preview">Add to the existing llm config (src/jobsmith/config.py) an apply-backend</span>
+      <span class="slice-preview">Conditional on slice-1 GO.</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-pending badge-sm">S</span>
@@ -1004,7 +1051,7 @@ a NO-GO pivots to the C fallback (OpenCode/OpenHands).</p>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-2">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="2 critic issue(s)">2 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1036,13 +1083,13 @@ a NO-GO pivots to the C fallback (OpenCode/OpenHands).</p>
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-2-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>Add to the existing <code>llm</code> config (src/jobsmith/config.py) an apply-backend
-selector so the apply pipeline can choose <code>claude_cloud</code> (default) vs
-<code>claude_local</code> (route claude -p through the local gateway). Carry the gateway
-settings (router host/port, the Anthropic model name claude -p should request,
-and the small/fast model) — reusing the existing openai_compatible base_url/model
-(gemma-4) as the upstream. Validate with Pydantic; default maps to claude_cloud
-for backward compatibility.</p>
+          <div class="markdown-block reveal-content serif-prose"><p>Conditional on slice-1 GO. Add to the existing <code>llm</code> config (src/jobsmith/config.py)
+an apply-backend selector: claude_cloud (default) vs claude_local. For
+claude_local, carry the vllm-mlx Anthropic endpoint URL, the model name claude -p
+requests (ANTHROPIC_MODEL), the haiku-tier model (ANTHROPIC_DEFAULT_HAIKU_MODEL),
+and a fallback policy. Reuse the existing openai_compatible base_url/model
+(gemma-4) — vllm-mlx serves the same model over both APIs. Pydantic validation;
+default = claude_cloud (backward compatible).</p>
 </div>
           <label for="slice-2-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1070,7 +1117,7 @@ sites; default stays cloud Claude (no regression).</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Config parses llm.apply.backend; default is claude_cloud (existing behavior).</li><li>Selecting claude_local with a missing router_url fails Pydantic validation with a clear error.</li></ul>
+        <ul class="slice-done-list"><li>Config parses llm.apply.backend; default is claude_cloud (existing behavior unchanged).</li><li>Selecting claude_local with a missing anthropic_url fails Pydantic validation with a clear error.</li></ul>
       </div>
       
     
@@ -1080,11 +1127,13 @@ sites; default stays cloud Claude (no regression).</p>
       <div class="slice-field-label">Decisions</div>
       <div class="slice-field-value">
         
-        <div class="markdown-block serif-prose"><p><strong>Trigger:</strong> startup config load.
-<strong>State:</strong> immutable config; reuses the existing openai_compatible base_url/model (gemma-4) as the router upstream.
-<strong>Payload:</strong> llm.apply block selecting cloud vs local + gateway coordinates.
-<strong>Rejected:</strong> a separate top-level config section (duplicates the existing llm block); an env-only switch (undocumented, hard to surface in the UI).</p>
+        <input type="checkbox" id="slice-2-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> startup config load. Conditional on slice-1 GO.
+<strong>State:</strong> immutable config; reuses the existing gemma-4 upstream (vllm-mlx serves both Anthropic + OpenAI).
+<strong>Payload:</strong> llm.apply block (backend, anthropic_url, models, on_failure).
+<strong>Rejected:</strong> a separate top-level section (duplicates the llm block); env-only switch (undocumented, not surfaceable in UI); the prior router_url field (no router now — vllm-mlx is Anthropic-native).</p>
 </div>
+        <label for="slice-2-decisions-reveal" class="reveal-label">Show full decisions</label>
         
       </div>
     </div>
@@ -1095,7 +1144,7 @@ sites; default stays cloud Claude (no regression).</p>
   <div class="slice-field-value block-zone">
     <div class="block-anchor" id="slice-2-block-file-tree-1" data-block-anchor="slice-2-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">src/jobsmith/config.py (edit — add llm.apply_backend &#43; gateway settings)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/config.py (edit — add llm.apply: backend &#43; anthropic_url &#43; models &#43; fallback)</code></li>
     <li class="file-entry"><code class="file-path">config-schema.yaml (edit — document the new fields)</code></li>
     <li class="file-entry"><code class="file-path">tests/test_config.py (edit — parse/default/validation tests)</code></li>
     
@@ -1107,9 +1156,10 @@ sites; default stays cloud Claude (no regression).</p>
     <thead><tr><th>Field</th><th>Type</th><th>Note</th></tr></thead>
     <tbody>
       <tr><td><code>backend</code></td><td><code>enum: claude_cloud | claude_local (default claude_cloud)</code></td><td>&mdash;</td></tr>
-      <tr><td><code>router_url</code></td><td><code>string (Anthropic-Messages endpoint of claude-code-router, e.g. http://127.0.0.1:8788)</code></td><td>&mdash;</td></tr>
-      <tr><td><code>anthropic_model</code></td><td><code>string (model name claude -p requests; router maps it to the gemma upstream)</code></td><td>&mdash;</td></tr>
-      <tr><td><code>small_fast_model</code></td><td><code>string (ANTHROPIC_SMALL_FAST_MODEL mapping)</code></td><td>&mdash;</td></tr>
+      <tr><td><code>anthropic_url</code></td><td><code>string (vllm-mlx native Anthropic endpoint, e.g. http://127.0.0.1:8081/anthropic or /v1)</code></td><td>&mdash;</td></tr>
+      <tr><td><code>anthropic_model</code></td><td><code>string (model name claude -p requests; vllm-mlx maps to the loaded gemma)</code></td><td>&mdash;</td></tr>
+      <tr><td><code>haiku_model</code></td><td><code>string (ANTHROPIC_DEFAULT_HAIKU_MODEL value)</code></td><td>&mdash;</td></tr>
+      <tr><td><code>on_failure</code></td><td><code>enum: error | fallback_cloud (default error)</code></td><td>&mdash;</td></tr>
       
     </tbody>
   </table>
@@ -1125,13 +1175,33 @@ sites; default stays cloud Claude (no regression).</p>
         
         
         <div class="markdown-block slice-tests"><p>Unit (tests/test_config.py): default backend = claude_cloud; claude_local without
-router_url -&gt; validation error; round-trips through .apply-config.yaml.</p>
+anthropic_url -&gt; validation error; on_failure default = error; round-trips via
+.apply-config.yaml.</p>
 </div>
         
       </div>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">Replaced router_url with anthropic_url (vllm-mlx native endpoint) &#43; renamed small_fast to haiku_model (ANTHROPIC_DEFAULT_HAIKU_MODEL; SMALL_FAST deprecated). [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Added on_failure policy (error|fallback_cloud) to back slice-5&#39;s graceful fallback. [resolved]</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1140,13 +1210,13 @@ router_url -&gt; validation error; round-trips through .apply-config.yaml.</p>
       <div class="slice-field-value">
         
         <div class="question-block slice-question-block">
-          <p>Reuse the existing llm.openai_compatible model, or a separate apply model?</p>
+          <p>Reuse the existing gemma upstream or a separate apply model?</p>
           
           
           <textarea
             data-section="slice-2-question-q-reuse"
             data-comment-for="slice-2-question-q-reuse"
-            placeholder="Answer question q-reuse...">Reuse the same gemma-4 upstream (base_url/model) for consistency across chat/scoring/apply; the router just re-exposes it over the Anthropic API. (Inferred — single-model story is simplest.)</textarea>
+            placeholder="Answer question q-reuse...">Reuse the same gemma-4 via vllm-mlx (one engine serves Anthropic for apply &#43; OpenAI for chat/scoring); single-model story is simplest. (Inferred.)</textarea>
           
         </div>
         
@@ -1165,11 +1235,11 @@ router_url -&gt; validation error; round-trips through .apply-config.yaml.</p>
   </div>
 </details>
 <details class="slice-card" id="slice-3" data-slice="3" data-slice-name="slice-3" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 3: claude-code-router gateway: lifecycle &#43; config in front of mlx_lm.server">
+  <summary class="slice-summary" aria-label="Slice 3: vllm-mlx engine: lifecycle serving gemma-4 over Anthropic (apply) &#43; OpenAI (chat/scoring)">
     <span class="slice-num">#3</span>
     <span class="slice-title-col">
-      <span class="slice-name">claude-code-router gateway: lifecycle &#43; config in front of mlx_lm.server</span>
-      <span class="slice-preview">Add a gateway manager (src/jobsmith/llm/ccrouter.py) that writes a</span>
+      <span class="slice-name">vllm-mlx engine: lifecycle serving gemma-4 over Anthropic (apply) &#43; OpenAI (chat/scoring)</span>
+      <span class="slice-preview">Conditional on slice-1 GO.</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-revision badge-sm">M</span>
@@ -1177,7 +1247,7 @@ router_url -&gt; validation error; round-trips through .apply-config.yaml.</p>
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-3">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="3 critic issue(s)">3 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1209,12 +1279,14 @@ router_url -&gt; validation error; round-trips through .apply-config.yaml.</p>
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-3-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>Add a gateway manager (src/jobsmith/llm/cc_router.py) that writes a
-claude-code-router config routing the Anthropic model name to the local
-mlx_lm.server OpenAI endpoint (gemma-4), starts/stops the router as a managed
-child, and exposes a health check. Reuses the desktop dependency-detection
-pattern (slice 6 of the desktop plan) to detect whether claude-code-router is
-installed and guide install if not.</p>
+          <div class="markdown-block reveal-content serif-prose"><p>Conditional on slice-1 GO. Add an engine manager (src/jobsmith/llm/vllm_mlx.py)
+that starts vllm-mlx serving gemma-4 (exposing native Anthropic /v1/messages for
+the apply path AND OpenAI /v1 for chat/scoring — consolidating off mlx_lm.server),
+with: a free-port bind + conflict pre-check, an idempotent start (PID-file/lock so
+concurrent applies don&#39;t double-launch), and a health poll that DISTINGUISHES
+&#39;model loading&#39; (~60-90s cold load) from &#39;crashed&#39; and surfaces a loading-status
+event the API/UI can forward. Detect whether vllm-mlx is installed; guide install
+(pip) if not (mirror the desktop dep-detection pattern).</p>
 </div>
           <label for="slice-3-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1226,8 +1298,8 @@ installed and guide install if not.</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Goal 2 — the translation gateway is what lets the unchanged claude -p speak to a
-local OpenAI model; it must be reliably startable + healthy before an apply run.</p>
+          <div class="markdown-block serif-prose"><p>Goal 2 — vllm-mlx is the local engine claude -p (and chat/scoring) talk to; it
+must start reliably, signal the cold-load wait, and not race under concurrent use.</p>
 </div>
           
         </div>
@@ -1236,13 +1308,13 @@ local OpenAI model; it must be reliably startable + healthy before an apply run.
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/llm/cc_router.py, src/jobsmith/desktop/deps.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/llm/vllm_mlx.py, src/jobsmith/desktop/deps.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>cc_router.start() launches claude-code-router pointed at mlx_lm.server and health-checks green; stop() terminates it (no orphan).</li><li>If claude-code-router is not installed, deps.py reports it (status) and surfaces a guided-install hint rather than crashing.</li></ul>
+        <ul class="slice-done-list"><li>vllm_mlx.start() launches vllm-mlx serving gemma-4 and health-checks green; stop() terminates it (no orphan); a second concurrent start() is a no-op (PID-lock), not a port collision.</li><li>During the ~60-90s cold load, health reports &#39;loading&#39; (distinct from &#39;crashed&#39;) and emits a forwardable loading-status signal; the port is chosen with a free-port fallback if the default is taken.</li><li>If vllm-mlx is not installed, deps.py reports it &#43; surfaces a guided pip-install hint rather than crashing.</li></ul>
       </div>
       
     
@@ -1253,10 +1325,10 @@ local OpenAI model; it must be reliably startable + healthy before an apply run.
       <div class="slice-field-value">
         
         <input type="checkbox" id="slice-3-decisions-reveal" class="reveal-toggle">
-        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> before a claude_local apply run; app/CLI lifecycle.
-<strong>State:</strong> router config file under the app data dir; router runs as a managed child (no persistence beyond the process).
-<strong>Payload:</strong> a healthy Anthropic-Messages endpoint backed by gemma-4.
-<strong>Rejected:</strong> Ollama-native-Anthropic (would add a second engine alongside MLX); LiteLLM (malware history in 1.82.7/8); embedding a custom translator (reinvents claude-code-router).</p>
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> before a claude_local apply (and as the chat/scoring engine); app/CLI lifecycle. Conditional on slice-1 GO.
+<strong>State:</strong> PID-file + chosen port under the app data dir; engine runs as a managed child.
+<strong>Payload:</strong> a healthy Anthropic + OpenAI endpoint backed by gemma-4, with a loading signal.
+<strong>Rejected:</strong> mlx_lm.server (no tool calling); claude-code-router (Electron GUI, no headless); Ollama (drops MLX); LiteLLM (malware-tainted releases). vllm-mlx consolidates engine+gateway and serves both APIs.</p>
 </div>
         <label for="slice-3-decisions-reveal" class="reveal-label">Show full decisions</label>
         
@@ -1269,15 +1341,15 @@ local OpenAI model; it must be reliably startable + healthy before an apply run.
   <div class="slice-field-value block-zone">
     <div class="block-anchor" id="slice-3-block-file-tree-1" data-block-anchor="slice-3-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">src/jobsmith/llm/cc_router.py (new — write router config, start/stop child, health check)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/deps.py (edit — detect claude-code-router install &#43; guided install)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/llm/vllm_mlx.py (new — start/stop, free-port &#43; PID-lock, health: loading vs crashed)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/desktop/deps.py (edit — detect vllm-mlx install &#43; guided pip install)</code></li>
     
   </ul>
 </div></div>
     <div class="block-anchor" id="slice-3-block-diagram-1" data-block-anchor="slice-3-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
-  <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Gateway lifecycle</span></div>
+  <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Engine lifecycle</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">ensure mlx_lm.server up (gemma-4)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">write router config (anthropic_model -&gt; mlx OpenAI route)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">start claude-code-router child</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">poll router health (Anthropic /v1/messages reachable)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">on apply done / app exit: stop router</div>
+    <div class="diagram-node">start() -&gt; PID-lock check (idempotent) &#43; free port</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">launch vllm-mlx (gemma-4; Anthropic &#43; OpenAI endpoints)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">health: loading (~60-90s) -&gt; emit &#39;model loading&#39; status</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">health: ready -&gt; Anthropic /v1/messages reachable</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">health: crashed -&gt; error (distinct from loading)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">stop(): terminate; no orphan</div>
   </div>
 </div></div>
     
@@ -1294,12 +1366,12 @@ local OpenAI model; it must be reliably startable + healthy before an apply run.
           
           <div class="test-group" data-kind="unit">
             <span class="test-chip">UNIT &middot; 1</span>
-            <ul><li>router-config writer produces the expected JSON mapping (anthropic_model -&gt;</li></ul>
+            <ul><li>free-port picker; PID-lock makes start() idempotent; health classifier</li></ul>
           </div>
           
           <div class="test-group" data-kind="other">
-            <span class="test-chip">OTHER &middot; 2</span>
-            <ul><li>base_url/model). Integration (gated): start router against a stub OpenAI server,</li><li>assert /v1/messages health; stop() leaves no process.</li></ul>
+            <span class="test-chip">OTHER &middot; 3</span>
+            <ul><li>maps loading vs crashed vs ready from stubbed responses. Integration (gated):</li><li>start vllm-mlx with gemma-4, poll until ready, assert Anthropic /v1/messages 200;</li><li>stop() leaves no process.</li></ul>
           </div>
           
         </div>
@@ -1309,6 +1381,31 @@ local OpenAI model; it must be reliably startable + healthy before an apply run.
     
 
     
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">Original slice managed claude-code-router (Electron GUI — cannot Popen). Replaced with vllm-mlx engine lifecycle (a real CLI server). [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Added cold-load (~60-90s) loading-vs-crashed health distinction &#43; a forwardable loading status (F3). [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Added free-port fallback &#43; conflict pre-check (F10) and PID-lock idempotent start for concurrent applies (F11). [resolved]</span>
+        </div>
+        
+      </div>
+    </div>
+    
 
     
     <div class="slice-field slice-questions">
@@ -1316,13 +1413,13 @@ local OpenAI model; it must be reliably startable + healthy before an apply run.
       <div class="slice-field-value">
         
         <div class="question-block slice-question-block">
-          <p>Bundle claude-code-router or detect&#43;guide install?</p>
+          <p>Bundle vllm-mlx or detect&#43;guide install?</p>
           
           
           <textarea
             data-section="slice-3-question-q-detect"
             data-comment-for="slice-3-question-q-detect"
-            placeholder="Answer question q-detect...">Detect &#43; guided install (mirror the desktop claude-detection pattern, feat slice 6) — it&#39;s a Node tool; bundling drags in Node. (Inferred from the desktop dep-handling precedent.)</textarea>
+            placeholder="Answer question q-detect...">Detect &#43; guided pip install (mirror the desktop dep-detection pattern); it&#39;s a Python package, installable into the same venv. (Inferred.)</textarea>
           
         </div>
         
@@ -1341,11 +1438,11 @@ local OpenAI model; it must be reliably startable + healthy before an apply run.
   </div>
 </details>
 <details class="slice-card" id="slice-4" data-slice="4" data-slice-name="slice-4" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 4: headless.py: inject BYO-model env when apply_backend=claude_local">
+  <summary class="slice-summary" aria-label="Slice 4: headless.py: build the env= seam &#43; inject BYO-model env when apply_backend=claude_local">
     <span class="slice-num">#4</span>
     <span class="slice-title-col">
-      <span class="slice-name">headless.py: inject BYO-model env when apply_backend=claude_local</span>
-      <span class="slice-preview">In src/jobsmith/headless.py, when config.llm.apply.backend == claudelocal,</span>
+      <span class="slice-name">headless.py: build the env= seam &#43; inject BYO-model env when apply_backend=claude_local</span>
+      <span class="slice-preview">Conditional on slice-1 GO.</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-revision badge-sm">M</span>
@@ -1353,7 +1450,7 @@ local OpenAI model; it must be reliably startable + healthy before an apply run.
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-4">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="2 critic issue(s)">2 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1385,13 +1482,15 @@ local OpenAI model; it must be reliably startable + healthy before an apply run.
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-4-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>In src/jobsmith/headless.py, when config.llm.apply.backend == claude_local,
-spawn <code>claude -p</code> with the BYO-model env: ANTHROPIC_BASE_URL=&lt;router_url&gt;,
-ANTHROPIC_AUTH_TOKEN=&lt;token&gt;, ANTHROPIC_MODEL=&lt;anthropic_model&gt;,
-ANTHROPIC_SMALL_FAST_MODEL=&lt;small_fast_model&gt;, and
-CLAUDE_CODE_ATTRIBUTION_HEADER=0 (prefix-cache fix for local backends). All
-existing flags (--system-prompt-file, --allowedTools, specialists, stream-json)
-are unchanged. Default (claude_cloud) spawns exactly as today — no env override.</p>
+          <div class="markdown-block reveal-content serif-prose"><p>Conditional on slice-1 GO. headless.py&#39;s run_phase (~415) calls subprocess.Popen
+WITHOUT an env= param today — so first ADD the seam: an <code>extra_env: dict|None</code>
+kwarg on run_phase passed as <code>env={**os.environ, **extra_env}</code> to Popen, threaded
+through every call site in apply.py (which resolves config.llm.apply). Then, when
+backend == claude_local, the caller injects: ANTHROPIC_BASE_URL=&lt;anthropic_url&gt;,
+ANTHROPIC_AUTH_TOKEN=&lt;dummy&gt;, ANTHROPIC_MODEL=&lt;anthropic_model&gt;,
+ANTHROPIC_DEFAULT_HAIKU_MODEL=&lt;haiku_model&gt;, CLAUDE_CODE_ATTRIBUTION_HEADER=0.
+Default (claude_cloud) passes no extra_env — the command + env are byte-identical
+to today. --allowedTools/--system-prompt-file/--agents unchanged in both modes.</p>
 </div>
           <label for="slice-4-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1403,8 +1502,9 @@ are unchanged. Default (claude_cloud) spawns exactly as today — no env overrid
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Goal 1/3 — this is the single seam that swaps the model while preserving the
-entire harness; everything downstream (specialists, tools, Chrome fallback) is untouched.</p>
+          <div class="markdown-block serif-prose"><p>Goal 1/3 — this is the single seam that swaps the model while preserving the whole
+harness. Critic confirmed the seam does NOT exist yet (Popen has no env=), so it is
+an explicit build task, not a config tweak.</p>
 </div>
           
         </div>
@@ -1413,13 +1513,13 @@ entire harness; everything downstream (specialists, tools, Chrome fallback) is u
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/headless.py, tests/test_headless.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/headless.py, src/jobsmith/apply.py, tests/test_headless.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>With apply_backend=claude_local, the spawned claude -p process env contains ANTHROPIC_BASE_URL=router &#43; ANTHROPIC_MODEL &#43; CLAUDE_CODE_ATTRIBUTION_HEADER=0.</li><li>With apply_backend=claude_cloud (default), no ANTHROPIC_* override is injected — the command is byte-identical to today&#39;s.</li><li>--allowedTools / --system-prompt-file / specialists are unchanged in both modes.</li></ul>
+        <ul class="slice-done-list"><li>run_phase accepts extra_env and passes env={**os.environ, **extra_env} to Popen; with extra_env=None the inherited env is used (today&#39;s behavior).</li><li>With apply_backend=claude_local, the spawned env contains ANTHROPIC_BASE_URL &#43; ANTHROPIC_MODEL &#43; ANTHROPIC_DEFAULT_HAIKU_MODEL &#43; CLAUDE_CODE_ATTRIBUTION_HEADER=0 (NOT the deprecated SMALL_FAST var).</li><li>With apply_backend=claude_cloud (default), no ANTHROPIC_* override is injected and --allowedTools/--system-prompt-file/--agents are byte-identical to today&#39;s command.</li></ul>
       </div>
       
     
@@ -1429,11 +1529,13 @@ entire harness; everything downstream (specialists, tools, Chrome fallback) is u
       <div class="slice-field-label">Decisions</div>
       <div class="slice-field-value">
         
-        <div class="markdown-block serif-prose"><p><strong>Trigger:</strong> apply run dispatch in headless.py.
-<strong>State:</strong> env passed per-subprocess; no global env mutation.
-<strong>Payload:</strong> the four ANTHROPIC_* vars + the prefix-cache header, only in local mode.
-<strong>Rejected:</strong> mutating the global/process env (leaks into other calls); a separate code path/duplicate command builder (drift risk — the only diff should be the env dict).</p>
+        <input type="checkbox" id="slice-4-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> apply run dispatch (apply.py -&gt; headless.run_phase). Conditional on slice-1 GO.
+<strong>State:</strong> env passed per-subprocess (no global env mutation); config read in apply.py (headless.py stays config-agnostic).
+<strong>Payload:</strong> the ANTHROPIC_* vars + ATTRIBUTION_HEADER=0, only in local mode.
+<strong>Rejected:</strong> mutating global os.environ (leaks across calls); a duplicate command builder (drift — only the env should differ); ANTHROPIC_SMALL_FAST_MODEL (deprecated -&gt; DEFAULT_HAIKU_MODEL).</p>
 </div>
+        <label for="slice-4-decisions-reveal" class="reveal-label">Show full decisions</label>
         
       </div>
     </div>
@@ -1444,15 +1546,16 @@ entire harness; everything downstream (specialists, tools, Chrome fallback) is u
   <div class="slice-field-value block-zone">
     <div class="block-anchor" id="slice-4-block-file-tree-1" data-block-anchor="slice-4-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">src/jobsmith/headless.py (edit — conditional env injection in the claude -p subprocess builder)</code></li>
-    <li class="file-entry"><code class="file-path">tests/test_headless.py (edit — assert env set for claude_local, absent for claude_cloud)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/headless.py (edit — add extra_env kwarg on run_phase; env={**os.environ, **extra_env} on Popen ~415)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/apply.py (edit — resolve config.llm.apply backend; build &#43; pass extra_env)</code></li>
+    <li class="file-entry"><code class="file-path">tests/test_headless.py (edit — assert env for claude_local; absent for claude_cloud; flags unchanged)</code></li>
     
   </ul>
 </div></div>
     <div class="block-anchor" id="slice-4-block-diagram-1" data-block-anchor="slice-4-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
   <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">Env injection seam</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">config.llm.apply.backend == claude_local?</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">yes -&gt; subprocess env &#43;= ANTHROPIC_BASE_URL/AUTH/MODEL/SMALL_FAST &#43; ATTRIBUTION_HEADER=0</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">no  -&gt; spawn claude -p unchanged (cloud)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude -p runs the SAME specialists/tools either way</div>
+    <div class="diagram-node">apply.py resolves config.llm.apply.backend</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude_local -&gt; extra_env = {ANTHROPIC_BASE_URL, AUTH_TOKEN(dummy), MODEL, DEFAULT_HAIKU_MODEL, ATTRIBUTION_HEADER=0}</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude_cloud -&gt; extra_env = None (no override)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">run_phase Popen(cmd, env={**os.environ, **extra_env} if extra_env else inherited)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">claude -p runs the SAME specialists/tools either way</div>
   </div>
 </div></div>
     
@@ -1465,15 +1568,43 @@ entire harness; everything downstream (specialists, tools, Chrome fallback) is u
       <div class="slice-field-value">
         
         
-        <div class="markdown-block slice-tests"><p>Unit (tests/test_headless.py): mock subprocess, assert the env dict for both
-backends (set vs unset), and that the allowedTools/system-prompt args are
-identical across modes. Regression: existing headless tests still pass.</p>
-</div>
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 2</span>
+            <ul><li>Unit (tests/test_headless.py): mock Popen, assert the env dict for both backends</li><li>(set vs unset, correct var names) and that cmd args are identical across modes.</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="regression">
+            <span class="test-chip">REGRESSION &middot; 1</span>
+            <ul><li>existing headless tests pass unchanged.</li></ul>
+          </div>
+          
+        </div>
         
       </div>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">headless.py Popen (~415) has NO env= today — the seam must be BUILT (extra_env kwarg &#43; env merge), not assumed. apply.py added as the config-resolving caller. [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">Inject ANTHROPIC_DEFAULT_HAIKU_MODEL, not the deprecated ANTHROPIC_SMALL_FAST_MODEL. [resolved]</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1482,13 +1613,13 @@ identical across modes. Regression: existing headless tests still pass.</p>
       <div class="slice-field-value">
         
         <div class="question-block slice-question-block">
-          <p>What ANTHROPIC_AUTH_TOKEN value for the local router?</p>
+          <p>What ANTHROPIC_AUTH_TOKEN for the local engine?</p>
           
           
           <textarea
             data-section="slice-4-question-q-auth"
             data-comment-for="slice-4-question-q-auth"
-            placeholder="Answer question q-auth...">A dummy/local token the router accepts (router does the real upstream auth, or none for localhost); claude -p just needs a non-empty value. (Inferred from local-gateway setups.)</textarea>
+            placeholder="Answer question q-auth...">A non-empty dummy token (vllm-mlx accepts it for localhost; the spike (slice 1) verifies claude -p initializes without an auth round-trip). (Inferred &#43; spike-verified.)</textarea>
           
         </div>
         
@@ -1507,11 +1638,11 @@ identical across modes. Regression: existing headless tests still pass.</p>
   </div>
 </details>
 <details class="slice-card" id="slice-5" data-slice="5" data-slice-name="slice-5" data-status="pending" data-approval="pending">
-  <summary class="slice-summary" aria-label="Slice 5: End-to-end apply on local gemma &#43; cloud fallback">
+  <summary class="slice-summary" aria-label="Slice 5: End-to-end apply on local gemma &#43; gateway-crash detection &#43; cloud fallback">
     <span class="slice-num">#5</span>
     <span class="slice-title-col">
-      <span class="slice-name">End-to-end apply on local gemma &#43; cloud fallback</span>
-      <span class="slice-preview">Wire it together: a claudelocal apply run starts the gateway (slice 3), spawns</span>
+      <span class="slice-name">End-to-end apply on local gemma &#43; gateway-crash detection &#43; cloud fallback</span>
+      <span class="slice-preview">Conditional on slice-1 GO.</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-blocked badge-sm">L</span>
@@ -1519,7 +1650,7 @@ identical across modes. Regression: existing headless tests still pass.</p>
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-5">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="2 critic issue(s)">2 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1551,13 +1682,16 @@ identical across modes. Regression: existing headless tests still pass.</p>
         <div class="slice-field-value">
           
           <input type="checkbox" id="slice-5-what-reveal" class="reveal-toggle">
-          <div class="markdown-block reveal-content serif-prose"><p>Wire it together: a claude_local apply run starts the gateway (slice 3), spawns
-claude -p with the BYO env (slice 4), and completes a real apply on a
-JS-rendered job (NVIDIA Workday) end-to-end. Add graceful fallback: if the
-gateway is unhealthy or the local run fails/stalls, surface a clear error and
-(optionally, per config) fall back to cloud Claude rather than producing a broken
-application. Verify the Chrome-render fallback (feat-2c81da71) works under the
-local model.</p>
+          <div class="markdown-block reveal-content serif-prose"><p>Conditional on slice-1 GO. Wire it together: a claude_local apply ensures the
+vllm-mlx engine is healthy (slice 3), spawns claude -p with the BYO env (slice 4),
+and completes a real apply on a JS-rendered job (NVIDIA Workday) end-to-end,
+exercising the Chrome-render fallback (feat-2c81da71) under gemma. Robustness:
+(a) distinguish ENGINE-DOWN errors (connection-refused mid-run -&gt; query
+vllm_mlx.health()) from normal model failures, since a mid-run crash surfaces as a
+non-JSON stderr line (JSONDecodeError path) not a structured event; (b) on
+failure, honor on_failure config (clear error, or fallback_cloud); (c) isolate
+sessions by backend so a cloud session is never resumed with gemma (suffix the
+deterministic session id with the backend).</p>
 </div>
           <label for="slice-5-what-reveal" class="reveal-label">Show full description</label>
           
@@ -1569,8 +1703,9 @@ local model.</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Goal 1 — the actual deliverable: a full apply produced by a local model, with a
-safety net so a flaky local backend never silently yields garbage.</p>
+          <div class="markdown-block serif-prose"><p>Goal 1 — the deliverable: a full apply produced by a local model, with a safety net
+so a flaky local engine never silently yields a broken application or pollutes a
+cloud session.</p>
 </div>
           
         </div>
@@ -1579,13 +1714,13 @@ safety net so a flaky local backend never silently yields garbage.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/headless.py, src/jobsmith/llm/cc_router.py, tests/test_apply_local_backend.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/apply.py, src/jobsmith/headless.py, src/jobsmith/llm/vllm_mlx.py, tests/test_apply_local_backend.py</code></div>
       </div>
       
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>A claude_local apply on a real JS-rendered job (NVIDIA Workday) produces a complete gather-&gt;draft-&gt;render with the Chrome-render fallback exercised.</li><li>If the gateway is down or the local run fails, the user gets a clear error (and a cloud fallback when configured) — never a silently broken application.</li><li>An equivalent claude_cloud run still works unchanged (no regression).</li></ul>
+        <ul class="slice-done-list"><li>A claude_local apply on a real JS-rendered job (NVIDIA Workday) produces a complete gather-&gt;draft-&gt;render with the Chrome-render fallback exercised under gemma.</li><li>A mid-run engine crash is detected as ENGINE-DOWN (via health()) and handled per on_failure (clear error, or cloud fallback) — never a silently broken application or a misclassified per-line JSON error.</li><li>Switching backends never resumes a cross-backend session (session id carries the backend); an equivalent claude_cloud run still works unchanged (no regression).</li></ul>
       </div>
       
     
@@ -1595,11 +1730,13 @@ safety net so a flaky local backend never silently yields garbage.</p>
       <div class="slice-field-label">Decisions</div>
       <div class="slice-field-value">
         
-        <div class="markdown-block serif-prose"><p><strong>Trigger:</strong> a claude_local apply run.
-<strong>State:</strong> gateway child lifecycle bound to the apply run; results saved as today.
-<strong>Payload:</strong> a complete application from the local model, or a clear error/fallback.
-<strong>Rejected:</strong> silent fallback with no signal (hides that local failed); no fallback at all (a flaky 4B model would block the user). Fallback policy is config-gated.</p>
+        <input type="checkbox" id="slice-5-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> a claude_local apply run. Conditional on slice-1 GO.
+<strong>State:</strong> engine lifecycle bound to the apply; session ids suffixed by backend; results saved as today.
+<strong>Payload:</strong> a complete local-model application, or a clear error / cloud fallback.
+<strong>Rejected:</strong> silent fallback (hides local failure); no fallback (a flaky 4B blocks the user) — policy is config-gated. Shared session ids across backends (cross-model context pollution) -&gt; backend-suffixed ids.</p>
 </div>
+        <label for="slice-5-decisions-reveal" class="reveal-label">Show full decisions</label>
         
       </div>
     </div>
@@ -1610,16 +1747,17 @@ safety net so a flaky local backend never silently yields garbage.</p>
   <div class="slice-field-value block-zone">
     <div class="block-anchor" id="slice-5-block-file-tree-1" data-block-anchor="slice-5-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
-    <li class="file-entry"><code class="file-path">src/jobsmith/headless.py (edit — orchestrate gateway-up -&gt; claude -p local -&gt; fallback)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/llm/cc_router.py (reuse — health/start/stop)</code></li>
-    <li class="file-entry"><code class="file-path">tests/test_apply_local_backend.py (new — e2e-ish with mocked router &#43; fallback paths)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/apply.py (edit — ensure engine healthy -&gt; spawn local -&gt; on-failure policy)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/headless.py (edit — backend suffix in deterministic_session_id; classify connection-refused vs model failure)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/llm/vllm_mlx.py (reuse — health() for mid-run crash detection)</code></li>
+    <li class="file-entry"><code class="file-path">tests/test_apply_local_backend.py (new — orchestration &#43; fallback &#43; session-isolation paths)</code></li>
     
   </ul>
 </div></div>
     <div class="block-anchor" id="slice-5-block-diagram-1" data-block-anchor="slice-5-block-diagram-1" data-block-kind="diagram"><div class="block block-diagram">
   <div class="block-header"><span class="block-kind">diagram</span><span class="block-title">End-to-end local apply</span></div>
   <div class="diagram-flow diagram-lr">
-    <div class="diagram-node">apply_backend=claude_local -&gt; ensure gateway healthy</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">spawn claude -p (BYO env) -&gt; gather-&gt;draft-&gt;render via gemma-4</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">tool calls incl. Chrome render fallback fire</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">on gateway-unhealthy / run-failure -&gt; clear error (&#43; optional cloud fallback)</div>
+    <div class="diagram-node">claude_local -&gt; ensure vllm-mlx healthy (else error/loading)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">session id suffixed by backend (no cloud&lt;-&gt;local resume)</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">spawn claude -p (BYO env) -&gt; gather-&gt;draft-&gt;render via gemma-4 &#43; chrome fallback</div><span class="diagram-arrow" aria-hidden="true">&#8594;</span><div class="diagram-node">mid-run connection-refused -&gt; health() says down -&gt; on_failure (error | fallback_cloud)</div>
   </div>
 </div></div>
     
@@ -1632,16 +1770,43 @@ safety net so a flaky local backend never silently yields garbage.</p>
       <div class="slice-field-value">
         
         
-        <div class="markdown-block slice-tests"><p>Integration (tests/test_apply_local_backend.py): mock the router health + a
-stubbed claude -p; assert the orchestration (gateway-up -&gt; spawn -&gt; teardown) and
-the fallback path on unhealthy gateway. Manual E2E: real apply on the NVIDIA
-Workday URL through gemma-4; compare to a cloud-Claude baseline.</p>
-</div>
+        <div class="test-strategy">
+          
+          <div class="test-group" data-kind="other">
+            <span class="test-chip">OTHER &middot; 4</span>
+            <ul><li>Integration (tests/test_apply_local_backend.py): mock vllm_mlx.health &#43; a stubbed</li><li>claude -p; assert orchestration (ensure-healthy -&gt; spawn -&gt; teardown), the</li><li>engine-down branch, the on_failure policy, and the backend-suffixed session id.</li><li>cloud-Claude baseline.</li></ul>
+          </div>
+          
+          <div class="test-group" data-kind="manual e2e">
+            <span class="test-chip">MANUAL E2E &middot; 1</span>
+            <ul><li>real apply on the NVIDIA Workday URL via gemma-4; compare to a</li></ul>
+          </div>
+          
+        </div>
         
       </div>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Mid-apply engine crash surfaces as a JSONDecodeError per-line, not a gateway signal — added health()-based ENGINE-DOWN classification (F4). [resolved]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Cross-backend session pollution (cloud session resumed with gemma) — session id now suffixed by backend in deterministic_session_id (F8). [resolved]</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1656,7 +1821,7 @@ Workday URL through gemma-4; compare to a cloud-Claude baseline.</p>
           <textarea
             data-section="slice-5-question-q-fallback"
             data-comment-for="slice-5-question-q-fallback"
-            placeholder="Answer question q-fallback...">Config-gated: default to a clear error &#43; retryable (don&#39;t silently spend cloud); allow opt-in auto-fallback to cloud Claude. (Inferred — matches the graceful-degradation pattern used for the browser/claude prompts.)</textarea>
+            placeholder="Answer question q-fallback...">Config-gated (llm.apply.on_failure): default error &#43; retryable (don&#39;t silently spend cloud); opt-in fallback_cloud. (Matches the graceful-degradation pattern.)</textarea>
           
         </div>
         
@@ -1679,7 +1844,7 @@ Workday URL through gemma-4; compare to a cloud-Claude baseline.</p>
     <span class="slice-num">#6</span>
     <span class="slice-title-col">
       <span class="slice-name">Config-tab UI &#43; docs: select the apply backend</span>
-      <span class="slice-preview">Surface the apply-backend choice in the web Config tab (web/src/app/views.tsx),</span>
+      <span class="slice-preview">Conditional on slice-1 GO.</span>
       <span class="slice-meta-row">
         <span class="slice-summary-badges">
           <span class="badge badge-pending badge-sm">S</span>
@@ -1687,7 +1852,7 @@ Workday URL through gemma-4; compare to a cloud-Claude baseline.</p>
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-6">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="1 critic issue(s)">1 issue</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1718,12 +1883,15 @@ Workday URL through gemma-4; compare to a cloud-Claude baseline.</p>
         <div class="slice-field-label">What</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Surface the apply-backend choice in the web Config tab (web/src/app/views.tsx),
-alongside the existing LLM provider selector: a toggle for the apply pipeline
-between &#34;Claude (cloud)&#34; and &#34;Local gemma (via router)&#34;, with the router URL /
-model fields when local is selected. Persist via /api/config. Document the local
-setup (install claude-code-router, start mlx_lm.server gemma-4) in docs.</p>
+          <input type="checkbox" id="slice-6-what-reveal" class="reveal-toggle">
+          <div class="markdown-block reveal-content serif-prose"><p>Conditional on slice-1 GO. Surface the apply-backend choice in the web Config tab
+(web/src/app/views.tsx) alongside the existing LLM provider selector: a toggle
+between &#39;Claude (cloud)&#39; and &#39;Local gemma (vllm-mlx)&#39;, revealing the anthropic_url
+/ model + on_failure when local is selected. Persist via /api/config. Document the
+local setup (pip install vllm-mlx, start it with gemma-4, expect a ~60-90s first-
+apply cold load) and the cross-backend-session note.</p>
 </div>
+          <label for="slice-6-what-reveal" class="reveal-label">Show full description</label>
           
         </div>
       </div>
@@ -1733,8 +1901,8 @@ setup (install claude-code-router, start mlx_lm.server gemma-4) in docs.</p>
         <div class="slice-field-label">Why</div>
         <div class="slice-field-value">
           
-          <div class="markdown-block serif-prose"><p>Operators need to flip the apply backend without editing YAML; docs make the
-local path reproducible.</p>
+          <div class="markdown-block serif-prose"><p>Operators need to flip the apply backend without editing YAML; docs make the local
+path reproducible and set the cold-load expectation.</p>
 </div>
           
         </div>
@@ -1749,7 +1917,7 @@ local path reproducible.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>The Config tab shows the apply-backend toggle; selecting Local reveals router_url/model and persists via PUT /api/config.</li><li>docs/local-apply-backend.md documents installing claude-code-router &#43; starting mlx_lm.server gemma-4 &#43; flipping the toggle.</li></ul>
+        <ul class="slice-done-list"><li>The Config tab shows the apply-backend toggle; selecting Local reveals anthropic_url/model &#43; on_failure and persists via PUT /api/config.</li><li>docs/local-apply-backend.md documents pip install vllm-mlx &#43; starting it with gemma-4 &#43; the ~60-90s cold load &#43; the per-backend session note.</li></ul>
       </div>
       
     
@@ -1759,11 +1927,13 @@ local path reproducible.</p>
       <div class="slice-field-label">Decisions</div>
       <div class="slice-field-value">
         
-        <div class="markdown-block serif-prose"><p><strong>Trigger:</strong> Config tab render + save.
-<strong>State:</strong> persisted via /api/config (llm.apply block).
-<strong>Payload:</strong> apply backend choice + router coordinates.
-<strong>Rejected:</strong> YAML-only configuration (operators can&#39;t switch without editing files); a separate settings screen (the Config tab already hosts the LLM provider selector).</p>
+        <input type="checkbox" id="slice-6-decisions-reveal" class="reveal-toggle">
+        <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> Config tab render + save. Conditional on slice-1 GO.
+<strong>State:</strong> persisted via /api/config (llm.apply block). deps reduced to [2] (only needs the config schema, not the headless wiring) for parallelism.
+<strong>Payload:</strong> apply backend choice + endpoint + on_failure.
+<strong>Rejected:</strong> YAML-only config (operators can&#39;t switch easily); conflating with the chat/scoring provider selector (apply uses the Claude harness; chat/scoring use OpenAICompatible — different backends).</p>
 </div>
+        <label for="slice-6-decisions-reveal" class="reveal-label">Show full decisions</label>
         
       </div>
     </div>
@@ -1776,7 +1946,7 @@ local path reproducible.</p>
   <ul class="file-list">
     <li class="file-entry"><code class="file-path">web/src/app/views.tsx (edit — apply-backend toggle in the Config tab)</code></li>
     <li class="file-entry"><code class="file-path">src/jobsmith/api/config_routes.py (edit — accept llm.apply in PUT /api/config)</code></li>
-    <li class="file-entry"><code class="file-path">docs/local-apply-backend.md (new — router &#43; mlx_lm.server setup)</code></li>
+    <li class="file-entry"><code class="file-path">docs/local-apply-backend.md (new — vllm-mlx setup &#43; cold-load &#43; session note)</code></li>
     
   </ul>
 </div></div>
@@ -1786,9 +1956,10 @@ local path reproducible.</p>
   <label style="display: block">Apply pipeline backend</label>
   
     Claude (cloud) — default
-    Local gemma (via router)
+    Local gemma (vllm-mlx)
   
   
+  <div style="color: var(--wf-text-muted)">First apply after start loads the model (~60-90s).</div>
 </div>
 </div>
 </div></div>
@@ -1802,14 +1973,27 @@ local path reproducible.</p>
       <div class="slice-field-value">
         
         
-        <div class="markdown-block slice-tests"><p>Unit (web): config tab renders the apply-backend toggle, persists the llm.apply
-payload on save. Doc lint/readthrough.</p>
+        <div class="markdown-block slice-tests"><p>Unit (web): Config tab renders the apply-backend toggle + persists the llm.apply
+payload on save. Doc readthrough.</p>
 </div>
         
       </div>
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">deps narrowed [4]-&gt;[2] — UI&#43;docs only need the config schema (slice 2), enabling parallelism with slices 3-5 (F9). [resolved]</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     
@@ -1824,7 +2008,7 @@ payload on save. Doc lint/readthrough.</p>
           <textarea
             data-section="slice-6-question-q-ui-scope"
             data-comment-for="slice-6-question-q-ui-scope"
-            placeholder="Answer question q-ui-scope...">A separate apply-backend toggle next to the existing chat/scoring provider selector — apply (claude harness) and chat/scoring (OpenAICompatible) are different backends and shouldn&#39;t be conflated. (Inferred from the two-subsystem split.)</textarea>
+            placeholder="Answer question q-ui-scope...">Separate apply-backend toggle next to the chat/scoring provider selector — apply (Claude harness) and chat/scoring (OpenAICompatible) are different backends. (Inferred.)</textarea>
           
         </div>
         
@@ -1832,7 +2016,7 @@ payload on save. Doc lint/readthrough.</p>
     </div>
     
 
-    <div class="slice-deps">Dependencies: slices 4</div>
+    <div class="slice-deps">Dependencies: slices 2</div>
 
     <details class="comment-collapse">
       <summary class="comment-collapse-trigger">+ Leave a comment</summary>
