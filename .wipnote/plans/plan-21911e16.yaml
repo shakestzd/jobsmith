@@ -1,0 +1,18 @@
+meta:
+    id: plan-21911e16
+    track_id: trk-f5052600
+    title: 'Model-agnostic apply pipeline: run claude -p on local gemma via claude-code-router'
+    description: 'Approach D from research: keep the Claude Code agentic apply harness (headless.py, specialists, tool gating, Chrome fallback) but point claude -p at a local gemma-4 (mlx_lm.server) through a claude-code-router proxy (Anthropic<->OpenAI), config-driven, with the cloud Claude path preserved as default. Extends plan-938f735b (chat+scoring pluggable). Includes a fidelity spike to verify gemma-4 drives the agentic tool-calling.'
+    created_at: "2026-06-26"
+    status: draft
+    priority: medium
+    schema_version: v4
+    version: 2
+design:
+    problem: ""
+    goals: []
+    constraints: []
+    approved: false
+    comment: ""
+slices: []
+questions: []
