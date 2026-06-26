@@ -42,6 +42,14 @@ const MOCK_CONFIG = {
   fit_scorer: {},
   portfolio: {},
   benchmarks: {},
+  llm: {
+    provider: 'claude_cli' as const,
+    model: null,
+    base_url: null,
+    api_key: null,
+    budget_usd: 1.0,
+    timeout_s: 300,
+  },
 };
 
 // ── Mock the API client module ────────────────────────────────────────────
@@ -214,5 +222,114 @@ describe('ConfigView', () => {
       // The field name is rendered in its own <span> — also a single text node.
       expect(screen.getByText('master.work_yml')).toBeInTheDocument();
     });
+  });
+});
+
+// ── LLM provider section ──────────────────────────────────────────────────
+
+describe('ConfigView — LLM provider section', () => {
+  it('renders the provider selector with all four options', async () => {
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    const select = screen.getByRole('combobox', { name: /provider/i });
+    expect(select).toBeInTheDocument();
+
+    const options = Array.from(select.querySelectorAll('option')).map(o => o.value);
+    expect(options).toContain('claude_cli');
+    expect(options).toContain('antigravity_cli');
+    expect(options).toContain('codex_cli');
+    expect(options).toContain('openai_compatible');
+  });
+
+  it('hydrates provider from GET response (claude_cli default)', async () => {
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    const select = screen.getByRole('combobox', { name: /provider/i });
+    expect((select as HTMLSelectElement).value).toBe('claude_cli');
+  });
+
+  it('base_url and model inputs are hidden when provider is claude_cli', async () => {
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    // base_url and model inputs must not be in the DOM when provider !== openai_compatible
+    expect(screen.queryByLabelText(/base url/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/model/i)).not.toBeInTheDocument();
+  });
+
+  it('base_url and model inputs appear when provider switches to openai_compatible', async () => {
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    const select = screen.getByRole('combobox', { name: /provider/i });
+    await act(async () => {
+      fireEvent.change(select, { target: { value: 'openai_compatible' } });
+    });
+
+    expect(screen.getByLabelText(/base url/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/model/i)).toBeInTheDocument();
+  });
+
+  it('MLX preset button fills base_url and switches provider to openai_compatible', async () => {
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /mlx/i }));
+    });
+
+    const select = screen.getByRole('combobox', { name: /provider/i });
+    expect((select as HTMLSelectElement).value).toBe('openai_compatible');
+    expect(screen.getByDisplayValue('http://127.0.0.1:8080/v1')).toBeInTheDocument();
+  });
+
+  it('Ollama preset button fills base_url and switches provider to openai_compatible', async () => {
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /ollama/i }));
+    });
+
+    const select = screen.getByRole('combobox', { name: /provider/i });
+    expect((select as HTMLSelectElement).value).toBe('openai_compatible');
+    expect(screen.getByDisplayValue('http://localhost:11434/v1')).toBeInTheDocument();
+  });
+
+  it('Save button PUT includes llm payload with provider', async () => {
+    mockApiPut.mockResolvedValue(MOCK_CONFIG);
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    });
+
+    expect(mockApiPut).toHaveBeenCalledOnce();
+    const [, payload] = mockApiPut.mock.calls[0] as [string, Record<string, unknown>];
+    expect(payload).toHaveProperty('llm');
+    expect((payload.llm as Record<string, unknown>).provider).toBe('claude_cli');
+  });
+
+  it('Save button PUT includes updated llm.base_url after MLX preset click', async () => {
+    mockApiPut.mockResolvedValue(MOCK_CONFIG);
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /mlx/i }));
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    });
+
+    expect(mockApiPut).toHaveBeenCalledOnce();
+    const [, payload] = mockApiPut.mock.calls[0] as [string, Record<string, unknown>];
+    const llm = payload.llm as Record<string, unknown>;
+    expect(llm.provider).toBe('openai_compatible');
+    expect(llm.base_url).toBe('http://127.0.0.1:8080/v1');
   });
 });

@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Icon, Badge } from './shared';
 import { apiPost, apiPut, JobsmithApiError } from '../api/client';
 import { useApplications, useMasterSection, useConfig, useFeedback, useDoctor } from '../api/hooks';
-import type { MasterAuthor, ApplicationRow, JobsmithConfig, ConfigValidateResponse, ConfigValidationError } from '../api/types';
+import type { MasterAuthor, ApplicationRow, JobsmithConfig, LLMProvider, ConfigValidateResponse, ConfigValidationError } from '../api/types';
 
 // ── SiteView ─────────────────────────────────────────────────────────────
 
@@ -366,6 +366,10 @@ export function ConfigView() {
   // output paths
   const [applicationsDir, setApplicationsDir] = useState('');
   const [jobsmithDb, setJobsmithDb] = useState('');
+  // llm settings
+  const [llmProvider, setLlmProvider] = useState<LLMProvider>('claude_cli');
+  const [llmBaseUrl, setLlmBaseUrl] = useState('');
+  const [llmModel, setLlmModel] = useState('');
 
   // Feedback state
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -382,6 +386,9 @@ export function ConfigView() {
     setAuthorYml(String(remoteConfig.master?.author_yml ?? ''));
     setApplicationsDir(String(remoteConfig.output?.applications_dir ?? ''));
     setJobsmithDb(String(remoteConfig.output?.jobsmith_db ?? ''));
+    setLlmProvider((remoteConfig.llm?.provider ?? 'claude_cli') as LLMProvider);
+    setLlmBaseUrl(remoteConfig.llm?.base_url ?? '');
+    setLlmModel(remoteConfig.llm?.model ?? '');
   }, [remoteConfig]);
 
   /** Build a config payload from current UI state, merged over remote defaults. */
@@ -400,8 +407,14 @@ export function ConfigView() {
         applications_dir: applicationsDir,
         jobsmith_db: jobsmithDb,
       },
+      llm: {
+        ...(remoteConfig?.llm ?? {}),
+        provider: llmProvider,
+        base_url: llmBaseUrl || null,
+        model: llmModel || null,
+      },
     };
-  }, [remoteConfig, workYml, skillYml, educationYml, authorYml, applicationsDir, jobsmithDb]);
+  }, [remoteConfig, workYml, skillYml, educationYml, authorYml, applicationsDir, jobsmithDb, llmProvider, llmBaseUrl, llmModel]);
 
   const handleValidate = useCallback(async () => {
     setValidateStatus('validating');
@@ -564,6 +577,66 @@ export function ConfigView() {
               <input className="mono" value={authorYml} onChange={e => setAuthorYml(e.target.value)} />
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-h"><h3>llm provider</h3></div>
+        <div style={{ padding: '16px 18px' }}>
+          <div className="field">
+            <label htmlFor="llm-provider-select">provider</label>
+            <select
+              id="llm-provider-select"
+              value={llmProvider}
+              onChange={e => setLlmProvider(e.target.value as LLMProvider)}
+            >
+              <option value="claude_cli">Claude CLI (default)</option>
+              <option value="antigravity_cli">Antigravity</option>
+              <option value="codex_cli">Codex</option>
+              <option value="openai_compatible">Local (OpenAI-compatible)</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>presets</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => { setLlmProvider('openai_compatible'); setLlmBaseUrl('http://127.0.0.1:8080/v1'); }}
+              >
+                MLX
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => { setLlmProvider('openai_compatible'); setLlmBaseUrl('http://localhost:11434/v1'); }}
+              >
+                Ollama
+              </button>
+            </div>
+          </div>
+          {llmProvider === 'openai_compatible' && (
+            <>
+              <div className="field">
+                <label htmlFor="llm-base-url-input">base url</label>
+                <input
+                  id="llm-base-url-input"
+                  className="mono"
+                  value={llmBaseUrl}
+                  onChange={e => setLlmBaseUrl(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="llm-model-input">model</label>
+                <input
+                  id="llm-model-input"
+                  className="mono"
+                  value={llmModel}
+                  onChange={e => setLlmModel(e.target.value)}
+                />
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

@@ -141,3 +141,103 @@ def test_benchmark_config_all_fields_optional() -> None:
     assert bm.resume_qmd is None
     assert bm.cover_letter_md is None
     assert bm.workflow_html is None
+
+
+# ---------------------------------------------------------------------------
+# LLMSettings tests
+# ---------------------------------------------------------------------------
+
+from jobsmith.config import LLM_PRESETS, LLMSettings  # noqa: E402
+
+
+def test_llm_default_provider_is_claude_cli() -> None:
+    """No llm block in config → provider defaults to claude_cli."""
+    config = JobsmithConfig()
+    assert config.llm.provider == "claude_cli"
+
+
+def test_llm_default_fields() -> None:
+    """Default LLMSettings has safe nulls and sensible numeric defaults."""
+    settings = LLMSettings()
+    assert settings.provider == "claude_cli"
+    assert settings.model is None
+    assert settings.base_url is None
+    assert settings.api_key is None
+    assert settings.budget_usd > 0
+    assert settings.timeout_s > 0
+
+
+def test_llm_block_parses_from_config_dict() -> None:
+    """llm fields load from model_validate with a full dict."""
+    config = JobsmithConfig.model_validate(
+        {
+            "llm": {
+                "provider": "openai_compatible",
+                "model": "mlx-community/Llama-3.2-3B",
+                "base_url": "http://127.0.0.1:8080/v1",
+                "api_key": "not-used",
+                "budget_usd": 0.5,
+                "timeout_s": 120,
+            }
+        }
+    )
+    assert config.llm.provider == "openai_compatible"
+    assert config.llm.model == "mlx-community/Llama-3.2-3B"
+    assert config.llm.base_url == "http://127.0.0.1:8080/v1"
+    assert config.llm.api_key == "not-used"
+    assert config.llm.budget_usd == 0.5
+    assert config.llm.timeout_s == 120
+
+
+def test_llm_block_round_trips_from_yaml_file(tmp_path: Path) -> None:
+    """llm section parses correctly from a .apply-config.yaml file."""
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        "llm:\n"
+        "  provider: openai_compatible\n"
+        "  base_url: http://localhost:11434/v1\n"
+        "  model: llama3.2\n"
+    )
+    config = load_config(config_file)
+    assert config.llm.provider == "openai_compatible"
+    assert config.llm.base_url == "http://localhost:11434/v1"
+    assert config.llm.model == "llama3.2"
+
+
+def test_llm_mlx_preset_base_url() -> None:
+    """MLX preset resolves to the correct local base_url."""
+    assert LLM_PRESETS["mlx"] == "http://127.0.0.1:8080/v1"
+
+
+def test_llm_ollama_preset_base_url() -> None:
+    """Ollama preset resolves to the correct local base_url."""
+    assert LLM_PRESETS["ollama"] == "http://localhost:11434/v1"
+
+
+def test_llm_invalid_provider_rejected() -> None:
+    """An unknown provider value is rejected by Pydantic validation."""
+    with pytest.raises(ValueError):
+        JobsmithConfig.model_validate({"llm": {"provider": "unknown_provider"}})
+
+
+def test_llm_openai_compatible_without_base_url_rejected() -> None:
+    """openai_compatible provider without base_url raises on validation."""
+    with pytest.raises(ValueError, match="base_url"):
+        JobsmithConfig.model_validate({"llm": {"provider": "openai_compatible"}})
+
+
+def test_llm_cli_providers_do_not_require_base_url() -> None:
+    """CLI providers are valid without a base_url."""
+    for provider in ("claude_cli", "antigravity_cli", "codex_cli"):
+        config = JobsmithConfig.model_validate({"llm": {"provider": provider}})
+        assert config.llm.provider == provider
+        assert config.llm.base_url is None
+
+
+def test_llm_no_llm_block_backward_compat(tmp_path: Path) -> None:
+    """Config file with no llm block uses defaults — backward compat preserved."""
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text("user:\n  name: Pat Doe\n")
+    config = load_config(config_file)
+    assert config.llm.provider == "claude_cli"
+    assert config.user.name == "Pat Doe"

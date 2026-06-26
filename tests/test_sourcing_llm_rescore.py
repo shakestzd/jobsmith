@@ -1084,3 +1084,315 @@ def test_mid_run_timeout_leaves_remaining_postings_null(db_path: Path) -> None:
             assert sr.coverage_score == 60
     finally:
         conn.close()
+
+
+# ===========================================================================
+# Slice 3 (feat-59d71698): pluggable Scorer Backend providers
+# ===========================================================================
+
+from jobsmith.config import LLMSettings  # noqa: E402
+from jobsmith.sourcing.llm_rescore import (  # noqa: E402
+    AntigravityScorer,
+    BaseScorerBackend,
+    ClaudeAgentScorer,
+    OpenAICompatibleScorer,
+    make_scorer,
+)
+
+# A well-formed fit-metrics JSON payload (what a cooperative server returns).
+_WELL_FORMED = json.dumps(
+    {
+        "specialty": "tax_equity",
+        "score": 82,
+        "rationale": "Strong tax equity fit via ITC work.",
+        "matched_evidence": ["profile.stack.dagster"],
+        "concerns": [],
+        "confidence": "high",
+        "coverage": 40,
+        "uncovered_must_haves": ["LangGraph"],
+    }
+)
+
+
+def _fake_row(**overrides) -> dict:
+    """A mapping that quacks like a sqlite3.Row for the scorer's row access."""
+    base = {
+        "id": 1,
+        "fast_score": 0.6,
+        "jd_text": "Tax equity solar finance ITC.",
+        "company": "TestCo",
+        "title": "Data Engineer",
+        "location": "Remote",
+        "url": "https://test.com/job",
+    }
+    base.update(overrides)
+    return base
+
+
+class _FakeCompatClient:
+    """Stand-in for OpenAICompatClient — records calls, returns canned content."""
+
+    def __init__(self, content: str) -> None:
+        self._content = content
+        self.calls: list[dict] = []
+
+    def complete(
+        self,
+        messages,
+        *,
+        response_format=None,
+        temperature=None,
+        extra=None,
+    ) -> str:
+        self.calls.append({"messages": messages, "response_format": response_format})
+        return self._content
+
+
+# ---------------------------------------------------------------------------
+# Factory resolution
+# ---------------------------------------------------------------------------
+
+
+def test_base_scorer_backend_is_abstract() -> None:
+    with pytest.raises(TypeError):
+        BaseScorerBackend()  # type: ignore[abstract]
+
+
+def test_make_scorer_default_claude() -> None:
+    scorer = make_scorer(LLMSettings(), query_fn=_make_fake_query())
+    assert isinstance(scorer, ClaudeAgentScorer)
+
+
+def test_make_scorer_unknown_provider_falls_back_to_claude() -> None:
+    # codex_cli has no dedicated scorer in slice 3 → default Claude path.
+    scorer = make_scorer(LLMSettings(provider="codex_cli"), query_fn=_make_fake_query())
+    assert isinstance(scorer, ClaudeAgentScorer)
+
+
+def test_make_scorer_codex_warns_about_claude_fallback(caplog) -> None:
+    """codex_cli scoring falls back to Claude but logs an explicit warning (not silent)."""
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="jobsmith.sourcing.llm_rescore"):
+        scorer = make_scorer(LLMSettings(provider="codex_cli"), query_fn=_make_fake_query())
+    assert isinstance(scorer, ClaudeAgentScorer)
+    assert any(
+        "codex_cli" in r.message and "fall" in r.message.lower() for r in caplog.records
+    ), "expected an explicit codex_cli→Claude fallback warning"
+
+
+def test_make_scorer_antigravity() -> None:
+    scorer = make_scorer(LLMSettings(provider="antigravity_cli"))
+    assert isinstance(scorer, AntigravityScorer)
+
+
+def test_make_scorer_openai_compatible() -> None:
+    scorer = make_scorer(
+        LLMSettings(provider="openai_compatible", base_url="http://127.0.0.1:8080/v1", model="m")
+    )
+    assert isinstance(scorer, OpenAICompatibleScorer)
+
+
+# ---------------------------------------------------------------------------
+# OpenAICompatibleScorer — well-formed parse (MLX + Ollama share the path)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["http://127.0.0.1:8080/v1", "http://localhost:11434/v1"],  # MLX, Ollama
+)
+def test_openai_scorer_parses_well_formed_json(base_url: str) -> None:
+    client = _FakeCompatClient(_WELL_FORMED)
+    scorer = OpenAICompatibleScorer(base_url=base_url, model="m", _client=client)
+
+    r = scorer.score(_fake_row(), system_prompt="SYSTEM PROMPT")
+
+    assert r.parse_ok is True
+    assert r.is_fallback is False
+    assert abs(r.llm_score - 0.82) < 0.01
+    assert r.specialty == "tax_equity"
+    assert "ITC" in r.rationale
+    assert r.coverage_score == 40
+    assert r.uncovered_must_haves == ["LangGraph"]
+
+    # json_schema response_format is REQUESTED (preferred where supported)...
+    assert client.calls[0]["response_format"]["type"] == "json_schema"
+    # ...AND the schema is ALSO embedded in the prompt (servers may ignore it).
+    system_content = client.calls[0]["messages"][0]["content"]
+    assert "SYSTEM PROMPT" in system_content
+    assert "score" in system_content
+
+
+def test_openai_scorer_markdown_fenced_json_parses() -> None:
+    fenced = "```json\n" + _WELL_FORMED + "\n```"
+    scorer = OpenAICompatibleScorer(
+        base_url="http://localhost:11434/v1", model="m", _client=_FakeCompatClient(fenced)
+    )
+    r = scorer.score(_fake_row(), system_prompt="SYS")
+    assert r.parse_ok is True
+    assert r.specialty == "tax_equity"
+
+
+# ---------------------------------------------------------------------------
+# OpenAICompatibleScorer — ROBUSTNESS (done_when #2): malformed output is
+# caught and FLAGGED (parse_ok=False), the crawl must NOT crash.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad_output",
+    [
+        "I'm sorry, I cannot comply with that request.",  # plain prose
+        '{"foo": "bar"}',  # JSON but schema-violating (no score)
+        '{"score": "high"}',  # score present but not an integer
+        "here you go: not json at all {{{",  # broken JSON
+        "",  # empty body
+        '{"score": 80, "rationale":',  # truncated JSON
+    ],
+)
+@pytest.mark.parametrize("base_url", ["http://127.0.0.1:8080/v1", "http://localhost:11434/v1"])
+def test_openai_scorer_malformed_output_is_flagged_not_raised(
+    bad_output: str, base_url: str
+) -> None:
+    client = _FakeCompatClient(bad_output)
+    scorer = OpenAICompatibleScorer(base_url=base_url, model="m", _client=client)
+
+    # MUST NOT raise — the crawl keeps going.
+    r = scorer.score(_fake_row(fast_score=0.6), system_prompt="SYS")
+
+    assert r.parse_ok is False
+    assert r.is_fallback is True
+    assert r.llm_score == pytest.approx(0.6)  # degrades to fast_score
+    assert r.coverage_score is None
+
+
+def test_openai_scorer_network_error_falls_back_without_parse_flag() -> None:
+    class _BoomClient:
+        def complete(self, *a, **k):  # noqa: ANN002, ANN003
+            raise RuntimeError("connection refused")
+
+    scorer = OpenAICompatibleScorer(
+        base_url="http://localhost:11434/v1", model="m", _client=_BoomClient()
+    )
+    r = scorer.score(_fake_row(), system_prompt="SYS")
+
+    assert r.is_fallback is True
+    # A transport failure is an availability fallback, not a parse failure.
+    assert r.parse_ok is True
+    assert r.llm_score == pytest.approx(0.6)
+
+
+# ---------------------------------------------------------------------------
+# AntigravityScorer — subprocess path (injected run_fn, no real `agy`)
+# ---------------------------------------------------------------------------
+
+
+def test_antigravity_scorer_parses_well_formed() -> None:
+    captured: dict = {}
+
+    def _run(prompt: str, *, timeout_sec: float, project_root=None) -> str:
+        captured["prompt"] = prompt
+        return _WELL_FORMED
+
+    scorer = AntigravityScorer(run_fn=_run)
+    r = scorer.score(_fake_row(), system_prompt="SYS PROMPT")
+
+    assert r.parse_ok is True
+    assert r.specialty == "tax_equity"
+    # Schema-in-prompt + system prompt rode along in the single-shot prompt.
+    assert "SYS PROMPT" in captured["prompt"]
+    assert "score" in captured["prompt"]
+
+
+def test_antigravity_scorer_malformed_flagged() -> None:
+    scorer = AntigravityScorer(run_fn=lambda prompt, **k: "garbage not json")
+    r = scorer.score(_fake_row(), system_prompt="SYS")
+    assert r.parse_ok is False
+    assert r.is_fallback is True
+
+
+def test_antigravity_scorer_subprocess_error_falls_back() -> None:
+    def _boom(prompt: str, **k) -> str:
+        raise RuntimeError("agy not found on PATH")
+
+    scorer = AntigravityScorer(run_fn=_boom)
+    r = scorer.score(_fake_row(), system_prompt="SYS")
+    assert r.is_fallback is True
+
+
+# ---------------------------------------------------------------------------
+# ClaudeAgentScorer — wraps the existing SDK path unchanged
+# ---------------------------------------------------------------------------
+
+
+def test_claude_scorer_score_uses_query_fn() -> None:
+    scorer = ClaudeAgentScorer(query_fn=_make_fake_query(score=80, specialty="tax_equity"))
+    r = scorer.score(_fake_row(), system_prompt="SYS")
+    assert r.parse_ok is True
+    assert r.is_fallback is False
+    assert abs(r.llm_score - 0.80) < 0.01
+    assert r.specialty == "tax_equity"
+
+
+def test_claude_scorer_sdk_error_falls_back() -> None:
+    scorer = ClaudeAgentScorer(query_fn=_make_fake_query(raise_exc=RuntimeError("SDK offline")))
+    r = scorer.score(_fake_row(), system_prompt="SYS")
+    assert r.is_fallback is True
+
+
+# ---------------------------------------------------------------------------
+# rescore_postings honors an injected scorer (provider-agnostic loop)
+# ---------------------------------------------------------------------------
+
+
+def test_rescore_postings_uses_injected_scorer(db_path: Path) -> None:
+    conn = jobsmith_db.open_pipeline_db(db_path)
+    try:
+        pid = _insert_posting(conn, dedup_key="inject-001", fast_score=0.6)
+
+        scorer = OpenAICompatibleScorer(
+            base_url="http://localhost:11434/v1",
+            model="m",
+            _client=_FakeCompatClient(_WELL_FORMED),
+        )
+        results = rescore_postings(
+            conn,
+            posting_ids=[pid],
+            scorer=scorer,
+            no_llm=False,
+        )
+        assert len(results) == 1
+        assert results[0].parse_ok is True
+        row = conn.execute(
+            "SELECT llm_score, specialty FROM postings WHERE id = ?", (pid,)
+        ).fetchone()
+        assert abs(row["llm_score"] - 0.82) < 0.01
+        assert row["specialty"] == "tax_equity"
+    finally:
+        conn.close()
+
+
+def test_rescore_postings_malformed_scorer_does_not_crash_crawl(db_path: Path) -> None:
+    """End-to-end: a malformed-JSON server response flags the posting, no crash."""
+    conn = jobsmith_db.open_pipeline_db(db_path)
+    try:
+        pid = _insert_posting(conn, dedup_key="inject-bad-001", fast_score=0.55)
+
+        scorer = OpenAICompatibleScorer(
+            base_url="http://localhost:11434/v1",
+            model="m",
+            _client=_FakeCompatClient("totally not json"),
+        )
+        results = rescore_postings(conn, posting_ids=[pid], scorer=scorer, no_llm=False)
+
+        assert len(results) == 1
+        assert results[0].parse_ok is False
+        assert results[0].is_fallback is True
+        # Fallback score still written — posting not lost.
+        row = conn.execute(
+            "SELECT llm_score FROM postings WHERE id = ?", (pid,)
+        ).fetchone()
+        assert row["llm_score"] == pytest.approx(0.55)
+    finally:
+        conn.close()

@@ -14,6 +14,20 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 CONFIG_FILENAME = ".apply-config.yaml"
 
+# ---------------------------------------------------------------------------
+# LLM provider — presets and settings
+# ---------------------------------------------------------------------------
+
+# Supported provider enum values (exactly 4 — do not expand without plan update).
+LLMProvider = Literal["claude_cli", "antigravity_cli", "codex_cli", "openai_compatible"]
+
+# Preset base_urls so the UI / config can one-click fill base_url.
+# These represent the two local inference servers that use openai_compatible.
+LLM_PRESETS: dict[str, str] = {
+    "mlx": "http://127.0.0.1:8080/v1",
+    "ollama": "http://localhost:11434/v1",
+}
+
 
 class MasterPaths(BaseModel):
     """Paths to the user's source-of-truth content YAMLs."""
@@ -243,6 +257,34 @@ class BenchmarkConfig(BaseModel):
     required: bool = False
 
 
+class LLMSettings(BaseModel):
+    """LLM backend configuration for chat and scoring pipelines.
+
+    The default provider is ``claude_cli`` for strict backward compatibility —
+    existing configs without an ``llm`` block continue to work unchanged.
+
+    Validation rule: ``base_url`` is REQUIRED when ``provider == openai_compatible``.
+    This covers both MLX (mlx_lm.server) and Ollama via their respective presets
+    in ``LLM_PRESETS``.
+    """
+
+    provider: LLMProvider = "claude_cli"
+    model: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    budget_usd: float = 1.0
+    timeout_s: int = 300
+
+    @model_validator(mode="after")
+    def _base_url_required_for_openai_compatible(self) -> LLMSettings:
+        if self.provider == "openai_compatible" and not self.base_url:
+            raise ValueError(
+                "base_url is required when provider is 'openai_compatible'. "
+                "Use LLM_PRESETS['mlx'] or LLM_PRESETS['ollama'] as a starting point."
+            )
+        return self
+
+
 class ReuseSettings(BaseModel):
     """All reuse-layer knobs in one place.
 
@@ -298,6 +340,7 @@ class JobsmithConfig(BaseModel):
     portfolio: PortfolioSettings = Field(default_factory=PortfolioSettings)
     benchmarks: BenchmarkConfig = Field(default_factory=BenchmarkConfig)
     reuse: ReuseSettings = Field(default_factory=ReuseSettings)
+    llm: LLMSettings = Field(default_factory=LLMSettings)
 
     @field_validator("anchor_thresholds")
     @classmethod
@@ -345,6 +388,9 @@ __all__ = [
     "CoverLetterSettings",
     "FitScorerSettings",
     "JobsmithConfig",
+    "LLM_PRESETS",
+    "LLMProvider",
+    "LLMSettings",
     "MasterPaths",
     "OutputPaths",
     "PortfolioSettings",
