@@ -37,6 +37,18 @@ from jobsmith.apply_local.driver import (
     StructuredBackend,
     run_node,
 )
+from jobsmith.apply_local.inputs import (
+    MissingMasterDataError,
+    load_master_data,
+    load_node_master,
+)
+from jobsmith.apply_local.nodes_gather import (
+    NODE_BULLET_SELECT,
+    NODE_FIT_SCORE,
+    NODE_JD_PARSE,
+    GatherStage,
+    build_gather_pipeline,
+)
 
 __all__ = [
     "Node",
@@ -54,4 +66,13 @@ __all__ = [
     "checkpoint_path",
     "read_checkpoint",
     "write_checkpoint",
+    # Slice 5 — GATHER specialists + master-data assembly
+    "MissingMasterDataError",
+    "load_master_data",
+    "load_node_master",
+    "GatherStage",
+    "build_gather_pipeline",
+    "NODE_JD_PARSE",
+    "NODE_FIT_SCORE",
+    "NODE_BULLET_SELECT",
 ]
