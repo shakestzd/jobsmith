@@ -8,8 +8,12 @@ import pytest
 import yaml
 
 from jobsmith.config import (
+    LLM_PRESETS,
+    ApplySettings,
     BenchmarkConfig,
     JobsmithConfig,
+    LLMSettings,
+    NodeBackendConfig,
     find_config,
     load_config,
 )
@@ -146,8 +150,6 @@ def test_benchmark_config_all_fields_optional() -> None:
 # ---------------------------------------------------------------------------
 # LLMSettings tests
 # ---------------------------------------------------------------------------
-
-from jobsmith.config import ApplySettings, LLM_PRESETS, LLMSettings, NodeBackendConfig  # noqa: E402
 
 
 def test_llm_default_provider_is_claude_cli() -> None:
