@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from jobsmith.apply_local.checkpoint import apply_state_dir
 from jobsmith.apply_local.driver import Node, NodeResult, Pipeline, StructuredBackend
@@ -93,7 +93,7 @@ def _docs_path(slug: str, name: str, root: Any) -> Path:
     return apply_state_dir(slug, root=root).parent / "documents" / name
 
 
-def _load_artifact(slug: str, filename: str, model_cls: type, root: Any) -> dict | None:
+def _load_artifact(slug: str, filename: str, model_cls: type[BaseModel], root: Any) -> dict | None:
     """Return a validated bare artifact (for resume), or None if absent/invalid."""
     path = _state_path(slug, filename, root)
     if not path.exists():
@@ -136,7 +136,7 @@ class GatherStage:
     failure writes NOTHING, so it is re-evaluated on the next run (driver policy).
     """
 
-    def __init__(self, node: Node, *, primary_artifact: str, model_cls: type, emit: EmitFn) -> None:
+    def __init__(self, node: Node, *, primary_artifact: str, model_cls: type[BaseModel], emit: EmitFn) -> None:
         self.node = node
         self.primary_artifact = primary_artifact
         self.model_cls = model_cls
@@ -301,7 +301,8 @@ def make_fit_score_stage(master: MasterData) -> GatherStage:
             build_fit_score_prompt(master, ctx.get(NODE_JD_PARSE) or {}, fast_path_scores=ctx.get("fast_path_scores")),
         )
 
-    def halt(obj: FitScore) -> str | None:
+    def halt(obj: BaseModel) -> str | None:
+        assert isinstance(obj, FitScore)
         uncovered = obj.uncovered_requirements()
         return f"UNCOVERED_MUST_HAVE: {'; '.join(uncovered)}" if uncovered else None
 
@@ -319,7 +320,8 @@ def make_bullet_select_stage(master: MasterData) -> GatherStage:
             build_bullet_select_prompt(master, ctx.get(NODE_JD_PARSE) or {}, ctx.get(NODE_FIT_SCORE)),
         )
 
-    def halt(obj: BulletSelection) -> str | None:
+    def halt(obj: BaseModel) -> str | None:
+        assert isinstance(obj, BulletSelection)
         result = evaluate_anchor_selection(bullets, obj)
         if result.exit_code == 1:
             ids = ", ".join(b.bullet_id for b in result.dropped_without_reason)
