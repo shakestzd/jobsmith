@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>SPIKE: prove gemma-4 drives the Claude Code agentic apply via vllm-mlx (decision gate)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-927b6921"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-27T00:04:09.718155"
+             data-updated="2026-06-27T05:14:28.303797" data-agent-assigned="claude-code" data-track-id="trk-f5052600">
+
+        <header>
+            <h1>SPIKE: prove gemma-4 drives the Claude Code agentic apply via vllm-mlx (decision gate)</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/310cff37-61bf-4ff7-9c84-164d58a69307.html" data-relationship="implemented_in" data-since="2026-06-27T00:07:22.677496">session 310cff37-61bf-4ff7-9c84-164d58a69307</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="../plans/plan-21911e16.html" data-relationship="planned_in" data-since="2026-06-27T00:04:09.725641">plan-21911e16</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-f5052600.html" data-relationship="part_of" data-since="2026-06-27T00:04:09.73095">trk-f5052600</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-steps>
+            <h3>Implementation Steps</h3>
+            <ol>
+                <li data-completed="true" data-step-id="task-1" data-agent="claude-code" data-created-by-agent="claude-code">✅ SPIKE: prove gemma-4 drives Claude Code apply via vllm-mlx (decision gate)</li>
+                <li data-completed="false" data-step-id="task-2" data-agent="claude-code" data-created-by-agent="claude-code">⏳ Extend the `llm` config with an apply-pipeline backend selector</li>
+                <li data-completed="false" data-step-id="task-3" data-agent="claude-code" data-created-by-agent="claude-code">⏳ vllm-mlx engine: lifecycle serving gemma-4 (Anthropic &#43; OpenAI)</li>
+                <li data-completed="false" data-step-id="task-4" data-agent="claude-code" data-created-by-agent="claude-code">⏳ headless.py: env= seam &#43; inject BYO-model env when apply_backend=claude_local</li>
+                <li data-completed="false" data-step-id="task-5" data-agent="claude-code" data-created-by-agent="claude-code">⏳ End-to-end apply on local gemma &#43; gateway-crash detection &#43; cloud fallback</li>
+                <li data-completed="false" data-step-id="task-6" data-agent="claude-code" data-created-by-agent="claude-code">⏳ Config-tab UI &#43; docs: select the apply backend</li>
+                <li data-completed="true" data-step-id="task-7" data-agent="claude-code" data-created-by-agent="claude-code">✅ Inverted-harness POC: code-driven jd-parse node via local gemma</li>
+            </ol>
+        </section>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Stand up vllm-mlx serving gemma-4-E4B-it-qat-4bit over its native Anthropic
+/v1/messages endpoint. Run a real `claude -p` against it (ANTHROPIC_BASE_URL=the
+vllm-mlx Anthropic endpoint, dummy ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL +
+ANTHROPIC_DEFAULT_HAIKU_MODEL, CLAUDE_CODE_ATTRIBUTION_HEADER=0) with the apply
+system prompt + allowedTools, on a JS-rendered job (NVIDIA Workday URL). Verify
+the agentic loop actually works: (a) tool_use blocks fire (WebFetch/Read/Write/
+Bash + claude-in-chrome render), (b) specialist dispatch works for &gt;=2 Claude
+tiers (haiku jd-parser AND sonnet bullet-selector both reach gemma), (c) the
+text markers &lt;&lt;PHASE_COMPLETE: gather&gt;&gt; etc. are emitted so run_phase advances,
+(d) claude -p initializes with a dummy auth token. Output a GO/NO-GO with
+evidence. This gates slices 2-6; NO-GO pivots to the C fallback (OpenCode/OpenHands).</p>
+        </section>
+    </article>
+</body>
+</html>
