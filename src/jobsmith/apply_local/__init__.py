@@ -18,6 +18,7 @@ The backend (the thing that actually calls the model) is INJECTED — see the
 """
 from __future__ import annotations
 
+from jobsmith.apply_local.backends import resolve_backend
 from jobsmith.apply_local.checkpoint import (
     apply_state_dir,
     checkpoint_path,
@@ -47,6 +48,7 @@ __all__ = [
     "FanOutStage",
     "LoopStage",
     "StructuredBackend",
+    "resolve_backend",
     "run_node",
     "apply_state_dir",
     "checkpoint_path",
