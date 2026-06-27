@@ -2,17 +2,491 @@ meta:
     id: plan-a40fac81
     track_id: trk-f5052600
     title: 'Code-orchestrated local apply: Python DAG + per-node LLM backends'
-    description: 'Pivot from plan-21911e16: a 4B local model can''t drive Claude Code''s agentic apply (spike NO-GO), so Python owns the apply DAG and the model does one bounded JSON task per node. v1 = gather->draft (5 nodes) on a new code-driver for the LOCAL path; per-node backends (local gemma via OpenAICompat + cloud Claude via anthropic SDK). Existing claude -p cloud apply untouched. Supersedes plan-21911e16 slices 2-6.'
+    description: |
+        Pivot from plan-21911e16. The slice-1 spike proved a 4B local gemma CANNOT drive
+        Claude Code's 70-tool agentic apply loop (it looped on step 1; ~5 tok/s; 0 artifacts
+        in 26 min) — NO-GO for "model drives Claude Code". The POC proved the inverted design:
+        Python owns the apply DAG and the model does ONE bounded JSON task per node (a real
+        jd-parse node produced a valid jd-parsed.json in 49.6s, first try). This plan builds a
+        no-framework, code-owned state-machine driver for the LOCAL apply path with per-node
+        backends (local gemma via the existing OpenAICompat client + cloud Claude via the
+        anthropic SDK). v1 = the gather->draft core (5 nodes). The existing claude -p cloud
+        apply is untouched. Supersedes plan-21911e16 slices 2-6.
     created_at: "2026-06-27"
     status: draft
     priority: medium
     schema_version: v4
     version: 2
 design:
-    problem: ""
-    goals: []
-    constraints: []
+    problem: |
+        jobsmith's apply pipeline is implemented as Claude Code specialist sub-agents driven
+        by `claude -p` (headless.py + the apply-*.md agents). plan-21911e16 tried to keep that
+        harness and point it at a local gemma via vllm-mlx; the spike (docs/spikes/
+        byo-model-apply.md) proved a 4B model has tool *fidelity* (single tool_use blocks are
+        well-formed) but not agentic *planning* — it loops on the orchestrator's first step and
+        never advances, and at ~5 tok/s a many-turn loop is impractical regardless. So the
+        local path needs a different harness: code owns orchestration; the model does narrow,
+        single-shot, schema-constrained tasks.
+    goals:
+        - Build a no-framework, Python-owned state-machine driver that executes the existing apply DAG (specialist-contracts.yaml pipeline.stages) for the LOCAL path, with each specialist reduced to a code Node that makes ONE bounded structured-JSON call.
+        - Provide a per-node Backend abstraction with two impls — OpenAICompatBackend (local gemma via vllm-mlx, reusing src/jobsmith/llm/openai_compat.py) and AnthropicBackend (cloud Claude via the anthropic SDK, tool_use structured output) — so any node can run local or cloud.
+        - Ship v1 as the gather->draft core (jd-parse, fit-score, bullet-select, prose-write, prose-qa) end-to-end on local gemma, with .apply-state/ JSON checkpoints for crash-resume and a config-gated on_failure policy.
+        - Leave the existing claude -p cloud apply path completely unchanged (no regression); the code-driver is a separate, config-selected orchestration for the local/hybrid path.
+    constraints:
+        - Reuse the existing JSON-from-weak-model machinery (openai_compat.py + the llm_rescore.py robust-parse pattern — json_schema response_format AND schema-in-prompt AND robust parse; flag parse_ok=False, never raise). vllm-mlx enforces response_format server-side, but a 4B honors it only as well as the server does, so robust-parse stays the safety net.
+        - vllm-mlx engine — do NOT pass --continuous-batching for gemma-4 (it crashes the MLLM attention path with a shared_kv TypeError -> 0 tokens); REQUIRE --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4. (Proven in the spike.)
+        - Lean dependencies — httpx is already in-tree; the only new runtime dep is the `anthropic` SDK (MIT, ~8 transitive). Optional `tenacity` (0 deps) for retry. Do NOT add LiteLLM — 1.82.7/1.82.8 shipped a confirmed credential-stealer (GHSA-5mg7-485q-xm76) — and do NOT add a heavy agent framework (LangGraph/CrewAI) for a fixed 13-node DAG.
+        - Default apply behavior is unchanged — the orchestrator selector defaults to the existing cloud claude -p path; the code-driver is opt-in.
     approved: false
-    comment: ""
-slices: []
+    comment: |
+        Grounded entirely in this session's spike + POC + orchestrator research. The
+        framework question was researched (LangGraph/Burr/Haystack/LlamaIndex/CrewAI/Agents
+        SDK/Prefect/Dagster) and the user chose NO framework — a thin code driver — because the
+        hard part (reliable JSON from a weak model) is already solved in-repo and the control
+        flow is a fixed DAG. Per-node backends + native anthropic backend in v1 were user
+        choices; cloud claude -p apply stays as-is (user choice: code-driver for local only).
+    research:
+        - url: https://github.com/waybarrios/vllm-mlx
+          claim: The local engine serving gemma-4 over OpenAI /v1 + Anthropic /v1/messages; spike-confirmed serve flags (no --continuous-batching; --tool-call-parser gemma4).
+          accessed: "2026-06-27"
+        - url: https://github.com/anthropics/anthropic-sdk-python
+          claim: Official `anthropic` Python SDK (MIT) — the AnthropicBackend dependency; sync/async Messages clients with Pydantic models and tool_use structured output.
+          accessed: "2026-06-27"
+        - url: https://docs.vllm.ai/en/latest/features/structured_outputs.html
+          claim: vllm enforces response_format/json_schema server-side (xgrammar/llguidance) — basis for the per-node structured-output call; robust-parse remains the safety net for a 4B.
+          accessed: "2026-06-27"
+        - url: https://github.com/advisories/GHSA-5mg7-485q-xm76
+          claim: LiteLLM 1.82.7/1.82.8 credential-stealer (Critical) — justifies first-party SDKs over a universal gateway dep.
+          accessed: "2026-06-27"
+slices:
+    - id: slice-1
+      num: 1
+      title: 'Driver core: Node + Pipeline state-machine + .apply-state checkpoint/resume'
+      what: |
+        New package src/jobsmith/apply_local/. driver.py defines: Node (one bounded LLM task —
+        name, output pydantic model, json_schema, bounded reask loop, returns validated obj +
+        parse_ok), and Pipeline (executes an ordered stage list with sequential + fan-out
+        (ThreadPoolExecutor) stages and bounded counter loops). checkpoint.py persists each
+        node result to .apply-state/<name>.json and skips a node whose checkpoint exists
+        (crash-resume). Productionizes scripts/_apply_local_poc.py. No specialist logic here —
+        pure orchestration primitives.
+      why: |
+        This is the spine of the inverted harness: Python owns control flow (sequencing,
+        fan-out, bounded loops, resume) so the model never has to plan. Proven viable by the
+        POC; this slice makes it a tested module.
+      files:
+        - src/jobsmith/apply_local/__init__.py
+        - src/jobsmith/apply_local/driver.py
+        - src/jobsmith/apply_local/checkpoint.py
+        - tests/test_apply_local_driver.py
+      deps: []
+      done_when:
+        - Pipeline runs an ordered list of stages — a sequential stage runs its node; a fan-out stage runs N nodes concurrently and joins; a loop stage re-runs its node until an ok-predicate or a max-iteration cap.
+        - A node whose .apply-state/<name>.json checkpoint already exists is skipped and its cached result returned (resume); a fresh run writes the checkpoint atomically.
+        - Node.run does a bounded reask (default 3) on invalid or unparseable JSON and returns (obj, parse_ok) — never raises on a single bad generation.
+      effort: M
+      risk: Med
+      tests: |
+        Unit (tests/test_apply_local_driver.py): Pipeline sequential/fanout/loop with stub
+        nodes; checkpoint skip-on-exists + atomic write; Node bounded-reask with a stub backend
+        that returns bad-then-good JSON. No network.
+      complexity: complex
+      approved: false
+      comment: ""
+      research_waiver: No-framework decision (LangGraph/Burr/Haystack/LlamaIndex evaluated this session; rejected for a fixed 13-node DAG with lean-dep constraint). Pure stdlib + pydantic orchestration; no external API governs this surface.
+      questions:
+        - id: q-fanout-concurrency
+          text: How do fan-out stages run nodes concurrently given a single local engine at ~5 tok/s?
+          answer: ThreadPoolExecutor in the abstraction, but with one local engine the fan-out serializes anyway; real concurrency only matters when a node is routed to cloud Claude. Keep the executor with a small worker cap.
+      decisions_notes: |
+        **Trigger:** an apply run in code_local orchestration mode constructs a Pipeline of nodes.
+        **State:** .apply-state/<name>.json per node (the existing specialist-contracts state convention) = the resume ledger; no global mutable state.
+        **Payload:** validated per-node objects threaded to downstream nodes.
+        **Rejected:** LangGraph/Burr/Haystack (framework weight + lock-in for a fixed DAG); a generic workflow engine (Prefect/Dagster — wrong altitude); letting the model decide the next step (the spike NO-GO).
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - src/jobsmith/apply_local/__init__.py (new)
+            - src/jobsmith/apply_local/driver.py (new — Node + Pipeline; sequential/fanout/loop)
+            - src/jobsmith/apply_local/checkpoint.py (new — .apply-state JSON read/write + skip-on-exists)
+            - tests/test_apply_local_driver.py (new)
+        - type: diagram
+          title: Pipeline execution model
+          fields:
+            direction: lr
+          entries:
+            - Pipeline(stages) — code-owned order
+            - sequential stage -> Node.run -> checkpoint
+            - fanout stage -> ThreadPool(N nodes) -> join
+            - loop stage -> re-run until ok() or max-iter cap
+            - 'resume: checkpoint exists -> skip + return cached'
+    - id: slice-2
+      num: 2
+      title: 'Per-node LLM Backend abstraction: OpenAICompatBackend + AnthropicBackend'
+      what: |
+        src/jobsmith/apply_local/backends.py defines a Backend protocol:
+        complete_structured(messages, schema, *, temperature) -> (raw, parse_ok). Two impls:
+        OpenAICompatBackend wraps the existing jobsmith.llm.openai_compat.OpenAICompatClient
+        (local gemma via vllm-mlx, or any OpenAI-compatible incl. Claude's OpenAI-compat
+        endpoint); AnthropicBackend uses the anthropic SDK Messages API with a single tool
+        (input_schema = the node schema) to force structured output, mapping tool_use back to a
+        dict. Both share the llm_rescore robust-parse helpers (strip fence -> loads -> substring
+        fallback). A factory resolves a Backend from config (provider + base_url/model/api_key).
+      why: |
+        Goal 2 — the same node body runs on local gemma or cloud Claude by swapping the Backend.
+        Native anthropic backend (user choice) makes cloud Claude a first-class per-node drop-in.
+      files:
+        - src/jobsmith/apply_local/backends.py
+        - tests/test_apply_local_backends.py
+        - pyproject.toml
+      deps: []
+      done_when:
+        - OpenAICompatBackend.complete_structured posts json_schema response_format to the configured base_url and returns (parsed_dict, parse_ok) using the shared robust-parse; parse_ok=False (not an exception) on unparseable content.
+        - AnthropicBackend.complete_structured calls the anthropic SDK with one tool whose input_schema is the node schema, forces tool_use, and returns the tool input as the parsed dict; a text-only (no tool_use) reply yields parse_ok=False.
+        - A backend factory selects the impl from config (claude_cloud->Anthropic, openai_compatible/local->OpenAICompat) without the caller importing either class.
+      effort: M
+      risk: Med
+      tests: |
+        Unit (tests/test_apply_local_backends.py): mock httpx for OpenAICompat (good/bad JSON ->
+        parse_ok); mock the anthropic client for tool_use vs text-only; factory resolution per
+        provider. No live network.
+      complexity: complex
+      approved: false
+      comment: ""
+      research:
+        - url: https://github.com/anthropics/anthropic-sdk-python
+          claim: anthropic SDK (MIT) Messages API + tool_use is the structured-output mechanism for Claude; the AnthropicBackend dependency added to pyproject.toml.
+          accessed: "2026-06-27"
+        - url: https://docs.vllm.ai/en/latest/features/structured_outputs.html
+          claim: response_format json_schema is enforced server-side by vllm-mlx; OpenAICompatBackend relies on it but keeps robust-parse as the 4B safety net.
+          accessed: "2026-06-27"
+      questions:
+        - id: q-anthropic-structured
+          text: How does AnthropicBackend force structured JSON — a response_format or tool_use?
+          answer: tool_use — pass a single tool whose input_schema is the node schema and force tool choice, then map the tool_use input back to a dict. Claude has no OpenAI-style response_format (anthropic SDK docs).
+      decisions_notes: |
+        **Trigger:** each Node.run calls Backend.complete_structured for its one task.
+        **State:** stateless clients; config carries base_url/model/api_key per provider.
+        **Payload:** (parsed_dict, parse_ok) — uniform across backends so nodes are backend-agnostic.
+        **Rejected:** OpenAI-compat-only for cloud (loses native Claude tool_use fidelity — user chose native anthropic); LiteLLM as a universal gateway (malware advisory GHSA-5mg7-485q-xm76); raising on bad JSON (the pipeline must degrade, not crash).
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - src/jobsmith/apply_local/backends.py (new — Backend protocol + 2 impls + factory)
+            - tests/test_apply_local_backends.py (new)
+            - pyproject.toml (edit — add `anthropic` dependency)
+        - type: data-model
+          title: Backend protocol
+          fields:
+            name: Backend
+          rows:
+            - name: complete_structured
+              type: '(messages: list[dict], schema: dict, *, temperature: float) -> tuple[dict|None, bool]'
+            - name: OpenAICompatBackend
+              type: wraps OpenAICompatClient; response_format=json_schema; robust-parse
+            - name: AnthropicBackend
+              type: anthropic SDK; single tool input_schema=schema; tool_use -> dict
+            - name: resolve_backend
+              type: (config.llm) -> Backend  (provider-keyed factory)
+    - id: slice-3
+      num: 3
+      title: 'Config: apply orchestration selector (claude_cloud | code_local) + per-node backend'
+      what: |
+        Extend the existing `llm` config (src/jobsmith/config.py) with an apply block:
+        orchestrator (enum: claude_cloud (default) | code_local), and for code_local a node
+        backend default (provider + base_url + model + api_key) plus on_failure (error |
+        fallback_cloud). Reuse the existing 4-provider enum + openai_compatible base_url/model.
+        Pydantic validation; default orchestrator=claude_cloud keeps today's behavior. Document
+        in config-schema.yaml.
+      why: |
+        One config switch selects the local code-driver vs the existing cloud claude -p path,
+        and carries the per-node backend endpoint — without touching call sites. Default stays
+        cloud (no regression). Salvaged + reshaped from plan-21911e16 slice-2.
+      files:
+        - src/jobsmith/config.py
+        - config-schema.yaml
+        - tests/test_config.py
+      deps: []
+      done_when:
+        - Config parses llm.apply.orchestrator; default is claude_cloud and existing apply behavior is byte-identical when unset.
+        - Selecting code_local with no node backend base_url fails Pydantic validation with a clear message; on_failure defaults to error.
+      effort: S
+      risk: Low
+      tests: |
+        Unit (tests/test_config.py): default orchestrator=claude_cloud; code_local without
+        base_url -> validation error; on_failure default=error; round-trip via .apply-config.yaml.
+      complexity: standard
+      approved: false
+      comment: ""
+      research_waiver: Internal Pydantic config over the existing llm provider enum + .apply-config.yaml; no external API or standard governs the field set (the backend endpoints themselves are researched in slices 2/4).
+      decisions_notes: |
+        **Trigger:** startup config load; apply run reads llm.apply.orchestrator.
+        **State:** immutable config; reuses the existing openai_compatible base_url/model for the local node backend.
+        **Payload:** llm.apply block (orchestrator, node backend, on_failure).
+        **Rejected:** a separate top-level section (duplicates llm); env-only switch (not UI-surfaceable); booleans instead of an enum (orchestrator is a real mode choice, extensible later).
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - 'src/jobsmith/config.py (edit — add llm.apply: orchestrator + node backend + on_failure)'
+            - config-schema.yaml (edit — document the new fields)
+            - tests/test_config.py (edit — default/validation/round-trip)
+        - type: data-model
+          title: llm.apply config
+          fields:
+            name: llm.apply
+          rows:
+            - name: orchestrator
+              type: 'enum: claude_cloud | code_local (default claude_cloud)'
+            - name: node_backend
+              type: provider + base_url + model + api_key (reuses the llm provider enum)
+            - name: on_failure
+              type: 'enum: error | fallback_cloud (default error)'
+    - id: slice-4
+      num: 4
+      title: vllm-mlx engine lifecycle manager (local node backend server)
+      what: |
+        src/jobsmith/llm/vllm_mlx.py manages the local engine: start() launches `vllm-mlx serve
+        <model> --host 127.0.0.1 --port <free> --enable-auto-tool-choice --tool-call-parser
+        gemma4 --reasoning-parser gemma4` (NO --continuous-batching — it crashes gemma-4), with a
+        free-port pick + conflict pre-check and an idempotent PID-lock; health() polls /v1/models
+        and classifies loading (~20-30s cold) vs crashed vs ready; stop() terminates with no
+        orphan. deps.py detects whether vllm-mlx is installed and surfaces a guided `uv pip
+        install vllm-mlx` hint. Salvaged from plan-21911e16 slice-3 with the spike's exact flags.
+      why: |
+        Goal 3 — the local node backend needs a reliable engine to talk to: start cleanly,
+        signal the cold load, never race under concurrent applies, and degrade with a clear
+        install hint rather than crash.
+      files:
+        - src/jobsmith/llm/vllm_mlx.py
+        - src/jobsmith/desktop/deps.py
+        - tests/test_vllm_mlx.py
+      deps: []
+      done_when:
+        - start() launches vllm-mlx with the gemma4 parser flags and WITHOUT --continuous-batching; a second concurrent start() is a no-op via PID-lock, not a port collision; stop() leaves no orphan process.
+        - health() distinguishes loading (process up, /v1/models not yet 200) from crashed (process gone) from ready (200) from stubbed responses; the port is chosen with a free-port fallback.
+        - When vllm-mlx is not installed, deps.py reports it and emits the guided `uv pip install vllm-mlx` hint instead of raising.
+      effort: M
+      risk: Med
+      tests: |
+        Unit (tests/test_vllm_mlx.py): free-port picker; PID-lock idempotent start; health
+        classifier over stubbed states; deps detection true/false. Integration (gated, opt-in):
+        real start gemma-4, poll ready, assert /v1/models 200, stop() clean.
+      complexity: complex
+      approved: false
+      comment: ""
+      research:
+        - url: https://github.com/waybarrios/vllm-mlx
+          claim: serve CLI + flags; the spike confirmed --continuous-batching crashes gemma-4 (shared_kv TypeError) and that --enable-auto-tool-choice --tool-call-parser gemma4 is required for tool/JSON output.
+          accessed: "2026-06-27"
+      questions:
+        - id: q-continuous-batching
+          text: Use --continuous-batching for engine throughput?
+          answer: No — the spike proved it crashes the gemma-4 MLLM path (shared_kv TypeError -> 0 tokens). Serve WITHOUT it; required flags are --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4.
+      decisions_notes: |
+        **Trigger:** a code_local apply ensures the engine is healthy before running the pipeline.
+        **State:** PID-file + chosen port under the app data dir; engine is a managed child process.
+        **Payload:** a healthy local OpenAI-compatible endpoint backed by gemma-4.
+        **Rejected:** --continuous-batching (spike: 0 tokens on gemma-4 MLLM); mlx_lm.server (no tool calling); bundling the engine (a pip package — detect+install mirrors the desktop dep pattern).
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - src/jobsmith/llm/vllm_mlx.py (new — start/stop, free-port + PID-lock, health classifier)
+            - src/jobsmith/desktop/deps.py (edit — detect vllm-mlx + guided install hint)
+            - tests/test_vllm_mlx.py (new)
+        - type: diagram
+          title: Engine lifecycle
+          fields:
+            direction: lr
+          entries:
+            - start() -> PID-lock (idempotent) + free port
+            - launch vllm-mlx (gemma-4; NO --continuous-batching; gemma4 parser)
+            - 'health: loading (~20-30s) -> ready (/v1/models 200) -> crashed (proc gone)'
+            - 'stop(): terminate, no orphan'
+    - id: slice-5
+      num: 5
+      title: The 5 gather->draft nodes (jd-parse, fit-score, bullet-select, prose-write, prose-qa)
+      what: |
+        src/jobsmith/apply_local/nodes.py implements the v1 specialists as code Nodes over the
+        existing .apply-state contract, reusing each specialist's prompt intent + output schema
+        from specialist-contracts.yaml: jd-parse (JD text -> jd-parsed.json), fit-score
+        (-> fit-score.json), bullet-select (-> bullet-selection.json), prose-write
+        (-> prose-draft.md), prose-qa (decision over prose-draft.md, loops with prose-write
+        max 3). Each node = a pydantic output model + a prompt builder + Node.run via the
+        configured Backend. Prose nodes may emit markdown, not JSON (handled as text outputs).
+      why: |
+        Goal 3 — these five nodes are the value core (gather -> draft) and match the spike's
+        done_when (jd-parsed.json + prose-draft.md). They prove a full sub-pipeline runs on a
+        local model with code orchestration.
+      files:
+        - src/jobsmith/apply_local/nodes.py
+        - src/jobsmith/apply_local/schemas.py
+        - tests/test_apply_local_nodes.py
+      deps:
+        - 1
+        - 2
+      done_when:
+        - jd-parse, fit-score, and bullet-select each produce their declared .apply-state JSON with the required fields (e.g. jd-parsed.json has company/position/role_type + must_haves>=2), validated against a pydantic schema.
+        - prose-write produces a prose-draft.md with a non-empty Professional Summary; prose-qa returns a pass|revise decision and the driver loops prose-write<->prose-qa at most 3 times.
+        - Every node runs through the Backend abstraction (backend-agnostic) and writes via the checkpoint helper (resumable).
+      effort: L
+      risk: High
+      tests: |
+        Unit (tests/test_apply_local_nodes.py): each node with a stub Backend returning a
+        canned valid payload -> asserts the written .apply-state artifact + schema; prose-qa
+        revise-then-pass loop bounded at 3. (Live-model run is exercised in slice 6.)
+      complexity: complex
+      approved: false
+      comment: ""
+      research:
+        - url: https://docs.vllm.ai/en/latest/features/structured_outputs.html
+          claim: json_schema response_format (server-enforced) is how each gather node constrains gemma's output; prose nodes use free-text and are validated structurally.
+          accessed: "2026-06-27"
+      questions:
+        - id: q-prose-output
+          text: Do the prose nodes return JSON like the gather nodes?
+          answer: No — prose-write/prose-qa emit markdown (the prose-draft.md contract); validate structurally (non-empty Professional Summary; pass|revise decision) rather than via json_schema. Only the gather nodes use json_schema.
+      decisions_notes: |
+        **Trigger:** the Pipeline runs these nodes in the gather->draft stages.
+        **State:** the existing .apply-state/ files (jd-parsed.json, fit-score.json, bullet-selection.json, prose-draft.md) — same contract the cloud path uses, so artifacts are interchangeable.
+        **Payload:** validated structured outputs (gather) + markdown (draft).
+        **Rejected:** re-deriving schemas from scratch (reuse specialist-contracts.yaml shapes); forcing JSON on prose (markdown is the contract; validate structurally); porting all 13 specialists now (v1 = gather->draft per the scope decision; render/ats/layout/cover/index/db deferred to phase 2). NOTE budget: 5 nodes + tests may approach the line — split gather (3) vs draft (2) at execution if it exceeds.
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - src/jobsmith/apply_local/nodes.py (new — 5 node builders over the Backend)
+            - src/jobsmith/apply_local/schemas.py (new — pydantic models per .apply-state artifact)
+            - tests/test_apply_local_nodes.py (new)
+        - type: diagram
+          title: v1 gather->draft node graph
+          fields:
+            direction: lr
+          entries:
+            - jd-parse -> jd-parsed.json
+            - 'fanout: fit-score -> fit-score.json | bullet-select -> bullet-selection.json'
+            - prose-write -> prose-draft.md
+            - prose-qa (loop<=3 with prose-write) -> pass|revise
+    - id: slice-6
+      num: 6
+      title: End-to-end gather->draft on local gemma + engine wiring + on_failure fallback
+      what: |
+        src/jobsmith/apply_local/run.py wires it together: resolve config.llm.apply, ensure the
+        vllm-mlx engine is healthy (slice 4), build the Pipeline of the 5 nodes (slice 5) with
+        the resolved Backend (slice 2), and run a real gather->draft apply on a pasted JD,
+        writing the .apply-state artifacts. Robustness: detect ENGINE-DOWN (connection-refused
+        -> vllm_mlx.health()) distinct from a node's parse_ok=False; on failure honor on_failure
+        (clear error | fallback_cloud handing off to the existing claude -p path); suffix the
+        .apply-state run dir by orchestrator so a cloud run and a local run never collide.
+      why: |
+        Goal 3 — the deliverable: a complete gather->draft produced by a local model under code
+        orchestration, with a safety net so a flaky local engine never yields a silently broken
+        draft or pollutes a cloud run.
+      files:
+        - src/jobsmith/apply_local/run.py
+        - src/jobsmith/apply.py
+        - tests/test_apply_local_run.py
+      deps:
+        - 3
+        - 4
+        - 5
+      done_when:
+        - A code_local apply on a pasted JD produces a complete gather->draft (jd-parsed.json through prose-draft.md) end-to-end against a healthy local gemma engine.
+        - A mid-run engine crash is detected as ENGINE-DOWN via health() (not misread as a node parse failure) and handled per on_failure (clear error, or fallback_cloud to claude -p); the local and cloud runs use distinct .apply-state run dirs.
+        - With orchestrator=claude_cloud (default) apply.py routes to the existing claude -p path unchanged (no regression).
+      effort: L
+      risk: High
+      tests: |
+        Integration (tests/test_apply_local_run.py): stub vllm_mlx.health + a stub Backend ->
+        assert orchestration order, the ENGINE-DOWN branch, the on_failure policy, and the
+        orchestrator-suffixed run dir. Manual E2E: real local gemma gather->draft on a pasted JD.
+      complexity: complex
+      approved: false
+      comment: ""
+      research_waiver: Orchestration glue over slices 1-5 (driver, backends, config, engine, nodes) + the existing apply.py routing; the external dependencies it composes are researched in those slices. No additional external API governs the wiring.
+      questions:
+        - id: q-engine-down
+          text: How to distinguish an engine crash from a node parse failure mid-run?
+          answer: On a connection-refused / non-JSON transport error, query vllm_mlx.health(); a 'crashed' classification = ENGINE-DOWN (route to on_failure), distinct from a node returning parse_ok=False (a model-output issue). Honor on_failure (error | fallback_cloud).
+      decisions_notes: |
+        **Trigger:** `jobsmith apply` with config.llm.apply.orchestrator=code_local.
+        **State:** engine lifecycle bound to the run; .apply-state run dir suffixed by orchestrator; artifacts saved as today.
+        **Payload:** a complete local gather->draft, or a clear error / cloud fallback.
+        **Rejected:** silent fallback (hides local failure); shared run dirs across orchestrators (cross-model pollution); treating connection-refused as a model error (mis-routes the fallback) — health()-gated ENGINE-DOWN classification instead.
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - src/jobsmith/apply_local/run.py (new — ensure-healthy -> run pipeline -> on_failure)
+            - src/jobsmith/apply.py (edit — route orchestrator=code_local to run.py; default claude_cloud unchanged)
+            - tests/test_apply_local_run.py (new)
+        - type: diagram
+          title: End-to-end code_local run
+          fields:
+            direction: lr
+          entries:
+            - config orchestrator=code_local
+            - ensure vllm-mlx healthy (else loading/error)
+            - run Pipeline(5 nodes) via resolved Backend
+            - engine crash -> health() says down -> on_failure (error | fallback_cloud -> claude -p)
+    - id: slice-7
+      num: 7
+      title: 'Config-tab UI + docs: select the apply orchestrator'
+      what: |
+        Surface the orchestrator choice in the web Config tab (web/src/app/views.tsx) next to
+        the existing LLM provider selector: a toggle 'Claude (cloud, claude -p)' vs 'Local code
+        driver (gemma via vllm-mlx)', revealing the node backend base_url/model + on_failure when
+        local is selected; persist via PUT /api/config. Document the local setup in
+        docs/local-apply-backend.md: `uv pip install vllm-mlx`, the exact serve flags (no
+        --continuous-batching; gemma4 parser), the ~20-30s cold load, and the v1 gather->draft
+        scope.
+      why: |
+        Operators flip the apply orchestrator without editing YAML; docs make the local path
+        reproducible and set the cold-load expectation. Salvaged from plan-21911e16 slice-6.
+      files:
+        - web/src/app/views.tsx
+        - src/jobsmith/api/config_routes.py
+        - docs/local-apply-backend.md
+      deps:
+        - 3
+      done_when:
+        - The Config tab shows the orchestrator toggle; selecting Local reveals node backend base_url/model + on_failure and persists via PUT /api/config.
+        - docs/local-apply-backend.md documents the install, the exact vllm-mlx serve flags (no --continuous-batching), the ~20-30s cold load, and the v1 gather->draft-only scope.
+      effort: S
+      risk: Low
+      tests: |
+        Unit (web): Config tab renders the orchestrator toggle + persists the llm.apply payload
+        on save. Doc readthrough. Browser-verify the Config tab in Chrome (screenshot + console).
+      complexity: standard
+      approved: false
+      comment: ""
+      research_waiver: UI + docs over the existing /api/config contract and the config fields from slice 3; no external API governs this surface.
+      decisions_notes: |
+        **Trigger:** Config tab render + save.
+        **State:** persisted via /api/config (llm.apply block).
+        **Payload:** orchestrator choice + node backend endpoint + on_failure.
+        **Rejected:** YAML-only config (operators can't switch easily); conflating with the chat/scoring provider selector (apply orchestration is a distinct axis from the chat/scoring backend).
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - web/src/app/views.tsx (edit — orchestrator toggle in the Config tab)
+            - src/jobsmith/api/config_routes.py (edit — accept llm.apply in PUT /api/config)
+            - docs/local-apply-backend.md (new — vllm-mlx setup + flags + cold-load + v1 scope)
+        - type: wireframe
+          title: Config tab — apply orchestrator
+          fields:
+            html: |
+                <div style="padding:var(--wf-space-md);background:var(--wf-surface);color:var(--wf-text)">
+                  <label style="display:block;margin-bottom:var(--wf-space-sm)">Apply orchestrator</label>
+                  <select style="width:100%;padding:var(--wf-space-sm);border:1px solid var(--wf-border)">
+                    <option>Claude (cloud, claude -p) — default</option>
+                    <option>Local code driver (gemma via vllm-mlx)</option>
+                  </select>
+                  <input placeholder="node backend base_url (http://127.0.0.1:8081/v1)" style="margin-top:var(--wf-space-sm);width:100%;padding:var(--wf-space-sm);border:1px solid var(--wf-border)"/>
+                  <div style="margin-top:var(--wf-space-sm);color:var(--wf-text-muted);font-size:var(--wf-font-sm)">First local apply loads the model (~20-30s).</div>
+                </div>
 questions: []
