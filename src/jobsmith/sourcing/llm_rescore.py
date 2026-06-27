@@ -50,6 +50,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from jobsmith.llm.robust_json import coerce_json_object
+
 if TYPE_CHECKING:
     from jobsmith.config import LLMSettings
 
@@ -565,44 +567,6 @@ _OPENAI_RESPONSE_FORMAT: dict[str, Any] = {
 }
 
 
-def _strip_code_fence(text: str) -> str:
-    """Strip a leading/trailing markdown code fence (```json … ```)."""
-    stripped = text.strip()
-    if not stripped.startswith("```"):
-        return stripped
-    # Drop the opening fence line (``` or ```json) and any trailing fence.
-    body = stripped[3:]
-    newline = body.find("\n")
-    if newline != -1:
-        first_line = body[:newline].strip().lower()
-        if first_line in ("", "json"):
-            body = body[newline + 1 :]
-    if body.rstrip().endswith("```"):
-        body = body.rstrip()[:-3]
-    return body.strip()
-
-
-def _coerce_json_object(content: str | None) -> dict | None:
-    """Best-effort: turn raw model output into a JSON object, else None."""
-    if not content or not isinstance(content, str):
-        return None
-    text = _strip_code_fence(content)
-    try:
-        obj = json.loads(text)
-        return obj if isinstance(obj, dict) else None
-    except (json.JSONDecodeError, TypeError):
-        pass
-    # Fallback: salvage the first {...} span (handles prose around the JSON).
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        try:
-            obj = json.loads(text[start : end + 1])
-            return obj if isinstance(obj, dict) else None
-        except (json.JSONDecodeError, TypeError):
-            return None
-    return None
-
-
 def _robust_parse_fit_metrics(content: str | None) -> tuple[bool, dict]:
     """Parse model output into a fit-metrics object.
 
@@ -610,8 +574,13 @@ def _robust_parse_fit_metrics(content: str | None) -> tuple[bool, dict]:
     integer-coercible ``score`` was recovered — the minimum signal a usable
     fit-metrics result requires. Coverage/specialty/rationale degrade
     gracefully downstream; a missing or non-numeric ``score`` flags the posting.
+
+    The generic JSON-object extraction (markdown-fence stripping, prose-span
+    salvage) lives in the SHARED :func:`jobsmith.llm.robust_json.coerce_json_object`
+    so the apply-local per-node backends parse model output identically; only the
+    fit-metrics ``score`` requirement is enforced here.
     """
-    obj = _coerce_json_object(content)
+    obj = coerce_json_object(content)
     if not isinstance(obj, dict):
         return False, {}
     try:
