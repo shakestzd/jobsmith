@@ -8,8 +8,12 @@ import pytest
 import yaml
 
 from jobsmith.config import (
+    LLM_PRESETS,
+    ApplySettings,
     BenchmarkConfig,
     JobsmithConfig,
+    LLMSettings,
+    NodeBackendConfig,
     find_config,
     load_config,
 )
@@ -147,8 +151,6 @@ def test_benchmark_config_all_fields_optional() -> None:
 # LLMSettings tests
 # ---------------------------------------------------------------------------
 
-from jobsmith.config import LLM_PRESETS, LLMSettings  # noqa: E402
-
 
 def test_llm_default_provider_is_claude_cli() -> None:
     """No llm block in config → provider defaults to claude_cli."""
@@ -241,3 +243,173 @@ def test_llm_no_llm_block_backward_compat(tmp_path: Path) -> None:
     config = load_config(config_file)
     assert config.llm.provider == "claude_cli"
     assert config.user.name == "Pat Doe"
+
+
+# ---------------------------------------------------------------------------
+# LLMSettings.apply (ApplySettings) tests — TDD slice feat-c7fab5c0
+# ---------------------------------------------------------------------------
+
+
+def test_apply_orchestrator_defaults_to_claude_cloud() -> None:
+    """When no llm.apply block is present, orchestrator defaults to claude_cloud."""
+    config = JobsmithConfig()
+    assert config.llm.apply.orchestrator == "claude_cloud"
+
+
+def test_no_apply_block_existing_behavior_unchanged(tmp_path: Path) -> None:
+    """Config with no llm.apply section → apply block is at default claude_cloud."""
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text("llm:\n  provider: claude_cli\n")
+    config = load_config(config_file)
+    assert config.llm.apply.orchestrator == "claude_cloud"
+    assert config.llm.apply.node_backend is None
+    assert config.llm.apply.node_backends == {}
+
+
+def test_apply_code_local_orchestrator_parses() -> None:
+    """code_local is a valid orchestrator value."""
+    config = JobsmithConfig.model_validate(
+        {"llm": {"apply": {"orchestrator": "code_local"}}}
+    )
+    assert config.llm.apply.orchestrator == "code_local"
+
+
+def test_apply_node_backend_default_parses() -> None:
+    """apply.node_backend with a provider + model parses correctly."""
+    config = JobsmithConfig.model_validate(
+        {
+            "llm": {
+                "apply": {
+                    "orchestrator": "code_local",
+                    "node_backend": {
+                        "provider": "openai_compatible",
+                        "base_url": "http://127.0.0.1:8080/v1",
+                        "model": "mlx-community/gemma-3-4b",
+                    },
+                }
+            }
+        }
+    )
+    nb = config.llm.apply.node_backend
+    assert nb is not None
+    assert nb.provider == "openai_compatible"
+    assert nb.base_url == "http://127.0.0.1:8080/v1"
+    assert nb.model == "mlx-community/gemma-3-4b"
+
+
+def test_apply_node_backends_map_parses() -> None:
+    """apply.node_backends is a dict of node_name -> NodeBackendConfig."""
+    config = JobsmithConfig.model_validate(
+        {
+            "llm": {
+                "apply": {
+                    "orchestrator": "code_local",
+                    "node_backend": {
+                        "provider": "openai_compatible",
+                        "base_url": "http://127.0.0.1:8080/v1",
+                        "model": "gemma-3",
+                    },
+                    "node_backends": {
+                        "prose-write": {
+                            "provider": "anthropic",
+                            "api_key": "sk-ant-test",
+                            "model": "claude-3-5-haiku-20241022",
+                        }
+                    },
+                }
+            }
+        }
+    )
+    overrides = config.llm.apply.node_backends
+    assert "prose-write" in overrides
+    assert overrides["prose-write"].provider == "anthropic"
+    assert overrides["prose-write"].api_key == "sk-ant-test"
+    assert overrides["prose-write"].model == "claude-3-5-haiku-20241022"
+
+
+def test_apply_on_failure_defaults_to_error() -> None:
+    """on_failure defaults to 'error' when not specified."""
+    config = JobsmithConfig()
+    assert config.llm.apply.on_failure == "error"
+
+
+def test_apply_on_failure_fallback_cloud_valid() -> None:
+    """fallback_cloud is a valid on_failure value."""
+    config = JobsmithConfig.model_validate(
+        {"llm": {"apply": {"on_failure": "fallback_cloud"}}}
+    )
+    assert config.llm.apply.on_failure == "fallback_cloud"
+
+
+def test_apply_on_failure_invalid_rejected() -> None:
+    """Unknown on_failure value is rejected by Pydantic."""
+    with pytest.raises(ValueError):
+        JobsmithConfig.model_validate(
+            {"llm": {"apply": {"on_failure": "retry_forever"}}}
+        )
+
+
+def test_anthropic_provider_accepted_in_node_backend() -> None:
+    """anthropic is now a valid LLMProvider for node backends."""
+    nb = NodeBackendConfig(provider="anthropic", api_key="sk-ant-test")
+    assert nb.provider == "anthropic"
+
+
+def test_anthropic_no_api_key_rejected_in_node_backend() -> None:
+    """anthropic provider without api_key raises a clear Pydantic error."""
+    with pytest.raises(ValueError, match="api_key"):
+        NodeBackendConfig(provider="anthropic")
+
+
+def test_anthropic_provider_accepted_in_llm_settings() -> None:
+    """anthropic is valid as the top-level llm.provider."""
+    config = JobsmithConfig.model_validate(
+        {"llm": {"provider": "anthropic", "api_key": "sk-ant-test"}}
+    )
+    assert config.llm.provider == "anthropic"
+
+
+def test_apply_round_trip_from_yaml(tmp_path: Path) -> None:
+    """Full llm.apply block round-trips through .apply-config.yaml."""
+    config_file = tmp_path / ".apply-config.yaml"
+    config_file.write_text(
+        "llm:\n"
+        "  provider: claude_cli\n"
+        "  apply:\n"
+        "    orchestrator: code_local\n"
+        "    on_failure: fallback_cloud\n"
+        "    node_backend:\n"
+        "      provider: openai_compatible\n"
+        "      base_url: http://127.0.0.1:8080/v1\n"
+        "      model: gemma-3-4b\n"
+        "    node_backends:\n"
+        "      prose-write:\n"
+        "        provider: anthropic\n"
+        "        api_key: sk-ant-abc\n"
+        "        model: claude-3-5-haiku-20241022\n"
+    )
+    config = load_config(config_file)
+    assert config.llm.apply.orchestrator == "code_local"
+    assert config.llm.apply.on_failure == "fallback_cloud"
+    assert config.llm.apply.node_backend is not None
+    assert config.llm.apply.node_backend.provider == "openai_compatible"
+    assert config.llm.apply.node_backend.base_url == "http://127.0.0.1:8080/v1"
+    assert config.llm.apply.node_backend.model == "gemma-3-4b"
+    assert "prose-write" in config.llm.apply.node_backends
+    pw = config.llm.apply.node_backends["prose-write"]
+    assert pw.provider == "anthropic"
+    assert pw.api_key == "sk-ant-abc"
+
+
+def test_apply_node_backends_empty_by_default() -> None:
+    """When node_backends is not set, it defaults to an empty dict."""
+    settings = ApplySettings()
+    assert settings.node_backends == {}
+
+
+def test_apply_invalid_orchestrator_rejected() -> None:
+    """An unknown orchestrator value is rejected by Pydantic."""
+    with pytest.raises(ValueError):
+        JobsmithConfig.model_validate(
+            {"llm": {"apply": {"orchestrator": "kubernetes_local"}}}
+        )
