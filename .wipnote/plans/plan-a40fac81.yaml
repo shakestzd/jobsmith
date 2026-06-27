@@ -14,10 +14,10 @@ meta:
         and hard nodes on cloud Claude. v1 = the gather->draft core (5 nodes, split gather vs
         draft). The existing claude -p cloud apply is untouched. Supersedes plan-21911e16 slices 2-6.
     created_at: "2026-06-27"
-    status: draft
+    status: finalized
     priority: medium
     schema_version: v4
-    version: 3
+    version: 4
 design:
     problem: |
         jobsmith's apply pipeline is implemented as Claude Code specialist sub-agents driven
@@ -66,6 +66,7 @@ design:
           accessed: "2026-06-27"
 slices:
     - id: slice-1
+      feature_id: feat-d67d2b1a
       num: 1
       title: 'Driver core: Node + Pipeline state-machine + applications/{slug}/.apply-state checkpoint/resume'
       what: |
@@ -99,9 +100,10 @@ slices:
         nodes; checkpoint skip-on-parse_ok + atomic write + re-run on parse_ok=false; Node
         bounded-reask with a stub backend returning bad-then-good JSON. No network.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research_waiver: No-framework decision (LangGraph/Burr/Haystack/LlamaIndex evaluated this session; rejected for a fixed DAG with a lean-dep constraint). Pure stdlib + pydantic orchestration; no external API governs this surface.
+      execution_status: promoted
       questions:
         - id: q-fanout-concurrency
           text: How do fan-out stages run nodes concurrently given a single local engine at ~5 tok/s?
@@ -138,6 +140,7 @@ slices:
             - status=halt -> short-circuit + surface
             - 'resume: parse_ok checkpoint exists -> skip + return cached'
     - id: slice-2
+      feature_id: feat-c920ceeb
       num: 2
       title: 'Per-node LLM Backend abstraction: OpenAICompatBackend + AnthropicBackend (strict tool_use)'
       what: |
@@ -171,7 +174,7 @@ slices:
         parse_ok); mock the anthropic client for tool_use vs text-only; resolve_backend per-node
         override + default. No live network.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://platform.claude.com/docs/en/build-with-claude/tool-use/overview
@@ -180,6 +183,7 @@ slices:
         - url: https://docs.vllm.ai/en/latest/features/structured_outputs.html
           claim: response_format json_schema is enforced server-side by vllm-mlx; OpenAICompatBackend relies on it but keeps shared robust-parse as the 4B safety net.
           accessed: "2026-06-27"
+      execution_status: promoted
       questions:
         - id: q-anthropic-structured
           text: How does AnthropicBackend force structured JSON — a response_format or tool_use?
@@ -218,6 +222,7 @@ slices:
             - name: resolve_backend
               type: (config.llm.apply, node_name) -> Backend  (per-node override, else default)
     - id: slice-3
+      feature_id: feat-c7fab5c0
       num: 3
       title: 'Config: orchestrator selector + per-node backends (adds `anthropic` provider)'
       what: |
@@ -246,9 +251,10 @@ slices:
         override parses; `anthropic` provider accepted; on_failure default=error; round-trip via
         .apply-config.yaml.
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
       research_waiver: Internal Pydantic config over the existing llm provider enum + .apply-config.yaml; no external API governs the field set (the backend endpoints are researched in slices 2/4).
+      execution_status: promoted
       critic_revisions:
         - source: local-design
           severity: SUCCESS
@@ -279,6 +285,7 @@ slices:
             - name: on_failure
               type: 'enum: error | fallback_cloud (default error)'
     - id: slice-4
+      feature_id: feat-0d2f3df4
       num: 4
       title: vllm-mlx engine lifecycle manager (local node backend server)
       what: |
@@ -308,12 +315,13 @@ slices:
         over stubbed states; deps detection true/false. Integration (gated, opt-in): real start gemma-4,
         poll ready, /v1/models 200, stop() clean.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://github.com/waybarrios/vllm-mlx
           claim: serve CLI + flags; the spike confirmed --continuous-batching crashes gemma-4 (shared_kv TypeError) and that --enable-auto-tool-choice --tool-call-parser gemma4 is required. README defaults to batching, so the spike is authoritative.
           accessed: "2026-06-27"
+      execution_status: promoted
       questions:
         - id: q-continuous-batching
           text: Use --continuous-batching for engine throughput?
@@ -344,6 +352,7 @@ slices:
             - 'health: loading (~20-30s) -> ready (/v1/models 200) -> crashed (proc gone)'
             - 'stop(): terminate, no orphan'
     - id: slice-5
+      feature_id: feat-d46dde68
       num: 5
       title: Gather nodes (jd-parse, fit-score, bullet-select) + master-input assembly + no-fab halt
       what: |
@@ -380,12 +389,13 @@ slices:
         payload -> asserts the written artifacts + schema; inputs.py master-load + missing-file error;
         the halt path on an uncovered must-have / unreasoned anchor drop. (Live-model run in slice 7.)
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://docs.vllm.ai/en/latest/features/structured_outputs.html
           claim: json_schema response_format (server-enforced) is how each gather node constrains gemma's output; shared robust-parse remains the safety net.
           accessed: "2026-06-27"
+      execution_status: promoted
       questions:
         - id: q-no-fab
           text: How does v1 enforce no_fabrication without the cloud inquirer/anchor-guard/fact-check?
@@ -417,6 +427,7 @@ slices:
             - 'fanout: fit-score -> fit-score.json | bullet-select -> bullet-selection.json (+diff/decisions/tailored work.yml)'
             - 'no-fab: uncovered must-have / anchor drop -> status=halt -> surface'
     - id: slice-6
+      feature_id: feat-9517bed8
       num: 6
       title: Draft nodes (prose-write, prose-qa) + deterministic QA checks + bounded revise loop
       what: |
@@ -450,9 +461,10 @@ slices:
         with a Professional Summary; prose-qa deterministic checks flag/clear known patterns; the
         revise loop bounded at 3; the would-fabricate halt. (Live-model run in slice 7.)
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research_waiver: Reuses the in-repo prose-writer/prose-qa prompt + check definitions from specialist-contracts.yaml; the deterministic checks are mechanical (regex/counts). No external API governs this surface beyond the Backend (slice 2).
+      execution_status: promoted
       questions:
         - id: q-prose-qa-checks
           text: Is prose-qa a model call or code?
@@ -482,6 +494,7 @@ slices:
             - loop prose-write<->prose-qa max 3, then surface findings
             - would-fabricate -> status=halt
     - id: slice-7
+      feature_id: feat-70b1b976
       num: 7
       title: End-to-end gather->draft + engine wiring + on_failure fallback + hybrid routing test
       what: |
@@ -520,9 +533,10 @@ slices:
         policy, and the claude_cloud passthrough. Manual E2E — real local gemma (+ optional cloud node)
         gather->draft on a pasted JD.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research_waiver: Orchestration glue over slices 1-6 + the existing _cli_apply routing; the external dependencies it composes are researched in those slices. No additional external API governs the wiring.
+      execution_status: promoted
       questions:
         - id: q-engine-down
           text: How to distinguish an engine crash from a node parse failure mid-run?
@@ -556,6 +570,7 @@ slices:
             - run Pipeline(gather+draft) — per-node Backend (local | cloud)
             - engine crash -> health() down -> on_failure (error | fallback_cloud -> claude -p)
     - id: slice-8
+      feature_id: feat-63ea7f22
       num: 8
       title: 'Config-tab UI + docs: select the apply orchestrator'
       what: |
@@ -584,9 +599,10 @@ slices:
         Unit (web): Config tab renders the orchestrator toggle + persists the llm.apply payload on
         save. Doc readthrough. Browser-verify the Config tab in Chrome (screenshot + console).
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
       research_waiver: UI + docs over the existing /api/config contract and the config fields from slice 3; no external API governs this surface.
+      execution_status: promoted
       critic_revisions:
         - source: local-feasibility
           severity: SUCCESS
