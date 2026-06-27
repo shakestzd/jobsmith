@@ -13,7 +13,7 @@
              data-status="in-progress"
              data-priority="medium"
              data-created="2026-06-05T06:55:13.108361"
-             data-updated="2026-06-06T06:28:22.985484" data-agent-assigned="claude-code">
+             data-updated="2026-06-12T09:17:28.541112" data-agent-assigned="claude-code">
 
         <header>
             <h1>Single-server local app: static-serve UI &#43; wheel bundle &#43; jobsmith up</h1>
@@ -24,27 +24,39 @@
         </header>
 
         <nav data-graph-edges>
-            <section data-edge-type="implemented_in">
-                <h3>Implemented In:</h3>
-                <ul>
-                    <li><a href="55a3f540-ef2d-4f64-a02e-865177ab4ce0.html" data-relationship="implemented_in" data-since="2026-06-05T06:57:31.656248">session 55a3f540-ef2d-4f64-a02e-865177ab4ce0</a></li>
-                </ul>
-            </section>
             <section data-edge-type="contains">
                 <h3>Contains:</h3>
                 <ul>
-                    <li><a href="feat-9c980bef.html" data-relationship="contains" data-since="2026-06-05T06:55:13.130943">Serve the built UI same-origin from create_app (StaticFiles &#43; SPA fallback)</a></li>
-                    <li><a href="feat-d58d5881.html" data-relationship="contains" data-since="2026-06-05T06:55:13.161458">Bundle web/dist into the wheel via a hatch build hook</a></li>
-                    <li><a href="feat-16257e94.html" data-relationship="contains" data-since="2026-06-05T06:55:13.190845">Localhost auto-auth: runtime token shim feeding header AND SSE paths</a></li>
-                    <li><a href="feat-2423bbec.html" data-relationship="contains" data-since="2026-06-05T06:55:13.22167">`jobsmith up` — boot the server, open the browser after listen (non-blocking), --dev toggle</a></li>
-                    <li><a href="feat-e4adbb42.html" data-relationship="contains" data-since="2026-06-05T06:55:13.291233">End-to-end acceptance: fresh wheel install → jobsmith up → apply/onboard in browser</a></li>
-                    <li><a href="feat-30736316.html" data-relationship="contains" data-since="2026-06-05T16:11:52.124335">roborev-991 fixes: shim bind-mode gate, JS-safe escaping, stale web_dist cleanup</a></li>
-                    <li><a href="bug-e98236c5.html" data-relationship="contains" data-since="2026-06-05T23:55:55.738203">Chat endpoint returns HTTP 500 on message send</a></li>
-                    <li><a href="feat-3bd11122.html" data-relationship="contains" data-since="2026-06-06T00:43:53.656267">Chat front-end overhaul: rendering, loading/error states, message actions, session UX</a></li>
-                    <li><a href="feat-fae0fda6.html" data-relationship="contains" data-since="2026-06-06T04:36:20.586539">Chat-driven cover-letter edits: propose -&gt; diff -&gt; apply (slice 1)</a></li>
-                    <li><a href="feat-22fad04f.html" data-relationship="contains" data-since="2026-06-06T05:21:49.930756">Show cover-letter proposal diff in Review tab (not cramped chat panel)</a></li>
-                    <li><a href="feat-dadd81ff.html" data-relationship="contains" data-since="2026-06-06T06:03:20.089064">Wire real cover-letter re-render on chat-apply</a></li>
-                    <li><a href="feat-0e29138c.html" data-relationship="contains" data-since="2026-06-06T06:28:22.972994">On-demand cover-letter PDF: Generate/Print button</a></li>
+                    <li><a href="../features/feat-9c980bef.html" data-relationship="contains" data-since="2026-06-05T06:55:13.130943">Serve the built UI same-origin from create_app (StaticFiles &#43; SPA fallback)</a></li>
+                    <li><a href="../features/feat-d58d5881.html" data-relationship="contains" data-since="2026-06-05T06:55:13.161458">Bundle web/dist into the wheel via a hatch build hook</a></li>
+                    <li><a href="../features/feat-16257e94.html" data-relationship="contains" data-since="2026-06-05T06:55:13.190845">Localhost auto-auth: runtime token shim feeding header AND SSE paths</a></li>
+                    <li><a href="../features/feat-2423bbec.html" data-relationship="contains" data-since="2026-06-05T06:55:13.22167">`jobsmith up` — boot the server, open the browser after listen (non-blocking), --dev toggle</a></li>
+                    <li><a href="../features/feat-e4adbb42.html" data-relationship="contains" data-since="2026-06-05T06:55:13.291233">End-to-end acceptance: fresh wheel install → jobsmith up → apply/onboard in browser</a></li>
+                    <li><a href="../features/feat-30736316.html" data-relationship="contains" data-since="2026-06-05T16:11:52.124335">roborev-991 fixes: shim bind-mode gate, JS-safe escaping, stale web_dist cleanup</a></li>
+                    <li><a href="../bugs/bug-e98236c5.html" data-relationship="contains" data-since="2026-06-05T23:55:55.738203">Chat endpoint returns HTTP 500 on message send</a></li>
+                    <li><a href="../features/feat-3bd11122.html" data-relationship="contains" data-since="2026-06-06T00:43:53.656267">Chat front-end overhaul: rendering, loading/error states, message actions, session UX</a></li>
+                    <li><a href="../features/feat-fae0fda6.html" data-relationship="contains" data-since="2026-06-06T04:36:20.586539">Chat-driven cover-letter edits: propose -&gt; diff -&gt; apply (slice 1)</a></li>
+                    <li><a href="../features/feat-22fad04f.html" data-relationship="contains" data-since="2026-06-06T05:21:49.930756">Show cover-letter proposal diff in Review tab (not cramped chat panel)</a></li>
+                    <li><a href="../features/feat-dadd81ff.html" data-relationship="contains" data-since="2026-06-06T06:03:20.089064">Wire real cover-letter re-render on chat-apply</a></li>
+                    <li><a href="../features/feat-0e29138c.html" data-relationship="contains" data-since="2026-06-06T06:28:22.972994">On-demand cover-letter PDF: Generate/Print button</a></li>
+                    <li><a href="../bugs/bug-fc23906b.html" data-relationship="contains" data-since="2026-06-10T18:19:18.806825">application.test.tsx: 38 failures — useProposal rendered outside ProposalProvider</a></li>
+                    <li><a href="../bugs/bug-600b3699.html" data-relationship="contains" data-since="2026-06-10T18:38:02.416408">Cover-letter apply gate false-positives on salutations — no greeting edit can pass</a></li>
+                    <li><a href="../bugs/bug-9d41145c.html" data-relationship="contains" data-since="2026-06-10T21:54:06.287404">Review-tab proposal diff card not scrollable — can&#39;t review all edits</a></li>
+                    <li><a href="../bugs/bug-17ea1f14.html" data-relationship="contains" data-since="2026-06-10T21:54:06.4574">Cover-letter PDF renders with duplicated header &#43; raw markdown title — needs a real letter template</a></li>
+                    <li><a href="../spikes/spk-429c3d8e.html" data-relationship="contains" data-since="2026-06-11T21:01:17.62338">Investigate apply event-stream latency and file durable fixes</a></li>
+                    <li><a href="../bugs/bug-9218a37d.html" data-relationship="contains" data-since="2026-06-11T21:05:19.339975">Event stream displays receipt/replay time instead of transcript timestamps</a></li>
+                    <li><a href="../bugs/bug-9ffccec7.html" data-relationship="contains" data-since="2026-06-11T21:05:19.556448">Application phase cards show hard-coded durations instead of measured elapsed time</a></li>
+                    <li><a href="../bugs/bug-84eaa5a1.html" data-relationship="contains" data-since="2026-06-11T21:05:19.758239">Supervisor and SSE stream stay keyed to the starting slug after canonical slug rekey</a></li>
+                    <li><a href="../bugs/bug-8350250a.html" data-relationship="contains" data-since="2026-06-11T21:05:19.963434">Canonical slug reconciliation still depends on legacy disk .apply-state files</a></li>
+                    <li><a href="../bugs/bug-0f48f080.html" data-relationship="contains" data-since="2026-06-11T21:05:20.165908">Apply state CLI and SSE poller churn SQLite connections and migrations per tiny event</a></li>
+                    <li><a href="../bugs/bug-404f66e2.html" data-relationship="contains" data-since="2026-06-12T09:17:28.367536">Application detail page opened from apply click stays at 0 events until manual reload</a></li>
+                    <li><a href="../bugs/bug-26db7047.html" data-relationship="contains" data-since="2026-06-12T09:17:28.535865">Phase card shows queued after phase halt (status=failed)</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/55a3f540-ef2d-4f64-a02e-865177ab4ce0.html" data-relationship="implemented_in" data-since="2026-06-05T06:57:31.656248">session 55a3f540-ef2d-4f64-a02e-865177ab4ce0</a></li>
                 </ul>
             </section>
         </nav>

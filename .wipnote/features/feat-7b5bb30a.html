@@ -13,7 +13,7 @@
              data-status="in-progress"
              data-priority="medium"
              data-created="2026-06-26T06:06:07.179194"
-             data-updated="2026-06-26T06:13:37.271905" data-agent-assigned="claude-code" data-track-id="trk-a57cff96">
+             data-updated="2026-06-26T06:58:47.874387" data-agent-assigned="claude-code" data-track-id="trk-a57cff96">
 
         <header>
             <h1>Tauri v2 scaffold &#43; macOS bundle config &#43; icons &#43; splash frontend</h1>
@@ -24,12 +24,6 @@
         </header>
 
         <nav data-graph-edges>
-            <section data-edge-type="planned_in">
-                <h3>Planned In:</h3>
-                <ul>
-                    <li><a href="../plans/plan-a23bba5f.html" data-relationship="planned_in" data-since="2026-06-26T06:06:07.184772">plan-a23bba5f</a></li>
-                </ul>
-            </section>
             <section data-edge-type="part_of">
                 <h3>Part Of:</h3>
                 <ul>
@@ -40,6 +34,12 @@
                 <h3>Implemented In:</h3>
                 <ul>
                     <li><a href="../sessions/89dae515-7da1-4053-b4c2-fd406ac63cf9.html" data-relationship="implemented_in" data-since="2026-06-26T06:13:37.271781">session 89dae515-7da1-4053-b4c2-fd406ac63cf9</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="../plans/plan-a23bba5f.html" data-relationship="planned_in" data-since="2026-06-26T06:06:07.184772">plan-a23bba5f</a></li>
                 </ul>
             </section>
         </nav>
@@ -55,7 +55,11 @@ required `src-tauri/icons/` set (icon.icns + PNG sizes) — without these
 `tauri build` fails. Bundle a tiny splash page (frontendDist) shown while the
 sidecar boots. Grant `shell:allow-spawn` for the sidecar in
 capabilities/default.json (scoped to the sidecar name only). Add root
-`package.json` scripts (`tauri dev`, `tauri build`). No backend wiring yet — slice 3.</p>
+`package.json` scripts (`tauri dev`, `tauri build`). No backend wiring yet — slice 3.
+[2026-06-26 06:34 claude-code] research-evidence: https://v2.tauri.app/reference/config/, https://v2.tauri.app/develop/sidecar/, https://crates.io/crates/tauri-plugin-single-instance
+[2026-06-26 06:36 claude-code] research-evidence: https://v2.tauri.app/reference/config/, https://v2.tauri.app/develop/sidecar/, https://crates.io/crates/tauri-plugin-single-instance
+[2026-06-26 06:39 claude-code] research-evidence: https://v2.tauri.app/reference/config/, https://v2.tauri.app/develop/sidecar/, https://crates.io/crates/tauri-plugin-single-instance
+[2026-06-26 06:58 claude-code] research-evidence: https://v2.tauri.app/develop/sidecar/, https://v2.tauri.app/start/create-project/</p>
         </section>
     </article>
 </body>
