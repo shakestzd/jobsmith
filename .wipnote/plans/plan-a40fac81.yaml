@@ -1,0 +1,18 @@
+meta:
+    id: plan-a40fac81
+    track_id: trk-f5052600
+    title: 'Code-orchestrated local apply: Python DAG + per-node LLM backends'
+    description: 'Pivot from plan-21911e16: a 4B local model can''t drive Claude Code''s agentic apply (spike NO-GO), so Python owns the apply DAG and the model does one bounded JSON task per node. v1 = gather->draft (5 nodes) on a new code-driver for the LOCAL path; per-node backends (local gemma via OpenAICompat + cloud Claude via anthropic SDK). Existing claude -p cloud apply untouched. Supersedes plan-21911e16 slices 2-6.'
+    created_at: "2026-06-27"
+    status: draft
+    priority: medium
+    schema_version: v4
+    version: 2
+design:
+    problem: ""
+    goals: []
+    constraints: []
+    approved: false
+    comment: ""
+slices: []
+questions: []
