@@ -49,6 +49,12 @@ const MOCK_CONFIG = {
     api_key: null,
     budget_usd: 1.0,
     timeout_s: 300,
+    apply: {
+      orchestrator: 'claude_cloud' as const,
+      on_failure: 'error' as const,
+      node_backend: null,
+      node_backends: {},
+    },
   },
 };
 
@@ -331,5 +337,112 @@ describe('ConfigView — LLM provider section', () => {
     const llm = payload.llm as Record<string, unknown>;
     expect(llm.provider).toBe('openai_compatible');
     expect(llm.base_url).toBe('http://127.0.0.1:8080/v1');
+  });
+});
+
+// ── Apply orchestrator section ─────────────────────────────────────────────
+
+describe('ConfigView — apply orchestrator section', () => {
+  it('renders the orchestrator selector with both options', async () => {
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    const select = screen.getByRole('combobox', { name: /orchestrator/i });
+    expect(select).toBeInTheDocument();
+
+    const options = Array.from(select.querySelectorAll('option')).map(o => o.value);
+    expect(options).toContain('claude_cloud');
+    expect(options).toContain('code_local');
+  });
+
+  it('hydrates orchestrator from GET response (claude_cloud default)', async () => {
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    const select = screen.getByRole('combobox', { name: /orchestrator/i });
+    expect((select as HTMLSelectElement).value).toBe('claude_cloud');
+  });
+
+  it('node-backend inputs are hidden when orchestrator is claude_cloud', async () => {
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    expect(screen.queryByLabelText(/node backend base url/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/node backend model/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/on failure/i)).not.toBeInTheDocument();
+  });
+
+  it('node-backend inputs appear when orchestrator switches to code_local', async () => {
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    const select = screen.getByRole('combobox', { name: /orchestrator/i });
+    await act(async () => {
+      fireEvent.change(select, { target: { value: 'code_local' } });
+    });
+
+    expect(screen.getByLabelText(/node backend base url/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/node backend model/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/on failure/i)).toBeInTheDocument();
+  });
+
+  it('on_failure selector has error and fallback_cloud options', async () => {
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    const orchSelect = screen.getByRole('combobox', { name: /orchestrator/i });
+    await act(async () => {
+      fireEvent.change(orchSelect, { target: { value: 'code_local' } });
+    });
+
+    const failSelect = screen.getByRole('combobox', { name: /on failure/i });
+    const options = Array.from(failSelect.querySelectorAll('option')).map(o => o.value);
+    expect(options).toContain('error');
+    expect(options).toContain('fallback_cloud');
+  });
+
+  it('Save PUT includes llm.apply with claude_cloud orchestrator by default', async () => {
+    mockApiPut.mockResolvedValue(MOCK_CONFIG);
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    });
+
+    expect(mockApiPut).toHaveBeenCalledOnce();
+    const [, payload] = mockApiPut.mock.calls[0] as [string, Record<string, unknown>];
+    const llm = payload.llm as Record<string, unknown>;
+    expect(llm).toHaveProperty('apply');
+    const apply = llm.apply as Record<string, unknown>;
+    expect(apply.orchestrator).toBe('claude_cloud');
+  });
+
+  it('Save PUT includes llm.apply.node_backend when code_local selected', async () => {
+    mockApiPut.mockResolvedValue(MOCK_CONFIG);
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    const orchSelect = screen.getByRole('combobox', { name: /orchestrator/i });
+    await act(async () => {
+      fireEvent.change(orchSelect, { target: { value: 'code_local' } });
+    });
+
+    const baseUrlInput = screen.getByLabelText(/node backend base url/i);
+    await act(async () => {
+      fireEvent.change(baseUrlInput, { target: { value: 'http://127.0.0.1:8081/v1' } });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    });
+
+    expect(mockApiPut).toHaveBeenCalledOnce();
+    const [, payload] = mockApiPut.mock.calls[0] as [string, Record<string, unknown>];
+    const llm = payload.llm as Record<string, unknown>;
+    const apply = llm.apply as Record<string, unknown>;
+    expect(apply.orchestrator).toBe('code_local');
+    const nodeBackend = apply.node_backend as Record<string, unknown>;
+    expect(nodeBackend.base_url).toBe('http://127.0.0.1:8081/v1');
   });
 });
