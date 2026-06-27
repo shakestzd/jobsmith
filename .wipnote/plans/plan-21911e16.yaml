@@ -4,10 +4,10 @@ meta:
     title: 'Model-agnostic apply pipeline: run claude -p on local gemma via vllm-mlx (Anthropic-native)'
     description: Keep the Claude Code agentic apply harness but point claude -p at a local gemma-4 served by vllm-mlx (a single MLX server exposing the native Anthropic Messages API with real tool_use blocks + MCP tool calling — no translation proxy). Config-driven, cloud Claude preserved as default. Extends plan-938f735b.
     created_at: "2026-06-26"
-    status: draft
+    status: finalized
     priority: medium
     schema_version: v4
-    version: 3
+    version: 4
 design:
     problem: |
         jobsmith's apply pipeline (gather -> draft -> render) is hardwired to the Claude
@@ -57,6 +57,7 @@ design:
           accessed: "2026-06-26"
 slices:
     - id: slice-1
+      feature_id: feat-927b6921
       num: 1
       title: 'SPIKE: prove gemma-4 drives the Claude Code agentic apply via vllm-mlx (decision gate)'
       what: |
@@ -92,7 +93,7 @@ slices:
         transcript; grep for tool_use events + the phase markers; inspect jd-parsed.json /
         prose-draft.md against the field checklist; compare to a cloud-Claude baseline.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://github.com/waybarrios/vllm-mlx
@@ -101,6 +102,7 @@ slices:
         - url: https://developers.googleblog.com/bring-state-of-the-art-agentic-skills-to-the-edge-with-gemma-4/
           claim: Gemma-4 function-calling is the capability under test; spike confirms it on the MLX/vllm-mlx runtime (blog demonstrated it on LiteRT-LM).
           accessed: "2026-06-26"
+      execution_status: promoted
       questions:
         - id: q-gate
           text: What happens on a NO-GO?
@@ -143,6 +145,7 @@ slices:
             - 'specialist dispatch: haiku (jd-parser) + sonnet (bullet-selector) -> gemma'
             - 'assess: tools fire? markers emitted? >=2 tiers route? draft produced?'
     - id: slice-2
+      feature_id: feat-f7900fac
       num: 2
       title: Extend the `llm` config with an apply-pipeline backend selector
       what: |
@@ -172,12 +175,13 @@ slices:
         anthropic_url -> validation error; on_failure default = error; round-trips via
         .apply-config.yaml.
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://code.claude.com/docs/en/model-config
           claim: The env vars the claude_local path sets (ANTHROPIC_BASE_URL/MODEL/DEFAULT_HAIKU_MODEL) — config carries the values; SMALL_FAST_MODEL is deprecated.
           accessed: "2026-06-26"
+      execution_status: promoted
       questions:
         - id: q-reuse
           text: Reuse the existing gemma upstream or a separate apply model?
@@ -217,6 +221,7 @@ slices:
             - name: on_failure
               type: 'enum: error | fallback_cloud (default error)'
     - id: slice-3
+      feature_id: feat-444a7049
       num: 3
       title: 'vllm-mlx engine: lifecycle serving gemma-4 over Anthropic (apply) + OpenAI (chat/scoring)'
       what: |
@@ -248,12 +253,13 @@ slices:
         start vllm-mlx with gemma-4, poll until ready, assert Anthropic /v1/messages 200;
         stop() leaves no process.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://github.com/waybarrios/vllm-mlx
           claim: vllm-mlx exposes OpenAI /v1/* and Anthropic /v1/messages from one process (continuous batching, prefix cache) — the single engine this slice manages.
           accessed: "2026-06-26"
+      execution_status: promoted
       questions:
         - id: q-detect
           text: Bundle vllm-mlx or detect+guide install?
@@ -291,6 +297,7 @@ slices:
             - 'health: crashed -> error (distinct from loading)'
             - 'stop(): terminate; no orphan'
     - id: slice-4
+      feature_id: feat-89494833
       num: 4
       title: 'headless.py: build the env= seam + inject BYO-model env when apply_backend=claude_local'
       what: |
@@ -325,7 +332,7 @@ slices:
         (set vs unset, correct var names) and that cmd args are identical across modes.
         Regression: existing headless tests pass unchanged.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://code.claude.com/docs/en/model-config
@@ -334,6 +341,7 @@ slices:
         - url: https://docs.vllm.ai/en/stable/serving/integrations/claude_code/
           claim: CLAUDE_CODE_ATTRIBUTION_HEADER=0 disables the per-request hash that breaks prefix-cache on local backends.
           accessed: "2026-06-26"
+      execution_status: promoted
       questions:
         - id: q-auth
           text: What ANTHROPIC_AUTH_TOKEN for the local engine?
@@ -366,6 +374,7 @@ slices:
             - run_phase Popen(cmd, env={**os.environ, **extra_env} if extra_env else inherited)
             - claude -p runs the SAME specialists/tools either way
     - id: slice-5
+      feature_id: feat-575aca8f
       num: 5
       title: End-to-end apply on local gemma + gateway-crash detection + cloud fallback
       what: |
@@ -403,12 +412,13 @@ slices:
         Manual E2E: real apply on the NVIDIA Workday URL via gemma-4; compare to a
         cloud-Claude baseline.
       complexity: complex
-      approved: false
+      approved: true
       comment: ""
       research:
         - url: https://github.com/waybarrios/vllm-mlx
           claim: vllm-mlx health/endpoint behavior is the basis for distinguishing engine-down from model failure mid-apply.
           accessed: "2026-06-26"
+      execution_status: promoted
       questions:
         - id: q-fallback
           text: Auto-fall-back to cloud on local failure, or just error?
@@ -441,6 +451,7 @@ slices:
             - spawn claude -p (BYO env) -> gather->draft->render via gemma-4 + chrome fallback
             - mid-run connection-refused -> health() says down -> on_failure (error | fallback_cloud)
     - id: slice-6
+      feature_id: feat-2172fa65
       num: 6
       title: 'Config-tab UI + docs: select the apply backend'
       what: |
@@ -468,9 +479,10 @@ slices:
         Unit (web): Config tab renders the apply-backend toggle + persists the llm.apply
         payload on save. Doc readthrough.
       complexity: standard
-      approved: false
+      approved: true
       comment: ""
       research_waiver: UI + docs over the existing /api/config contract and the config fields defined in slice 2; no external API governs this surface.
+      execution_status: promoted
       questions:
         - id: q-ui-scope
           text: One unified provider control or a separate apply toggle?
