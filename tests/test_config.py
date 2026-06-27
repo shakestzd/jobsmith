@@ -147,7 +147,7 @@ def test_benchmark_config_all_fields_optional() -> None:
 # LLMSettings tests
 # ---------------------------------------------------------------------------
 
-from jobsmith.config import LLM_PRESETS, LLMSettings, ApplySettings, NodeBackendConfig  # noqa: E402
+from jobsmith.config import ApplySettings, LLM_PRESETS, LLMSettings, NodeBackendConfig  # noqa: E402
 
 
 def test_llm_default_provider_is_claude_cli() -> None:
