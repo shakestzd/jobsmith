@@ -221,19 +221,21 @@ benchmarks:
 # Omitting this section (the default) keeps all existing behaviour unchanged:
 # the pipeline routes through the Claude CLI subprocess exactly as before.
 #
-# Provider enum (exactly 4 values):
+# Provider enum (5 values — feat-c7fab5c0 added `anthropic`):
 #   claude_cli         — Claude Code CLI subprocess (default, backward-compat)
 #   antigravity_cli    — Antigravity `agy` CLI subprocess
 #   codex_cli          — OpenAI Codex CLI subprocess
 #   openai_compatible  — Single unified OpenAI-compatible HTTP endpoint
 #                        (covers MLX via mlx_lm.server and Ollama).
 #                        REQUIRES base_url.
+#   anthropic          — Direct Anthropic API (no CLI subprocess).
+#                        REQUIRES api_key.
 #
 # Quick presets for openai_compatible:
 #   MLX  (mlx_lm.server): base_url: http://127.0.0.1:8080/v1
 #   Ollama:               base_url: http://localhost:11434/v1
 llm:
-  # One of: claude_cli | antigravity_cli | codex_cli | openai_compatible
+  # One of: claude_cli | antigravity_cli | codex_cli | openai_compatible | anthropic
   provider: claude_cli
 
   # Optional. Model identifier passed to the provider.
@@ -246,8 +248,8 @@ llm:
   #   http://localhost:11434/v1  ← Ollama
   base_url: null
 
-  # Optional. API key sent in the Authorization header for openai_compatible.
-  # Many local servers (MLX, Ollama) do not require a key — set to null or omit.
+  # Required when provider == anthropic. Ignored for all other providers.
+  # Optional for openai_compatible (many local servers do not check it).
   api_key: null
 
   # Per-request spend ceiling in USD (advisory — not enforced by all providers).
@@ -255,3 +257,51 @@ llm:
 
   # Request timeout in seconds. Increase for large local models.
   timeout_s: 300
+
+  # --------------------------------------------------------------------------
+  # llm.apply — orchestrator selector + per-node backend routing
+  # --------------------------------------------------------------------------
+  # Controls which apply pipeline path is used and how each DAG node is routed
+  # to an LLM backend. Omitting this block leaves all existing behaviour
+  # unchanged (orchestrator defaults to claude_cloud).
+  #
+  # orchestrator enum:
+  #   claude_cloud  — (DEFAULT) existing cloud `claude -p` path; byte-identical
+  #                   when this block is absent. No call-site changes.
+  #   code_local    — Python DAG runner executes the apply pipeline locally,
+  #                   routing each node to its configured backend.
+  #
+  # on_failure enum (code_local only):
+  #   error         — (DEFAULT) fail hard when a node raises.
+  #   fallback_cloud — retry the failed node via the cloud claude_cloud path.
+  #
+  # Node backend resolution (highest priority first):
+  #   1. node_backends[node_name]  — explicit per-node override.
+  #   2. node_backend              — default backend for all nodes.
+  #   3. Parent llm.provider       — falls back when neither is set.
+  apply:
+    # One of: claude_cloud | code_local
+    orchestrator: claude_cloud
+
+    # One of: error | fallback_cloud
+    on_failure: error
+
+    # Default backend applied to every DAG node that lacks an explicit override.
+    # Uses the same fields as llm (provider, model, base_url, api_key).
+    # Omit to inherit the parent llm.provider for all nodes.
+    node_backend: null
+    # Example (local MLX for all nodes):
+    # node_backend:
+    #   provider: openai_compatible
+    #   base_url: http://127.0.0.1:8080/v1
+    #   model: mlx-community/gemma-3-4b-it-qat-4bit
+
+    # Per-node backend overrides. Keys are DAG node names (e.g. prose-write).
+    # A node present here uses its specific backend regardless of node_backend.
+    node_backends: {}
+    # Example (hybrid run — cloud Anthropic for prose-write, local for the rest):
+    # node_backends:
+    #   prose-write:
+    #     provider: anthropic
+    #     api_key: sk-ant-...
+    #     model: claude-3-5-haiku-20241022

@@ -18,8 +18,8 @@ CONFIG_FILENAME = ".apply-config.yaml"
 # LLM provider — presets and settings
 # ---------------------------------------------------------------------------
 
-# Supported provider enum values (exactly 4 — do not expand without plan update).
-LLMProvider = Literal["claude_cli", "antigravity_cli", "codex_cli", "openai_compatible"]
+# Supported provider enum values (5 after feat-c7fab5c0 added `anthropic`).
+LLMProvider = Literal["claude_cli", "antigravity_cli", "codex_cli", "openai_compatible", "anthropic"]
 
 # Preset base_urls so the UI / config can one-click fill base_url.
 # These represent the two local inference servers that use openai_compatible.
@@ -257,15 +257,77 @@ class BenchmarkConfig(BaseModel):
     required: bool = False
 
 
+class NodeBackendConfig(BaseModel):
+    """Per-node LLM backend override for the code-local apply orchestrator.
+
+    Used in ``ApplySettings.node_backend`` (default for all nodes) and
+    ``ApplySettings.node_backends`` (per-node override map).
+
+    Validation rules:
+      - ``api_key`` is REQUIRED when ``provider == anthropic``.
+      - ``base_url`` is REQUIRED when ``provider == openai_compatible``.
+    """
+
+    provider: LLMProvider = "claude_cli"
+    model: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_provider_requirements(self) -> NodeBackendConfig:
+        if self.provider == "anthropic" and not self.api_key:
+            raise ValueError(
+                "api_key is required when provider is 'anthropic'. "
+                "Set api_key to your Anthropic API key."
+            )
+        if self.provider == "openai_compatible" and not self.base_url:
+            raise ValueError(
+                "base_url is required when provider is 'openai_compatible'. "
+                "Use LLM_PRESETS['mlx'] or LLM_PRESETS['ollama'] as a starting point."
+            )
+        return self
+
+
+# Apply orchestrator modes.
+ApplyOrchestrator = Literal["claude_cloud", "code_local"]
+
+# Behaviour when a node fails during code-local orchestration.
+ApplyOnFailure = Literal["error", "fallback_cloud"]
+
+
+class ApplySettings(BaseModel):
+    """Orchestrator selection + per-node backend routing for the apply pipeline.
+
+    Default behaviour (``orchestrator == claude_cloud``) is byte-identical to
+    the existing ``claude -p`` path — no regression when this block is absent.
+
+    When ``orchestrator == code_local`` the Python DAG runner executes the
+    apply pipeline locally, routing each node to its configured backend.
+
+    Node backend resolution (highest priority first):
+      1. ``node_backends[node_name]`` — explicit per-node override.
+      2. ``node_backend`` — default backend for all nodes.
+      3. Falls back to the parent ``LLMSettings`` provider when neither is set.
+    """
+
+    orchestrator: ApplyOrchestrator = "claude_cloud"
+    node_backend: NodeBackendConfig | None = None
+    node_backends: dict[str, NodeBackendConfig] = Field(default_factory=dict)
+    on_failure: ApplyOnFailure = "error"
+
+
 class LLMSettings(BaseModel):
     """LLM backend configuration for chat and scoring pipelines.
 
     The default provider is ``claude_cli`` for strict backward compatibility —
     existing configs without an ``llm`` block continue to work unchanged.
 
-    Validation rule: ``base_url`` is REQUIRED when ``provider == openai_compatible``.
-    This covers both MLX (mlx_lm.server) and Ollama via their respective presets
-    in ``LLM_PRESETS``.
+    Validation rules:
+      - ``base_url`` is REQUIRED when ``provider == openai_compatible``.
+      - ``api_key`` is REQUIRED when ``provider == anthropic``.
+
+    The ``apply`` sub-block controls orchestrator selection and per-node backend
+    routing for the apply pipeline (added in feat-c7fab5c0).
     """
 
     provider: LLMProvider = "claude_cli"
@@ -274,13 +336,19 @@ class LLMSettings(BaseModel):
     api_key: str | None = None
     budget_usd: float = 1.0
     timeout_s: int = 300
+    apply: ApplySettings = Field(default_factory=ApplySettings)
 
     @model_validator(mode="after")
-    def _base_url_required_for_openai_compatible(self) -> LLMSettings:
+    def _validate_provider_requirements(self) -> LLMSettings:
         if self.provider == "openai_compatible" and not self.base_url:
             raise ValueError(
                 "base_url is required when provider is 'openai_compatible'. "
                 "Use LLM_PRESETS['mlx'] or LLM_PRESETS['ollama'] as a starting point."
+            )
+        if self.provider == "anthropic" and not self.api_key:
+            raise ValueError(
+                "api_key is required when provider is 'anthropic'. "
+                "Set api_key to your Anthropic API key."
             )
         return self
 
@@ -383,6 +451,9 @@ def find_config(start: Path) -> Path | None:
 
 __all__ = [
     "AnchorThresholds",
+    "ApplyOnFailure",
+    "ApplyOrchestrator",
+    "ApplySettings",
     "BenchmarkConfig",
     "CONFIG_FILENAME",
     "CoverLetterSettings",
@@ -392,6 +463,7 @@ __all__ = [
     "LLMProvider",
     "LLMSettings",
     "MasterPaths",
+    "NodeBackendConfig",
     "OutputPaths",
     "PortfolioSettings",
     "ResumeSettings",
