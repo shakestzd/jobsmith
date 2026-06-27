@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Per-node LLM Backend abstraction: OpenAICompatBackend &#43; AnthropicBackend (strict tool_use)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-c920ceeb"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-06-27T17:49:32.379271"
+             data-updated="2026-06-27T18:33:17.315617" data-agent-assigned="claude-code" data-track-id="trk-f5052600">
+
+        <header>
+            <h1>Per-node LLM Backend abstraction: OpenAICompatBackend &#43; AnthropicBackend (strict tool_use)</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="../plans/plan-a40fac81.html" data-relationship="planned_in" data-since="2026-06-27T17:49:32.384599">plan-a40fac81</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-f5052600.html" data-relationship="part_of" data-since="2026-06-27T17:49:32.394251">trk-f5052600</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="../features/feat-c7fab5c0.html" data-relationship="blocked_by">feat-c7fab5c0</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/c0d1772a-012a-437d-8b57-4dbba4e33afd.html" data-relationship="implemented_in" data-since="2026-06-27T18:33:17.315472">session c0d1772a-012a-437d-8b57-4dbba4e33afd</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>src/jobsmith/apply_local/backends.py defines a Backend protocol —
+complete_structured(messages, schema, *, temperature) -&gt; (dict|None, parse_ok). Two impls:
+OpenAICompatBackend wraps the existing OpenAICompatClient (local gemma via vllm-mlx, or
+Claude&#39;s OpenAI-compat endpoint); AnthropicBackend uses the anthropic SDK Messages API
+with a single STRICT custom tool (input_schema = the node schema, tool_choice forced) and
+maps the tool_use input back to a dict. Both SHARE the llm_rescore robust-parse helpers
+(extract them to a shared util — do not duplicate). resolve_backend(config, node_name)
+returns the per-node backend (node_backends override, else node_backend default).</p>
+        </section>
+    </article>
+</body>
+</html>
