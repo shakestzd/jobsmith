@@ -1,7 +1,7 @@
 ---
 name: apply-jd-parser
 description: Parse a job URL or pasted JD into structured fields. Mechanical extraction only — no analysis, no fit scoring, no fabrication. First specialist in the /apply pipeline.
-tools: WebFetch, Read, Write, Bash
+tools: WebFetch, Read, Write, Bash, ToolSearch, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__get_page_text, mcp__claude-in-chrome__read_page, mcp__claude-in-chrome__tabs_close_mcp
 model: haiku
 color: blue
 ---
@@ -63,9 +63,13 @@ Two URL patterns:
 }
 ```
 
+Note: WebFetch issues a GET, so the GraphQL POST body above may not be sendable directly — but the same `ApiBoardJobPosting` query is also reachable via a **GET** to `https://jobs.ashbyhq.com/api/non-user-graphql?op=ApiBoardJobPosting&operationName=ApiBoardJobPosting&variables=<url-encoded-json>&extensions=...`. Try the GET form before falling back.
+
 **Option B — `__NEXT_DATA__` parse (fallback):** Fetch the HTML page with WebFetch. Locate the `<script id="__NEXT_DATA__" type="application/json">` tag and parse the JSON blob it contains. The full posting including `descriptionHtml` and structured fields lives in `props.pageProps.jobPosting`.
 
-Use Option A first; if the GraphQL POST is unavailable (WebFetch may not support POST), fall back to Option B.
+**Option C — browser render (last resort):** if both A and B fail (Ashby bodies are JS-rendered and frequently return only a header shell to WebFetch), use the **Browser render fallback** described under "Unknown ATS" below.
+
+Use Option A first; if the GraphQL GET/POST is unavailable, fall back to Option B; only then Option C.
 
 ### Unknown ATS
 
@@ -73,13 +77,26 @@ For any URL that does not match the patterns above, use a two-step fetch strateg
 
 1. **Direct fetch (preferred):** WebFetch the URL directly and extract text from the response body.
 2. **Jina Reader retry (fallback):** If the direct fetch returns < 500 characters of meaningful body (bot-block, 403, empty body, JS-only shell), retry via `https://r.jina.ai/{original_url}` — Jina renders the page in a real browser and returns clean markdown. Use this response if it contains ≥ 500 characters of meaningful content.
-3. **Halt:** If both attempts return < 500 characters of meaningful body, halt with `reason=NEED_JD_TEXT_PASTED`.
+3. **Browser render retry (last resort):** If Jina also returns < 500 characters of meaningful body, fall through to the **Browser render fallback** below.
+4. **Halt:** If all tiers return < 500 characters of meaningful body, halt with `reason=NEED_JD_TEXT_PASTED`.
+
+### Browser render fallback (last resort — JS-rendered / bot-blocked pages)
+
+Use this **only** when every text-based tier above has failed (JSON endpoint unavailable, WebFetch body < 500 chars, Jina shell). It drives a real Chrome via the `claude-in-chrome` MCP tools, so it renders JS and bypasses most bot blocks — but it requires a **live Chrome with the extension connected**, which is often absent in headless/cron apply runs. Degrade gracefully — never stall waiting on it:
+
+1. **Probe availability.** Call `mcp__claude-in-chrome__tabs_context_mcp` once. If it errors, reports the tool is unknown, or shows no connected browser, **SKIP this tier entirely and go to halt** — do not retry. (In headless `claude -p` the MCP tools may be deferred; if a direct call reports the tool is unknown, run `ToolSearch("select:mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_create_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__get_page_text,mcp__claude-in-chrome__tabs_close_mcp")` once, then retry the probe. Still failing → skip.)
+2. **Open a fresh tab** with `mcp__claude-in-chrome__tabs_create_mcp` (never reuse an existing tab — it may hold the user's own work), then `mcp__claude-in-chrome__navigate` to the original `jd_url`. Let the page finish rendering.
+3. **Extract text** with `mcp__claude-in-chrome__get_page_text` (preferred). Use `read_page` only if `get_page_text` returns empty.
+4. **Close the tab** you opened with `mcp__claude-in-chrome__tabs_close_mcp` so you don't leave clutter.
+5. **Accept** the result only if it has ≥ 500 characters of meaningful body; otherwise halt with `reason=NEED_JD_TEXT_PASTED`.
+
+Navigate-and-read only: do **not** click, fill forms, or do anything that could trigger a JS dialog (alerts block the extension).
 
 ---
 
 ## Steps
 
-1. If `jd_url` is set, determine the ATS from the URL (see URL → API mapping above) and run **one** WebFetch against the appropriate JSON endpoint. For Unknown ATS URLs, apply the two-step fetch strategy above (direct → Jina Reader → halt). Only halt with `reason=NEED_JD_TEXT_PASTED` after both attempts have failed.
+1. If `jd_url` is set, determine the ATS from the URL (see URL → API mapping above) and run **one** WebFetch against the appropriate JSON endpoint. For Unknown ATS URLs, apply the fetch ladder above (direct → Jina Reader → Browser render fallback → halt). Only halt with `reason=NEED_JD_TEXT_PASTED` after every tier has failed.
 2. Otherwise use `jd_text` directly.
 3. Extract fields per the schema. Be literal — do not infer beyond what's printed.
 4. Classify role_type into one of: `data-analyst`, `data-engineer`, `ai-engineer`, `finance`, `renewable-energy`, `general`. Use these signals:
@@ -163,6 +180,6 @@ Persist your result envelope to the DB:
 ## Constraints
 - DO NOT score fit. fit-scorer does that.
 - DO NOT modify master YAML.
-- DO NOT use Chrome MCP. WebFetch only.
+- Chrome (the `claude-in-chrome` MCP tools) is a **last-resort** fetch fallback only — engage it strictly after the JSON-endpoint, WebFetch, and Jina tiers fail, and skip it cleanly when no browser is connected. NEVER use it as the primary fetch for boards with a working JSON endpoint (Greenhouse, Lever, Ashby GraphQL). Navigate-and-read only — no clicks, forms, or dialog triggers.
 - DO NOT generate the slug — the orchestrator does that after reading your output.
-- Time budget: 60 seconds.
+- Time budget: 60 seconds for the text-based tiers; allow up to 120 seconds total when the browser-render fallback is engaged.

@@ -260,8 +260,23 @@ def _build_command(
         "--output-format",
         "stream-json",
         "--verbose",
+        # The claude-in-chrome MCP tools are the apply-jd-parser's LAST-RESORT
+        # fetch fallback for JS-rendered / bot-blocked boards (e.g. Ashby pages
+        # that 403 WebFetch). They are user-scoped MCP tools inherited from the
+        # user's config (no --strict-mcp-config), and gated here. The parser
+        # only engages them after the JSON-endpoint / WebFetch / Jina tiers fail
+        # and skips them cleanly when no browser is connected (headless/cron) —
+        # see agents/apply-jd-parser.md and the jd-parser contract allowlist.
         "--allowedTools",
-        "Agent Bash WebFetch Read Edit Write",
+        (
+            "Agent Bash WebFetch Read Edit Write ToolSearch "
+            "mcp__claude-in-chrome__tabs_context_mcp "
+            "mcp__claude-in-chrome__tabs_create_mcp "
+            "mcp__claude-in-chrome__navigate "
+            "mcp__claude-in-chrome__get_page_text "
+            "mcp__claude-in-chrome__read_page "
+            "mcp__claude-in-chrome__tabs_close_mcp"
+        ),
         "--max-turns",
         str(max_turns),
     ]

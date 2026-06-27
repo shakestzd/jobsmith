@@ -100,7 +100,12 @@ def test_command_construction_no_resume(monkeypatch):
     assert "stream-json" in args
     assert "--verbose" in args
     assert "--allowedTools" in args
-    assert "Agent Bash WebFetch Read Edit Write" in args
+    allowed = args[args.index("--allowedTools") + 1]
+    # Base tool set preserved …
+    assert "Agent Bash WebFetch Read Edit Write" in allowed
+    # … plus the claude-in-chrome render fallback for the JD parser (feat-2c81da71)
+    assert "mcp__claude-in-chrome__navigate" in allowed
+    assert "mcp__claude-in-chrome__get_page_text" in allowed
     assert "--max-turns" in args
     assert "30" in args
     # No --resume flag when resume=False (mutually exclusive)
