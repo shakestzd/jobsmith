@@ -470,7 +470,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-1" class="slice-nav-item" data-slice-nav="1">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="1"></span>
         <span>#1 Driver core: Node + Pipeline state-machine + .apply-state checkpoint/resume</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="1 issue(s)">&#9888;1</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -479,7 +479,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-2" class="slice-nav-item" data-slice-nav="2">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="2"></span>
         <span>#2 Per-node LLM Backend abstraction: OpenAICompatBackend + AnthropicBackend</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="2 issue(s)">&#9888;2</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -506,7 +506,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-5" class="slice-nav-item" data-slice-nav="5">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="5"></span>
         <span>#5 The 5 gather-&gt;draft nodes (jd-parse, fit-score, bullet-select, prose-write, prose-qa)</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="2 issue(s)">&#9888;2</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -515,7 +515,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-6" class="slice-nav-item" data-slice-nav="6">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="6"></span>
         <span>#6 End-to-end gather-&gt;draft on local gemma + engine wiring + on_failure fallback</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="3 issue(s)">&#9888;3</span>
         <span class="nav-triage-badge nav-triage-question" title="1 open question(s)">?1</span>
       </a>
     </li>
@@ -524,7 +524,7 @@ body.right-rail-collapsed .sidebar-reopen{display:flex}
       <a href="#slice-7" class="slice-nav-item" data-slice-nav="7">
         <span class="slice-nav-dot" data-approval="pending" data-dot-for="7"></span>
         <span>#7 Config-tab UI + docs: select the apply orchestrator</span>
-        
+        <span class="nav-triage-badge nav-triage-issue" title="1 issue(s)">&#9888;1</span>
         
       </a>
     </li>
@@ -699,7 +699,7 @@ apply is untouched. Supersedes plan-21911e16 slices 2-6.
         <div class="block-anchor" id="overview-slice-6-block-file-tree-1" data-block-anchor="slice-6-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
     <li class="file-entry"><code class="file-path">src/jobsmith/apply_local/run.py (new — ensure-healthy -&gt; run pipeline -&gt; on_failure)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/apply.py (edit — route orchestrator=code_local to run.py; default claude_cloud unchanged)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/_cli_apply.py (edit — route orchestrator=code_local to run.py; default claude_cloud unchanged. NOTE: apply.py is a deprecation shim — the real run_apply lives in _cli_apply.py)</code></li>
     <li class="file-entry"><code class="file-path">tests/test_apply_local_run.py (new)</code></li>
     
   </ul>
@@ -713,7 +713,7 @@ apply is untouched. Supersedes plan-21911e16 slices 2-6.
         <div class="block-anchor" id="overview-slice-7-block-file-tree-1" data-block-anchor="slice-7-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
     <li class="file-entry"><code class="file-path">web/src/app/views.tsx (edit — orchestrator toggle in the Config tab)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/api/config_routes.py (edit — accept llm.apply in PUT /api/config)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/api/config.py (edit — accept llm.apply in PUT /api/config)</code></li>
     <li class="file-entry"><code class="file-path">docs/local-apply-backend.md (new — vllm-mlx setup &#43; flags &#43; cold-load &#43; v1 scope)</code></li>
     
   </ul>
@@ -809,11 +809,11 @@ apply is untouched. Supersedes plan-21911e16 slices 2-6.
   <h2>Dependency Graph</h2>
   <div id="graph-data" style="display:none">
     <div data-node="1" data-name="Driver core: Node + Pipeline state-machine + .apply-state checkpoint/resume" data-status="pending" data-deps="" data-files="4"></div>
-    <div data-node="2" data-name="Per-node LLM Backend abstraction: OpenAICompatBackend + AnthropicBackend" data-status="pending" data-deps="" data-files="3"></div>
+    <div data-node="2" data-name="Per-node LLM Backend abstraction: OpenAICompatBackend + AnthropicBackend" data-status="pending" data-deps="3" data-files="3"></div>
     <div data-node="3" data-name="Config: apply orchestration selector (claude_cloud | code_local) + per-node backend" data-status="pending" data-deps="" data-files="3"></div>
     <div data-node="4" data-name="vllm-mlx engine lifecycle manager (local node backend server)" data-status="pending" data-deps="" data-files="3"></div>
     <div data-node="5" data-name="The 5 gather-&gt;draft nodes (jd-parse, fit-score, bullet-select, prose-write, prose-qa)" data-status="pending" data-deps="1,2" data-files="3"></div>
-    <div data-node="6" data-name="End-to-end gather-&gt;draft on local gemma + engine wiring + on_failure fallback" data-status="pending" data-deps="3,4,5" data-files="3"></div>
+    <div data-node="6" data-name="End-to-end gather-&gt;draft on local gemma + engine wiring + on_failure fallback" data-status="pending" data-deps="1,2,3,4,5" data-files="3"></div>
     <div data-node="7" data-name="Config-tab UI + docs: select the apply orchestrator" data-status="pending" data-deps="3" data-files="3"></div>
     
     <!--PLAN_GRAPH_NODES-->
@@ -880,7 +880,7 @@ single-shot, schema-constrained tasks.
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-1">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="1 critic issue(s)">1 issue</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -916,7 +916,8 @@ single-shot, schema-constrained tasks.
 name, output pydantic model, json_schema, bounded reask loop, returns validated obj +
 parse_ok), and Pipeline (executes an ordered stage list with sequential + fan-out
 (ThreadPoolExecutor) stages and bounded counter loops). checkpoint.py persists each
-node result to .apply-state/&lt;name&gt;.json and skips a node whose checkpoint exists
+node result to applications/{slug}/.apply-state/&lt;name&gt;.json (the EXISTING per-application
+state dir from specialist-contracts.yaml, slug threaded in) and skips a node whose checkpoint exists
 (crash-resume). Productionizes scripts/_apply_local_poc.py. No specialist logic here —
 pure orchestration primitives.</p>
 </div>
@@ -947,7 +948,7 @@ POC; this slice makes it a tested module.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Done when</div>
-        <ul class="slice-done-list"><li>Pipeline runs an ordered list of stages — a sequential stage runs its node; a fan-out stage runs N nodes concurrently and joins; a loop stage re-runs its node until an ok-predicate or a max-iteration cap.</li><li>A node whose .apply-state/&lt;name&gt;.json checkpoint already exists is skipped and its cached result returned (resume); a fresh run writes the checkpoint atomically.</li><li>Node.run does a bounded reask (default 3) on invalid or unparseable JSON and returns (obj, parse_ok) — never raises on a single bad generation.</li></ul>
+        <ul class="slice-done-list"><li>Pipeline runs an ordered list of stages — a sequential stage runs its node; a fan-out stage runs N nodes concurrently and joins; a loop stage re-runs its node until an ok-predicate or a max-iteration cap.</li><li>A node whose applications/{slug}/.apply-state/&lt;name&gt;.json checkpoint already exists AND was written with parse_ok=true is skipped and its cached result returned (resume); a parse_ok=false result is NOT treated as a final checkpoint (re-run on resume); a fresh run writes the checkpoint atomically.</li><li>Node.run does a bounded reask (default 3) on invalid or unparseable JSON and returns (obj, parse_ok) — never raises on a single bad generation.</li></ul>
       </div>
       
     
@@ -959,7 +960,7 @@ POC; this slice makes it a tested module.</p>
         
         <input type="checkbox" id="slice-1-decisions-reveal" class="reveal-toggle">
         <div class="markdown-block reveal-content serif-prose"><p><strong>Trigger:</strong> an apply run in code_local orchestration mode constructs a Pipeline of nodes.
-<strong>State:</strong> .apply-state/&lt;name&gt;.json per node (the existing specialist-contracts state convention) = the resume ledger; no global mutable state.
+<strong>State:</strong> applications/{slug}/.apply-state/&lt;name&gt;.json per node (the existing specialist-contracts state convention) = the resume ledger; no global mutable state.
 <strong>Payload:</strong> validated per-node objects threaded to downstream nodes.
 <strong>Rejected:</strong> LangGraph/Burr/Haystack (framework weight + lock-in for a fixed DAG); a generic workflow engine (Prefect/Dagster — wrong altitude); letting the model decide the next step (the spike NO-GO).</p>
 </div>
@@ -1007,6 +1008,25 @@ that returns bad-then-good JSON. No network.</p>
     
 
     
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">checkpoint path corrected to applications/{slug}/.apply-state/ (slug threaded in); a parse_ok=false node is not a final checkpoint (re-run on resume). [FIXED]</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">SUCCESS</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">OpenAICompatClient.complete(response_format=...) reuse verified (openai_compat.py:169-203); no-framework build-vs-buy call sound.</span>
+        </div>
+        
+      </div>
+    </div>
+    
 
     
     <div class="slice-field slice-questions">
@@ -1051,7 +1071,7 @@ that returns bad-then-good JSON. No network.</p>
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-2">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="2 critic issue(s)">2 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1184,6 +1204,31 @@ provider. No live network.</p>
     
 
     
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">AnthropicBackend has no live v1 caller (run.py uses one local backend; fallback_cloud uses claude -p; claude_cloud not in the 4-value provider enum). Resolve via per-node routing &#43; enum expansion, or defer to phase 2. NEEDS user decision.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Reconcile with the existing BaseScorerBackend hierarchy in llm_rescore.py (OpenAICompatibleScorer &#43; robust-parse) — extract/share, don&#39;t fork a parallel Backend.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">SUCCESS</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">Verified: Claude uses tool_use/input_schema (no response_format); anthropic SDK is MIT and not yet a dep; consider strict:true custom-tool mode for guaranteed conformance.</span>
+        </div>
+        
+      </div>
+    </div>
+    
 
     
     <div class="slice-field slice-questions">
@@ -1205,7 +1250,7 @@ provider. No live network.</p>
     </div>
     
 
-    <div class="slice-deps">Dependencies: none</div>
+    <div class="slice-deps">Dependencies: slices 3</div>
 
     <details class="comment-collapse">
       <summary class="comment-collapse-trigger">+ Leave a comment</summary>
@@ -1551,7 +1596,7 @@ real start gemma-4, poll ready, assert /v1/models 200, stop() clean.</p>
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-5">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="2 critic issue(s)">2 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1677,6 +1722,25 @@ revise-then-pass loop bounded at 3. (Live-model run is exercised in slice 6.)</p
     
 
     
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Hidden hard surface: fit-score/bullet-select/prose-write need master-YAML/profile/voice-guide assembly (absent from files); bullet-select writes 5 artifacts not 1; no_fabrication has NO local enforcement (no inquirer/anchor-guard/fact-check). Split gather vs draft; add input-assembly &#43; a v1 halt-and-surface policy.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">prose-qa is mostly deterministic checks (word-count/em-dash/stock-phrase), not a Backend call; fit-score reframes a claude-agent core scorer into one gemma call. Likely over budget — pre-split.</span>
+        </div>
+        
+      </div>
+    </div>
+    
 
     
     <div class="slice-field slice-questions">
@@ -1721,7 +1785,7 @@ revise-then-pass loop bounded at 3. (Live-model run is exercised in slice 6.)</p
           <span class="badge badge-revision badge-sm badge-complexity" title="Complexity: complex">Complex</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-6">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="3 critic issue(s)">3 issues</span>
           <span class="badge badge-sm badge-questions" title="1 open question(s)">1 Q</span>
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1782,7 +1846,7 @@ draft or pollutes a cloud run.</p>
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>src/jobsmith/apply_local/run.py, src/jobsmith/apply.py, tests/test_apply_local_run.py</code></div>
+        <div class="slice-field-value"><code>src/jobsmith/apply_local/run.py, src/jobsmith/_cli_apply.py, tests/test_apply_local_run.py</code></div>
       </div>
       
       
@@ -1816,7 +1880,7 @@ draft or pollutes a cloud run.</p>
     <div class="block-anchor" id="slice-6-block-file-tree-1" data-block-anchor="slice-6-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
     <li class="file-entry"><code class="file-path">src/jobsmith/apply_local/run.py (new — ensure-healthy -&gt; run pipeline -&gt; on_failure)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/apply.py (edit — route orchestrator=code_local to run.py; default claude_cloud unchanged)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/_cli_apply.py (edit — route orchestrator=code_local to run.py; default claude_cloud unchanged. NOTE: apply.py is a deprecation shim — the real run_apply lives in _cli_apply.py)</code></li>
     <li class="file-entry"><code class="file-path">tests/test_apply_local_run.py (new)</code></li>
     
   </ul>
@@ -1847,6 +1911,31 @@ orchestrator-suffixed run dir. Manual E2E: real local gemma gather-&gt;draft on 
     
 
     
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">Edited apply.py (a deprecation shim) — retargeted to _cli_apply.py.run_apply [FIXED]; deps tightened to [1,2,3,4,5] [FIXED].</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-design</span>
+          <span class="critic-revision-summary">.apply-state orchestrator dir-suffixing breaks fallback_cloud resume (cloud path uses the un-suffixed dir). Use a backend marker, or document the no-cross-resume tradeoff.</span>
+        </div>
+        
+        <div class="critic-revision">
+          <span class="badge badge-pending critic-revision-badge">WARN</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">done_when #1 (complete gather-&gt;draft on a real gemma) is a manual E2E gate; ENGINE-DOWN/on_failure/routing are the CI-automatable branches.</span>
+        </div>
+        
+      </div>
+    </div>
+    
 
     
     <div class="slice-field slice-questions">
@@ -1868,7 +1957,7 @@ orchestrator-suffixed run dir. Manual E2E: real local gemma gather-&gt;draft on 
     </div>
     
 
-    <div class="slice-deps">Dependencies: slices 3,4,5</div>
+    <div class="slice-deps">Dependencies: slices 1,2,3,4,5</div>
 
     <details class="comment-collapse">
       <summary class="comment-collapse-trigger">+ Leave a comment</summary>
@@ -1891,7 +1980,7 @@ orchestrator-suffixed run dir. Manual E2E: real local gemma gather-&gt;draft on 
           <span class="badge badge-discuss badge-sm badge-complexity" title="Complexity: standard">Standard</span>
           
           <span class="badge badge-pending badge-sm slice-approval-badge" data-badge-for="slice-7">Pending</span>
-          
+          <span class="badge badge-sm badge-issues" title="1 critic issue(s)">1 issue</span>
           
         </span>
         <span class="slice-actions" onclick="event.stopPropagation()">
@@ -1951,7 +2040,7 @@ reproducible and set the cold-load expectation. Salvaged from plan-21911e16 slic
       
       <div class="slice-field">
         <div class="slice-field-label">Files</div>
-        <div class="slice-field-value"><code>web/src/app/views.tsx, src/jobsmith/api/config_routes.py, docs/local-apply-backend.md</code></div>
+        <div class="slice-field-value"><code>web/src/app/views.tsx, src/jobsmith/api/config.py, docs/local-apply-backend.md</code></div>
       </div>
       
       
@@ -1983,7 +2072,7 @@ reproducible and set the cold-load expectation. Salvaged from plan-21911e16 slic
     <div class="block-anchor" id="slice-7-block-file-tree-1" data-block-anchor="slice-7-block-file-tree-1" data-block-kind="file-tree"><div class="block block-file-tree">
   <ul class="file-list">
     <li class="file-entry"><code class="file-path">web/src/app/views.tsx (edit — orchestrator toggle in the Config tab)</code></li>
-    <li class="file-entry"><code class="file-path">src/jobsmith/api/config_routes.py (edit — accept llm.apply in PUT /api/config)</code></li>
+    <li class="file-entry"><code class="file-path">src/jobsmith/api/config.py (edit — accept llm.apply in PUT /api/config)</code></li>
     <li class="file-entry"><code class="file-path">docs/local-apply-backend.md (new — vllm-mlx setup &#43; flags &#43; cold-load &#43; v1 scope)</code></li>
     
   </ul>
@@ -2019,6 +2108,19 @@ on save. Doc readthrough. Browser-verify the Config tab in Chrome (screenshot + 
     </div>
     
 
+    
+    <div class="slice-field slice-critic-revisions">
+      <div class="slice-field-label">Critic Revisions</div>
+      <div class="slice-field-value">
+        
+        <div class="critic-revision">
+          <span class="badge badge-blocked critic-revision-badge">DANGER</span>
+          <span class="critic-revision-source">local-feasibility</span>
+          <span class="critic-revision-summary">Cited src/jobsmith/api/config_routes.py does NOT exist; retargeted to src/jobsmith/api/config.py (owns PUT /api/config). [FIXED]</span>
+        </div>
+        
+      </div>
+    </div>
     
 
     

@@ -67,7 +67,8 @@ slices:
         name, output pydantic model, json_schema, bounded reask loop, returns validated obj +
         parse_ok), and Pipeline (executes an ordered stage list with sequential + fan-out
         (ThreadPoolExecutor) stages and bounded counter loops). checkpoint.py persists each
-        node result to .apply-state/<name>.json and skips a node whose checkpoint exists
+        node result to applications/{slug}/.apply-state/<name>.json (the EXISTING per-application
+        state dir from specialist-contracts.yaml, slug threaded in) and skips a node whose checkpoint exists
         (crash-resume). Productionizes scripts/_apply_local_poc.py. No specialist logic here —
         pure orchestration primitives.
       why: |
@@ -82,7 +83,7 @@ slices:
       deps: []
       done_when:
         - Pipeline runs an ordered list of stages — a sequential stage runs its node; a fan-out stage runs N nodes concurrently and joins; a loop stage re-runs its node until an ok-predicate or a max-iteration cap.
-        - A node whose .apply-state/<name>.json checkpoint already exists is skipped and its cached result returned (resume); a fresh run writes the checkpoint atomically.
+        - A node whose applications/{slug}/.apply-state/<name>.json checkpoint already exists AND was written with parse_ok=true is skipped and its cached result returned (resume); a parse_ok=false result is NOT treated as a final checkpoint (re-run on resume); a fresh run writes the checkpoint atomically.
         - Node.run does a bounded reask (default 3) on invalid or unparseable JSON and returns (obj, parse_ok) — never raises on a single bad generation.
       effort: M
       risk: Med
@@ -98,9 +99,16 @@ slices:
         - id: q-fanout-concurrency
           text: How do fan-out stages run nodes concurrently given a single local engine at ~5 tok/s?
           answer: ThreadPoolExecutor in the abstraction, but with one local engine the fan-out serializes anyway; real concurrency only matters when a node is routed to cloud Claude. Keep the executor with a small worker cap.
+      critic_revisions:
+        - source: local-design
+          severity: WARN
+          summary: checkpoint path corrected to applications/{slug}/.apply-state/ (slug threaded in); a parse_ok=false node is not a final checkpoint (re-run on resume). [FIXED]
+        - source: local-feasibility
+          severity: SUCCESS
+          summary: OpenAICompatClient.complete(response_format=...) reuse verified (openai_compat.py:169-203); no-framework build-vs-buy call sound.
       decisions_notes: |
         **Trigger:** an apply run in code_local orchestration mode constructs a Pipeline of nodes.
-        **State:** .apply-state/<name>.json per node (the existing specialist-contracts state convention) = the resume ledger; no global mutable state.
+        **State:** applications/{slug}/.apply-state/<name>.json per node (the existing specialist-contracts state convention) = the resume ledger; no global mutable state.
         **Payload:** validated per-node objects threaded to downstream nodes.
         **Rejected:** LangGraph/Burr/Haystack (framework weight + lock-in for a fixed DAG); a generic workflow engine (Prefect/Dagster — wrong altitude); letting the model decide the next step (the spike NO-GO).
       blocks:
@@ -140,7 +148,8 @@ slices:
         - src/jobsmith/apply_local/backends.py
         - tests/test_apply_local_backends.py
         - pyproject.toml
-      deps: []
+      deps:
+        - 3
       done_when:
         - OpenAICompatBackend.complete_structured posts json_schema response_format to the configured base_url and returns (parsed_dict, parse_ok) using the shared robust-parse; parse_ok=False (not an exception) on unparseable content.
         - AnthropicBackend.complete_structured calls the anthropic SDK with one tool whose input_schema is the node schema, forces tool_use, and returns the tool input as the parsed dict; a text-only (no tool_use) reply yields parse_ok=False.
@@ -165,6 +174,16 @@ slices:
         - id: q-anthropic-structured
           text: How does AnthropicBackend force structured JSON — a response_format or tool_use?
           answer: tool_use — pass a single tool whose input_schema is the node schema and force tool choice, then map the tool_use input back to a dict. Claude has no OpenAI-style response_format (anthropic SDK docs).
+      critic_revisions:
+        - source: local-design
+          severity: DANGER
+          summary: AnthropicBackend has no live v1 caller (run.py uses one local backend; fallback_cloud uses claude -p; claude_cloud not in the 4-value provider enum). Resolve via per-node routing + enum expansion, or defer to phase 2. NEEDS user decision.
+        - source: local-design
+          severity: WARN
+          summary: Reconcile with the existing BaseScorerBackend hierarchy in llm_rescore.py (OpenAICompatibleScorer + robust-parse) — extract/share, don't fork a parallel Backend.
+        - source: local-feasibility
+          severity: SUCCESS
+          summary: 'Verified: Claude uses tool_use/input_schema (no response_format); anthropic SDK is MIT and not yet a dep; consider strict:true custom-tool mode for guaranteed conformance.'
       decisions_notes: |
         **Trigger:** each Node.run calls Backend.complete_structured for its one task.
         **State:** stateless clients; config carries base_url/model/api_key per provider.
@@ -349,6 +368,13 @@ slices:
         - id: q-prose-output
           text: Do the prose nodes return JSON like the gather nodes?
           answer: No — prose-write/prose-qa emit markdown (the prose-draft.md contract); validate structurally (non-empty Professional Summary; pass|revise decision) rather than via json_schema. Only the gather nodes use json_schema.
+      critic_revisions:
+        - source: local-design
+          severity: DANGER
+          summary: 'Hidden hard surface: fit-score/bullet-select/prose-write need master-YAML/profile/voice-guide assembly (absent from files); bullet-select writes 5 artifacts not 1; no_fabrication has NO local enforcement (no inquirer/anchor-guard/fact-check). Split gather vs draft; add input-assembly + a v1 halt-and-surface policy.'
+        - source: local-design
+          severity: WARN
+          summary: prose-qa is mostly deterministic checks (word-count/em-dash/stock-phrase), not a Backend call; fit-score reframes a claude-agent core scorer into one gemma call. Likely over budget — pre-split.
       decisions_notes: |
         **Trigger:** the Pipeline runs these nodes in the gather->draft stages.
         **State:** the existing .apply-state/ files (jd-parsed.json, fit-score.json, bullet-selection.json, prose-draft.md) — same contract the cloud path uses, so artifacts are interchangeable.
@@ -387,9 +413,11 @@ slices:
         draft or pollutes a cloud run.
       files:
         - src/jobsmith/apply_local/run.py
-        - src/jobsmith/apply.py
+        - src/jobsmith/_cli_apply.py
         - tests/test_apply_local_run.py
       deps:
+        - 1
+        - 2
         - 3
         - 4
         - 5
@@ -411,6 +439,16 @@ slices:
         - id: q-engine-down
           text: How to distinguish an engine crash from a node parse failure mid-run?
           answer: On a connection-refused / non-JSON transport error, query vllm_mlx.health(); a 'crashed' classification = ENGINE-DOWN (route to on_failure), distinct from a node returning parse_ok=False (a model-output issue). Honor on_failure (error | fallback_cloud).
+      critic_revisions:
+        - source: local-design
+          severity: DANGER
+          summary: Edited apply.py (a deprecation shim) — retargeted to _cli_apply.py.run_apply [FIXED]; deps tightened to [1,2,3,4,5] [FIXED].
+        - source: local-design
+          severity: WARN
+          summary: .apply-state orchestrator dir-suffixing breaks fallback_cloud resume (cloud path uses the un-suffixed dir). Use a backend marker, or document the no-cross-resume tradeoff.
+        - source: local-feasibility
+          severity: WARN
+          summary: 'done_when #1 (complete gather->draft on a real gemma) is a manual E2E gate; ENGINE-DOWN/on_failure/routing are the CI-automatable branches.'
       decisions_notes: |
         **Trigger:** `jobsmith apply` with config.llm.apply.orchestrator=code_local.
         **State:** engine lifecycle bound to the run; .apply-state run dir suffixed by orchestrator; artifacts saved as today.
@@ -421,7 +459,7 @@ slices:
           title: Files this slice touches
           entries:
             - src/jobsmith/apply_local/run.py (new — ensure-healthy -> run pipeline -> on_failure)
-            - src/jobsmith/apply.py (edit — route orchestrator=code_local to run.py; default claude_cloud unchanged)
+            - 'src/jobsmith/_cli_apply.py (edit — route orchestrator=code_local to run.py; default claude_cloud unchanged. NOTE: apply.py is a deprecation shim — the real run_apply lives in _cli_apply.py)'
             - tests/test_apply_local_run.py (new)
         - type: diagram
           title: End-to-end code_local run
@@ -448,7 +486,7 @@ slices:
         reproducible and set the cold-load expectation. Salvaged from plan-21911e16 slice-6.
       files:
         - web/src/app/views.tsx
-        - src/jobsmith/api/config_routes.py
+        - src/jobsmith/api/config.py
         - docs/local-apply-backend.md
       deps:
         - 3
@@ -464,6 +502,10 @@ slices:
       approved: false
       comment: ""
       research_waiver: UI + docs over the existing /api/config contract and the config fields from slice 3; no external API governs this surface.
+      critic_revisions:
+        - source: local-feasibility
+          severity: DANGER
+          summary: Cited src/jobsmith/api/config_routes.py does NOT exist; retargeted to src/jobsmith/api/config.py (owns PUT /api/config). [FIXED]
       decisions_notes: |
         **Trigger:** Config tab render + save.
         **State:** persisted via /api/config (llm.apply block).
@@ -474,7 +516,7 @@ slices:
           title: Files this slice touches
           entries:
             - web/src/app/views.tsx (edit — orchestrator toggle in the Config tab)
-            - src/jobsmith/api/config_routes.py (edit — accept llm.apply in PUT /api/config)
+            - src/jobsmith/api/config.py (edit — accept llm.apply in PUT /api/config)
             - docs/local-apply-backend.md (new — vllm-mlx setup + flags + cold-load + v1 scope)
         - type: wireframe
           title: Config tab — apply orchestrator
@@ -490,3 +532,109 @@ slices:
                   <div style="margin-top:var(--wf-space-sm);color:var(--wf-text-muted);font-size:var(--wf-font-sm)">First local apply loads the model (~20-30s).</div>
                 </div>
 questions: []
+critique:
+    reviewed_at: "2026-06-27"
+    reviewers:
+        - local-design (design critic; general-purpose agent on Opus 4.8 — read the plan + specialist-contracts.yaml + config.py + apply.py)
+        - local-feasibility (feasibility critic; general-purpose agent on Opus 4.8 — verified cited files in-repo + fetched official anthropic/vLLM/advisory docs)
+    assumptions:
+        - id: A1
+          status: verified
+          text: Structured JSON from Claude is via a tool with input_schema (tool_use), NOT an OpenAI response_format; the `anthropic` SDK (MIT) is the right dep and is NOT already installed.
+          evidence: https://platform.claude.com/docs/en/build-with-claude/tool-use/overview ; pyproject.toml (only claude-agent-sdk + httpx present)
+        - id: A2
+          status: verified
+          text: OpenAICompatClient.complete(messages, response_format=..., temperature=...) returns the content string and accepts a json_schema response_format; the 4-provider LLMProvider enum exists to extend.
+          evidence: src/jobsmith/llm/openai_compat.py:169-203 ; src/jobsmith/config.py:22,260-288
+        - id: A3
+          status: verified
+          text: specialist-contracts.yaml declares pipeline.stages (the DAG) and the 5 v1 specialists' reusable .apply-state outputs (jd-parsed.json/fit-score.json/bullet-selection.json/prose-draft.md).
+          evidence: src/jobsmith/plugin/agents/apply/specialist-contracts.yaml:136-155,191-208
+        - id: A4
+          status: verified
+          text: vLLM enforces response_format json_schema server-side (xgrammar/guidance); robust-parse remains justified because some servers silently ignore it.
+          evidence: https://docs.vllm.ai/en/latest/features/structured_outputs.html ; llm_rescore.py:549-555
+        - id: A5
+          status: questionable
+          text: 'AnthropicBackend (a native cloud per-node backend) is coherent in a v1 scoped ''code-driver for LOCAL only''. As drafted no v1 path invokes it: run.py resolves ONE backend, fallback_cloud uses claude -p, and claude_cloud isn''t in the provider enum.'
+          evidence: design-critic finding; plan goals 2/4 vs slice-2/6
+    critics:
+        - title: DESIGN CRITIC
+          sections:
+            - heading: AnthropicBackend coherence (top blocker)
+              items:
+                - badge: no live caller
+                  kind: danger
+                  text: v1 is 'local-only' yet ships a native cloud backend nothing invokes — run.py uses one local Backend, fallback_cloud routes to claude -p. Resolve via per-node/hybrid routing + a live acceptance test, or defer AnthropicBackend to phase 2.
+                - badge: enum gap
+                  kind: danger
+                  text: factory maps claude_cloud->Anthropic but claude_cloud isn't one of the 4 enum values (config.py:22, annotated 'do not expand without plan update'); slice 3 must authorize the expansion.
+            - heading: Slice 5 under-specified + over-budget
+              items:
+                - badge: hidden inputs
+                  kind: danger
+                  text: fit-score/bullet-select/prose-write need master YAML + profile.yaml + voice_guide assembly — absent from slice 5 (nodes.py/schemas.py only). The hardest surface is undescribed.
+                - badge: multi-output
+                  kind: danger
+                  text: bullet-select really writes 5 artifacts (+anchor-preservation/restoration_queue); prose-write writes tailored work.yml. Card reduces each to one output.
+                - badge: no-fabrication
+                  kind: danger
+                  text: the GLOBAL no_fabrication guardrail has NO local enforcement in v1 (no inquirer/anchor-guard/fact-check) — a 4B can hallucinate metrics unchecked. v1 needs a policy (halt-and-surface).
+                - badge: split + reframe
+                  kind: warn
+                  text: split gather (jd/fit/bullet) vs draft (prose-write/prose-qa) to fit budget; prose-qa is mostly DETERMINISTIC checks (word-count/em-dash/stock-phrase) not a Backend call; fit-score is a wrapper over a claude-agent core scorer.
+            - heading: Wrong seams + reuse
+              items:
+                - badge: dead shim
+                  kind: danger
+                  text: slice 6 edited apply.py, a deprecation shim ('delete in 0.8.6') — retargeted to _cli_apply.py (run_apply). [FIXED]
+                - badge: apply-state path
+                  kind: danger
+                  text: checkpoint path is applications/{slug}/.apply-state/ not bare .apply-state/; orchestrator dir-suffixing would break fallback_cloud resume. [PATH FIXED; suffix reconciliation pending]
+                - badge: fork vs extend
+                  kind: warn
+                  text: slice 2 forks a parallel Backend hierarchy; llm_rescore.py already has BaseScorerBackend + OpenAICompatibleScorer + robust-parse — extract/share rather than duplicate.
+        - title: FEASIBILITY CRITIC
+          sections:
+            - heading: Verified clean
+              items:
+                - badge: external claims
+                  kind: success
+                  text: Anthropic tool_use/input_schema, MIT anthropic SDK, vLLM server-side json_schema, gemma-4 serve flags + no-continuous-batching crash, the 4-provider enum, OpenAICompatClient reuse, and the specialist-contracts DAG/state files ALL verified; all 4 research URLs substantiate their claims.
+            - heading: Findings
+              items:
+                - badge: wrong file
+                  kind: danger
+                  text: slice 7 cited src/jobsmith/api/config_routes.py which does NOT exist; real PUT /api/config handler is src/jobsmith/api/config.py. [FIXED]
+                - badge: upstream contradicts
+                  kind: warn
+                  text: vllm-mlx README shows --continuous-batching as the DEFAULT and omits the parser flags; keep the spike doc as the authoritative flag source for gemma-4 (it crashes with batching).
+                - badge: manual gate
+                  kind: warn
+                  text: 'slice 6 done_when #1 (complete gather->draft on a real gemma) is a manual E2E gate, not CI-automatable; the ENGINE-DOWN/on_failure/routing branches ARE unit-testable.'
+                - badge: free wins
+                  kind: info
+                  text: consider stdlib graphlib.TopologicalSorter if ordering ever needs topo-resolution, and Anthropic strict:true custom-tool mode for guaranteed schema conformance in AnthropicBackend.
+    risks:
+        - risk: AnthropicBackend has no live caller in v1 (incoherent with local-only scope).
+          severity: High
+          mitigation: Add per-node backend routing (config node_backends map) + an `anthropic` provider enum value (slice 3) + a hybrid acceptance test (slice 6); OR defer AnthropicBackend to phase 2. NEEDS a user decision.
+        - risk: Slice 5 hides master-data assembly + multi-artifact writes + the no-fabrication guardrail, and over-budget.
+          severity: High
+          mitigation: Split into gather vs draft slices; add an explicit input-assembly concern; define a v1 no-fabrication policy (halt-and-surface on uncovered must-have / anchor drop, since the inquirer isn't ported).
+        - risk: A 4B can produce schema-valid but fabricated content; CI only proves plumbing (stubs), not model quality.
+          severity: Medium
+          mitigation: Keep robust-parse + parse_ok; add a manual E2E quality gate; document that done_when proves wiring, not draft quality.
+    synthesis: |
+        Both passes verified the plan's EXTERNAL and in-repo factual claims clean (Anthropic
+        tool_use, MIT anthropic SDK, vLLM server-side json_schema, gemma-4 flags, the config
+        enum, OpenAICompat reuse, the specialist DAG, all research URLs). Two file-path danger
+        items are already FIXED in this revision: slice 7 now targets api/config.py (not the
+        nonexistent config_routes.py) and slice 6 targets _cli_apply.py (not the apply.py
+        deprecation shim); the .apply-state path is corrected to applications/{slug}/.apply-state/
+        and deps were tightened (6 += [1,2]; 2 += [3]). TWO design blockers remain for the human
+        reviewer: (1) AnthropicBackend is incoherent under the 'local-only' scope — decide
+        per-node/hybrid routing in v1 vs defer to phase 2; (2) slice 5 must be split (gather vs
+        draft) and must name the master-data input assembly, bullet-select's multi-artifact
+        writes, and a v1 no-fabrication policy (no inquirer/anchor-guard/fact-check are ported).
+        Also reconcile slice 2 with the existing BaseScorerBackend hierarchy rather than forking.
