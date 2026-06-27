@@ -158,7 +158,29 @@ export interface WriteResponse {
 
 // ── Config ───────────────────────────────────────────────────────────────
 
-export type LLMProvider = 'claude_cli' | 'antigravity_cli' | 'codex_cli' | 'openai_compatible';
+export type LLMProvider = 'claude_cli' | 'antigravity_cli' | 'codex_cli' | 'openai_compatible' | 'anthropic';
+
+/** Which Python DAG drives the apply pipeline. */
+export type ApplyOrchestrator = 'claude_cloud' | 'code_local';
+
+/** Behaviour when a node fails during code-local orchestration. */
+export type ApplyOnFailure = 'error' | 'fallback_cloud';
+
+/** Per-node LLM backend override (mirrors NodeBackendConfig in config.py). */
+export interface NodeBackendConfig {
+  provider: LLMProvider;
+  model?: string | null;
+  base_url?: string | null;
+  api_key?: string | null;
+}
+
+/** Apply orchestrator selection + per-node routing (mirrors ApplySettings in config.py). */
+export interface ApplySettings {
+  orchestrator: ApplyOrchestrator;
+  node_backend?: NodeBackendConfig | null;
+  node_backends?: Record<string, NodeBackendConfig>;
+  on_failure: ApplyOnFailure;
+}
 
 export interface LLMSettings {
   provider: LLMProvider;
@@ -167,6 +189,7 @@ export interface LLMSettings {
   api_key?: string | null;
   budget_usd: number;
   timeout_s: number;
+  apply?: ApplySettings;
   [k: string]: unknown;
 }
 
