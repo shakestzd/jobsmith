@@ -251,6 +251,74 @@ def build_bullet_select_prompt(
     return "\n\n".join(parts)
 
 
+# ---------------------------------------------------------------------------
+# DRAFT context (slice 6) — voice-guide loader + prose-write prompt assembly
+# ---------------------------------------------------------------------------
+
+
+def load_voice_guide(config: JobsmithConfig, *, repo_root: Path) -> str:
+    """Return the voice-guide text for the prose writer (``""`` when absent).
+
+    The voice guide is ADVISORY style context (``config.voice.voice_guide_path``),
+    not master evidence, so a missing/unset file is non-fatal (unlike master data):
+    the no-fabrication guarantee comes from the writer's halt, not this guide.
+    """
+    raw = config.voice.voice_guide_path
+    if raw is None:
+        return ""
+    path = resolve(Path(raw), repo_root)
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8").strip()
+
+
+def _render_findings(prior_findings: list[dict] | None) -> str:
+    """Render prior prose-qa blocking findings as fix constraints (revise pass)."""
+    if not prior_findings:
+        return ""
+    items = "\n".join(f"- {f.get('category', '')}: {f.get('span', '')}" for f in prior_findings)
+    return (
+        "## Fix these blocking style violations from the previous draft\n"
+        "Rewrite ONLY to clear them; never add a fact to do so:\n" + items
+    )
+
+
+def build_prose_write_prompt(
+    master: MasterData,
+    jd_parsed: dict[str, Any],
+    fit_score: dict[str, Any] | None,
+    bullet_selection: dict[str, Any] | None,
+    *,
+    voice_guide: str = "",
+    prior_findings: list[dict] | None = None,
+) -> str:
+    """Prompt for prose-write — master facts + voice guide + JD/fit/selection.
+
+    The writer may only REMOVE/RESTRUCTURE master facts into a Professional
+    Summary + tailored bullets; it MUST signal ``would_fabricate`` (never write)
+    when a JD requirement has no master coverage.
+    """
+    must_haves = (jd_parsed or {}).get("must_haves", [])
+    parts = [
+        "Write a Professional Summary (2-3 sentences) and tailored resume bullets "
+        "as Markdown, using ONLY facts present in the master evidence below.",
+        "Output the prose-draft.md body in `markdown`. If a JD must-have has no "
+        "master coverage, set `would_fabricate` to the offending claim and write nothing.",
+        "## Voice guide\n" + (voice_guide or "[none]"),
+        "## JD must-haves\n" + json.dumps(must_haves, ensure_ascii=False),
+        "## Master work evidence\n" + _render_bullets(master.work_bullets),
+        _render_section("Master skills", master.skill),
+    ]
+    if fit_score:
+        parts.append("## Fit must-have table\n" + json.dumps(fit_score.get("must_have_table", []), ensure_ascii=False))
+    if bullet_selection:
+        parts.append("## Bullet selection\n" + json.dumps(bullet_selection.get("positions", []), ensure_ascii=False))
+    findings = _render_findings(prior_findings)
+    if findings:
+        parts.append(findings)
+    return "\n\n".join(parts)
+
+
 __all__ = [
     "MissingMasterDataError",
     "MasterRequirement",
@@ -258,7 +326,9 @@ __all__ = [
     "NODE_MASTER_REQUIREMENTS",
     "load_node_master",
     "load_master_data",
+    "load_voice_guide",
     "build_jd_parse_prompt",
     "build_fit_score_prompt",
     "build_bullet_select_prompt",
+    "build_prose_write_prompt",
 ]
