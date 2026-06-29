@@ -211,4 +211,47 @@ def llm_status() -> dict:
     }
 
 
-__all__ = ["claude_status", "llm_status"]
+# ---------------------------------------------------------------------------
+# Local apply engine detection: vllm-mlx (feat-0d2f3df4, slice 4)
+# ---------------------------------------------------------------------------
+#
+# The code-orchestrated LOCAL apply path serves gemma-4 via the `vllm-mlx`
+# engine (see docs/spikes/byo-model-apply.md). Detection here is presence-only
+# and MUST NOT raise: when the runtime is absent we surface a guided
+# `uv pip install vllm-mlx` hint so the desktop app can degrade gracefully
+# instead of crashing. The engine *lifecycle* lives in jobsmith.llm.vllm_mlx;
+# this probe deliberately stays import-light (PATH + importable-module checks
+# only) and self-contained, mirroring claude_status()/llm_status() above.
+
+# Console script (hyphen) and importable module (underscore); either one means
+# the runtime can be launched.
+_VLLM_MLX_BINARY = "vllm-mlx"
+_VLLM_MLX_MODULE = "vllm_mlx"
+
+# Guided remediation (kept in sync with jobsmith.llm.vllm_mlx.INSTALL_HINT).
+_VLLM_MLX_INSTALL_HINT = "uv pip install vllm-mlx"
+
+
+def vllm_mlx_status() -> dict:
+    """Report whether the ``vllm-mlx`` local apply engine is installed.
+
+    Returns
+    -------
+    dict
+        ``{"installed": bool, "path": str | None, "install_hint": str | None}``.
+        ``installed`` is ``True`` when the console script resolves on PATH or the
+        ``vllm_mlx`` module is importable; ``path`` is the resolved console-script
+        path (``None`` when only the module is present). ``install_hint`` carries
+        the guided ``uv pip install vllm-mlx`` command when the runtime is absent
+        and is ``None`` otherwise. Never raises.
+    """
+    path = shutil.which(_VLLM_MLX_BINARY)
+    installed = path is not None or _module_installed(_VLLM_MLX_MODULE)
+    return {
+        "installed": installed,
+        "path": path,
+        "install_hint": None if installed else _VLLM_MLX_INSTALL_HINT,
+    }
+
+
+__all__ = ["claude_status", "llm_status", "vllm_mlx_status"]

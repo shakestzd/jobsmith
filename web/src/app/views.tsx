@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Icon, Badge } from './shared';
 import { apiPost, apiPut, JobsmithApiError } from '../api/client';
 import { useApplications, useMasterSection, useConfig, useFeedback, useDoctor } from '../api/hooks';
-import type { MasterAuthor, ApplicationRow, JobsmithConfig, LLMProvider, ConfigValidateResponse, ConfigValidationError } from '../api/types';
+import type { MasterAuthor, ApplicationRow, JobsmithConfig, LLMProvider, ApplyOrchestrator, ApplyOnFailure, ConfigValidateResponse, ConfigValidationError } from '../api/types';
 
 // ── SiteView ─────────────────────────────────────────────────────────────
 
@@ -370,6 +370,11 @@ export function ConfigView() {
   const [llmProvider, setLlmProvider] = useState<LLMProvider>('claude_cli');
   const [llmBaseUrl, setLlmBaseUrl] = useState('');
   const [llmModel, setLlmModel] = useState('');
+  // apply orchestrator settings
+  const [applyOrchestrator, setApplyOrchestrator] = useState<ApplyOrchestrator>('claude_cloud');
+  const [applyNodeBaseUrl, setApplyNodeBaseUrl] = useState('');
+  const [applyNodeModel, setApplyNodeModel] = useState('');
+  const [applyOnFailure, setApplyOnFailure] = useState<ApplyOnFailure>('error');
 
   // Feedback state
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -389,10 +394,25 @@ export function ConfigView() {
     setLlmProvider((remoteConfig.llm?.provider ?? 'claude_cli') as LLMProvider);
     setLlmBaseUrl(remoteConfig.llm?.base_url ?? '');
     setLlmModel(remoteConfig.llm?.model ?? '');
+    setApplyOrchestrator((remoteConfig.llm?.apply?.orchestrator ?? 'claude_cloud') as ApplyOrchestrator);
+    setApplyNodeBaseUrl(remoteConfig.llm?.apply?.node_backend?.base_url ?? '');
+    setApplyNodeModel(remoteConfig.llm?.apply?.node_backend?.model ?? '');
+    setApplyOnFailure((remoteConfig.llm?.apply?.on_failure ?? 'error') as ApplyOnFailure);
   }, [remoteConfig]);
 
   /** Build a config payload from current UI state, merged over remote defaults. */
   const buildPayload = useCallback((): Record<string, unknown> => {
+    const applyBlock: Record<string, unknown> = {
+      orchestrator: applyOrchestrator,
+      on_failure: applyOnFailure,
+    };
+    if (applyOrchestrator === 'code_local') {
+      applyBlock.node_backend = {
+        provider: 'openai_compatible',
+        base_url: applyNodeBaseUrl || null,
+        model: applyNodeModel || null,
+      };
+    }
     return {
       ...(remoteConfig ?? {}),
       master: {
@@ -412,9 +432,10 @@ export function ConfigView() {
         provider: llmProvider,
         base_url: llmBaseUrl || null,
         model: llmModel || null,
+        apply: applyBlock,
       },
     };
-  }, [remoteConfig, workYml, skillYml, educationYml, authorYml, applicationsDir, jobsmithDb, llmProvider, llmBaseUrl, llmModel]);
+  }, [remoteConfig, workYml, skillYml, educationYml, authorYml, applicationsDir, jobsmithDb, llmProvider, llmBaseUrl, llmModel, applyOrchestrator, applyNodeBaseUrl, applyNodeModel, applyOnFailure]);
 
   const handleValidate = useCallback(async () => {
     setValidateStatus('validating');
@@ -634,6 +655,58 @@ export function ConfigView() {
                   value={llmModel}
                   onChange={e => setLlmModel(e.target.value)}
                 />
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-h"><h3>apply orchestrator</h3></div>
+        <div style={{ padding: '16px 18px' }}>
+          <div className="field">
+            <label htmlFor="apply-orchestrator-select">orchestrator</label>
+            <select
+              id="apply-orchestrator-select"
+              value={applyOrchestrator}
+              onChange={e => setApplyOrchestrator(e.target.value as ApplyOrchestrator)}
+            >
+              <option value="claude_cloud">Claude (cloud, claude -p)</option>
+              <option value="code_local">Local code driver (gemma via vllm-mlx)</option>
+            </select>
+          </div>
+          {applyOrchestrator === 'code_local' && (
+            <>
+              <div className="field">
+                <label htmlFor="apply-node-base-url-input">node backend base url</label>
+                <input
+                  id="apply-node-base-url-input"
+                  className="mono"
+                  placeholder="http://127.0.0.1:8081/v1"
+                  value={applyNodeBaseUrl}
+                  onChange={e => setApplyNodeBaseUrl(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="apply-node-model-input">node backend model</label>
+                <input
+                  id="apply-node-model-input"
+                  className="mono"
+                  placeholder="mlx-community/gemma-4-E4B-it-qat-4bit"
+                  value={applyNodeModel}
+                  onChange={e => setApplyNodeModel(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="apply-on-failure-select">on failure</label>
+                <select
+                  id="apply-on-failure-select"
+                  value={applyOnFailure}
+                  onChange={e => setApplyOnFailure(e.target.value as ApplyOnFailure)}
+                >
+                  <option value="error">error (stop)</option>
+                  <option value="fallback_cloud">fallback to cloud</option>
+                </select>
               </div>
             </>
           )}

@@ -1346,6 +1346,46 @@ def _run_apply_phases(
 # ---------------------------------------------------------------------------
 
 
+def _run_code_local_apply(
+    url: str,
+    *,
+    jd_text: str | None,
+    slug: str | None,
+    config,
+    resolved_cwd: Path,
+    rdr: ApplyRenderer,
+):
+    """CLI adapter for the code-orchestrated LOCAL apply (plan-a40fac81).
+
+    Returns an ``ApplyOutcome`` (the caller enacts the ``on_failure`` policy), or
+    ``None`` when an input precondition fails (already surfaced to the user). The
+    local path requires PASTED JD text — it does not scrape the URL (the cloud
+    path owns scraping).
+    """
+    from jobsmith.apply_local.run import run_local_apply
+    from jobsmith.core.slug import derive_slug
+
+    if not jd_text or not jd_text.strip():
+        rdr.print_error(
+            "code_local apply requires pasted JD text (--jd-text / --jd-text-file); "
+            "URL scraping is the cloud path."
+        )
+        return None
+
+    resolved_slug = slug or derive_slug(url)
+    rdr.print_info(f"jobsmith apply (code_local): slug={resolved_slug!r}")
+    outcome = run_local_apply(
+        jd_text=jd_text,
+        slug=resolved_slug,
+        config=config,
+        repo_root=resolved_cwd,
+        jd_url=url,
+    )
+    if outcome.ok:
+        rdr.print_info(f"code_local apply complete: {len(outcome.artifacts)} artifacts under {resolved_slug}")
+    return outcome
+
+
 def run_apply(
     url: str,
     *,
@@ -1403,6 +1443,28 @@ def run_apply(
 
     resolved_cwd = cwd or Path.cwd()
     rdr = renderer or ApplyRenderer(yes=skip_confirm, verbosity=verbosity)
+
+    # Code-orchestrated LOCAL apply path (plan-a40fac81). Only engages when the
+    # operator selects it; the default (claude_cloud) falls through to the
+    # unchanged core_run_apply path below. on_failure=fallback_cloud also falls
+    # through (no recursion — the cloud path never re-checks the orchestrator).
+    _config = load_config(search_from=resolved_cwd)
+    if _config.llm.apply.orchestrator == "code_local":
+        outcome = _run_code_local_apply(
+            url, jd_text=jd_text, slug=slug, config=_config, resolved_cwd=resolved_cwd, rdr=rdr
+        )
+        if outcome is None:
+            return 1  # input error already surfaced
+        if outcome.ok:
+            return 0
+        if outcome.fallback_cloud:
+            rdr.print_info(
+                f"local apply {outcome.status} ({outcome.reason}); falling back to cloud claude -p"
+            )
+            # fall through to the cloud path below
+        else:
+            rdr.print_error(f"local apply {outcome.status}: {outcome.reason}")
+            return 1
 
     def _phase_runner(
         *,
