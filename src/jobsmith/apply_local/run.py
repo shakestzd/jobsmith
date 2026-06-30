@@ -30,6 +30,8 @@ from jobsmith.apply_local.checkpoint import apply_state_dir
 from jobsmith.apply_local.driver import Pipeline, PipelineResult, StructuredBackend
 from jobsmith.apply_local.nodes_draft import ART_PROSE_DRAFT, build_draft_pipeline
 from jobsmith.apply_local.nodes_gather import build_gather_pipeline
+from jobsmith.apply_local.render import render_local
+from jobsmith.apply_local.run_record import finalize_run, open_run_record
 from jobsmith.apply_local.schemas import (
     ART_BULLET_SELECTION,
     ART_FIT_SCORE,
@@ -70,6 +72,11 @@ class ApplyOutcome:
     halt_node: str | None = None
     artifacts: dict[str, str] = field(default_factory=dict)
     fallback_cloud: bool = False  # caller should route to claude -p
+    # Local render status ("ok" | "skipped" | "error" | None). A "skipped" (no
+    # quarto) or "error" never demotes ``status`` from OK — the tailored
+    # gather/draft artifacts are valuable and kept — but it is surfaced here (and
+    # in ``reason`` for an error) so the CLI / run-history can report it.
+    render_status: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -259,6 +266,25 @@ def _classify_failure(
     return ApplyOutcome(status=HALT, slug=slug, reason=result.reason, halt_node=result.halt_node)
 
 
+def _finish_render(
+    outcome: ApplyOutcome, *, slug: str, config: JobsmithConfig, repo_root: Any
+) -> None:
+    """Render the resume + assemble the portfolio, folding results into outcome.
+
+    Best-effort: :func:`render_local` never raises. A ``"skipped"`` (no quarto)
+    leaves the apply OK with no fake PDF; an ``"error"`` is surfaced in
+    ``outcome.reason`` while the gather/draft artifacts in ``outcome.artifacts``
+    are preserved.
+    """
+    render = render_local(slug, config, repo_root=repo_root)
+    outcome.render_status = render.status
+    outcome.artifacts.update(render.artifacts)
+    if render.pdf_path:
+        outcome.artifacts["resume_pdf"] = render.pdf_path
+    if render.status == "error":
+        outcome.reason = render.reason
+
+
 def run_local_apply(
     *,
     jd_text: str,
@@ -267,13 +293,17 @@ def run_local_apply(
     repo_root: Any = None,
     jd_url: str | None = None,
     backend: StructuredBackend | None = None,
+    run_id: str | None = None,
 ) -> ApplyOutcome:
-    """Run a code_local gather->draft apply for ``slug`` on the pasted ``jd_text``.
+    """Run a code_local gather->draft->render apply for ``slug`` on ``jd_text``.
 
     Builds the gather + draft pipelines, resolves a per-node backend (ensuring
-    the local engine when any node is local), runs gather then draft, and writes
-    the ``applications/{slug}/.apply-state`` artifacts. When ``backend`` is
-    injected (tests / explicit backend), the engine is not managed.
+    the local engine when any node is local), runs gather then draft, writes the
+    ``applications/{slug}/.apply-state`` artifacts, then renders the resume PDF
+    and assembles the portfolio PURELY in code (no ``claude -p``). The apply is
+    recorded in the pipeline ``apply_runs`` table (a clean no-op when no config
+    DB is present). When ``backend`` is injected (tests / explicit backend), the
+    engine is not managed.
     """
     on_failure = config.llm.apply.on_failure
     gather = build_gather_pipeline(config, slug, root=repo_root)
@@ -308,6 +338,8 @@ def run_local_apply(
             engine_managed = True  # all local nodes use live endpoints; still health-classifiable
         backend = routing
 
+    db_conn, db_run_id = open_run_record(repo_root, slug=slug, run_id=run_id)
+    db_final_status = "failed"
     try:
         gres = gather.run(backend, context={"jd_text": jd_text, "jd_url": jd_url})
         if gres.status != "ok":
@@ -317,8 +349,15 @@ def run_local_apply(
         if dres.status != "ok":
             return _classify_failure(dres, slug=slug, engine_managed=engine_managed, on_failure=on_failure)
 
-        return ApplyOutcome(status=OK, slug=slug, artifacts=_artifact_paths(slug, repo_root))
+        outcome = ApplyOutcome(status=OK, slug=slug, artifacts=_artifact_paths(slug, repo_root))
+        _finish_render(outcome, slug=slug, config=config, repo_root=repo_root)
+        # A render "error" finalizes the run as failed (mirroring the cloud
+        # late-render-failure convention) while keeping the early artifacts; a
+        # clean render or a quarto-absent "skipped" finalizes as done.
+        db_final_status = "failed" if outcome.render_status == "error" else "done"
+        return outcome
     finally:
+        finalize_run(db_conn, db_run_id, slug, db_final_status)
         if stop_engine:
             vllm_mlx.stop()
 

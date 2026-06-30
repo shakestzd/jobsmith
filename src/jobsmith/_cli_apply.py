@@ -1382,7 +1382,20 @@ def _run_code_local_apply(
         jd_url=url,
     )
     if outcome.ok:
-        rdr.print_info(f"code_local apply complete: {len(outcome.artifacts)} artifacts under {resolved_slug}")
+        pdf = outcome.artifacts.get("resume_pdf")
+        if pdf:
+            rdr.print_info(f"code_local apply complete: resume rendered -> {pdf}")
+        elif outcome.render_status == "skipped":
+            rdr.print_info(
+                "code_local apply complete: resume.qmd built "
+                "(quarto not installed — PDF render skipped)"
+            )
+        elif outcome.render_status == "error":
+            rdr.print_info(f"code_local apply complete with render warning: {outcome.reason}")
+        else:
+            rdr.print_info(
+                f"code_local apply complete: {len(outcome.artifacts)} artifacts under {resolved_slug}"
+            )
     return outcome
 
 
