@@ -25,6 +25,7 @@ import yaml
 
 from jobsmith.apply_local import run as run_mod
 from jobsmith.apply_local.backends import AnthropicBackend, OpenAICompatBackend
+from jobsmith.apply_local.checkpoint import apply_state_dir
 from jobsmith.apply_local.nodes_draft import ART_PROSE_DRAFT, NODE_PROSE_WRITE
 from jobsmith.apply_local.run import (
     ENGINE_DOWN,
@@ -198,7 +199,7 @@ def _full_stub(ids: dict[str, str]) -> SchemaStub:
 
 
 def _state(root: Path, name: str) -> Path:
-    return root / "applications" / SLUG / ".apply-state" / name
+    return apply_state_dir(SLUG, root=root) / name
 
 
 # ===========================================================================
@@ -258,8 +259,8 @@ def test_hybrid_routing_sends_prose_to_cloud_rest_local(tmp_path: Path) -> None:
 
 
 def test_build_routing_backend_resolves_per_node_provider(tmp_path: Path) -> None:
-    from jobsmith.apply_local.nodes_gather import build_gather_pipeline
     from jobsmith.apply_local.nodes_draft import build_draft_pipeline
+    from jobsmith.apply_local.nodes_gather import build_gather_pipeline
 
     cfg = _setup(tmp_path)
     cfg.llm.apply.node_backend = NodeBackendConfig(
@@ -357,6 +358,40 @@ def test_ensure_engine_reuses_live_configured_endpoint(tmp_path: Path, monkeypat
     monkeypatch.setattr(vllm_mlx, "_models_ready", lambda port, **_: port == 8081)
     base_url, managed = ensure_engine(cfg)
     assert base_url == "http://127.0.0.1:8081/v1" and managed is False
+
+
+class _SchemaClient:
+    """OpenAI-compat client stub: returns the payload for the schema name."""
+
+    def __init__(self, payloads: dict[str, dict]) -> None:
+        self.payloads = payloads
+
+    def complete(self, messages, response_format=None, temperature=0.0):
+        name = ((response_format or {}).get("json_schema") or {}).get("name", "")
+        return json.dumps(self.payloads.get(name, {}))
+
+
+def test_live_per_node_endpoint_is_honored_not_clobbered(tmp_path: Path, monkeypatch) -> None:
+    """roborev 1061: a node already pointing at a LIVE endpoint must be used as-is
+    — no managed engine started, base_url untouched."""
+    cfg = _setup(tmp_path)
+    cfg.llm.apply.node_backend = NodeBackendConfig(
+        provider="openai_compatible", base_url="http://127.0.0.1:9911/v1"
+    )
+    payloads = {"jd_parsed": _jd_payload(), "fit_score": _fit_payload(),
+                "bullet_selection": _bullet_payload(_bullet_ids(tmp_path)), "prose_draft": _prose_payload()}
+    monkeypatch.setattr(
+        run_mod, "resolve_backend",
+        lambda config, node: OpenAICompatBackend(base_url="http://127.0.0.1:9911/v1", _client=_SchemaClient(payloads)),
+    )
+    monkeypatch.setattr(vllm_mlx, "_models_ready", lambda port, **_: port == 9911)  # 9911 is live
+
+    def _boom(config):
+        raise AssertionError("ensure_engine must NOT run when every local node has a live endpoint")
+
+    monkeypatch.setattr(run_mod, "ensure_engine", _boom)
+    outcome = run_local_apply(jd_text="Need a data engineer.", slug=SLUG, config=cfg, repo_root=tmp_path)
+    assert outcome.ok  # completed against the live per-node endpoint, no managed engine
 
 
 # ===========================================================================

@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from jobsmith.apply_local.checkpoint import apply_state_dir
 from jobsmith.apply_local.inputs import (
     NODE_MASTER_REQUIREMENTS,
     MissingMasterDataError,
@@ -330,11 +331,11 @@ def test_fit_score_prompt_injects_master_evidence(tmp_path: Path):
 
 
 def _state(root: Path, name: str) -> Path:
-    return root / "applications" / SLUG / ".apply-state" / name
+    return apply_state_dir(SLUG, root=root) / name
 
 
 def _docs(root: Path, name: str) -> Path:
-    return root / "applications" / SLUG / "documents" / name
+    return apply_state_dir(SLUG, root=root).parent / "documents" / name
 
 
 def _setup(tmp_path: Path) -> tuple[JobsmithConfig, dict[str, str]]:

@@ -21,8 +21,9 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 from jobsmith.apply_local.backends import OpenAICompatBackend, resolve_backend
 from jobsmith.apply_local.checkpoint import apply_state_dir
@@ -283,7 +284,13 @@ def run_local_apply(
     if backend is None:
         routing = build_routing_backend(config, [gather, draft])
         local = [b for b in routing._by_name.values() if isinstance(b, OpenAICompatBackend)]
-        if local:
+        # Per-node: a backend already pointing at a LIVE endpoint (e.g. a specific
+        # node_backends override, or a user-run engine) is used AS-IS. Only nodes
+        # whose endpoint is not live need the managed engine — and only those get
+        # their base_url set to it, so explicit per-node endpoints are never
+        # clobbered (roborev 1061).
+        need_managed = [b for b in local if not _endpoint_live(b.base_url)]
+        if need_managed:
             try:
                 base_url, managed = ensure_engine(config)
             except EngineUnavailableError as exc:
@@ -295,8 +302,10 @@ def run_local_apply(
                 )
             engine_managed = True  # a local engine is in play (ours or a user's)
             stop_engine = managed  # only tear down an engine we started
-            for b in local:
+            for b in need_managed:
                 b.base_url = base_url
+        elif local:
+            engine_managed = True  # all local nodes use live endpoints; still health-classifiable
         backend = routing
 
     try:

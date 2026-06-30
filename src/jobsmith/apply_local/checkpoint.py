@@ -26,19 +26,36 @@ import tempfile
 from pathlib import Path
 
 STATE_DIRNAME = ".apply-state"
-_APPLICATIONS = "applications"
 
 
-def _base_root(root: str | os.PathLike[str] | None) -> Path:
-    """Resolve the directory under which ``applications/`` lives."""
-    return Path(root) if root is not None else Path.cwd()
+def _applications_root(root: str | os.PathLike[str] | None) -> Path:
+    """Resolve the configured applications directory under the repo ``root``.
+
+    Mirrors :func:`jobsmith.core.paths.apply_state_dir` so LOCAL apply artifacts
+    land in ``config.output.applications_dir`` (default ``private/applications``)
+    — the same directory the API, assembler, and site readers use — instead of a
+    hard-coded ``applications/`` that nothing else reads. Falls back to the
+    default config when no ``.apply-config.yaml`` is found (e.g. in tests).
+    """
+    from jobsmith.config import JobsmithConfig, find_config, load_config
+    from jobsmith.paths import resolve
+
+    repo_root = Path(root) if root is not None else Path.cwd()
+    config_path = find_config(repo_root)
+    config = load_config(config_path) if config_path is not None else JobsmithConfig()
+    return resolve(config.output.applications_dir, repo_root)
 
 
 def apply_state_dir(slug: str, *, root: str | os.PathLike[str] | None = None) -> Path:
-    """Return ``{root}/applications/{slug}/.apply-state`` for ``slug``."""
+    """Return ``{applications_dir}/{slug}/.apply-state`` for ``slug``.
+
+    ``applications_dir`` is resolved from ``config.output.applications_dir`` under
+    ``root`` (the repo root), so local artifacts share the directory the rest of
+    jobsmith reads from.
+    """
     if not slug:
         raise ValueError("apply_state_dir requires a non-empty slug.")
-    return _base_root(root) / _APPLICATIONS / slug / STATE_DIRNAME
+    return _applications_root(root) / slug / STATE_DIRNAME
 
 
 def checkpoint_path(slug: str, name: str, *, root: str | os.PathLike[str] | None = None) -> Path:

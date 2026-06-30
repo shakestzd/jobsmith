@@ -292,9 +292,25 @@ def test_loop_halts_on_max_iter_exhaustion(tmp_path: Path):
 
 
 def test_checkpoint_path_threads_slug(tmp_path: Path):
-    expected = tmp_path / "applications" / SLUG / ".apply-state" / "jd-parse.json"
+    state = apply_state_dir(SLUG, root=tmp_path)
+    expected = state / "jd-parse.json"
     assert checkpoint_path(SLUG, "jd-parse", root=tmp_path) == expected
-    assert apply_state_dir(SLUG, root=tmp_path) == expected.parent
+    assert str(state).endswith(f"{SLUG}/.apply-state")  # slug threaded into the path
+
+
+def test_apply_state_dir_defaults_to_private_applications(tmp_path: Path):
+    # Default config.output.applications_dir is private/applications — NOT a bare
+    # applications/ (roborev 1061: local artifacts must land where the app reads).
+    assert apply_state_dir(SLUG, root=tmp_path) == tmp_path / "private" / "applications" / SLUG / ".apply-state"
+
+
+def test_apply_state_dir_honors_configured_applications_dir(tmp_path: Path):
+    import yaml
+
+    (tmp_path / ".apply-config.yaml").write_text(
+        yaml.safe_dump({"output": {"applications_dir": "custom/apps"}}), encoding="utf-8"
+    )
+    assert apply_state_dir(SLUG, root=tmp_path) == tmp_path / "custom" / "apps" / SLUG / ".apply-state"
 
 
 def test_atomic_write_leaves_no_tmp_and_is_readable(tmp_path: Path):
