@@ -237,6 +237,74 @@ def test_draft_context_loaded_from_gather_artifacts(tmp_path: Path) -> None:
 
 
 # ===========================================================================
+# Render + DB run-record wiring (feat-d1ef000b, roborev 1061 finding 1)
+# ===========================================================================
+
+
+def test_apply_renders_resume_qmd_quarto_absent_stays_ok(tmp_path: Path, monkeypatch) -> None:
+    """After draft, render builds documents/resume.qmd; quarto absent => skipped,
+    apply stays OK, NO fake pdf, gather/draft artifacts preserved."""
+    cfg = _setup(tmp_path)
+    backend = _full_stub(_bullet_ids(tmp_path))
+    monkeypatch.setattr("shutil.which", lambda name: None)  # quarto absent
+
+    outcome = run_local_apply(jd_text="Need a data engineer.", slug=SLUG, config=cfg,
+                              repo_root=tmp_path, backend=backend)
+
+    assert outcome.ok
+    assert outcome.render_status == "skipped"
+    documents = apply_state_dir(SLUG, root=tmp_path).parent / "documents"
+    assert (documents / "resume.qmd").is_file()
+    assert not (documents / "resume.pdf").exists()  # no fake pdf
+    assert "resume_qmd" in outcome.artifacts and "resume_pdf" not in outcome.artifacts
+    # gather/draft artifacts still surfaced
+    assert ART_JD_PARSED in outcome.artifacts and ART_PROSE_DRAFT in outcome.artifacts
+
+
+def test_apply_render_error_surfaced_without_losing_artifacts(tmp_path: Path, monkeypatch) -> None:
+    """A render "error" is surfaced (render_status + reason) but the gather/draft
+    artifacts remain and the apply outcome stays OK."""
+    from jobsmith.apply_local.render import RenderResult
+
+    cfg = _setup(tmp_path)
+    backend = _full_stub(_bullet_ids(tmp_path))
+    monkeypatch.setattr(
+        run_mod, "render_local",
+        lambda slug, config, *, repo_root: RenderResult(status="error", reason="quarto exit 1: boom"),
+    )
+
+    outcome = run_local_apply(jd_text="x", slug=SLUG, config=cfg, repo_root=tmp_path, backend=backend)
+
+    assert outcome.status == OK  # gather+draft succeeded
+    assert outcome.render_status == "error"
+    assert "boom" in (outcome.reason or "")
+    assert ART_JD_PARSED in outcome.artifacts and ART_PROSE_DRAFT in outcome.artifacts
+
+
+def test_apply_records_run_when_config_db_present(tmp_path: Path, monkeypatch) -> None:
+    """The apply is recorded in apply_runs (finalized done) when a config DB exists."""
+    cfg = _setup(tmp_path)
+    (tmp_path / ".apply-config.yaml").write_text("{}\n", encoding="utf-8")
+    backend = _full_stub(_bullet_ids(tmp_path))
+    monkeypatch.setattr("shutil.which", lambda name: None)
+
+    outcome = run_local_apply(jd_text="x", slug=SLUG, config=cfg, repo_root=tmp_path,
+                              backend=backend, run_id="run-fixed-123")
+
+    assert outcome.ok
+    from jobsmith.db import get_apply_run_by_slug, open_pipeline_db
+
+    db = open_pipeline_db(tmp_path / "private" / "jobsmith.db")
+    try:
+        row = get_apply_run_by_slug(db, SLUG)
+        assert row is not None
+        assert row["run_id"] == "run-fixed-123"
+        assert row["status"] == "done"  # render skipped (no quarto) => still done
+    finally:
+        db.close()
+
+
+# ===========================================================================
 # Per-node routing flows through Pipeline.run (the wiring slice 6 deferred)
 # ===========================================================================
 
