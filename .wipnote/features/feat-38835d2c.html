@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Robust structured LLM calls for thinking models in code_local apply (max_tokens &#43; tolerant JSON)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-38835d2c"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-07-02T01:46:50.980682"
+             data-updated="2026-07-02T01:48:08.286296" data-agent-assigned="claude-code" data-track-id="trk-f5052600" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.67.1">
+
+        <header>
+            <h1>Robust structured LLM calls for thinking models in code_local apply (max_tokens &#43; tolerant JSON)</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-f5052600.html" data-relationship="part_of" data-since="2026-07-02T01:46:51.000604">trk-f5052600</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/41bc4b7a-5c34-4d6f-8bc0-fe909326b8df.html" data-relationship="implemented_in" data-since="2026-07-02T01:46:51.10142">session 41bc4b7a-5c34-4d6f-8bc0-fe909326b8df</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-steps>
+            <h3>Implementation Steps</h3>
+            <ol>
+                <li data-completed="false" data-step-id="task-1" data-agent="claude-code" data-created-by-agent="claude-code">⏳ Fix structured LLM calls for thinking models (feat-38835d2c)</li>
+            </ol>
+        </section>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Fix code_local apply gate failures against gemma-4-E4B-it. (A) OpenAICompatClient omits max_tokens so thinking-mode reasoning runs to the 300s httpx timeout: add explicit max_tokens + configurable timeout in llm/openai_compat.py and apply_local/backends.py. (B) gemma-4-it thinking mode ignores response_format json_schema, returning fenced JSON with wrong field names: add tolerant JSON extraction (strip markdown fences, locate JSON block) plus schema-field normalization, and/or disable thinking mode via chat_template_kwargs. Validate jd-parse yields a valid JdParsed against local MLX on 8081.</p>
+        </section>
+    </article>
+</body>
+</html>
