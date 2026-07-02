@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Wire desktop UI -&gt; code_local apply end-to-end (smart Gemma defaults)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-e5b9c219"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-07-02T09:38:19.048523"
+             data-updated="2026-07-02T09:40:00.307407" data-agent-assigned="claude-code" data-track-id="trk-f5052600" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.67.1">
+
+        <header>
+            <h1>Wire desktop UI -&gt; code_local apply end-to-end (smart Gemma defaults)</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="relates_to">
+                <h3>Relates To:</h3>
+                <ul>
+                    <li><a href="../features/feat-63ea7f22.html" data-relationship="relates_to" data-since="2026-07-02T09:38:19.306225">Config-tab UI &#43; docs: select the apply orchestrator</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-f5052600.html" data-relationship="part_of" data-since="2026-07-02T09:38:19.085614">trk-f5052600</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/41bc4b7a-5c34-4d6f-8bc0-fe909326b8df.html" data-relationship="implemented_in" data-since="2026-07-02T09:38:19.198125">session 41bc4b7a-5c34-4d6f-8bc0-fe909326b8df</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-steps>
+            <h3>Implementation Steps</h3>
+            <ol>
+                <li data-completed="false" data-step-id="task-7" data-agent="claude-code" data-created-by-agent="claude-code">⏳ Wire UI→code_local apply with Gemma defaults (feat-e5b9c219)</li>
+            </ol>
+        </section>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Make a code_local apply runnable end-to-end from the desktop UI/sidecar against local Gemma-4, not just selectable. Confirm the path POST /api/applications -&gt; run_apply -&gt; _run_code_local_apply -&gt; run_local_apply and the Config-tab orchestrator select (feat-63ea7f22). Apply known-good Gemma defaults automatically for openai_compatible/MLX backends: disable_thinking for structured nodes (jd-parse/fit-score/bullet-select), plain_text_mode for prose-write, sensible max_tokens, so selecting code_local + local MLX just works without exposing thinking internals. Validate through the sidecar API against MLX 8081.</p>
+        </section>
+    </article>
+</body>
+</html>
