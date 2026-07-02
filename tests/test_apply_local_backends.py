@@ -369,6 +369,114 @@ def test_plain_text_mode_forwarded_by_resolve_backend() -> None:
     assert backend.plain_text_mode is True
 
 
+# ---------------------------------------------------------------------------
+# Gemma smart defaults — _is_gemma_model + _effective_openai_compat_flags
+# ---------------------------------------------------------------------------
+
+
+def test_is_gemma_model_matches_various_gemma_ids() -> None:
+    from jobsmith.apply_local.backends import _is_gemma_model
+
+    assert _is_gemma_model("mlx-community/gemma-4-E4B-it-qat-4bit") is True
+    assert _is_gemma_model("Gemma-3-2B") is True  # uppercase
+    assert _is_gemma_model("GEMMA-4") is True  # all-caps
+    assert _is_gemma_model(None) is False
+    assert _is_gemma_model("") is False
+    assert _is_gemma_model("gpt-4o") is False
+    assert _is_gemma_model("claude-sonnet-4-5") is False
+    assert _is_gemma_model("llama-3.1-8b") is False
+
+
+def _make_cfg_openai(model: str, **extra) -> JobsmithConfig:
+    """Helper: build a JobsmithConfig with openai_compatible + given model."""
+    from jobsmith.config import ApplySettings
+
+    return JobsmithConfig(
+        llm=LLMSettings(
+            apply=ApplySettings(
+                node_backend=NodeBackendConfig(
+                    provider="openai_compatible",
+                    base_url="http://127.0.0.1:8081/v1",
+                    model=model,
+                    **extra,
+                )
+            )
+        )
+    )
+
+
+def test_gemma_structured_node_gets_disable_thinking_true() -> None:
+    """Gemma + structured node → disable_thinking=True applied by default."""
+    for node_name in ("jd-parse", "fit-score", "bullet-select"):
+        backend = resolve_backend(_make_cfg_openai("mlx-community/gemma-4-E4B-it-qat-4bit"), node_name)
+        assert isinstance(backend, OpenAICompatBackend), node_name
+        assert backend.disable_thinking is True, f"disable_thinking should be True for {node_name}"
+        assert backend.plain_text_mode is False, f"plain_text_mode should be False for {node_name}"
+
+
+def test_gemma_prose_write_node_gets_plain_text_mode_true() -> None:
+    """Gemma + prose-write → plain_text_mode=True, disable_thinking=False by default."""
+    backend = resolve_backend(_make_cfg_openai("mlx-community/gemma-4-E4B-it-qat-4bit"), "prose-write")
+    assert isinstance(backend, OpenAICompatBackend)
+    assert backend.plain_text_mode is True
+    assert backend.disable_thinking is False
+
+
+def test_gemma_defaults_apply_max_tokens() -> None:
+    """Gemma defaults: prose-write gets GEMMA_PROSE_MAX_TOKENS; structured gets GEMMA_STRUCTURED_MAX_TOKENS."""
+    from jobsmith.apply_local.backends import GEMMA_PROSE_MAX_TOKENS, GEMMA_STRUCTURED_MAX_TOKENS
+
+    prose_backend = resolve_backend(_make_cfg_openai("mlx-community/gemma-4-E4B-it-qat-4bit"), "prose-write")
+    structured_backend = resolve_backend(_make_cfg_openai("mlx-community/gemma-4-E4B-it-qat-4bit"), "jd-parse")
+    assert isinstance(prose_backend, OpenAICompatBackend)
+    assert isinstance(structured_backend, OpenAICompatBackend)
+    assert prose_backend.max_tokens == GEMMA_PROSE_MAX_TOKENS
+    assert structured_backend.max_tokens == GEMMA_STRUCTURED_MAX_TOKENS
+
+
+def test_non_gemma_openai_compat_not_affected() -> None:
+    """Non-Gemma openai_compatible model: no Gemma defaults applied."""
+    for model in ("gpt-4o", "llama-3.1-8b", "mistral-7b"):
+        backend = resolve_backend(_make_cfg_openai(model), "jd-parse")
+        assert isinstance(backend, OpenAICompatBackend), model
+        assert backend.disable_thinking is False, f"disable_thinking should stay False for {model}"
+        assert backend.plain_text_mode is False, f"plain_text_mode should stay False for {model}"
+
+    prose_backend = resolve_backend(_make_cfg_openai("gpt-4o"), "prose-write")
+    assert isinstance(prose_backend, OpenAICompatBackend)
+    assert prose_backend.plain_text_mode is False
+
+
+def test_explicit_user_false_overrides_gemma_default() -> None:
+    """Explicit disable_thinking=False must override the Gemma default of True for structured nodes."""
+    backend = resolve_backend(
+        _make_cfg_openai("mlx-community/gemma-4-E4B-it-qat-4bit", disable_thinking=False),
+        "jd-parse",
+    )
+    assert isinstance(backend, OpenAICompatBackend)
+    assert backend.disable_thinking is False
+
+
+def test_explicit_user_false_overrides_gemma_plain_text_mode() -> None:
+    """Explicit plain_text_mode=False must override the Gemma default of True for prose-write."""
+    backend = resolve_backend(
+        _make_cfg_openai("mlx-community/gemma-4-E4B-it-qat-4bit", plain_text_mode=False),
+        "prose-write",
+    )
+    assert isinstance(backend, OpenAICompatBackend)
+    assert backend.plain_text_mode is False
+
+
+def test_explicit_user_max_tokens_overrides_gemma_default() -> None:
+    """Explicit max_tokens must override the Gemma default."""
+    backend = resolve_backend(
+        _make_cfg_openai("mlx-community/gemma-4-E4B-it-qat-4bit", max_tokens=1024),
+        "prose-write",
+    )
+    assert isinstance(backend, OpenAICompatBackend)
+    assert backend.max_tokens == 1024
+
+
 def test_robust_parse_helpers_are_shared_single_source() -> None:
     from jobsmith.llm import robust_json
     from jobsmith.sourcing import llm_rescore

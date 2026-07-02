@@ -289,6 +289,71 @@ def _extract_tool_use(response: Any) -> tuple[dict | None, bool]:
 # Resolution — config.llm.apply (override -> default -> parent LLMSettings)
 # ---------------------------------------------------------------------------
 
+# Node names that produce long-form prose (need plain_text_mode=True on Gemma).
+_PROSE_WRITE_NODES: frozenset[str] = frozenset({"prose-write"})
+
+# Per-node max_tokens Gemma defaults: prose needs more room than structured.
+GEMMA_STRUCTURED_MAX_TOKENS = 4096
+GEMMA_PROSE_MAX_TOKENS = 8192
+
+
+def _is_gemma_model(model: str | None) -> bool:
+    """Return True when the model id contains 'gemma' (case-insensitive).
+
+    Conservative detection: only matches Gemma models served via an
+    openai_compatible backend.  Non-Gemma models are never affected.
+    """
+    return bool(model) and "gemma" in model.lower()
+
+
+def _effective_openai_compat_flags(
+    node_cfg: NodeBackendConfig, node_name: str
+) -> tuple[bool, bool, int]:
+    """Compute (disable_thinking, plain_text_mode, max_tokens) for an openai_compatible node.
+
+    Gemma-specific defaults are applied when the model id contains 'gemma'
+    AND the user has not explicitly set the field (field value is None).
+    Non-None values are always honoured verbatim — an explicit user override
+    always wins, regardless of model.
+
+    Gemma defaults (conservative — non-Gemma openai_compatible is unaffected):
+    * Structured nodes  : disable_thinking=True, plain_text_mode=False
+    * Prose-write nodes : disable_thinking=False, plain_text_mode=True
+    * max_tokens        : GEMMA_PROSE_MAX_TOKENS for prose-write,
+                          GEMMA_STRUCTURED_MAX_TOKENS for all others.
+
+    When the model is NOT Gemma, None fields fall back to the backend's built-in
+    defaults (False / DEFAULT_MAX_TOKENS).
+    """
+    is_prose = node_name in _PROSE_WRITE_NODES
+    is_gemma = _is_gemma_model(node_cfg.model)
+
+    # disable_thinking
+    if node_cfg.disable_thinking is not None:
+        disable_thinking = node_cfg.disable_thinking
+    elif is_gemma:
+        disable_thinking = not is_prose  # True for structured; False for prose-write
+    else:
+        disable_thinking = False  # backend default
+
+    # plain_text_mode
+    if node_cfg.plain_text_mode is not None:
+        plain_text_mode = node_cfg.plain_text_mode
+    elif is_gemma:
+        plain_text_mode = is_prose  # True for prose-write; False for structured
+    else:
+        plain_text_mode = False  # backend default
+
+    # max_tokens
+    if node_cfg.max_tokens is not None:
+        max_tokens = node_cfg.max_tokens
+    elif is_gemma:
+        max_tokens = GEMMA_PROSE_MAX_TOKENS if is_prose else GEMMA_STRUCTURED_MAX_TOKENS
+    else:
+        max_tokens = DEFAULT_MAX_TOKENS  # backend default
+
+    return disable_thinking, plain_text_mode, max_tokens
+
 
 def _resolve_node_config(config: JobsmithConfig, node_name: str) -> NodeBackendConfig:
     """Resolve the effective NodeBackendConfig for ``node_name``.
@@ -321,9 +386,10 @@ def resolve_backend(config: JobsmithConfig, node_name: str) -> StructuredBackend
     antigravity_cli) are cloud orchestrators or chat-only and are NOT valid
     per-node structured backends in the code-local path — they fail fast.
 
-    ``NodeBackendConfig.timeout_s``, ``max_tokens``, and ``disable_thinking``
-    are forwarded to the concrete backend when set; ``None`` keeps each
-    backend's own default so existing configs without these fields are unaffected.
+    For ``openai_compatible`` nodes, Gemma-aware defaults are applied when
+    the model id contains "gemma" (case-insensitive): see
+    :func:`_effective_openai_compat_flags` for full precedence rules.
+    Explicit user values in ``NodeBackendConfig`` always override defaults.
     """
     node_cfg = _resolve_node_config(config, node_name)
     provider = node_cfg.provider
@@ -335,15 +401,17 @@ def resolve_backend(config: JobsmithConfig, node_name: str) -> StructuredBackend
             kwargs["timeout_s"] = node_cfg.timeout_s
         return AnthropicBackend(**kwargs)
     if provider == "openai_compatible":
+        disable_thinking, plain_text_mode, max_tokens = _effective_openai_compat_flags(
+            node_cfg, node_name
+        )
         oc_kwargs: dict[str, Any] = {
             "base_url": node_cfg.base_url or "",
             "model": node_cfg.model,
             "api_key": node_cfg.api_key,
-            "disable_thinking": node_cfg.disable_thinking,
-            "plain_text_mode": node_cfg.plain_text_mode,
+            "disable_thinking": disable_thinking,
+            "plain_text_mode": plain_text_mode,
+            "max_tokens": max_tokens,
         }
-        if node_cfg.max_tokens is not None:
-            oc_kwargs["max_tokens"] = node_cfg.max_tokens
         if node_cfg.timeout_s is not None:
             oc_kwargs["timeout_s"] = node_cfg.timeout_s
         return OpenAICompatBackend(**oc_kwargs)
@@ -359,6 +427,10 @@ __all__ = [
     "OpenAICompatBackend",
     "AnthropicBackend",
     "resolve_backend",
+    "_is_gemma_model",
+    "_effective_openai_compat_flags",
     "DEFAULT_ANTHROPIC_MODEL",
     "DEFAULT_MAX_TOKENS",
+    "GEMMA_STRUCTURED_MAX_TOKENS",
+    "GEMMA_PROSE_MAX_TOKENS",
 ]

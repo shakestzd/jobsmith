@@ -286,14 +286,17 @@ class NodeBackendConfig(BaseModel):
     # ``{"chat_template_kwargs": {"enable_thinking": false}}`` in the request
     # body so mlx_lm's constrained JSON decoding applies without a thinking
     # preamble in the response that would confuse the JSON parser.
-    disable_thinking: bool = False
+    # ``None`` means "not configured by the user — apply smart defaults"
+    # (see resolve_backend in apply_local/backends.py for Gemma auto-defaults).
+    disable_thinking: bool | None = None
     # When True, the OpenAI-compatible backend skips the ``response_format``
     # (json_schema constrained decoding) and requests plain-text output instead.
     # The backend wraps the raw text into ``{"markdown": ..., "would_fabricate": ...}``
     # using a WOULD_FABRICATE sentinel line.  Best for long-form prose nodes where
     # constrained JSON decoding fights free-text generation (e.g. prose-write on
     # small local models).
-    plain_text_mode: bool = False
+    # ``None`` means "not configured by the user — apply smart defaults".
+    plain_text_mode: bool | None = None
 
     @model_validator(mode="after")
     def _validate_provider_requirements(self) -> NodeBackendConfig:

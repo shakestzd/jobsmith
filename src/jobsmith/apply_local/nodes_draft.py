@@ -370,8 +370,17 @@ def build_draft_pipeline(config: JobsmithConfig, slug: str, *, root: Any) -> Pip
     voice_guide = load_voice_guide(config, repo_root=repo_root)
     # Derive plain_text_mode from the per-node (then default) backend config so
     # the node's system prompt matches the backend's completion strategy.
+    # Use the same effective-flags resolution as resolve_backend so that Gemma
+    # auto-defaults (plain_text_mode=True for prose-write) propagate to the
+    # system prompt path even when the user hasn't set plain_text_mode explicitly.
     _node_cfg = config.llm.apply.node_backends.get(NODE_PROSE_WRITE) or config.llm.apply.node_backend
-    _plain = _node_cfg.plain_text_mode if _node_cfg is not None else False
+    if _node_cfg is not None and _node_cfg.provider == "openai_compatible":
+        from jobsmith.apply_local.backends import _effective_openai_compat_flags
+        _, _plain, _ = _effective_openai_compat_flags(_node_cfg, NODE_PROSE_WRITE)
+    elif _node_cfg is not None:
+        _plain = bool(_node_cfg.plain_text_mode)
+    else:
+        _plain = False
     write_node = make_prose_write_node(master, voice_guide=voice_guide, plain_text_mode=_plain)
     draft_node = ProseDraftNode(write_node, slug=slug, root=repo_root, max_iter=MAX_DRAFT_ITERS)
     loop = LoopStage(draft_node, _qa_passed, max_iter=MAX_DRAFT_ITERS)
