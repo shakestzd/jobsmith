@@ -32,7 +32,7 @@ from typing import Any
 import yaml
 
 from jobsmith.apply_local.checkpoint import apply_state_dir
-from jobsmith.apply_local.nodes_draft import ART_PROSE_DRAFT
+from jobsmith.apply_local.nodes_draft import ART_PROSE_DRAFT, run_prose_qa_checks
 from jobsmith.assemble import PACKAGE_ROOT, assemble_application
 from jobsmith.config import JobsmithConfig
 from jobsmith.paths import resolve
@@ -60,6 +60,12 @@ class RenderResult:
     pdf_path: str | None = None
     reason: str | None = None
     artifacts: dict[str, str] = field(default_factory=dict)
+    # The resume renders its work bullets from work.yml, NOT prose-draft.md — so
+    # the prose-qa gate does not cover them. We re-run the deterministic checks on
+    # the ACTUAL resume bullets so un-QA'd bullet text never silently ships
+    # (roborev 1066). ``qa_pass`` False means blocking findings on those bullets.
+    qa_pass: bool = True
+    qa_findings: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +280,19 @@ def _render_local(slug: str, config: JobsmithConfig, *, repo_root: Any) -> Rende
     _ensure_extensions(documents, root)
     result = _quarto_render(documents)
 
+    # Gate the resume's ACTUAL work bullets (work.yml) with the deterministic
+    # prose-qa checks — prose-qa only saw prose-draft.md (roborev 1066).
+    bullets_md = _resume_bullets_markdown(documents)
+    if bullets_md:
+        qa = run_prose_qa_checks(bullets_md, iteration=1)
+        result.qa_pass = qa.get("decision") == "pass"
+        result.qa_findings = qa.get("blocking_findings", [])
+        if not result.qa_pass:
+            logger.warning(
+                "apply_local render: %d QA finding(s) on resume work.yml bullets",
+                len(result.qa_findings),
+            )
+
     result.artifacts.update(_doc_artifacts(documents))
     if result.pdf_path:
         result.artifacts["resume_pdf"] = result.pdf_path
@@ -284,6 +303,25 @@ def _render_local(slug: str, config: JobsmithConfig, *, repo_root: Any) -> Rende
 def _read_draft(state: Path) -> str:
     path = state / ART_PROSE_DRAFT
     return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
+def _resume_bullets_markdown(documents: Path) -> str:
+    """The resume's work.yml bullets as markdown ``- `` lines for the QA checks."""
+    work = documents / "work.yml"
+    if not work.is_file():
+        return ""
+    try:
+        data = yaml.safe_load(work.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return ""
+    lines: list[str] = []
+    for position in data if isinstance(data, list) else []:
+        details = position.get("details") if isinstance(position, dict) else None
+        for detail in details or []:
+            text = detail.get("bullet", "") if isinstance(detail, dict) else str(detail)
+            if text.strip():
+                lines.append(f"- {text.strip()}")
+    return "\n".join(lines)
 
 
 def _doc_artifacts(documents: Path) -> dict[str, str]:

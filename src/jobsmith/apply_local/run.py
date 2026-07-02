@@ -77,6 +77,9 @@ class ApplyOutcome:
     # gather/draft artifacts are valuable and kept — but it is surfaced here (and
     # in ``reason`` for an error) so the CLI / run-history can report it.
     render_status: str | None = None
+    # False when the deterministic QA checks flag the resume's actual work.yml
+    # bullets (roborev 1066) — surfaced so unchecked bullet text is never silent.
+    resume_qa_pass: bool = True
 
     @property
     def ok(self) -> bool:
@@ -294,11 +297,15 @@ def _finish_render(
     """
     render = render_local(slug, config, repo_root=repo_root)
     outcome.render_status = render.status
+    outcome.resume_qa_pass = render.qa_pass
     outcome.artifacts.update(render.artifacts)
     if render.pdf_path:
         outcome.artifacts["resume_pdf"] = render.pdf_path
     if render.status == "error":
         outcome.reason = render.reason
+    elif not render.qa_pass:
+        cats = "; ".join(sorted({str(f.get("category", "?")) for f in render.qa_findings}))
+        outcome.reason = f"resume work bullets have unresolved QA findings: {cats}"
 
 
 def run_local_apply(
