@@ -198,20 +198,22 @@ def _endpoint_live(base_url: str | None) -> bool:
     return bool(base_url) and vllm_mlx._models_ready(_port_of(base_url))
 
 
-def ensure_engine(config: JobsmithConfig) -> tuple[str, bool]:
+def ensure_engine(config: JobsmithConfig, *, model: str | None = None) -> tuple[str, bool]:
     """Return ``(base_url, managed)`` for a healthy local engine.
 
     Reuses a user-run endpoint already serving at the configured base_url
     (``managed=False``); otherwise starts and waits on our own managed engine
-    (``managed=True``). Raises :class:`EngineUnavailableError` if it cannot be
-    made ready.
+    serving ``model`` (``managed=True``). ``model`` should be the model the
+    managed local nodes actually target (roborev 1065); falls back to the
+    default ``node_backend`` model. Raises :class:`EngineUnavailableError` if it
+    cannot be made ready.
     """
     configured = _configured_endpoint(config)
     if _endpoint_live(configured):
         logger.info("apply_local: using already-serving engine at %s", configured)
         return configured, False
 
-    model = _engine_model(config)
+    model = model or _engine_model(config)
     try:
         vllm_mlx.start(model)
     except vllm_mlx.VllmMlxNotInstalledError as exc:
@@ -232,6 +234,20 @@ def ensure_engine(config: JobsmithConfig) -> tuple[str, bool]:
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
+
+
+def _discard_prior_run(slug: str, repo_root: Any) -> None:
+    """Remove any prior ``.apply-state`` + ``documents`` for a forced fresh run.
+
+    Without this, checkpoint resume (and an already-built resume.qmd) would make
+    ``--force`` return stale outputs (roborev 1065).
+    """
+    import shutil
+
+    state = apply_state_dir(slug, root=repo_root)
+    for d in (state, state.parent / "documents"):
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
 
 
 def _load_draft_context(slug: str, repo_root: Any) -> dict[str, Any]:
@@ -294,6 +310,7 @@ def run_local_apply(
     jd_url: str | None = None,
     backend: StructuredBackend | None = None,
     run_id: str | None = None,
+    force: bool = False,
 ) -> ApplyOutcome:
     """Run a code_local gather->draft->render apply for ``slug`` on ``jd_text``.
 
@@ -302,10 +319,14 @@ def run_local_apply(
     ``applications/{slug}/.apply-state`` artifacts, then renders the resume PDF
     and assembles the portfolio PURELY in code (no ``claude -p``). The apply is
     recorded in the pipeline ``apply_runs`` table (a clean no-op when no config
-    DB is present). When ``backend`` is injected (tests / explicit backend), the
-    engine is not managed.
+    DB is present). ``run_id`` ties the record to the caller's run; ``force``
+    discards any prior ``.apply-state``/``documents`` so a fresh run never
+    resumes stale artifacts (roborev 1065). When ``backend`` is injected (tests /
+    explicit backend), the engine is not managed.
     """
     on_failure = config.llm.apply.on_failure
+    if force:
+        _discard_prior_run(slug, repo_root)
     gather = build_gather_pipeline(config, slug, root=repo_root)
     draft = build_draft_pipeline(config, slug, root=repo_root)
 
@@ -321,8 +342,11 @@ def run_local_apply(
         # clobbered (roborev 1061).
         need_managed = [b for b in local if not _endpoint_live(b.base_url)]
         if need_managed:
+            # Serve the model the managed nodes actually target — not merely the
+            # default node_backend model (roborev 1065).
+            managed_model = next((b.model for b in need_managed if getattr(b, "model", None)), None)
             try:
-                base_url, managed = ensure_engine(config)
+                base_url, managed = ensure_engine(config, model=managed_model)
             except EngineUnavailableError as exc:
                 return ApplyOutcome(
                     status=ENGINE_DOWN,
