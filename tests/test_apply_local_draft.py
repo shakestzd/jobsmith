@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from jobsmith.apply_local.backends import AnthropicBackend, OpenAICompatBackend, resolve_backend
@@ -308,3 +309,38 @@ def test_prose_draft_model_carries_markdown_and_fabricate_signal() -> None:
     obj = ProseDraft.model_validate({"markdown": "# Professional Summary\n\nHi.", "would_fabricate": None})
     assert obj.markdown.startswith("# Professional Summary")
     assert obj.would_fabricate is None
+
+
+# ===========================================================================
+# FIX 1 — empty/blank draft guard in run_prose_qa_checks
+# ===========================================================================
+
+
+@pytest.mark.parametrize("empty", ["", "   ", "\n\t\n"])
+def test_empty_draft_is_never_pass(empty: str) -> None:
+    """An empty or whitespace-only draft must never return decision='pass'."""
+    report = run_prose_qa_checks(empty, iteration=1, max_iter=MAX_DRAFT_ITERS)
+    assert report["decision"] != "pass", "empty draft must not pass qa"
+    assert any(f["category"] == "empty_draft" for f in report["blocking_findings"])
+
+
+def test_empty_draft_decision_is_revise_before_max_iter() -> None:
+    report = run_prose_qa_checks("", iteration=1, max_iter=3)
+    assert report["decision"] == "revise"
+
+
+def test_empty_draft_decision_is_halt_at_max_iter() -> None:
+    report = run_prose_qa_checks("", iteration=3, max_iter=3)
+    assert report["decision"] == "halt"
+
+
+def test_empty_draft_loop_halts_not_passes(tmp_path: Path) -> None:
+    """Pipeline with a prose-write that always returns empty markdown must HALT, not pass."""
+    cfg = _setup(tmp_path)
+    # StubBackend always returns parse_ok=False (None, False) for empty content;
+    # simulate: return a ProseDraft with markdown="" which triggers FIX 1.
+    backend = StubBackend(fixed=_prose_payload(""))
+    result = build_draft_pipeline(cfg, SLUG, root=tmp_path).run(backend, context=_ctx())
+
+    assert result.status == "halt", "pipeline must HALT on repeated empty draft, never 'ok'"
+    assert backend.calls == MAX_DRAFT_ITERS

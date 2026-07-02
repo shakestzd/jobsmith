@@ -308,6 +308,67 @@ def test_resolved_backend_satisfies_protocol() -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# plain_text_mode — OpenAICompatBackend skips response_format, wraps prose
+# ---------------------------------------------------------------------------
+
+
+def test_plain_text_mode_skips_response_format() -> None:
+    """plain_text_mode must NOT send response_format to the underlying client."""
+    client = _FakeCompatClient("# Summary\n\n- Built a pipeline.")
+    backend = OpenAICompatBackend(base_url="http://x/v1", plain_text_mode=True, _client=client)
+
+    data, ok = backend.complete_structured([{"role": "user", "content": "write it"}], NODE_SCHEMA)
+
+    assert ok is True
+    assert data == {"markdown": "# Summary\n\n- Built a pipeline.", "would_fabricate": None}
+    assert client.calls[0]["response_format"] is None, "response_format must be None in plain_text_mode"
+
+
+def test_plain_text_mode_empty_response_is_parse_failure() -> None:
+    """Empty text in plain_text_mode → (None, False) so the driver can reask."""
+    client = _FakeCompatClient("")
+    backend = OpenAICompatBackend(base_url="http://x/v1", plain_text_mode=True, _client=client)
+
+    data, ok = backend.complete_structured([{"role": "user", "content": "write it"}], NODE_SCHEMA)
+
+    assert ok is False
+    assert data is None
+
+
+def test_plain_text_mode_would_fabricate_sentinel_extracted() -> None:
+    """A WOULD_FABRICATE: prefix is parsed and returned in would_fabricate field."""
+    client = _FakeCompatClient("WOULD_FABRICATE: $500M cost savings not in context")
+    backend = OpenAICompatBackend(base_url="http://x/v1", plain_text_mode=True, _client=client)
+
+    data, ok = backend.complete_structured([{"role": "user", "content": "write it"}], NODE_SCHEMA)
+
+    assert ok is True
+    assert data is not None
+    assert data["would_fabricate"] == "$500M cost savings not in context"
+    assert data["markdown"] == ""
+
+
+def test_plain_text_mode_forwarded_by_resolve_backend() -> None:
+    """resolve_backend must forward plain_text_mode=True to OpenAICompatBackend."""
+    from jobsmith.config import ApplySettings
+
+    cfg = JobsmithConfig(
+        llm=LLMSettings(
+            apply=ApplySettings(
+                node_backend=NodeBackendConfig(
+                    provider="openai_compatible",
+                    base_url="http://x/v1",
+                    plain_text_mode=True,
+                )
+            )
+        )
+    )
+    backend = resolve_backend(cfg, "prose-write")
+    assert isinstance(backend, OpenAICompatBackend)
+    assert backend.plain_text_mode is True
+
+
 def test_robust_parse_helpers_are_shared_single_source() -> None:
     from jobsmith.llm import robust_json
     from jobsmith.sourcing import llm_rescore

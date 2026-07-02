@@ -122,7 +122,19 @@ class OpenAICompatBackend:
     max_tokens:
         Maximum generation tokens; forwarded to :class:`OpenAICompatClient`.
         Prevents local engines from timing out waiting for context exhaustion.
+    plain_text_mode:
+        When True, skip the ``response_format`` (json_schema constrained decoding)
+        and request plain-text output.  The raw response is wrapped into
+        ``{"markdown": text, "would_fabricate": None}`` (or the would-fabricate
+        sentinel is extracted if the response starts with ``WOULD_FABRICATE:``).
+        Returns ``(None, False)`` when the response is empty so the driver's
+        bounded reask loop retries rather than passing an empty draft through.
+        Use this for long-form prose nodes where constrained JSON decoding fights
+        free-text generation (e.g. ``prose-write`` with small local models).
     """
+
+    # Sentinel prefix prose-write emits when it cannot verify a claim.
+    _FABRICATE_SENTINEL = "WOULD_FABRICATE:"
 
     def __init__(
         self,
@@ -133,6 +145,7 @@ class OpenAICompatBackend:
         timeout_s: float = DEFAULT_TIMEOUT_S,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         disable_thinking: bool = False,
+        plain_text_mode: bool = False,
         _client: Any = None,
     ) -> None:
         self.base_url = base_url
@@ -141,6 +154,7 @@ class OpenAICompatBackend:
         self.timeout_s = timeout_s
         self.max_tokens = max_tokens
         self.disable_thinking = disable_thinking
+        self.plain_text_mode = plain_text_mode
         self._client = _client  # injectable for tests
 
     def _get_client(self) -> Any:
@@ -163,6 +177,8 @@ class OpenAICompatBackend:
         extra: dict | None = None
         if self.disable_thinking:
             extra = {"chat_template_kwargs": {"enable_thinking": False}}
+        if self.plain_text_mode:
+            return self._complete_plain(client, messages, temperature=temperature, extra=extra)
         content = client.complete(
             messages,
             response_format=_openai_response_format(schema),
@@ -173,6 +189,30 @@ class OpenAICompatBackend:
         if obj is None:
             return None, False
         return obj, True
+
+    def _complete_plain(
+        self,
+        client: Any,
+        messages: list[dict],
+        *,
+        temperature: float,
+        extra: dict | None,
+    ) -> tuple[dict | None, bool]:
+        """Plain-text completion: no response_format, wraps result as markdown envelope.
+
+        Returns ``({"markdown": text, "would_fabricate": None}, True)`` when the
+        model produces non-empty prose, ``({"markdown": "", "would_fabricate":
+        claim}, True)`` on a WOULD_FABRICATE sentinel, and ``(None, False)`` when
+        the response is empty so the driver's reask loop can retry.
+        """
+        content = client.complete(messages, response_format=None, temperature=temperature, extra=extra)
+        text = (content or "").strip()
+        if not text:
+            return None, False
+        if text.startswith(self._FABRICATE_SENTINEL):
+            claim = text[len(self._FABRICATE_SENTINEL):].strip().splitlines()[0].strip()
+            return {"markdown": "", "would_fabricate": claim or "unspecified fabrication"}, True
+        return {"markdown": text, "would_fabricate": None}, True
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +340,7 @@ def resolve_backend(config: JobsmithConfig, node_name: str) -> StructuredBackend
             "model": node_cfg.model,
             "api_key": node_cfg.api_key,
             "disable_thinking": node_cfg.disable_thinking,
+            "plain_text_mode": node_cfg.plain_text_mode,
         }
         if node_cfg.max_tokens is not None:
             oc_kwargs["max_tokens"] = node_cfg.max_tokens

@@ -179,7 +179,28 @@ def run_prose_qa_checks(markdown: str, *, iteration: int, max_iter: int = MAX_DR
     violation contributes one ``blocking_findings`` entry. ``decision`` is
     ``pass`` when there are none, ``halt`` once ``iteration`` reaches ``max_iter``
     with findings remaining, else ``revise``.
+
+    An empty/whitespace draft is itself a blocking finding (``check="empty_draft"``)
+    so a 0-byte response from prose-write NEVER returns ``pass`` — it is ``revise``
+    until the cap, then ``halt``.
     """
+    if not markdown or not markdown.strip():
+        empty_finding = {
+            "category": "empty_draft",
+            "span": "draft is empty or whitespace-only",
+            "suggestion": "prose-write must return a non-empty markdown body",
+        }
+        decision = "halt" if iteration >= max_iter else "revise"
+        return {
+            "iteration": iteration,
+            "decision": decision,
+            "blocking_findings": [empty_finding],
+            "advisory_findings": [],
+            "bullet_style_checks": {key: {"violations": 0, "details": []} for key in CHECK_KEYS},
+            "words_unchanged": [],
+            "calibration_metrics": {"false_positive_estimate": 0.0},
+        }
+
     aggregate: dict[str, list[str]] = {key: [] for key in CHECK_KEYS}
     for bullet in _bullet_lines(markdown):
         for key, details in _check_bullet(bullet).items():
@@ -214,8 +235,27 @@ def run_prose_qa_checks(markdown: str, *, iteration: int, max_iter: int = MAX_DR
 # ---------------------------------------------------------------------------
 
 
-def make_prose_write_node(master: MasterData, *, voice_guide: str) -> Node:
-    """Build the prose-write :class:`Node` (Markdown-in-JSON envelope)."""
+_PLAIN_SYSTEM_PROMPT = (
+    "You are a resume prose writer. Write the resume content as plain Markdown — "
+    "a Professional Summary section followed by Tailored Bullets — with NO JSON, "
+    "no code fences, and no commentary.\n"
+    "If you cannot include a specific metric or achievement because it is not "
+    "present in the provided context and including it would require invention, "
+    "start your ENTIRE response with exactly:\n"
+    "WOULD_FABRICATE: <one-line description of the claim you cannot verify>\n"
+    "Otherwise, write only the Markdown body."
+)
+
+
+def make_prose_write_node(master: MasterData, *, voice_guide: str, plain_text_mode: bool = False) -> Node:
+    """Build the prose-write :class:`Node` (Markdown-in-JSON envelope).
+
+    When ``plain_text_mode=True`` the system prompt asks for plain Markdown (no
+    JSON schema) and the backend is expected to wrap the response itself — see
+    :class:`~jobsmith.apply_local.backends.OpenAICompatBackend` with
+    ``plain_text_mode=True``.  Use this with small local models where constrained
+    JSON decoding fights long-form generation.
+    """
     schema = response_format(ProseDraft, "prose_draft")
 
     def build_messages(ctx: Mapping[str, Any]) -> list[dict]:
@@ -227,15 +267,16 @@ def make_prose_write_node(master: MasterData, *, voice_guide: str) -> Node:
             voice_guide=voice_guide,
             prior_findings=ctx.get("prior_findings"),
         )
-        schema_obj = (schema.get("json_schema") or {}).get("schema", schema)
+        if plain_text_mode:
+            system_content = _PLAIN_SYSTEM_PROMPT
+        else:
+            schema_obj = (schema.get("json_schema") or {}).get("schema", schema)
+            system_content = (
+                "You are a resume prose writer. Respond with ONE JSON object matching "
+                "this schema and nothing else:\n" + json.dumps(schema_obj)
+            )
         return [
-            {
-                "role": "system",
-                "content": (
-                    "You are a resume prose writer. Respond with ONE JSON object matching "
-                    "this schema and nothing else:\n" + json.dumps(schema_obj)
-                ),
-            },
+            {"role": "system", "content": system_content},
             {"role": "user", "content": prompt},
         ]
 
@@ -319,11 +360,19 @@ def build_draft_pipeline(config: JobsmithConfig, slug: str, *, root: Any) -> Pip
     :data:`MAX_DRAFT_ITERS` times via the driver's :class:`LoopStage`. The
     ``slug`` is threaded through the context so the loop node writes its artifacts
     under ``applications/{slug}/.apply-state``.
+
+    ``plain_text_mode`` is read from the per-node backend config for
+    :data:`NODE_PROSE_WRITE` (falling back to the default node backend) so the
+    prose-write Node's system prompt matches the backend's completion mode.
     """
     repo_root = Path(root)
     master = load_master_data(config, repo_root=repo_root)
     voice_guide = load_voice_guide(config, repo_root=repo_root)
-    write_node = make_prose_write_node(master, voice_guide=voice_guide)
+    # Derive plain_text_mode from the per-node (then default) backend config so
+    # the node's system prompt matches the backend's completion strategy.
+    _node_cfg = config.llm.apply.node_backends.get(NODE_PROSE_WRITE) or config.llm.apply.node_backend
+    _plain = _node_cfg.plain_text_mode if _node_cfg is not None else False
+    write_node = make_prose_write_node(master, voice_guide=voice_guide, plain_text_mode=_plain)
     draft_node = ProseDraftNode(write_node, slug=slug, root=repo_root, max_iter=MAX_DRAFT_ITERS)
     loop = LoopStage(draft_node, _qa_passed, max_iter=MAX_DRAFT_ITERS)
     return Pipeline([loop], slug=slug, root=repo_root)
