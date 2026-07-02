@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Sync main into trk-f5052600, re-gate, and merge to main</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-5106a095"
+             data-type="feature"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-07-02T07:38:16.042935"
+             data-updated="2026-07-02T08:16:33.70184" data-agent-assigned="claude-code" data-track-id="trk-f5052600" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.67.1">
+
+        <header>
+            <h1>Sync main into trk-f5052600, re-gate, and merge to main</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-f5052600.html" data-relationship="part_of" data-since="2026-07-02T07:38:16.057209">trk-f5052600</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/41bc4b7a-5c34-4d6f-8bc0-fe909326b8df.html" data-relationship="implemented_in" data-since="2026-07-02T07:38:16.151424">session 41bc4b7a-5c34-4d6f-8bc0-fe909326b8df</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-steps>
+            <h3>Implementation Steps</h3>
+            <ol>
+                <li data-completed="true" data-step-id="task-5" data-agent="claude-code" data-created-by-agent="claude-code">✅ Merge main into trk-f5052600 &#43; re-gate (feat-5106a095)</li>
+            </ol>
+        </section>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Land the code_local pluggable-backend apply pipeline (Gemma-4 e2e gate now passing, commit 8bebe92) onto main. (1) merge main into trk-f5052600, resolve conflicts (config.py edited both sides); (2) re-run quality gates + the live Gemma-4 gather-&gt;draft e2e to confirm still green after absorbing main&#39;s 72 commits; (3) merge trk-f5052600 into main after committing main&#39;s pending wipnote/htmlgraph bookkeeping. Branch is 72 behind / 35 ahead of main.</p>
+        </section>
+    </article>
+</body>
+</html>
