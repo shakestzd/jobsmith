@@ -257,12 +257,49 @@ def build_bullet_select_prompt(
     master: MasterData, jd_parsed: dict[str, Any], fit_score: dict[str, Any] | None
 ) -> str:
     """Prompt for bullet-select — JD + fit + master work/skill bullet inventory."""
+    anchor_bullets = [b for b in master.work_bullets if b.is_anchor]
+    anchor_id_lines = "\n".join(
+        f"  - {b.bullet_id}  ({b.company} / {b.position_title}): {b.text[:80]}"
+        for b in anchor_bullets
+    )
+    anchor_count = len(anchor_bullets)
+
     parts = [
         "Select and reorder the candidate's master work bullets to match the JD.",
-        "Reference bullets ONLY by their (id). NEVER fabricate: select, reorder, and "
-        "JD-keyword-phrase existing bullets. Preserve [ANCHOR] bullets unless you log "
-        "a reason_if_dropped. List any JD must-have you cannot map to a master bullet "
-        "in uncovered_must_haves.",
+        # Explicit output contract — mirrors the jd-parse explicit-contract style.
+        (
+            "OUTPUT CONTRACT — fill every field exactly as described:\n"
+            '\n'
+            '  "positions"  — array of the CANDIDATE\'S actual work-history positions.\n'
+            "                 Derive company + title from the master bullet listing below\n"
+            "                 (one entry per distinct employer/role that appears there).\n"
+            "                 NEVER invent a position for the target JD company — the JD\n"
+            "                 company is where the candidate wants to work, not where they\n"
+            "                 have worked.\n"
+            "                 EVERY master bullet below MUST appear in exactly one\n"
+            '                 position\'s bullets[] with an explicit "included" flag.\n'
+            "                 A bullet omitted entirely is treated as a silent drop and\n"
+            "                 HALTS the pipeline.\n"
+            '\n'
+            '  "included"   — REQUIRED boolean on every bullet entry.\n'
+            "                 true  = keep in the tailored resume.\n"
+            "                 false = drop from the tailored resume.\n"
+            "                 Omitting this field on any bullet HALTS the pipeline.\n"
+            '\n'
+            '  "reason_if_dropped" — REQUIRED non-empty string when included is false\n'
+            "                 AND the bullet is marked [ANCHOR] in the inventory below.\n"
+            "                 Omitting the reason (or leaving it null) for a dropped\n"
+            "                 anchor HALTS the pipeline.\n"
+            '\n'
+            '  "anchor_bullets_master" — list the IDs of ALL anchor bullets (every\n'
+            f"                 [ANCHOR] bullet in the inventory = {anchor_count} total).\n"
+            '  "anchor_bullets_kept"   — IDs of anchor bullets with included:true.\n'
+            '  "anchor_bullets_dropped"— one entry per anchor with included:false,\n'
+            "                 each entry must carry a non-empty reason.\n"
+            '\n'
+            f"ANCHOR BULLETS ({anchor_count} total — you MUST account for every one):\n"
+            + (anchor_id_lines if anchor_id_lines else "  [none]")
+        ),
         "## Job\n" + json.dumps(jd_parsed, ensure_ascii=False, indent=2),
     ]
     if fit_score:
@@ -270,6 +307,11 @@ def build_bullet_select_prompt(
         parts.append("## Fit must-have table\n" + json.dumps(table, ensure_ascii=False))
     parts.append("## Master work bullets\n" + _render_bullets(master.work_bullets))
     parts.append(_render_section("Master skills", master.skill))
+    parts.append(
+        "Reference bullets ONLY by their (id). NEVER fabricate: select, reorder, and "
+        "JD-keyword-phrase existing bullets. List any JD must-have you cannot map to a "
+        "master bullet in uncovered_must_haves. Output only the JSON object."
+    )
     return "\n\n".join(parts)
 
 
