@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>prose-write emits empty markdown; prose-qa false-passes empty draft (Gemma-4)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="bug-95170484"
+             data-type="bug"
+             data-status="in-progress"
+             data-priority="medium"
+             data-created="2026-07-02T03:23:26.857215"
+             data-updated="2026-07-02T07:15:42.244972" data-agent-assigned="claude-code" data-track-id="trk-f5052600" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.67.1">
+
+        <header>
+            <h1>prose-write emits empty markdown; prose-qa false-passes empty draft (Gemma-4)</h1>
+            <div class="metadata">
+                <span class="badge status-in-progress">In Progress</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-f5052600.html" data-relationship="part_of" data-since="2026-07-02T03:23:26.870505">trk-f5052600</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/41bc4b7a-5c34-4d6f-8bc0-fe909326b8df.html" data-relationship="implemented_in" data-since="2026-07-02T07:15:11.218665">session 41bc4b7a-5c34-4d6f-8bc0-fe909326b8df</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-steps>
+            <h3>Implementation Steps</h3>
+            <ol>
+                <li data-completed="false" data-step-id="task-4" data-agent="claude-code" data-created-by-agent="claude-code">⏳ Fix prose-write empty output &#43; prose-qa empty guard (bug-95170484)</li>
+            </ol>
+        </section>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>With a matching JD the code_local gather stage fully passes (jd-parse, fit-score, bullet-select 15/15, all anchors, 0 uncovered). But prose-write returns {markdown:&#39;&#39;, would_fabricate:null}: Gemma-4-E4B under disable_thinking + json_schema constrained decoding defaults the large free-text markdown field to empty. Then run_prose_qa_checks() in nodes_draft.py treats empty markdown as zero violations -&gt; decision=pass -&gt; outcome.status=ok with a 0-byte prose-draft.md (FALSE SUCCESS). Fix 1 (correctness, do regardless): add an empty/blank-markdown guard in run_prose_qa_checks so a blank draft yields revise (or halt at max_iter), never pass. Fix 2 (generation): make prose-write actually produce prose - likely stop forcing the big markdown field through json_schema constrained decoding (request plain markdown + wrap), and/or re-enable thinking / raise max_tokens for the draft node; may be a gemma-4-E4B long-form capability wall. Blocks the plan-a40fac81 e2e gate (needs non-empty prose-draft.md).</p>
+        </section>
+    </article>
+</body>
+</html>
