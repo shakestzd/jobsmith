@@ -272,6 +272,15 @@ class NodeBackendConfig(BaseModel):
     model: str | None = None
     base_url: str | None = None
     api_key: str | None = None
+    # Optional overrides for the OpenAI-compatible backend.  ``None`` means
+    # "use the backend's built-in default" so existing configs are unaffected.
+    max_tokens: int | None = None
+    timeout_s: float | None = None
+    # When True, the OpenAI-compatible backend sends
+    # ``{"chat_template_kwargs": {"enable_thinking": false}}`` in the request
+    # body so mlx_lm's constrained JSON decoding applies without a thinking
+    # preamble in the response that would confuse the JSON parser.
+    disable_thinking: bool = False
 
     @model_validator(mode="after")
     def _validate_provider_requirements(self) -> NodeBackendConfig:

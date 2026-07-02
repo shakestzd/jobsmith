@@ -111,6 +111,17 @@ class OpenAICompatBackend:
     are NOT swallowed here — the driver's :meth:`Node._attempt` catches them and
     turns them into a reask, so this backend's only failure mode is returning
     ``parse_ok=False`` for content it cannot coerce into a JSON object.
+
+    Parameters
+    ----------
+    disable_thinking:
+        When True, sends ``{"chat_template_kwargs": {"enable_thinking": false}}``
+        in the request body so mlx_lm's constrained JSON decoding applies without
+        a Gemma-4 thinking preamble in the response.  Has no effect on servers
+        that don't recognise the key.
+    max_tokens:
+        Maximum generation tokens; forwarded to :class:`OpenAICompatClient`.
+        Prevents local engines from timing out waiting for context exhaustion.
     """
 
     def __init__(
@@ -120,12 +131,16 @@ class OpenAICompatBackend:
         model: str | None = None,
         api_key: str | None = None,
         timeout_s: float = DEFAULT_TIMEOUT_S,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        disable_thinking: bool = False,
         _client: Any = None,
     ) -> None:
         self.base_url = base_url
         self.model = model
         self.api_key = api_key
         self.timeout_s = timeout_s
+        self.max_tokens = max_tokens
+        self.disable_thinking = disable_thinking
         self._client = _client  # injectable for tests
 
     def _get_client(self) -> Any:
@@ -138,16 +153,21 @@ class OpenAICompatBackend:
             model=self.model or "default",
             api_key=self.api_key,
             timeout_s=self.timeout_s,
+            max_tokens=self.max_tokens,
         )
 
     def complete_structured(
         self, messages: list[dict], schema: dict, *, temperature: float = 0.0
     ) -> tuple[dict | None, bool]:
         client = self._get_client()
+        extra: dict | None = None
+        if self.disable_thinking:
+            extra = {"chat_template_kwargs": {"enable_thinking": False}}
         content = client.complete(
             messages,
             response_format=_openai_response_format(schema),
             temperature=temperature,
+            extra=extra,
         )
         obj = coerce_json_object(content)
         if obj is None:
@@ -260,17 +280,32 @@ def resolve_backend(config: JobsmithConfig, node_name: str) -> StructuredBackend
     :class:`OpenAICompatBackend`. Other providers (claude_cli / codex_cli /
     antigravity_cli) are cloud orchestrators or chat-only and are NOT valid
     per-node structured backends in the code-local path — they fail fast.
+
+    ``NodeBackendConfig.timeout_s``, ``max_tokens``, and ``disable_thinking``
+    are forwarded to the concrete backend when set; ``None`` keeps each
+    backend's own default so existing configs without these fields are unaffected.
     """
     node_cfg = _resolve_node_config(config, node_name)
     provider = node_cfg.provider
     if provider == "anthropic":
-        return AnthropicBackend(model=node_cfg.model, api_key=node_cfg.api_key)
+        kwargs: dict[str, Any] = {"model": node_cfg.model, "api_key": node_cfg.api_key}
+        if node_cfg.max_tokens is not None:
+            kwargs["max_tokens"] = node_cfg.max_tokens
+        if node_cfg.timeout_s is not None:
+            kwargs["timeout_s"] = node_cfg.timeout_s
+        return AnthropicBackend(**kwargs)
     if provider == "openai_compatible":
-        return OpenAICompatBackend(
-            base_url=node_cfg.base_url or "",
-            model=node_cfg.model,
-            api_key=node_cfg.api_key,
-        )
+        oc_kwargs: dict[str, Any] = {
+            "base_url": node_cfg.base_url or "",
+            "model": node_cfg.model,
+            "api_key": node_cfg.api_key,
+            "disable_thinking": node_cfg.disable_thinking,
+        }
+        if node_cfg.max_tokens is not None:
+            oc_kwargs["max_tokens"] = node_cfg.max_tokens
+        if node_cfg.timeout_s is not None:
+            oc_kwargs["timeout_s"] = node_cfg.timeout_s
+        return OpenAICompatBackend(**oc_kwargs)
     raise ValueError(
         f"provider {provider!r} is not a valid per-node apply backend; "
         "the code-local orchestrator supports 'openai_compatible' (local engines) "

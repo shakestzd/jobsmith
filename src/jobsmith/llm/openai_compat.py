@@ -88,6 +88,11 @@ class OpenAICompatClient:
         local MLX/Ollama servers ignore it, so it is harmless when absent.
     timeout_s:
         Per-request timeout in seconds (maps to ``config.llm.timeout_s``).
+    max_tokens:
+        Maximum number of tokens the server may generate per request. Sending an
+        explicit cap prevents local engines (mlx_lm, Ollama) from waiting until
+        context is exhausted before returning, which would otherwise cause a
+        300-second timeout on every structured call. Default 4096.
     """
 
     def __init__(
@@ -97,6 +102,7 @@ class OpenAICompatClient:
         model: str,
         api_key: str | None = None,
         timeout_s: float = 300.0,
+        max_tokens: int = 4096,
     ) -> None:
         if not base_url:
             raise ValueError("OpenAICompatClient requires a non-empty base_url.")
@@ -104,6 +110,7 @@ class OpenAICompatClient:
         self.model = model
         self.api_key = api_key
         self.timeout_s = timeout_s
+        self.max_tokens = max_tokens
 
     # ------------------------------------------------------------------
     # Request construction
@@ -124,7 +131,12 @@ class OpenAICompatClient:
         temperature: float | None = None,
         extra: dict | None = None,
     ) -> dict:
-        payload: dict = {"model": self.model, "messages": messages, "stream": stream}
+        payload: dict = {
+            "model": self.model,
+            "messages": messages,
+            "stream": stream,
+            "max_tokens": self.max_tokens,
+        }
         if response_format is not None:
             payload["response_format"] = response_format
         if temperature is not None:

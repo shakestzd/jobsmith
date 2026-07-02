@@ -202,13 +202,35 @@ def _render_section(label: str, data: Any) -> str:
 
 def build_jd_parse_prompt(*, jd_text: str | None, jd_url: str | None, explicit_company: str | None) -> str:
     """Prompt for jd-parse — JD url/text only, no master data."""
-    parts = ["Extract structured fields from this job posting."]
+    parts = [
+        "Extract structured fields from this job posting and return a JSON object.",
+        (
+            "The JSON object MUST use EXACTLY these field names "
+            "(use null for unknown optional fields):\n"
+            '  "company"        — string: employer name (REQUIRED)\n'
+            '  "position"       — string: job title (REQUIRED)\n'
+            '  "role_type"      — string: one of "data-analyst", "data-engineer", '
+            '"ai-engineer", "finance", "renewable-energy", "general" (REQUIRED)\n'
+            '  "must_haves"     — array of strings: at least 2 concrete requirements '
+            "from the JD text (REQUIRED)\n"
+            '  "top_keywords"   — array of strings: technical skills and keywords\n'
+            '  "location"       — string or null: city/state/country\n'
+            '  "location_type"  — string: one of "remote", "hybrid", "onsite", "unknown"\n'
+            '  "nice_to_haves"  — array of strings: preferred but not required\n'
+            '  "salary_range"   — string or null: salary info if present\n'
+            '  "apply_url"      — string: application URL or empty string\n'
+            '  "jd_text_clean"  — string: cleaned job description text'
+        ),
+    ]
     if explicit_company:
         parts.append(f"Company override: {explicit_company}")
     if jd_url:
         parts.append(f"Job URL: {jd_url}")
     parts.append("Job description text:\n" + (jd_text or "[no JD text provided]"))
-    parts.append("Return at least two concrete must_haves taken from the JD text.")
+    parts.append(
+        "Return at least two concrete must_haves taken from the JD text. "
+        "Output only the JSON object, no explanation."
+    )
     return "\n\n".join(parts)
 
 

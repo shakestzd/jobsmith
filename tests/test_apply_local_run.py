@@ -357,7 +357,7 @@ def test_routing_backend_unknown_schema_raises() -> None:
 
 
 class _FailingClient:
-    def complete(self, messages, response_format=None, temperature=0.0):
+    def complete(self, messages, response_format=None, temperature=0.0, extra=None):
         raise ConnectionError("connection refused")
 
 
@@ -434,7 +434,7 @@ class _SchemaClient:
     def __init__(self, payloads: dict[str, dict]) -> None:
         self.payloads = payloads
 
-    def complete(self, messages, response_format=None, temperature=0.0):
+    def complete(self, messages, response_format=None, temperature=0.0, extra=None):
         name = ((response_format or {}).get("json_schema") or {}).get("name", "")
         return json.dumps(self.payloads.get(name, {}))
 
