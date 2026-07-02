@@ -188,6 +188,36 @@ def test_start_replaces_a_stale_lock(monkeypatch, tmp_path, popen_spy):
     assert handle.port == 9200
 
 
+def test_start_reuses_live_engine_serving_the_same_model(monkeypatch, tmp_path, popen_spy):
+    """A live engine serving the SAME model is reused — no relaunch (roborev 1066)."""
+    (tmp_path / vllm_mlx._LOCK_FILENAME).write_text(
+        json.dumps({"pid": 4242, "port": 9000, "model": "same-model"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(vllm_mlx, "_pid_alive", lambda _pid: True)
+
+    handle = vllm_mlx.start("same-model", data_dir=tmp_path)
+    assert len(popen_spy) == 0  # reused, never launched
+    assert handle.model == "same-model" and handle.port == 9000
+
+
+def test_start_replaces_live_engine_serving_a_different_model(monkeypatch, tmp_path, popen_spy):
+    """A live engine serving a DIFFERENT model is terminated + replaced (roborev 1066)."""
+    (tmp_path / vllm_mlx._LOCK_FILENAME).write_text(
+        json.dumps({"pid": 4242, "port": 9000, "model": "old-model"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(vllm_mlx, "is_installed", lambda: True)
+    monkeypatch.setattr(vllm_mlx, "_serve_command_prefix", lambda: ["vllm-mlx"])
+    monkeypatch.setattr(vllm_mlx, "_select_free_port", lambda: 9300)
+    monkeypatch.setattr(vllm_mlx, "_pid_alive", lambda _pid: True)
+    replaced: list[str] = []
+    monkeypatch.setattr(vllm_mlx, "_terminate", lambda handle, proc: replaced.append(handle.model))
+
+    handle = vllm_mlx.start("new-model", data_dir=tmp_path)
+    assert replaced == ["old-model"]  # the wrong-model engine was terminated
+    assert len(popen_spy) == 1
+    assert handle.model == "new-model" and handle.port == 9300
+
+
 def test_start_raises_clear_install_hint_when_not_installed(
     monkeypatch, tmp_path, popen_spy
 ):

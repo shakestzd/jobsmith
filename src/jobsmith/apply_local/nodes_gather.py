@@ -328,6 +328,15 @@ def make_bullet_select_stage(master: MasterData) -> GatherStage:
             return f"ANCHOR_DROP_REQUIRES_INQUIRY: {ids}"
         if obj.uncovered_must_haves:
             return f"UNCOVERED_MUST_HAVE: {'; '.join(obj.uncovered_must_haves)}"
+        # Every master bullet must be accounted for — a bullet omitted from the
+        # selection is silently dropped from work.yml (roborev 1066).
+        sel_ids = [ch.master_bullet_id for pos in obj.positions for ch in pos.bullets]
+        dupes = sorted({i for i in sel_ids if sel_ids.count(i) > 1})
+        if dupes:
+            return f"DUPLICATE_BULLET_ID: {', '.join(dupes)}"
+        missing = sorted({b.bullet_id for b in bullets} - set(sel_ids))
+        if missing:
+            return f"UNACCOUNTED_MASTER_BULLET: {', '.join(missing)}"
         return None
 
     def emit(data: dict, *, slug: str, root: Any, ctx: Mapping[str, Any] | None = None) -> None:

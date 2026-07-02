@@ -403,12 +403,19 @@ export function ConfigView() {
 
   /** Build a config payload from current UI state, merged over remote defaults. */
   const buildPayload = useCallback((): Record<string, unknown> => {
+    // Merge over the existing apply block so fields the UI does not expose —
+    // node_backends (per-node routing) and hidden node_backend fields like
+    // api_key / max_tokens / timeout_s — survive a save (roborev 1065).
+    const priorApply = (remoteConfig?.llm?.apply ?? {}) as Record<string, unknown>;
+    const priorNodeBackend = (priorApply.node_backend ?? {}) as Record<string, unknown>;
     const applyBlock: Record<string, unknown> = {
+      ...priorApply,
       orchestrator: applyOrchestrator,
       on_failure: applyOnFailure,
     };
     if (applyOrchestrator === 'code_local') {
       applyBlock.node_backend = {
+        ...priorNodeBackend,
         provider: 'openai_compatible',
         base_url: applyNodeBaseUrl || null,
         model: applyNodeModel || null,

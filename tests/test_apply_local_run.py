@@ -362,7 +362,7 @@ class _FailingClient:
 
 
 def _patch_engine(monkeypatch, *, health_state: str) -> None:
-    monkeypatch.setattr(run_mod, "ensure_engine", lambda config: ("http://127.0.0.1:1/v1", True))
+    monkeypatch.setattr(run_mod, "ensure_engine", lambda config, **_k: ("http://127.0.0.1:1/v1", True))
     monkeypatch.setattr(run_mod, "resolve_backend",
                         lambda config, node: OpenAICompatBackend(base_url="http://x/v1", _client=_FailingClient()))
     monkeypatch.setattr(vllm_mlx, "health", lambda **_: {"state": health_state, "base_url": None})
@@ -409,7 +409,7 @@ def test_engine_not_installed_surfaces_engine_down(tmp_path: Path, monkeypatch) 
         provider="openai_compatible", base_url="http://localhost:9/v1"
     )
 
-    def _raise(config):
+    def _raise(config, **_k):
         raise EngineUnavailableError("vllm-mlx not installed: uv pip install vllm-mlx")
 
     monkeypatch.setattr(run_mod, "ensure_engine", _raise)
@@ -439,6 +439,66 @@ class _SchemaClient:
         return json.dumps(self.payloads.get(name, {}))
 
 
+def test_managed_engine_uses_per_node_model(tmp_path: Path, monkeypatch) -> None:
+    """roborev 1065: the managed engine serves the model the local nodes target,
+    not merely the default node_backend model."""
+    cfg = _setup(tmp_path)
+    monkeypatch.setattr(
+        run_mod, "resolve_backend",
+        lambda config, node: OpenAICompatBackend(base_url="http://x/v1", model="mlx-community/per-node-model"),
+    )
+    monkeypatch.setattr(vllm_mlx, "_models_ready", lambda *a, **k: False)  # nothing live -> needs managed
+    captured: dict = {}
+
+    def _fake_ensure(config, *, model=None):
+        captured["model"] = model
+        raise run_mod.EngineUnavailableError("short-circuit after capture")
+
+    monkeypatch.setattr(run_mod, "ensure_engine", _fake_ensure)
+    run_local_apply(jd_text="x", slug=SLUG, config=cfg, repo_root=tmp_path)
+    assert captured["model"] == "mlx-community/per-node-model"
+
+
+def test_force_discards_prior_run(tmp_path: Path) -> None:
+    """roborev 1065: --force clears prior .apply-state/documents so no stale reuse."""
+    cfg = _setup(tmp_path)
+    state = apply_state_dir(SLUG, root=tmp_path)
+    docs = state.parent / "documents"
+    docs.mkdir(parents=True, exist_ok=True)
+    stale = docs / "stale-marker.txt"
+    stale.write_text("old", encoding="utf-8")
+    backend = _full_stub(_bullet_ids(tmp_path))
+
+    run_local_apply(jd_text="x", slug=SLUG, config=cfg, repo_root=tmp_path, backend=backend, force=True)
+    assert not stale.exists()  # prior documents/ was discarded before the fresh run
+
+
+class _Rdr:
+    def print_info(self, *_a, **_k):
+        pass
+
+    def print_error(self, *_a, **_k):
+        pass
+
+
+def test_cli_adapter_threads_run_id_and_force(tmp_path: Path, monkeypatch) -> None:
+    """roborev 1065: the CLI adapter passes run_id + force into run_local_apply."""
+    import jobsmith._cli_apply as cli
+
+    captured: dict = {}
+
+    def _fake_run(**kw):
+        captured.update(kw)
+        return ApplyOutcome(status=OK, slug="s")
+
+    monkeypatch.setattr("jobsmith.apply_local.run.run_local_apply", _fake_run)
+    cli._run_code_local_apply(
+        "https://jobs.example.com/1", jd_text="jd body", slug="s",
+        config=JobsmithConfig(), resolved_cwd=tmp_path, rdr=_Rdr(), run_id="RID-123", force=True,
+    )
+    assert captured["run_id"] == "RID-123" and captured["force"] is True
+
+
 def test_live_per_node_endpoint_is_honored_not_clobbered(tmp_path: Path, monkeypatch) -> None:
     """roborev 1061: a node already pointing at a LIVE endpoint must be used as-is
     — no managed engine started, base_url untouched."""
@@ -454,7 +514,7 @@ def test_live_per_node_endpoint_is_honored_not_clobbered(tmp_path: Path, monkeyp
     )
     monkeypatch.setattr(vllm_mlx, "_models_ready", lambda port, **_: port == 9911)  # 9911 is live
 
-    def _boom(config):
+    def _boom(config, **_k):
         raise AssertionError("ensure_engine must NOT run when every local node has a live endpoint")
 
     monkeypatch.setattr(run_mod, "ensure_engine", _boom)

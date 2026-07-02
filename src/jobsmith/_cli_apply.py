@@ -1354,13 +1354,16 @@ def _run_code_local_apply(
     config,
     resolved_cwd: Path,
     rdr: ApplyRenderer,
+    run_id: str | None = None,
+    force: bool = False,
 ):
     """CLI adapter for the code-orchestrated LOCAL apply (plan-a40fac81).
 
     Returns an ``ApplyOutcome`` (the caller enacts the ``on_failure`` policy), or
     ``None`` when an input precondition fails (already surfaced to the user). The
     local path requires PASTED JD text — it does not scrape the URL (the cloud
-    path owns scraping).
+    path owns scraping). ``run_id`` is threaded so the DB run-record matches the
+    caller's run id; ``force`` discards prior artifacts (roborev 1065).
     """
     from jobsmith.apply_local.run import run_local_apply
     from jobsmith.core.slug import derive_slug
@@ -1380,6 +1383,8 @@ def _run_code_local_apply(
         config=config,
         repo_root=resolved_cwd,
         jd_url=url,
+        run_id=run_id,
+        force=force,
     )
     if outcome.ok:
         pdf = outcome.artifacts.get("resume_pdf")
@@ -1464,7 +1469,8 @@ def run_apply(
     _config = load_config(search_from=resolved_cwd)
     if _config.llm.apply.orchestrator == "code_local":
         outcome = _run_code_local_apply(
-            url, jd_text=jd_text, slug=slug, config=_config, resolved_cwd=resolved_cwd, rdr=rdr
+            url, jd_text=jd_text, slug=slug, config=_config, resolved_cwd=resolved_cwd,
+            rdr=rdr, run_id=run_id, force=force,
         )
         if outcome is None:
             return 1  # input error already surfaced

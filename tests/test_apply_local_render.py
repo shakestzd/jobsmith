@@ -131,6 +131,29 @@ def test_render_builds_resume_qmd_structure_quarto_absent(tmp_path: Path, monkey
     assert result.artifacts.get("resume_qmd") == str(documents / "resume.qmd")
 
 
+def test_render_flags_qa_findings_on_resume_bullets(tmp_path: Path, monkeypatch) -> None:
+    """roborev 1066: the resume's work.yml bullets are QA-gated (prose-qa only saw
+    prose-draft.md), so un-QA'd bullet text is flagged, not silently shipped."""
+    cfg = _write_master(tmp_path)
+    documents = _seed_documents(tmp_path)
+    bad_work = [{"title": "Data Analyst", "location": "Atlas", "date": "2020",
+                 "details": ["Leveraged existing pipelines to speed up analyst reporting"]}]
+    (documents / "work.yml").write_text(yaml.safe_dump(bad_work), encoding="utf-8")
+    monkeypatch.setattr("shutil.which", lambda name: None)  # quarto absent
+
+    result = render_local(SLUG, cfg, repo_root=tmp_path)
+    assert result.qa_pass is False
+    assert any(f.get("category") == "stock_phrases" for f in result.qa_findings)
+
+
+def test_render_qa_passes_on_clean_resume_bullets(tmp_path: Path, monkeypatch) -> None:
+    cfg = _write_master(tmp_path)
+    _seed_documents(tmp_path)  # the seeded _WORK bullets are clean
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    result = render_local(SLUG, cfg, repo_root=tmp_path)
+    assert result.qa_pass is True and result.qa_findings == []
+
+
 def test_render_skipped_makes_no_fake_pdf(tmp_path: Path, monkeypatch) -> None:
     cfg = _write_master(tmp_path)
     documents = _seed_documents(tmp_path)

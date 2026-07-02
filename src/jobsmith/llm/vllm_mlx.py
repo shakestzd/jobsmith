@@ -340,10 +340,14 @@ def start(
     data_dir = data_dir or _resolve_data_dir()
     with _START_LOCK:
         existing = _read_handle(data_dir)
-        if existing is not None and _pid_alive(existing.pid):
-            return existing
         if existing is not None:
-            _clear_lock(data_dir)  # stale
+            if _pid_alive(existing.pid) and existing.model == model:
+                return existing  # same model already served — reuse
+            if _pid_alive(existing.pid):
+                # Live but serving a DIFFERENT model — replace it so a per-node
+                # model change never reuses the wrong engine (roborev 1066).
+                _terminate(existing, _PROCS.pop(existing.pid, None))
+            _clear_lock(data_dir)  # stale (dead) or replaced (wrong model)
 
         prefix = _serve_command_prefix()
         if prefix is None:

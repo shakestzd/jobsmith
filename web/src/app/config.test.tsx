@@ -212,6 +212,50 @@ describe('ConfigView', () => {
     await waitFor(() => expect(screen.getByText('saved')).toBeInTheDocument());
   });
 
+  it('save preserves node_backends and hidden node_backend fields (roborev 1065)', async () => {
+    const cfgWithHidden = {
+      ...MOCK_CONFIG,
+      llm: {
+        ...MOCK_CONFIG.llm,
+        apply: {
+          orchestrator: 'code_local' as const,
+          on_failure: 'error' as const,
+          node_backend: {
+            provider: 'openai_compatible',
+            base_url: 'http://127.0.0.1:8081/v1',
+            model: 'gemma',
+            api_key: 'sk-secret',
+            timeout_s: 900,
+          },
+          node_backends: {
+            'prose-write': { provider: 'anthropic', model: 'claude-opus-4-1', api_key: 'sk-cloud' },
+          },
+        },
+      },
+    };
+    mockApiGet.mockResolvedValue(cfgWithHidden);
+    mockApiPut.mockResolvedValue(cfgWithHidden);
+    render(<ConfigView />);
+    await waitFor(() => screen.getByDisplayValue('assets/content/work.yml'));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    });
+
+    const payload = mockApiPut.mock.calls[0][1] as { llm: { apply: Record<string, any> } };
+    const apply = payload.llm.apply;
+    // per-node routing map survives
+    expect(apply.node_backends['prose-write']).toEqual({
+      provider: 'anthropic', model: 'claude-opus-4-1', api_key: 'sk-cloud',
+    });
+    // hidden node_backend fields the UI does not expose survive
+    expect(apply.node_backend.api_key).toBe('sk-secret');
+    expect(apply.node_backend.timeout_s).toBe(900);
+    // UI-edited fields still applied
+    expect(apply.node_backend.base_url).toBe('http://127.0.0.1:8081/v1');
+    expect(apply.orchestrator).toBe('code_local');
+  });
+
   it('shows 422 errors inline when PUT returns 422', async () => {
     const { JobsmithApiError } = await import('../api/client');
     const err = new JobsmithApiError(

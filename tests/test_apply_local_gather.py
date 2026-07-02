@@ -478,6 +478,22 @@ def test_bullet_select_halts_on_uncovered_must_have(tmp_path: Path):
     assert "UNCOVERED_MUST_HAVE" in (result.reason or "")
 
 
+def test_bullet_select_halts_on_unaccounted_master_bullet(tmp_path: Path):
+    """roborev 1066: a master bullet omitted from the selection must halt, not be
+    silently dropped from work.yml."""
+    cfg, ids = _setup(tmp_path)
+    payload = _bullet_payload(ids)
+    # Drop the non-anchor mentor bullet (0.1) entirely from the selection.
+    payload["positions"][0]["bullets"] = [payload["positions"][0]["bullets"][0]]
+    backend = RoutingBackend({"jd_parsed": _jd_payload(), "fit_score": _fit_payload(),
+                              "bullet_selection": payload})
+    result = _run(cfg, tmp_path, backend)
+    assert result.status == "halt"
+    assert result.halt_node == NODE_BULLET_SELECT
+    assert "UNACCOUNTED_MASTER_BULLET" in (result.reason or "")
+    assert ids["0.1"] in (result.reason or "")  # names the dropped bullet
+
+
 def test_full_gather_pipeline_runs_to_ok_and_resumes(tmp_path: Path):
     cfg, ids = _setup(tmp_path)
     backend = RoutingBackend({"jd_parsed": _jd_payload(), "fit_score": _fit_payload(),
