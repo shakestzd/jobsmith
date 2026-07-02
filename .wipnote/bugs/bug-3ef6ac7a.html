@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>code_local apply halts at bullet-select on Gemma-4 (ANCHOR_DROP_REQUIRES_INQUIRY)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="bug-3ef6ac7a"
+             data-type="bug"
+             data-status="done"
+             data-priority="medium"
+             data-created="2026-07-02T02:10:41.614126"
+             data-updated="2026-07-02T03:23:26.721946" data-agent-assigned="claude-code" data-track-id="trk-f5052600" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.67.1">
+
+        <header>
+            <h1>code_local apply halts at bullet-select on Gemma-4 (ANCHOR_DROP_REQUIRES_INQUIRY)</h1>
+            <div class="metadata">
+                <span class="badge status-done">Done</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-f5052600.html" data-relationship="part_of" data-since="2026-07-02T02:10:41.629173">trk-f5052600</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/41bc4b7a-5c34-4d6f-8bc0-fe909326b8df.html" data-relationship="implemented_in" data-since="2026-07-02T02:38:30.138665">session 41bc4b7a-5c34-4d6f-8bc0-fe909326b8df</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="relates_to">
+                <h3>Relates To:</h3>
+                <ul>
+                    <li><a href="../features/feat-38835d2c.html" data-relationship="relates_to" data-since="2026-07-02T02:11:01.964006">Robust structured LLM calls for thinking models in code_local apply (max_tokens &#43; tolerant JSON)</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-steps>
+            <h3>Implementation Steps</h3>
+            <ol>
+                <li data-completed="true" data-step-id="task-2" data-agent="claude-code" data-created-by-agent="claude-code">✅ Investigate bullet-select anchor-drop halt (bug-3ef6ac7a)</li>
+            </ol>
+        </section>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>After the structured-call fix (9fb1a63), the live Gemma-4 gather-&gt;draft clears jd-parse and fit-score but halts at bullet-select: the model drops anchor work bullets without emitting reason_if_dropped, tripping the ANCHOR_DROP_REQUIRES_INQUIRY controlled halt, so no prose-draft.md is produced. Both disable_thinking on/off halt identically. Open question: model-capability limit (gemma-4-E4B-it too weak to follow the anchor-drop-reason contract) vs fixable via prompt tuning or contract adjustment. Blocks the plan-a40fac81 e2e merge gate.</p>
+        </section>
+    </article>
+</body>
+</html>

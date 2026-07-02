@@ -11,6 +11,14 @@ vi.mock('../api/client', () => ({
   apiPut: vi.fn(),
   postApplication: vi.fn(),
   buildEventsUrl: vi.fn(),
+  // BrowserInstallPrompt + ClaudeInstallPrompt are now mounted in step 1.
+  // Resolve as "already installed" so they immediately hide (render null)
+  // without blocking any existing test assertions.
+  getBrowserStatus: vi.fn().mockResolvedValue({ installed: true }),
+  getDepsStatus: vi.fn().mockResolvedValue({ claude_installed: true }),
+  installBrowser: vi.fn(),
+  buildBrowserInstallEventsUrl: vi.fn().mockReturnValue(''),
+  redactSensitive: vi.fn((s: string) => s),
   JobsmithApiError: class JobsmithApiError extends Error {
     status = 500;
   },

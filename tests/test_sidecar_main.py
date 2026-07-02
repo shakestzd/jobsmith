@@ -102,3 +102,100 @@ def test_redacting_log_config_attaches_filter_to_access_handler():
     config = sidecar_main._redacting_log_config()
     assert "redact_token" in config["filters"]
     assert "redact_token" in config["handlers"]["access"]["filters"]
+
+
+# ---------------------------------------------------------------------------
+# Regression: Finder-launch root resolution (feat-f4b197ac / roborev 1056)
+# ---------------------------------------------------------------------------
+
+
+def test_prepare_env_sets_jobsmith_repo_root(monkeypatch, tmp_path):
+    """_prepare_env() must set JOBSMITH_REPO_ROOT to the platformdirs data dir.
+
+    Simulates a Finder-launched .app where JOBSMITH_REPO_ROOT is absent:
+    after _prepare_env() the env var must point at the resolved data dir so
+    repo_root_for() tier-2 returns it rather than falling back to cwd ("/").
+    """
+    import os
+
+    monkeypatch.delenv("JOBSMITH_REPO_ROOT", raising=False)
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+
+    data_dir = sidecar_main._prepare_env()
+
+    assert "JOBSMITH_REPO_ROOT" in os.environ
+    assert Path(os.environ["JOBSMITH_REPO_ROOT"]) == data_dir
+    assert data_dir.is_absolute()
+    assert "jobsmith" in str(data_dir).lower()
+
+
+def test_prepare_env_creates_data_dir(monkeypatch, tmp_path):
+    """_prepare_env() must create the data dir so tier-2 is_dir() passes."""
+    # Point platformdirs at a tmp location so we don't pollute the real store.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("JOBSMITH_REPO_ROOT", raising=False)
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+
+    data_dir = sidecar_main._prepare_env()
+
+    assert data_dir.exists(), "_prepare_env must mkdir the data dir"
+    assert data_dir.is_dir()
+
+
+def test_prepare_env_respects_existing_repo_root(monkeypatch, tmp_path):
+    """setdefault must NOT clobber a JOBSMITH_REPO_ROOT the caller already set."""
+    import os
+
+    custom_root = str(tmp_path / "my-custom-root")
+    monkeypatch.setenv("JOBSMITH_REPO_ROOT", custom_root)
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+
+    sidecar_main._prepare_env()
+
+    assert os.environ["JOBSMITH_REPO_ROOT"] == custom_root
+
+
+def test_finder_launch_repo_root_resolution(monkeypatch, tmp_path):
+    """Integration regression: simulates cwd='/' + JOBSMITH_DESKTOP=1.
+
+    After _prepare_env() runs (as the sidecar binary would), repo_root_for()
+    must return the platformdirs data dir — NOT '/' or a sample-data path.
+    Also asserts the non-desktop path (JOBSMITH_REPO_ROOT unset, explicit cwd)
+    still returns the cwd-fallback unchanged.
+    """
+    from importlib import reload
+    from pathlib import Path
+
+    import jobsmith.settings as settings_mod
+    from jobsmith.paths import repo_root_for
+
+    # --- Desktop / Finder branch ---
+    monkeypatch.delenv("JOBSMITH_REPO_ROOT", raising=False)
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    (tmp_path / "cfg").mkdir(parents=True)
+
+    # Reload settings so XDG override takes effect (no persisted repo_root).
+    reload(settings_mod)
+
+    data_dir = sidecar_main._prepare_env()
+
+    # JOBSMITH_REPO_ROOT is now set; repo_root_for with cwd='/' must return it.
+    result = repo_root_for(cwd=Path("/"))
+    assert result == data_dir, (
+        f"Finder-launch: expected data_dir {data_dir!r}, got {result!r}"
+    )
+    assert result != Path("/"), "Must not fall back to filesystem root"
+
+    # --- Non-desktop / CLI branch: clearing the env var restores legacy behaviour ---
+    monkeypatch.delenv("JOBSMITH_REPO_ROOT", raising=False)
+    # Re-reload settings to clear any cache.
+    reload(settings_mod)  # noqa: PLE0605 — intentional second reload
+
+    cli_cwd = tmp_path / "cli_workspace"
+    cli_cwd.mkdir()
+    cli_result = repo_root_for(cwd=cli_cwd)
+    # No .apply-config.yaml, no env var, no settings — fallback is cwd itself.
+    assert cli_result == cli_cwd, (
+        f"CLI path must be unchanged; expected {cli_cwd!r}, got {cli_result!r}"
+    )

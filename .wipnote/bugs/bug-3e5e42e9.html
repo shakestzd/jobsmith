@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>MLX/gemma fit-scorer: gemma-3-4b echoes JSON schema -&gt; parse_ok=False fallback</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="bug-3e5e42e9"
+             data-type="bug"
+             data-status="done"
+             data-priority="medium"
+             data-created="2026-06-26T22:07:45.810705"
+             data-updated="2026-06-26T22:56:53.743759" data-agent-assigned="claude-code" data-track-id="trk-f5052600" data-created-by-agent="claude-code" data-created-by-model="claude-opus-4-8[1m]" data-created-by-cli-version="0.67.0">
+
+        <header>
+            <h1>MLX/gemma fit-scorer: gemma-3-4b echoes JSON schema -&gt; parse_ok=False fallback</h1>
+            <div class="metadata">
+                <span class="badge status-done">Done</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="caused_by">
+                <h3>Caused By:</h3>
+                <ul>
+                    <li><a href="../features/feat-3405b656.html" data-relationship="caused_by" data-since="2026-06-26T22:07:45.914831">MLX backend: gemma-3-4b-it-4bit default &#43; live end-to-end test</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-f5052600.html" data-relationship="part_of" data-since="2026-06-26T22:07:45.828156">trk-f5052600</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/29725f56-fe01-47f6-a7aa-868c267e3117.html" data-relationship="implemented_in" data-since="2026-06-26T22:20:12.900678">session 29725f56-fe01-47f6-a7aa-868c267e3117</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Live test (feat-3405b656): gemma-3-4b-it-4bit returns the JSON schema (type/object/properties, values nested under properties) instead of a flat fit-metrics object. _robust_parse_fit_metrics strips the fence + parses the outer dict but score is nested -&gt; parse_ok=False -&gt; fast_score fallback (no crash, no real LLM score). Chat works fine. Fixes: few-shot the scorer prompt with the desired flat JSON (not the schema); response_format/guided-JSON if mlx_lm.server supports it; harden parser to read properties.score; or use a larger gemma.</p>
+        </section>
+    </article>
+</body>
+</html>

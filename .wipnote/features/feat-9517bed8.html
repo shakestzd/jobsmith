@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Draft nodes (prose-write, prose-qa) &#43; deterministic QA checks &#43; bounded revise loop</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-9517bed8"
+             data-type="feature"
+             data-status="done"
+             data-priority="medium"
+             data-created="2026-06-27T17:49:32.494338"
+             data-updated="2026-06-27T20:20:00.7184" data-agent-assigned="claude-code" data-track-id="trk-f5052600">
+
+        <header>
+            <h1>Draft nodes (prose-write, prose-qa) &#43; deterministic QA checks &#43; bounded revise loop</h1>
+            <div class="metadata">
+                <span class="badge status-done">Done</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="../features/feat-d67d2b1a.html" data-relationship="blocked_by">feat-d67d2b1a</a></li>
+                    <li><a href="../features/feat-c920ceeb.html" data-relationship="blocked_by">feat-c920ceeb</a></li>
+                    <li><a href="../features/feat-d46dde68.html" data-relationship="blocked_by">feat-d46dde68</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="../plans/plan-a40fac81.html" data-relationship="planned_in" data-since="2026-06-27T17:49:32.501947">plan-a40fac81</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-f5052600.html" data-relationship="part_of" data-since="2026-06-27T17:49:32.507237">trk-f5052600</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/c0d1772a-012a-437d-8b57-4dbba4e33afd.html" data-relationship="implemented_in" data-since="2026-06-27T19:53:52.116473">session c0d1772a-012a-437d-8b57-4dbba4e33afd</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>src/jobsmith/apply_local/nodes_draft.py implements the draft specialists. prose-write (a
+Backend call — often routed to cloud Claude via node_backends for quality) writes
+prose-draft.md (Professional Summary + tailored bullets) reusing the prose-writer prompt +
+master/voice-guide context from inputs.py. prose-qa is MOSTLY DETERMINISTIC — it runs the
+five mechanical blocking checks in code (word-count, metric-cluster, parenthetical-tech-list,
+em-dash density, stock-phrases) and only optionally consults the Backend for advisory rhythm;
+it returns pass|revise. The Pipeline loops prose-write &lt;-&gt; prose-qa at most 3 times. Honors
+the same no-fab halt (would-fabricate -&gt; halt).</p>
+        </section>
+    </article>
+</body>
+</html>

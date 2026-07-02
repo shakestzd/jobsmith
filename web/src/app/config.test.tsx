@@ -64,6 +64,11 @@ vi.mock('../api/client', () => ({
   apiGet: vi.fn(),
   apiPost: vi.fn(),
   apiPut: vi.fn(),
+  // OfflineModeToggle is now mounted inside ConfigView. These mocks make it
+  // hide silently (404-like rejection → phase='hidden' → renders null) so
+  // it doesn't interfere with the config form tests.
+  getLlmStatus: vi.fn().mockRejectedValue(new Error('not desktop')),
+  enableOfflineMode: vi.fn(),
   JobsmithApiError: class JobsmithApiError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -289,6 +294,7 @@ describe('ConfigView — LLM provider section', () => {
     const select = screen.getByRole('combobox', { name: /provider/i });
     expect((select as HTMLSelectElement).value).toBe('openai_compatible');
     expect(screen.getByDisplayValue('http://127.0.0.1:8080/v1')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('mlx-community/gemma-4-E4B-it-qat-4bit')).toBeInTheDocument();
   });
 
   it('Ollama preset button fills base_url and switches provider to openai_compatible', async () => {
@@ -337,6 +343,7 @@ describe('ConfigView — LLM provider section', () => {
     const llm = payload.llm as Record<string, unknown>;
     expect(llm.provider).toBe('openai_compatible');
     expect(llm.base_url).toBe('http://127.0.0.1:8080/v1');
+    expect(llm.model).toBe('mlx-community/gemma-4-E4B-it-qat-4bit');
   });
 });
 

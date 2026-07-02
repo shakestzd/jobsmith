@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Config: orchestrator selector &#43; per-node backends (adds `anthropic` provider)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-c7fab5c0"
+             data-type="feature"
+             data-status="done"
+             data-priority="medium"
+             data-created="2026-06-27T17:49:32.407269"
+             data-updated="2026-06-27T18:07:19.833173" data-agent-assigned="claude-code" data-track-id="trk-f5052600">
+
+        <header>
+            <h1>Config: orchestrator selector &#43; per-node backends (adds `anthropic` provider)</h1>
+            <div class="metadata">
+                <span class="badge status-done">Done</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="../plans/plan-a40fac81.html" data-relationship="planned_in" data-since="2026-06-27T17:49:32.413507">plan-a40fac81</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-f5052600.html" data-relationship="part_of" data-since="2026-06-27T17:49:32.418584">trk-f5052600</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/c0d1772a-012a-437d-8b57-4dbba4e33afd.html" data-relationship="implemented_in" data-since="2026-06-27T17:56:06.515318">session c0d1772a-012a-437d-8b57-4dbba4e33afd</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>Extend the `llm` config (src/jobsmith/config.py) with an apply block — orchestrator
+(enum: claude_cloud (default) | code_local); a node_backend default (provider + base_url +
+model + api_key); a node_backends map (node_name -&gt; backend override, for hybrid routing);
+and on_failure (error | fallback_cloud). ADD an `anthropic` value to the LLMProvider enum
+(authorized expansion of the documented 4 — required for AnthropicBackend). Pydantic
+validation; default orchestrator=claude_cloud (existing behavior). Document in config-schema.yaml.</p>
+        </section>
+    </article>
+</body>
+</html>

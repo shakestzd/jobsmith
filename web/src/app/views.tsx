@@ -7,6 +7,7 @@ import { Icon, Badge } from './shared';
 import { apiPost, apiPut, JobsmithApiError } from '../api/client';
 import { useApplications, useMasterSection, useConfig, useFeedback, useDoctor } from '../api/hooks';
 import type { MasterAuthor, ApplicationRow, JobsmithConfig, LLMProvider, ApplyOrchestrator, ApplyOnFailure, ConfigValidateResponse, ConfigValidationError } from '../api/types';
+import { OfflineModeToggle } from '../components/OfflineModeToggle';
 
 // ── SiteView ─────────────────────────────────────────────────────────────
 
@@ -623,7 +624,7 @@ export function ConfigView() {
               <button
                 type="button"
                 className="btn"
-                onClick={() => { setLlmProvider('openai_compatible'); setLlmBaseUrl('http://127.0.0.1:8080/v1'); }}
+                onClick={() => { setLlmProvider('openai_compatible'); setLlmBaseUrl('http://127.0.0.1:8080/v1'); setLlmModel('mlx-community/gemma-4-E4B-it-qat-4bit'); }}
               >
                 MLX
               </button>
@@ -711,6 +712,12 @@ export function ConfigView() {
             </>
           )}
         </div>
+      </div>
+
+      {/* Desktop-only offline-mode status panel. Renders nothing on a plain
+          web server (probes /api/desktop/llm/status which 404s outside Tauri). */}
+      <div style={{ marginTop: 16 }}>
+        <OfflineModeToggle />
       </div>
     </div>
   );

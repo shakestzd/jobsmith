@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>End-to-end gather-&gt;draft &#43; engine wiring &#43; on_failure fallback &#43; hybrid routing test</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-70b1b976"
+             data-type="feature"
+             data-status="done"
+             data-priority="medium"
+             data-created="2026-06-27T17:49:32.520307"
+             data-updated="2026-06-29T19:02:04.292269" data-agent-assigned="claude-code" data-track-id="trk-f5052600">
+
+        <header>
+            <h1>End-to-end gather-&gt;draft &#43; engine wiring &#43; on_failure fallback &#43; hybrid routing test</h1>
+            <div class="metadata">
+                <span class="badge status-done">Done</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/c0d1772a-012a-437d-8b57-4dbba4e33afd.html" data-relationship="implemented_in" data-since="2026-06-27T20:22:00.672824">session c0d1772a-012a-437d-8b57-4dbba4e33afd</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="../plans/plan-a40fac81.html" data-relationship="planned_in" data-since="2026-06-27T17:49:32.52626">plan-a40fac81</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-f5052600.html" data-relationship="part_of" data-since="2026-06-27T17:49:32.53134">trk-f5052600</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="../features/feat-d67d2b1a.html" data-relationship="blocked_by">feat-d67d2b1a</a></li>
+                    <li><a href="../features/feat-c920ceeb.html" data-relationship="blocked_by">feat-c920ceeb</a></li>
+                    <li><a href="../features/feat-c7fab5c0.html" data-relationship="blocked_by">feat-c7fab5c0</a></li>
+                    <li><a href="../features/feat-0d2f3df4.html" data-relationship="blocked_by">feat-0d2f3df4</a></li>
+                    <li><a href="../features/feat-d46dde68.html" data-relationship="blocked_by">feat-d46dde68</a></li>
+                    <li><a href="../features/feat-9517bed8.html" data-relationship="blocked_by">feat-9517bed8</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>src/jobsmith/apply_local/run.py wires it together — resolve config.llm.apply, ensure the
+vllm-mlx engine is healthy (slice 4), build the Pipeline of the gather (slice 5) + draft
+(slice 6) nodes with per-node resolved Backends (slice 2), and run a real gather-&gt;draft apply
+on a pasted JD, writing the applications/{slug}/.apply-state artifacts. Routing is wired into
+the REAL entrypoint jobsmith._cli_apply.run_apply (NOT apply.py, a deprecation shim).
+Robustness — detect ENGINE-DOWN (connection-refused -&gt; vllm_mlx.health()) distinct from a
+node parse_ok=False or a halt; on failure honor on_failure (clear error | fallback_cloud to
+claude -p). A hybrid run (some nodes local, some cloud via node_backends) completes end-to-end.</p>
+        </section>
+    </article>
+</body>
+</html>

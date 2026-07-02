@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>vllm-mlx engine lifecycle manager (local node backend server)</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-0d2f3df4"
+             data-type="feature"
+             data-status="done"
+             data-priority="medium"
+             data-created="2026-06-27T17:49:32.431622"
+             data-updated="2026-06-27T18:29:20.816672" data-agent-assigned="claude-code" data-track-id="trk-f5052600">
+
+        <header>
+            <h1>vllm-mlx engine lifecycle manager (local node backend server)</h1>
+            <div class="metadata">
+                <span class="badge status-done">Done</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/c0d1772a-012a-437d-8b57-4dbba4e33afd.html" data-relationship="implemented_in" data-since="2026-06-27T17:56:25.47064">session c0d1772a-012a-437d-8b57-4dbba4e33afd</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-f5052600.html" data-relationship="part_of" data-since="2026-06-27T17:49:32.445338">trk-f5052600</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="../plans/plan-a40fac81.html" data-relationship="planned_in" data-since="2026-06-27T17:49:32.438037">plan-a40fac81</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>src/jobsmith/llm/vllm_mlx.py manages the local engine — start() launches `vllm-mlx serve
+&lt;model&gt; --host 127.0.0.1 --port &lt;free&gt; --enable-auto-tool-choice --tool-call-parser gemma4
+--reasoning-parser gemma4` (NO --continuous-batching — it crashes gemma-4), with a free-port
+pick + conflict pre-check and an idempotent PID-lock; health() polls /v1/models and classifies
+loading (~20-30s cold) vs crashed vs ready; stop() terminates with no orphan. deps.py detects
+whether vllm-mlx is installed and surfaces a guided `uv pip install vllm-mlx` hint. The spike
+doc is the authoritative flag source (upstream README defaults to batching).</p>
+        </section>
+    </article>
+</body>
+</html>

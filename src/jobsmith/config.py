@@ -21,11 +21,17 @@ CONFIG_FILENAME = ".apply-config.yaml"
 # Supported provider enum values (5 after feat-c7fab5c0 added `anthropic`).
 LLMProvider = Literal["claude_cli", "antigravity_cli", "codex_cli", "openai_compatible", "anthropic"]
 
-# Preset base_urls so the UI / config can one-click fill base_url.
-# These represent the two local inference servers that use openai_compatible.
-LLM_PRESETS: dict[str, str] = {
-    "mlx": "http://127.0.0.1:8080/v1",
-    "ollama": "http://localhost:11434/v1",
+# Preset base_urls (and optional default model) so the UI / config can one-click
+# fill base_url + model. Keys are preset names; values carry at least "base_url"
+# and optionally "model" for presets that have a canonical default model.
+LLM_PRESETS: dict[str, dict[str, str]] = {
+    "mlx": {
+        "base_url": "http://127.0.0.1:8080/v1",
+        "model": "mlx-community/gemma-4-E4B-it-qat-4bit",
+    },
+    "ollama": {
+        "base_url": "http://localhost:11434/v1",
+    },
 }
 
 
@@ -359,7 +365,7 @@ class LLMSettings(BaseModel):
         if self.provider == "openai_compatible" and not self.base_url:
             raise ValueError(
                 "base_url is required when provider is 'openai_compatible'. "
-                "Use LLM_PRESETS['mlx'] or LLM_PRESETS['ollama'] as a starting point."
+                "Use LLM_PRESETS['mlx']['base_url'] or LLM_PRESETS['ollama']['base_url'] as a starting point."
             )
         if self.provider == "anthropic" and not self.api_key:
             raise ValueError(

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Gather nodes (jd-parse, fit-score, bullet-select) &#43; master-input assembly &#43; no-fab halt</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-d46dde68"
+             data-type="feature"
+             data-status="done"
+             data-priority="medium"
+             data-created="2026-06-27T17:49:32.46276"
+             data-updated="2026-06-27T19:51:23.563662" data-agent-assigned="claude-code" data-track-id="trk-f5052600">
+
+        <header>
+            <h1>Gather nodes (jd-parse, fit-score, bullet-select) &#43; master-input assembly &#43; no-fab halt</h1>
+            <div class="metadata">
+                <span class="badge status-done">Done</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="blocked_by">
+                <h3>Blocked By:</h3>
+                <ul>
+                    <li><a href="../features/feat-d67d2b1a.html" data-relationship="blocked_by">feat-d67d2b1a</a></li>
+                    <li><a href="../features/feat-c920ceeb.html" data-relationship="blocked_by">feat-c920ceeb</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/c0d1772a-012a-437d-8b57-4dbba4e33afd.html" data-relationship="implemented_in" data-since="2026-06-27T19:04:15.409013">session c0d1772a-012a-437d-8b57-4dbba4e33afd</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="../plans/plan-a40fac81.html" data-relationship="planned_in" data-since="2026-06-27T17:49:32.472443">plan-a40fac81</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-f5052600.html" data-relationship="part_of" data-since="2026-06-27T17:49:32.480601">trk-f5052600</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>src/jobsmith/apply_local/nodes_gather.py + inputs.py + schemas.py implement the gather
+specialists as code Nodes over the existing applications/{slug}/.apply-state contract.
+inputs.py ASSEMBLES each node&#39;s prompt context by loading the master data each specialist
+declares (profile.yaml + master work/skill/education/author/publication.yml + fast-path
+scores) and injecting it — this is the hardest surface and is explicit here. Nodes:
+jd-parse (JD text -&gt; jd-parsed.json); fit-score (a SINGLE gemma JSON call that replaces the
+cloud claude-agent core scorer, normalized 0-100 -&gt; 0-1 -&gt; fit-score.json); bullet-select
+(-&gt; bullet-selection.json AND its real companion artifacts bullet-diff.md +
+bullet-decisions.json + tailored work.yml/skill.yml, preserving anchor bullets). No-fab
+policy — if a JD must-have can&#39;t be grounded or an anchor would drop without a reason, the
+node returns status=halt and the driver surfaces it (v1 ports no inquirer/anchor-guard).</p>
+        </section>
+    </article>
+</body>
+</html>

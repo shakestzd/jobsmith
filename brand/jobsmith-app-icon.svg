@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Jobsmith">
+  <!-- Indigo Ink squircle background -->
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#2C2E72"/>
+  <!-- White J-Rise glyph + amber tip, centered in squircle -->
+  <!-- Glyph viewBox 0 0 100 100; center of glyph ~(48,48.5); scale 5.2 -->
+  <!-- After scale: center at (249.6, 252.2); translate by (262,260) → (511.6, 512.2) ≈ center(512,512) -->
+  <g transform="translate(262,260) scale(5.2)">
+    <!-- shaft + hook (white) -->
+    <path d="M59,27 L59,60 Q59,79 41,79 Q24,79 24,63" fill="none" stroke="#ffffff" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- amber arrowhead tip -->
+    <path d="M46,32 L59,18 L72,32" fill="none" stroke="#F4A024" stroke-width="12.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

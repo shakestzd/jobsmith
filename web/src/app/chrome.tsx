@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Icon } from './shared';
 import { useApplications } from '../api/hooks';
+import Logo from '../components/Logo';
 import type { IconName, ThemeName, ViewName } from '../types';
 
 // ── Postings badge (new-since-last-visit) ─────────────────────────────────
@@ -86,7 +87,7 @@ export function Sidebar({ view, open, setView, openNew }: SidebarProps) {
   return (
     <aside className="sidebar" style={{ overflow: 'hidden', opacity: open ? 1 : 0 }}>
       <div className="brand">
-        <span className="brand-mark"></span>
+        <Logo size={26} variant="tile" />
         <span>jobsmith</span>
       </div>
 

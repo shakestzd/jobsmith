@@ -1,0 +1,566 @@
+meta:
+    id: plan-21911e16
+    track_id: trk-f5052600
+    title: 'Model-agnostic apply pipeline: run claude -p on local gemma via vllm-mlx (Anthropic-native)'
+    description: Keep the Claude Code agentic apply harness but point claude -p at a local gemma-4 served by vllm-mlx (a single MLX server exposing the native Anthropic Messages API with real tool_use blocks + MCP tool calling — no translation proxy). Config-driven, cloud Claude preserved as default. Extends plan-938f735b.
+    created_at: "2026-06-26"
+    status: finalized
+    priority: medium
+    schema_version: v4
+    version: 4
+design:
+    problem: |
+        jobsmith's apply pipeline (gather -> draft -> render) is hardwired to the Claude
+        Code CLI: src/jobsmith/headless.py builds a `claude -p` command (_build_command,
+        ~241-294) with --system-prompt-file/--allowedTools/--agents and spawns it via
+        subprocess.Popen (run_phase, ~415), parsing stream-json events incl. text markers
+        <<PHASE_COMPLETE>>/<<PHASE_FAILED>> and dispatching specialist sub-agents that each
+        request a Claude tier (haiku/sonnet/opus). plan-938f735b made CHAT + sourcing
+        SCORING pluggable but scoped OUT this agentic harness. The user wants the WHOLE
+        pipeline runnable by a local/open model so jobsmith is not Claude-locked.
+    goals:
+        - Run the full apply pipeline end-to-end on a local gemma-4 model, reusing the Claude Code harness unchanged (no specialist/tool re-architecture).
+        - Drive it by pointing `claude -p` at a local Anthropic-native MLX server (vllm-mlx) that serves gemma-4 with real tool_use blocks — selected via the existing `llm` config. No translation proxy.
+        - Preserve the cloud Claude path as the default/backward-compatible backend; the local path is opt-in.
+        - Prove tool-calling fidelity first (spike) before building plumbing — de-risk that a 4B gemma can complete the agentic loop AND that vllm-mlx carries tool_use for all requested Claude tiers.
+    constraints:
+        - Do not regress the existing `claude -p` cloud path (default behavior unchanged when the local backend is not selected).
+        - Tool use under the local model must work end-to-end — WebFetch/Read/Write/Bash + the claude-in-chrome Chrome-render fallback (feat-2c81da71). The engine MUST support tool calling (mlx_lm.server does NOT — that is why vllm-mlx is chosen).
+        - Use the current Claude Code env var ANTHROPIC_DEFAULT_HAIKU_MODEL (ANTHROPIC_SMALL_FAST_MODEL is deprecated). Apple Silicon (MLX). Avoid LiteLLM 1.82.7/1.82.8 (malware).
+    approved: false
+    comment: |
+        DECISIONS (this session's research + user choices + dual-critic pass):
+        - Approach D (keep Claude Code, swap model) over A (build agent loop) / C (adopt
+          OpenCode/OpenHands). C is the documented FALLBACK if slice-1 spike is NO-GO.
+        - Engine = vllm-mlx (Anthropic-native MLX, real tool_use, tool calling) — REVISED
+          from "mlx_lm.server + claude-code-router" after the feasibility critic found
+          mlx_lm.server has NO tool calling and claude-code-router is an Electron GUI app
+          (no headless mode). vllm-mlx collapses engine+gateway into one process and can
+          also serve chat/scoring (consolidating off mlx_lm.server). User-confirmed.
+        - Env var corrected to ANTHROPIC_DEFAULT_HAIKU_MODEL (SMALL_FAST deprecated).
+        - INTERVIEW NOTE: design forks settled via AUQ this session; per-slice 4-stage
+          interviews compressed — decisions_notes capture inferred picks; human review
+          (wipnote serve) + this critique are the gates.
+        - ALL OF slices 2-6 ARE CONDITIONAL ON slice-1 GO (a NO-GO re-plans around C).
+    research:
+        - url: https://github.com/waybarrios/vllm-mlx
+          claim: 'Chosen engine: a native MLX server exposing BOTH OpenAI /v1/* and Anthropic /v1/messages from one process, with REAL tool_use/tool_result content blocks + MCP tool calling (12 parsers) and ''Works with Claude Code''. Solves the two blockers — no separate router, and tool calling works (unlike mlx_lm.server).'
+          accessed: "2026-06-26"
+        - url: https://code.claude.com/docs/en/model-config
+          claim: Claude Code repoints via ANTHROPIC_BASE_URL + ANTHROPIC_MODEL (BASE_URL routes, MODEL selects). ANTHROPIC_SMALL_FAST_MODEL is DEPRECATED in favor of ANTHROPIC_DEFAULT_HAIKU_MODEL — the var slice 4 must inject.
+          accessed: "2026-06-26"
+        - url: https://docs.vllm.ai/en/stable/serving/integrations/claude_code/
+          claim: Confirms ANTHROPIC_BASE_URL pointing at a local server + CLAUDE_CODE_ATTRIBUTION_HEADER=0 to disable the per-request hash that breaks prefix-cache on local backends.
+          accessed: "2026-06-26"
+        - url: https://developers.googleblog.com/bring-state-of-the-art-agentic-skills-to-the-edge-with-gemma-4/
+          claim: Gemma 4 has native function-calling/tool use (demonstrated on LiteRT-LM); the spike must independently confirm it holds on the vllm-mlx engine since the runtime differs.
+          accessed: "2026-06-26"
+slices:
+    - id: slice-1
+      feature_id: feat-927b6921
+      num: 1
+      title: 'SPIKE: prove gemma-4 drives the Claude Code agentic apply via vllm-mlx (decision gate)'
+      what: |
+        Stand up vllm-mlx serving gemma-4-E4B-it-qat-4bit over its native Anthropic
+        /v1/messages endpoint. Run a real `claude -p` against it (ANTHROPIC_BASE_URL=the
+        vllm-mlx Anthropic endpoint, dummy ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL +
+        ANTHROPIC_DEFAULT_HAIKU_MODEL, CLAUDE_CODE_ATTRIBUTION_HEADER=0) with the apply
+        system prompt + allowedTools, on a JS-rendered job (NVIDIA Workday URL). Verify
+        the agentic loop actually works: (a) tool_use blocks fire (WebFetch/Read/Write/
+        Bash + claude-in-chrome render), (b) specialist dispatch works for >=2 Claude
+        tiers (haiku jd-parser AND sonnet bullet-selector both reach gemma), (c) the
+        text markers <<PHASE_COMPLETE: gather>> etc. are emitted so run_phase advances,
+        (d) claude -p initializes with a dummy auth token. Output a GO/NO-GO with
+        evidence. This gates slices 2-6; NO-GO pivots to the C fallback (OpenCode/OpenHands).
+      why: |
+        The approach rests on a 4B local model driving Claude Code's multi-step tool
+        calls AND on vllm-mlx faithfully carrying tool_use across all requested Claude
+        tiers. Proving it first avoids building plumbing on a false premise (the previous
+        engine/gateway both failed feasibility — see critique).
+      files:
+        - scripts/_apply_byo_spike.sh
+        - docs/spikes/byo-model-apply.md
+      deps: []
+      done_when:
+        - A `claude -p` apply run against gemma-4-on-vllm-mlx fires REAL tool_use blocks (not hallucinated) for at least WebFetch/Read/Write and the claude-in-chrome render path.
+        - At least two specialist tiers (haiku jd-parser AND sonnet bullet-selector) both successfully reach gemma (no unrouted-model error) — confirming vllm-mlx serves the loaded model regardless of the requested Claude tier name.
+        - 'The text markers <<PHASE_COMPLETE: gather>> (and draft/render) appear in the transcript so run_phase advances instead of exhausting max_turns; and claude -p initializes cleanly with a dummy ANTHROPIC_AUTH_TOKEN.'
+        - 'Verifiable output: jd-parsed.json has non-empty company/position + must_haves (>=2) + role_type, AND prose-draft.md has a non-empty Professional Summary section. docs/spikes/byo-model-apply.md records an explicit GO or NO-GO with transcript evidence.'
+      effort: M
+      risk: High
+      tests: |
+        Manual spike: scripts/_apply_byo_spike.sh runs end-to-end; capture the stream-json
+        transcript; grep for tool_use events + the phase markers; inspect jd-parsed.json /
+        prose-draft.md against the field checklist; compare to a cloud-Claude baseline.
+      complexity: complex
+      approved: true
+      comment: ""
+      research:
+        - url: https://github.com/waybarrios/vllm-mlx
+          claim: vllm-mlx serves the native Anthropic endpoint with real tool_use blocks + tool parsers — the mechanism under test in this spike.
+          accessed: "2026-06-26"
+        - url: https://developers.googleblog.com/bring-state-of-the-art-agentic-skills-to-the-edge-with-gemma-4/
+          claim: Gemma-4 function-calling is the capability under test; spike confirms it on the MLX/vllm-mlx runtime (blog demonstrated it on LiteRT-LM).
+          accessed: "2026-06-26"
+      execution_status: promoted
+      questions:
+        - id: q-gate
+          text: What happens on a NO-GO?
+          answer: Pivot to the C fallback (adopt OpenCode or OpenHands' Python SDK as the apply orchestrator) — slices 2-6 are vllm-mlx/Claude-Code-specific and would be re-planned. (User chose D primary; C documented fallback.)
+      critic_revisions:
+        - source: local-feasibility
+          severity: DANGER
+          summary: mlx_lm.server has NO tool calling (no tools field in /v1/chat/completions) — agentic loop impossible on it. Engine switched to vllm-mlx (native tool_use). Spike now explicitly tests tool_use firing. [resolved]
+        - source: local-design
+          severity: DANGER
+          summary: Specialists use 3 Claude tiers (haiku/sonnet/opus); spike now verifies >=2 tiers route to the single gemma (a single-model Anthropic server serves the loaded model regardless of requested name). [resolved]
+        - source: local-design
+          severity: WARN
+          summary: Phase-complete markers are model-generated text a 4B model may skip -> max_turns hang. Spike done_when now requires <<PHASE_COMPLETE>> emission. [resolved]
+        - source: local-design
+          severity: WARN
+          summary: '''usable result'' was unverifiable -> replaced with concrete field checks (jd-parsed.json fields, prose-draft.md Professional Summary). [resolved]'
+        - source: local-feasibility
+          severity: WARN
+          summary: 'Dummy ANTHROPIC_AUTH_TOKEN: spike now verifies claude -p initializes without auth error against the local endpoint. [resolved]'
+      decisions_notes: |
+        **Trigger:** manual spike before any plumbing.
+        **State:** throwaway script + a findings doc; no production code changes.
+        **Payload:** GO/NO-GO + fidelity notes (tool_use fired? tiers routed? markers emitted?) shaping slices 2-6.
+        **Rejected:** building config/headless first (wasteful if NO-GO); the prior mlx_lm.server engine (no tool calling) and claude-code-router gateway (Electron GUI, no headless) — both failed feasibility, replaced by vllm-mlx. Larger gemma (12B/31B) up front — try E4B first, escalate only if E4B's tool fidelity is poor.
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - scripts/_apply_byo_spike.sh (new, throwaway — start vllm-mlx, run claude -p apply against its Anthropic endpoint)
+            - docs/spikes/byo-model-apply.md (new — GO/NO-GO + fidelity evidence)
+            - src/jobsmith/headless.py (reference only — _build_command ~241-294, run_phase ~415, markers ~57-58/477-489)
+            - src/jobsmith/plugin/agents/apply/specialist-contracts.yaml (reference — the haiku/sonnet/opus tiers to exercise)
+        - type: diagram
+          title: Spike data path
+          entries:
+            - vllm-mlx serving gemma-4-E4B (native Anthropic /v1/messages + tool_use)
+            - claude -p (ANTHROPIC_BASE_URL=vllm-mlx, dummy token, MODEL + DEFAULT_HAIKU_MODEL)
+            - 'agentic loop: tool_use blocks (WebFetch/Read/Write/Bash + chrome render)'
+            - 'specialist dispatch: haiku (jd-parser) + sonnet (bullet-selector) -> gemma'
+            - 'assess: tools fire? markers emitted? >=2 tiers route? draft produced?'
+    - id: slice-2
+      feature_id: feat-f7900fac
+      num: 2
+      title: Extend the `llm` config with an apply-pipeline backend selector
+      what: |
+        Conditional on slice-1 GO. Add to the existing `llm` config (src/jobsmith/config.py)
+        an apply-backend selector: claude_cloud (default) vs claude_local. For
+        claude_local, carry the vllm-mlx Anthropic endpoint URL, the model name claude -p
+        requests (ANTHROPIC_MODEL), the haiku-tier model (ANTHROPIC_DEFAULT_HAIKU_MODEL),
+        and a fallback policy. Reuse the existing openai_compatible base_url/model
+        (gemma-4) — vllm-mlx serves the same model over both APIs. Pydantic validation;
+        default = claude_cloud (backward compatible).
+      why: |
+        Goal 2/3 — one config switch selects the apply backend without touching call
+        sites; default stays cloud Claude (no regression).
+      files:
+        - src/jobsmith/config.py
+        - config-schema.yaml
+        - tests/test_config.py
+      deps:
+        - 1
+      done_when:
+        - Config parses llm.apply.backend; default is claude_cloud (existing behavior unchanged).
+        - Selecting claude_local with a missing anthropic_url fails Pydantic validation with a clear error.
+      effort: S
+      risk: Low
+      tests: |
+        Unit (tests/test_config.py): default backend = claude_cloud; claude_local without
+        anthropic_url -> validation error; on_failure default = error; round-trips via
+        .apply-config.yaml.
+      complexity: standard
+      approved: true
+      comment: ""
+      research:
+        - url: https://code.claude.com/docs/en/model-config
+          claim: The env vars the claude_local path sets (ANTHROPIC_BASE_URL/MODEL/DEFAULT_HAIKU_MODEL) — config carries the values; SMALL_FAST_MODEL is deprecated.
+          accessed: "2026-06-26"
+      execution_status: promoted
+      questions:
+        - id: q-reuse
+          text: Reuse the existing gemma upstream or a separate apply model?
+          answer: Reuse the same gemma-4 via vllm-mlx (one engine serves Anthropic for apply + OpenAI for chat/scoring); single-model story is simplest. (Inferred.)
+      critic_revisions:
+        - source: local-feasibility
+          severity: DANGER
+          summary: Replaced router_url with anthropic_url (vllm-mlx native endpoint) + renamed small_fast to haiku_model (ANTHROPIC_DEFAULT_HAIKU_MODEL; SMALL_FAST deprecated). [resolved]
+        - source: local-design
+          severity: WARN
+          summary: Added on_failure policy (error|fallback_cloud) to back slice-5's graceful fallback. [resolved]
+      decisions_notes: |
+        **Trigger:** startup config load. Conditional on slice-1 GO.
+        **State:** immutable config; reuses the existing gemma-4 upstream (vllm-mlx serves both Anthropic + OpenAI).
+        **Payload:** llm.apply block (backend, anthropic_url, models, on_failure).
+        **Rejected:** a separate top-level section (duplicates the llm block); env-only switch (undocumented, not surfaceable in UI); the prior router_url field (no router now — vllm-mlx is Anthropic-native).
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - 'src/jobsmith/config.py (edit — add llm.apply: backend + anthropic_url + models + fallback)'
+            - config-schema.yaml (edit — document the new fields)
+            - tests/test_config.py (edit — parse/default/validation tests)
+        - type: data-model
+          title: llm.apply config
+          fields:
+            name: llm.apply
+          rows:
+            - name: backend
+              type: 'enum: claude_cloud | claude_local (default claude_cloud)'
+            - name: anthropic_url
+              type: string (vllm-mlx native Anthropic endpoint, e.g. http://127.0.0.1:8081/anthropic or /v1)
+            - name: anthropic_model
+              type: string (model name claude -p requests; vllm-mlx maps to the loaded gemma)
+            - name: haiku_model
+              type: string (ANTHROPIC_DEFAULT_HAIKU_MODEL value)
+            - name: on_failure
+              type: 'enum: error | fallback_cloud (default error)'
+    - id: slice-3
+      feature_id: feat-444a7049
+      num: 3
+      title: 'vllm-mlx engine: lifecycle serving gemma-4 over Anthropic (apply) + OpenAI (chat/scoring)'
+      what: |
+        Conditional on slice-1 GO. Add an engine manager (src/jobsmith/llm/vllm_mlx.py)
+        that starts vllm-mlx serving gemma-4 (exposing native Anthropic /v1/messages for
+        the apply path AND OpenAI /v1 for chat/scoring — consolidating off mlx_lm.server),
+        with: a free-port bind + conflict pre-check, an idempotent start (PID-file/lock so
+        concurrent applies don't double-launch), and a health poll that DISTINGUISHES
+        'model loading' (~60-90s cold load) from 'crashed' and surfaces a loading-status
+        event the API/UI can forward. Detect whether vllm-mlx is installed; guide install
+        (pip) if not (mirror the desktop dep-detection pattern).
+      why: |
+        Goal 2 — vllm-mlx is the local engine claude -p (and chat/scoring) talk to; it
+        must start reliably, signal the cold-load wait, and not race under concurrent use.
+      files:
+        - src/jobsmith/llm/vllm_mlx.py
+        - src/jobsmith/desktop/deps.py
+      deps:
+        - 1
+      done_when:
+        - vllm_mlx.start() launches vllm-mlx serving gemma-4 and health-checks green; stop() terminates it (no orphan); a second concurrent start() is a no-op (PID-lock), not a port collision.
+        - During the ~60-90s cold load, health reports 'loading' (distinct from 'crashed') and emits a forwardable loading-status signal; the port is chosen with a free-port fallback if the default is taken.
+        - If vllm-mlx is not installed, deps.py reports it + surfaces a guided pip-install hint rather than crashing.
+      effort: M
+      risk: Med
+      tests: |
+        Unit: free-port picker; PID-lock makes start() idempotent; health classifier
+        maps loading vs crashed vs ready from stubbed responses. Integration (gated):
+        start vllm-mlx with gemma-4, poll until ready, assert Anthropic /v1/messages 200;
+        stop() leaves no process.
+      complexity: complex
+      approved: true
+      comment: ""
+      research:
+        - url: https://github.com/waybarrios/vllm-mlx
+          claim: vllm-mlx exposes OpenAI /v1/* and Anthropic /v1/messages from one process (continuous batching, prefix cache) — the single engine this slice manages.
+          accessed: "2026-06-26"
+      execution_status: promoted
+      questions:
+        - id: q-detect
+          text: Bundle vllm-mlx or detect+guide install?
+          answer: Detect + guided pip install (mirror the desktop dep-detection pattern); it's a Python package, installable into the same venv. (Inferred.)
+      critic_revisions:
+        - source: local-feasibility
+          severity: DANGER
+          summary: Original slice managed claude-code-router (Electron GUI — cannot Popen). Replaced with vllm-mlx engine lifecycle (a real CLI server). [resolved]
+        - source: local-design
+          severity: WARN
+          summary: Added cold-load (~60-90s) loading-vs-crashed health distinction + a forwardable loading status (F3). [resolved]
+        - source: local-design
+          severity: WARN
+          summary: Added free-port fallback + conflict pre-check (F10) and PID-lock idempotent start for concurrent applies (F11). [resolved]
+      decisions_notes: |
+        **Trigger:** before a claude_local apply (and as the chat/scoring engine); app/CLI lifecycle. Conditional on slice-1 GO.
+        **State:** PID-file + chosen port under the app data dir; engine runs as a managed child.
+        **Payload:** a healthy Anthropic + OpenAI endpoint backed by gemma-4, with a loading signal.
+        **Rejected:** mlx_lm.server (no tool calling); claude-code-router (Electron GUI, no headless); Ollama (drops MLX); LiteLLM (malware-tainted releases). vllm-mlx consolidates engine+gateway and serves both APIs.
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - 'src/jobsmith/llm/vllm_mlx.py (new — start/stop, free-port + PID-lock, health: loading vs crashed)'
+            - src/jobsmith/desktop/deps.py (edit — detect vllm-mlx install + guided pip install)
+        - type: diagram
+          title: Engine lifecycle
+          fields:
+            direction: lr
+          entries:
+            - start() -> PID-lock check (idempotent) + free port
+            - launch vllm-mlx (gemma-4; Anthropic + OpenAI endpoints)
+            - 'health: loading (~60-90s) -> emit ''model loading'' status'
+            - 'health: ready -> Anthropic /v1/messages reachable'
+            - 'health: crashed -> error (distinct from loading)'
+            - 'stop(): terminate; no orphan'
+    - id: slice-4
+      feature_id: feat-89494833
+      num: 4
+      title: 'headless.py: build the env= seam + inject BYO-model env when apply_backend=claude_local'
+      what: |
+        Conditional on slice-1 GO. headless.py's run_phase (~415) calls subprocess.Popen
+        WITHOUT an env= param today — so first ADD the seam: an `extra_env: dict|None`
+        kwarg on run_phase passed as `env={**os.environ, **extra_env}` to Popen, threaded
+        through every call site in apply.py (which resolves config.llm.apply). Then, when
+        backend == claude_local, the caller injects: ANTHROPIC_BASE_URL=<anthropic_url>,
+        ANTHROPIC_AUTH_TOKEN=<dummy>, ANTHROPIC_MODEL=<anthropic_model>,
+        ANTHROPIC_DEFAULT_HAIKU_MODEL=<haiku_model>, CLAUDE_CODE_ATTRIBUTION_HEADER=0.
+        Default (claude_cloud) passes no extra_env — the command + env are byte-identical
+        to today. --allowedTools/--system-prompt-file/--agents unchanged in both modes.
+      why: |
+        Goal 1/3 — this is the single seam that swaps the model while preserving the whole
+        harness. Critic confirmed the seam does NOT exist yet (Popen has no env=), so it is
+        an explicit build task, not a config tweak.
+      files:
+        - src/jobsmith/headless.py
+        - src/jobsmith/apply.py
+        - tests/test_headless.py
+      deps:
+        - 2
+        - 3
+      done_when:
+        - run_phase accepts extra_env and passes env={**os.environ, **extra_env} to Popen; with extra_env=None the inherited env is used (today's behavior).
+        - With apply_backend=claude_local, the spawned env contains ANTHROPIC_BASE_URL + ANTHROPIC_MODEL + ANTHROPIC_DEFAULT_HAIKU_MODEL + CLAUDE_CODE_ATTRIBUTION_HEADER=0 (NOT the deprecated SMALL_FAST var).
+        - With apply_backend=claude_cloud (default), no ANTHROPIC_* override is injected and --allowedTools/--system-prompt-file/--agents are byte-identical to today's command.
+      effort: M
+      risk: Med
+      tests: |
+        Unit (tests/test_headless.py): mock Popen, assert the env dict for both backends
+        (set vs unset, correct var names) and that cmd args are identical across modes.
+        Regression: existing headless tests pass unchanged.
+      complexity: complex
+      approved: true
+      comment: ""
+      research:
+        - url: https://code.claude.com/docs/en/model-config
+          claim: ANTHROPIC_BASE_URL routes + ANTHROPIC_MODEL selects + ANTHROPIC_DEFAULT_HAIKU_MODEL (SMALL_FAST deprecated); injected only for the local backend.
+          accessed: "2026-06-26"
+        - url: https://docs.vllm.ai/en/stable/serving/integrations/claude_code/
+          claim: CLAUDE_CODE_ATTRIBUTION_HEADER=0 disables the per-request hash that breaks prefix-cache on local backends.
+          accessed: "2026-06-26"
+      execution_status: promoted
+      questions:
+        - id: q-auth
+          text: What ANTHROPIC_AUTH_TOKEN for the local engine?
+          answer: A non-empty dummy token (vllm-mlx accepts it for localhost; the spike (slice 1) verifies claude -p initializes without an auth round-trip). (Inferred + spike-verified.)
+      critic_revisions:
+        - source: local-feasibility
+          severity: WARN
+          summary: headless.py Popen (~415) has NO env= today — the seam must be BUILT (extra_env kwarg + env merge), not assumed. apply.py added as the config-resolving caller. [resolved]
+        - source: local-feasibility
+          severity: DANGER
+          summary: Inject ANTHROPIC_DEFAULT_HAIKU_MODEL, not the deprecated ANTHROPIC_SMALL_FAST_MODEL. [resolved]
+      decisions_notes: |
+        **Trigger:** apply run dispatch (apply.py -> headless.run_phase). Conditional on slice-1 GO.
+        **State:** env passed per-subprocess (no global env mutation); config read in apply.py (headless.py stays config-agnostic).
+        **Payload:** the ANTHROPIC_* vars + ATTRIBUTION_HEADER=0, only in local mode.
+        **Rejected:** mutating global os.environ (leaks across calls); a duplicate command builder (drift — only the env should differ); ANTHROPIC_SMALL_FAST_MODEL (deprecated -> DEFAULT_HAIKU_MODEL).
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - src/jobsmith/headless.py (edit — add extra_env kwarg on run_phase; env={**os.environ, **extra_env} on Popen ~415)
+            - src/jobsmith/apply.py (edit — resolve config.llm.apply backend; build + pass extra_env)
+            - tests/test_headless.py (edit — assert env for claude_local; absent for claude_cloud; flags unchanged)
+        - type: diagram
+          title: Env injection seam
+          entries:
+            - apply.py resolves config.llm.apply.backend
+            - claude_local -> extra_env = {ANTHROPIC_BASE_URL, AUTH_TOKEN(dummy), MODEL, DEFAULT_HAIKU_MODEL, ATTRIBUTION_HEADER=0}
+            - claude_cloud -> extra_env = None (no override)
+            - run_phase Popen(cmd, env={**os.environ, **extra_env} if extra_env else inherited)
+            - claude -p runs the SAME specialists/tools either way
+    - id: slice-5
+      feature_id: feat-575aca8f
+      num: 5
+      title: End-to-end apply on local gemma + gateway-crash detection + cloud fallback
+      what: |
+        Conditional on slice-1 GO. Wire it together: a claude_local apply ensures the
+        vllm-mlx engine is healthy (slice 3), spawns claude -p with the BYO env (slice 4),
+        and completes a real apply on a JS-rendered job (NVIDIA Workday) end-to-end,
+        exercising the Chrome-render fallback (feat-2c81da71) under gemma. Robustness:
+        (a) distinguish ENGINE-DOWN errors (connection-refused mid-run -> query
+        vllm_mlx.health()) from normal model failures, since a mid-run crash surfaces as a
+        non-JSON stderr line (JSONDecodeError path) not a structured event; (b) on
+        failure, honor on_failure config (clear error, or fallback_cloud); (c) isolate
+        sessions by backend so a cloud session is never resumed with gemma (suffix the
+        deterministic session id with the backend).
+      why: |
+        Goal 1 — the deliverable: a full apply produced by a local model, with a safety net
+        so a flaky local engine never silently yields a broken application or pollutes a
+        cloud session.
+      files:
+        - src/jobsmith/apply.py
+        - src/jobsmith/headless.py
+        - src/jobsmith/llm/vllm_mlx.py
+        - tests/test_apply_local_backend.py
+      deps:
+        - 4
+      done_when:
+        - A claude_local apply on a real JS-rendered job (NVIDIA Workday) produces a complete gather->draft->render with the Chrome-render fallback exercised under gemma.
+        - A mid-run engine crash is detected as ENGINE-DOWN (via health()) and handled per on_failure (clear error, or cloud fallback) — never a silently broken application or a misclassified per-line JSON error.
+        - Switching backends never resumes a cross-backend session (session id carries the backend); an equivalent claude_cloud run still works unchanged (no regression).
+      effort: L
+      risk: High
+      tests: |
+        Integration (tests/test_apply_local_backend.py): mock vllm_mlx.health + a stubbed
+        claude -p; assert orchestration (ensure-healthy -> spawn -> teardown), the
+        engine-down branch, the on_failure policy, and the backend-suffixed session id.
+        Manual E2E: real apply on the NVIDIA Workday URL via gemma-4; compare to a
+        cloud-Claude baseline.
+      complexity: complex
+      approved: true
+      comment: ""
+      research:
+        - url: https://github.com/waybarrios/vllm-mlx
+          claim: vllm-mlx health/endpoint behavior is the basis for distinguishing engine-down from model failure mid-apply.
+          accessed: "2026-06-26"
+      execution_status: promoted
+      questions:
+        - id: q-fallback
+          text: Auto-fall-back to cloud on local failure, or just error?
+          answer: 'Config-gated (llm.apply.on_failure): default error + retryable (don''t silently spend cloud); opt-in fallback_cloud. (Matches the graceful-degradation pattern.)'
+      critic_revisions:
+        - source: local-design
+          severity: WARN
+          summary: Mid-apply engine crash surfaces as a JSONDecodeError per-line, not a gateway signal — added health()-based ENGINE-DOWN classification (F4). [resolved]
+        - source: local-design
+          severity: WARN
+          summary: Cross-backend session pollution (cloud session resumed with gemma) — session id now suffixed by backend in deterministic_session_id (F8). [resolved]
+      decisions_notes: |
+        **Trigger:** a claude_local apply run. Conditional on slice-1 GO.
+        **State:** engine lifecycle bound to the apply; session ids suffixed by backend; results saved as today.
+        **Payload:** a complete local-model application, or a clear error / cloud fallback.
+        **Rejected:** silent fallback (hides local failure); no fallback (a flaky 4B blocks the user) — policy is config-gated. Shared session ids across backends (cross-model context pollution) -> backend-suffixed ids.
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - src/jobsmith/apply.py (edit — ensure engine healthy -> spawn local -> on-failure policy)
+            - src/jobsmith/headless.py (edit — backend suffix in deterministic_session_id; classify connection-refused vs model failure)
+            - src/jobsmith/llm/vllm_mlx.py (reuse — health() for mid-run crash detection)
+            - tests/test_apply_local_backend.py (new — orchestration + fallback + session-isolation paths)
+        - type: diagram
+          title: End-to-end local apply
+          entries:
+            - claude_local -> ensure vllm-mlx healthy (else error/loading)
+            - session id suffixed by backend (no cloud<->local resume)
+            - spawn claude -p (BYO env) -> gather->draft->render via gemma-4 + chrome fallback
+            - mid-run connection-refused -> health() says down -> on_failure (error | fallback_cloud)
+    - id: slice-6
+      feature_id: feat-2172fa65
+      num: 6
+      title: 'Config-tab UI + docs: select the apply backend'
+      what: |
+        Conditional on slice-1 GO. Surface the apply-backend choice in the web Config tab
+        (web/src/app/views.tsx) alongside the existing LLM provider selector: a toggle
+        between 'Claude (cloud)' and 'Local gemma (vllm-mlx)', revealing the anthropic_url
+        / model + on_failure when local is selected. Persist via /api/config. Document the
+        local setup (pip install vllm-mlx, start it with gemma-4, expect a ~60-90s first-
+        apply cold load) and the cross-backend-session note.
+      why: |
+        Operators need to flip the apply backend without editing YAML; docs make the local
+        path reproducible and set the cold-load expectation.
+      files:
+        - web/src/app/views.tsx
+        - src/jobsmith/api/config_routes.py
+        - docs/local-apply-backend.md
+      deps:
+        - 2
+      done_when:
+        - The Config tab shows the apply-backend toggle; selecting Local reveals anthropic_url/model + on_failure and persists via PUT /api/config.
+        - docs/local-apply-backend.md documents pip install vllm-mlx + starting it with gemma-4 + the ~60-90s cold load + the per-backend session note.
+      effort: S
+      risk: Low
+      tests: |
+        Unit (web): Config tab renders the apply-backend toggle + persists the llm.apply
+        payload on save. Doc readthrough.
+      complexity: standard
+      approved: true
+      comment: ""
+      research_waiver: UI + docs over the existing /api/config contract and the config fields defined in slice 2; no external API governs this surface.
+      execution_status: promoted
+      questions:
+        - id: q-ui-scope
+          text: One unified provider control or a separate apply toggle?
+          answer: Separate apply-backend toggle next to the chat/scoring provider selector — apply (Claude harness) and chat/scoring (OpenAICompatible) are different backends. (Inferred.)
+      critic_revisions:
+        - source: local-design
+          severity: WARN
+          summary: deps narrowed [4]->[2] — UI+docs only need the config schema (slice 2), enabling parallelism with slices 3-5 (F9). [resolved]
+      decisions_notes: |
+        **Trigger:** Config tab render + save. Conditional on slice-1 GO.
+        **State:** persisted via /api/config (llm.apply block). deps reduced to [2] (only needs the config schema, not the headless wiring) for parallelism.
+        **Payload:** apply backend choice + endpoint + on_failure.
+        **Rejected:** YAML-only config (operators can't switch easily); conflating with the chat/scoring provider selector (apply uses the Claude harness; chat/scoring use OpenAICompatible — different backends).
+      blocks:
+        - type: file-tree
+          title: Files this slice touches
+          entries:
+            - web/src/app/views.tsx (edit — apply-backend toggle in the Config tab)
+            - src/jobsmith/api/config_routes.py (edit — accept llm.apply in PUT /api/config)
+            - docs/local-apply-backend.md (new — vllm-mlx setup + cold-load + session note)
+        - type: wireframe
+          title: Config tab — apply backend
+          fields:
+            html: |
+                <div style="padding:var(--wf-space-md);background:var(--wf-surface);color:var(--wf-text)">
+                  <label style="display:block;margin-bottom:var(--wf-space-sm)">Apply pipeline backend</label>
+                  <select style="width:100%;padding:var(--wf-space-sm);border:1px solid var(--wf-border)">
+                    <option>Claude (cloud) — default</option>
+                    <option>Local gemma (vllm-mlx)</option>
+                  </select>
+                  <input placeholder="anthropic_url (http://127.0.0.1:8081/anthropic)" style="margin-top:var(--wf-space-sm);width:100%;padding:var(--wf-space-sm);border:1px solid var(--wf-border)"/>
+                  <div style="margin-top:var(--wf-space-sm);color:var(--wf-text-muted);font-size:var(--wf-font-sm)">First apply after start loads the model (~60-90s).</div>
+                </div>
+questions: []
+critique:
+    reviewed_at: "2026-06-26"
+    reviewers:
+        - local-design (design critic; wipnote:researcher on Opus 4.8 — read headless.py + specialist-contracts.yaml)
+        - local-feasibility (feasibility critic; wipnote:researcher on Opus 4.8 — verified headless.py subprocess, fetched all research URLs, checked engine/gateway viability)
+    assumptions:
+        - id: A1
+          status: verified
+          text: headless.py builds claude -p via _build_command (~241-294) and spawns via subprocess.Popen in run_phase (~415) with NO env= param — the env-injection seam must be built.
+          evidence: Feasibility critic read headless.py:415; the Popen call lacks env=.
+        - id: A2
+          status: falsified
+          text: ORIGINAL assumption that mlx_lm.server + claude-code-router could carry the agentic apply — FALSE. mlx_lm.server has no tool calling; claude-code-router is an Electron GUI. Both replaced by vllm-mlx.
+          evidence: mlx_lm SERVER.md (no tools field); github.com/musistudio/claude-code-router (GUI, 'Open Server and click Start').
+        - id: A3
+          status: verified
+          text: vllm-mlx exposes native Anthropic /v1/messages with real tool_use blocks + tool calling, AND OpenAI /v1 — one engine for apply + chat/scoring.
+          evidence: https://github.com/waybarrios/vllm-mlx
+        - id: A4
+          status: plausible
+          text: Gemma-4 (E4B) can drive Claude Code's multi-step agentic tool-calling reliably enough for the apply pipeline.
+          evidence: Gemma-4 has native function-calling (Google blog, on LiteRT-LM); the spike (slice 1) is the gate that confirms it on vllm-mlx — marked plausible until then.
+    critics: []
+    risks:
+        - risk: Gemma-4-E4B may not drive Claude Code's multi-tool agentic loop reliably (tool fidelity, phase-marker emission).
+          severity: High
+          mitigation: Spike-first (slice 1) gates the whole plan; NO-GO pivots to the C fallback (OpenCode/OpenHands). Escalate to a larger gemma if E4B is weak.
+        - risk: vllm-mlx maturity / gemma-4 support on it unverified.
+          severity: Medium
+          mitigation: Slice 1 confirms gemma-4 loads + tool_use works on vllm-mlx before any plumbing; mlx-omni-server/Rapid-MLX are documented alternatives.
+        - risk: ~60-90s cold load reads as a hang.
+          severity: Low
+          mitigation: Slice 3 loading-vs-crashed health + a loading status signal; slice 6 docs the wait.
+    synthesis: |
+        The dual-critic pass caught two structural blockers that would have sunk the build:
+        mlx_lm.server has no tool calling and claude-code-router is a GUI app — so the
+        original engine+gateway pair was infeasible. Both are replaced by vllm-mlx, a single
+        Anthropic-native MLX server with real tool_use blocks (user-confirmed), which also
+        SIMPLIFIES the design by removing the translation proxy and consolidating chat/
+        scoring onto one engine. The deprecated ANTHROPIC_SMALL_FAST_MODEL is corrected to
+        ANTHROPIC_DEFAULT_HAIKU_MODEL, and the headless.py env= seam is now an explicit build
+        task (it does not exist yet). Multi-tier routing, phase-marker emission, cold-load
+        UX, engine-crash detection, session isolation, port/concurrency safety, and the
+        slice-6 dep are all folded in. The plan now hinges entirely on slice-1: if gemma-4
+        on vllm-mlx can drive Claude Code's agentic tool-calling (incl. >=2 specialist tiers
+        + phase markers), slices 2-6 are sound; if not, pivot to the C fallback. Ready for
+        human review with slice-1 as the explicit go/no-go gate.

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="wipnote-version" content="1.0">
+    <title>Driver core: Node &#43; Pipeline state-machine &#43; applications/{slug}/.apply-state checkpoint/resume</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+    <article id="feat-d67d2b1a"
+             data-type="feature"
+             data-status="done"
+             data-priority="medium"
+             data-created="2026-06-27T17:49:32.339034"
+             data-updated="2026-06-27T18:16:47.262013" data-agent-assigned="claude-code" data-track-id="trk-f5052600">
+
+        <header>
+            <h1>Driver core: Node &#43; Pipeline state-machine &#43; applications/{slug}/.apply-state checkpoint/resume</h1>
+            <div class="metadata">
+                <span class="badge status-done">Done</span>
+                <span class="badge priority-medium">Medium Priority</span>
+            </div>
+        </header>
+
+        <nav data-graph-edges>
+            <section data-edge-type="planned_in">
+                <h3>Planned In:</h3>
+                <ul>
+                    <li><a href="../plans/plan-a40fac81.html" data-relationship="planned_in" data-since="2026-06-27T17:49:32.353869">plan-a40fac81</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="part_of">
+                <h3>Part Of:</h3>
+                <ul>
+                    <li><a href="../tracks/trk-f5052600.html" data-relationship="part_of" data-since="2026-06-27T17:49:32.36239">trk-f5052600</a></li>
+                </ul>
+            </section>
+            <section data-edge-type="implemented_in">
+                <h3>Implemented In:</h3>
+                <ul>
+                    <li><a href="../sessions/c0d1772a-012a-437d-8b57-4dbba4e33afd.html" data-relationship="implemented_in" data-since="2026-06-27T17:55:53.537739">session c0d1772a-012a-437d-8b57-4dbba4e33afd</a></li>
+                </ul>
+            </section>
+        </nav>
+
+        <section data-content>
+            <h3>Description</h3>
+            <p>New package src/jobsmith/apply_local/. driver.py defines: Node (one bounded LLM task —
+name, output pydantic model, json_schema, bounded reask loop, returns validated obj +
+parse_ok, and a status=ok|halt for the no-fabrication policy), and Pipeline (executes an
+ordered stage list with sequential + fan-out (ThreadPoolExecutor) stages and bounded
+counter loops; a halt short-circuits and surfaces). checkpoint.py persists each node
+result to applications/{slug}/.apply-state/&lt;name&gt;.json (the EXISTING per-application
+state dir from specialist-contracts.yaml, slug threaded in) and skips a node whose
+checkpoint exists (crash-resume). Productionizes scripts/_apply_local_poc.py. Pure
+orchestration primitives — no specialist logic.</p>
+        </section>
+    </article>
+</body>
+</html>
